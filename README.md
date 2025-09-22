@@ -12,7 +12,7 @@
 
 ### **시스템 아키텍처 설계도 (System Architecture)**
 
-[Image of a system architecture diagram]
+![Image](https://github.com/user-attachments/assets/05cfb76c-32f1-42be-a631-cf111268a743)
 
 | **컴포넌트** | **역할** | **사용 기술/서비스** |
 | :--- | :--- | :--- |
