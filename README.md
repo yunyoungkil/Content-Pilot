@@ -115,3 +115,5 @@ Content-Pilot/
     - 이 단계에서는 기존의 'AI 분석' 및 'Gemini 결과' 패널의 기능들을 새로운 모드에 맞게 통합하고 재배치합니다.
 
 이 계획은 현재의 강력한 기능들을 기반으로, **서버리스(Serverless)** 아키텍처를 통해 **지속 가능하고 확장 가능한 서비스**로 발전시키는 체계적인 로드맵입니다. 각 단계를 완료할 때마다 프로그램의 가치가 크게 향상될 것입니다.
+#### **스크랩 UI/UX**
+<img width="842" height="819" alt="Image" src="https://github.com/user-attachments/assets/0787955a-1316-4aa5-8333-bfb25997cfa3" />
