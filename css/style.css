@@ -1,0 +1,473 @@
+/* Scrapbook Mode (예시 UI) */
+.scrapbook-root {
+  display: flex;
+  min-width: 800px;
+  min-height: 420px;
+  background: #f7f8fa;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+}
+.scrapbook-list-section {
+  width: 320px;
+  background: #f5f5f5;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.scrapbook-list-header {
+  padding: 24px 20px 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scrapbook-list-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 2px;
+}
+.scrapbook-sort-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scrapbook-sort-label {
+  font-size: 14px;
+  color: #888;
+  margin-right: 2px;
+}
+.scrapbook-sort-btn {
+  background: #f5f5f5;
+  color: #222;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+}
+.scrapbook-sort-btn.active,
+.scrapbook-sort-btn:hover {
+  background: #e8f0fe;
+  color: #4285f4;
+  border: 1.5px solid #4285f4;
+}
+.scrapbook-keyword-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1.5px solid #e0e0e0;
+  font-size: 14px;
+  background: #fff;
+  color: #222;
+}
+.scrapbook-list-cards {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 18px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scrap-card {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
+  border: 2px solid transparent;
+  padding: 10px 12px;
+  gap: 12px;
+  cursor: pointer;
+  transition: border 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.scrap-card:hover {
+  background: #e8f0fe;
+  border: 2px solid #4285f4;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.1);
+}
+.scrap-card.active {
+  border: 2px solid #4285f4;
+  background: #e8f0fe;
+}
+.scrap-card-img-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: #eee;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.scrap-card-img-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.scrap-card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scrap-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #222;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scrap-card-snippet {
+  font-size: 13px;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scrap-card-source {
+  font-size: 12px;
+  color: #b0b0b0;
+  margin-top: 2px;
+}
+.scrapbook-detail-section {
+  flex: 1;
+  background: #f7f8fa;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 0 0;
+}
+.scrapbook-detail-header {
+  font-size: 19px;
+  font-weight: 700;
+  color: #222;
+  padding: 24px 0 12px 32px;
+}
+.scrapbook-detail-content {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0 0 0 32px;
+}
+.scrapbook-detail-empty {
+  color: #b0b0b0;
+  font-size: 16px;
+  margin-top: 80px;
+}
+.scrapbook-detail-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08);
+  padding: 28px 28px 22px 28px;
+  min-width: 320px;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.scrapbook-detail-img {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eee;
+  margin-bottom: 8px;
+}
+.scrapbook-detail-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #4285f4;
+  margin-bottom: 2px;
+  text-align: center;
+}
+.scrapbook-detail-meta {
+  font-size: 13px;
+  color: #b0b0b0;
+  margin-bottom: 8px;
+}
+.scrapbook-detail-desc {
+  font-size: 15px;
+  color: #444;
+  line-height: 1.7;
+  text-align: left;
+}
+.scrapbook-detail-skeleton {
+  width: 340px;
+  height: 220px;
+  background: #f5f5f5;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 40px;
+  animation: skeleton-fade 1.2s infinite alternate;
+}
+.scrapbook-skeleton-img {
+  width: 120px;
+  height: 80px;
+  background: #e0e0e0;
+  border-radius: 8px;
+}
+.scrapbook-skeleton-line {
+  width: 180px;
+  height: 16px;
+  background: #e0e0e0;
+  border-radius: 6px;
+}
+.scrapbook-skeleton-line.short {
+  width: 100px;
+}
+@keyframes skeleton-fade {
+  0% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+/* Content-Pilot 확장 프로그램 스타일 */
+#content-pilot-panel {
+  position: fixed;
+  top: 80px;
+  right: 32px;
+  width: 320px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  z-index: 999999;
+  padding: 24px 20px 20px 20px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  min-height: 120px;
+}
+#content-pilot-panel .cp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #4285f4;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 18px;
+  font-size: 15px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background 0.2s;
+}
+#content-pilot-panel .cp-btn:hover {
+  background: #3367d6;
+}
+#content-pilot-panel .cp-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+#content-pilot-panel .cp-profile img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #eee;
+}
+#content-pilot-panel .cp-profile .cp-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+#cp-scrapbook-wrap {
+  display: flex;
+  height: 420px;
+  min-width: 600px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 12px;
+}
+#cp-scrap-list {
+  width: 220px;
+  background: #f2f3f7;
+  border-right: 1px solid #e0e0e0;
+  padding: 0;
+  overflow-y: auto;
+}
+.cp-scrap-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border-radius: 6px;
+  margin: 14px 12px 0 12px;
+  padding: 10px 10px 10px 8px;
+  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+.cp-scrap-card:hover {
+  border: 2px solid #4285f4;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.1);
+}
+.cp-scrap-card.selected {
+  border: 2px solid #34a853;
+  box-shadow: 0 2px 12px rgba(52, 168, 83, 0.1);
+}
+.cp-scrap-card img {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #eee;
+}
+.cp-scrap-card .cp-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.cp-scrap-card .cp-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #222;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-scrap-card .cp-card-snippet {
+  font-size: 13px;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#cp-scrap-detail {
+  flex: 1;
+  background: #fff;
+  padding: 28px 24px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+#cp-scrap-detail .cp-detail-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 8px;
+}
+#cp-scrap-detail .cp-detail-img {
+  width: 100%;
+  max-width: 220px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  object-fit: cover;
+  background: #eee;
+}
+#cp-scrap-detail .cp-detail-content {
+  font-size: 15px;
+  color: #444;
+  line-height: 1.7;
+  word-break: keep-all;
+}
+#cp-kanban-wrap {
+  display: flex;
+  gap: 18px;
+  min-width: 700px;
+  height: 420px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  margin-top: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  padding: 18px 18px 10px 18px;
+}
+.cp-kanban-col {
+  flex: 1;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
+  padding: 0 10px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  max-width: 220px;
+}
+.cp-kanban-col-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: #4285f4;
+  margin: 14px 0 10px 0;
+  text-align: center;
+  letter-spacing: 1px;
+}
+.cp-kanban-card {
+  background: #f2f3f7;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #333;
+  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
+  cursor: grab;
+  border: 2px solid transparent;
+  transition: border 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-kanban-card.cluster {
+  background: #e6f4ea;
+  border: 2px solid #34a853;
+  color: #188038;
+  position: relative;
+}
+.cp-kanban-card.cluster::before {
+  content: "AI 추천";
+  font-size: 11px;
+  color: #fff;
+  background: #34a853;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-right: 6px;
+  font-weight: 600;
+  position: absolute;
+  top: -12px;
+  left: 10px;
+}
+#cp-draft-wrap {
+  display: flex;
+  min-width: 700px;
+  height: 420px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  margin-top: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+#cp-draft-board {
+  width: 220px;
+  background: #f2f3f7;
+  border-right: 1px solid #e0e0e0;
+  padding: 0 0 0 0;
+  overflow-y: auto;
+}
+#cp-draft-editor {
+  flex: 1;
+  background: #fff;
+  padding: 28px 24px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}

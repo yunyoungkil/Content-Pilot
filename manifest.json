@@ -21,7 +21,6 @@
     }
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon-16.png",
       "32": "images/icon-32.png",
@@ -31,5 +30,11 @@
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["images/icon-32.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
