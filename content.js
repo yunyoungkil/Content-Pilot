@@ -1,76 +1,110 @@
-// ===== 스크랩 후보 하이라이트 기능(중복 선언 방지) =====
+// ===== 스크랩 후보 하이라이트 기능(Alt 하이라이트) =====
+// ===== 스크랩 후보 하이라이트 기능(Alt 하이라이트) =====
 if (!window.__pilotHighlightInitialized) {
   window.__pilotHighlightInitialized = true;
   window.__pilotHighlightTarget = null;
   window.__pilotHighlightActive = false;
 
-  window.addEventListener('keydown', (e) => {
-    // 카드 플로팅 버튼이 보일 때만 Alt 하이라이트 활성화
-    const cardBtn = document.getElementById('cp-card-float-btn');
-    const panel = document.getElementById('content-pilot-panel');
-    if (e.key === 'Alt') {
-      if (cardBtn && (!panel || panel.style.display === 'none')) {
-        window.__pilotHighlightActive = true;
-      } else {
-        window.__pilotHighlightActive = false;
-      }
-    }
-  });
-  window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt') {
-      window.__pilotHighlightActive = false;
-      if (window.__pilotHighlightTarget) {
-        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+  // 모든 프레임에서 Alt 키 상태 메시지를 수신하여 하이라이트 활성화 여부를 결정
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === "alt_key_state_changed") {
+      window.__pilotHighlightActive = msg.isAltPressed;
+      if (!msg.isAltPressed && window.__pilotHighlightTarget) {
+        window.__pilotHighlightTarget.classList.remove("pilot-highlight");
         window.__pilotHighlightTarget = null;
       }
     }
   });
 
-  // Alt키를 다시 누를 때도 하이라이트가 정상 동작하도록 mousemove에서 Alt키 상태를 체크
-  window.addEventListener('mousemove', (e) => {
-  // 카드 플로팅 버튼이 보일 때만 Alt 하이라이트 동작
-  const cardBtn = document.getElementById('cp-card-float-btn');
-  const panel = document.getElementById('content-pilot-panel');
-  if (window.__pilotHighlightActive && cardBtn && (!panel || panel.style.display === 'none')) {
+  window.addEventListener("mousemove", (e) => {
+    const panel = document.getElementById("content-pilot-panel");
+    if (window.__pilotHighlightActive) {
       const el = e.target;
       // 패널 내부에서는 하이라이트 동작 금지
-      const panel = document.getElementById('content-pilot-panel');
       if (panel && (el === panel || panel.contains(el))) {
         if (window.__pilotHighlightTarget) {
-          window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+          window.__pilotHighlightTarget.classList.remove("pilot-highlight");
           window.__pilotHighlightTarget = null;
         }
         return;
       }
-      // 이전 타겟과 다를 때만 처리
-      if (window.__pilotHighlightTarget && window.__pilotHighlightTarget !== el) {
-        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+      if (
+        window.__pilotHighlightTarget &&
+        window.__pilotHighlightTarget !== el
+      ) {
+        window.__pilotHighlightTarget.classList.remove("pilot-highlight");
         window.__pilotHighlightTarget = null;
       }
-      // 새 타겟이 body, html이 아니고, 이미 하이라이트가 안 되어 있으면 add
       if (el && el !== document.body && el !== document.documentElement) {
-        if (!el.classList.contains('pilot-highlight')) {
-          el.classList.add('pilot-highlight');
+        if (!el.classList.contains("pilot-highlight")) {
+          el.classList.add("pilot-highlight");
         }
         window.__pilotHighlightTarget = el;
       }
     } else {
       if (window.__pilotHighlightTarget) {
-        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+        window.__pilotHighlightTarget.classList.remove("pilot-highlight");
         window.__pilotHighlightTarget = null;
       }
     }
   });
-// ...existing code...
+
+  // Alt+클릭 시 스크랩 로직
+  window.addEventListener(
+    "click",
+    (e) => {
+      if (window.__pilotHighlightActive) {
+        e.preventDefault();
+        const targetElement = e.target;
+        // 하이라이트 제거
+        targetElement.classList.remove("pilot-highlight");
+        // 스크랩 로직 (예: background.js로 데이터 전송)
+        const scrapData = {
+          text: targetElement.innerText,
+          html: targetElement.outerHTML,
+          tag: targetElement.tagName,
+          url: location.href,
+        };
+        chrome.runtime.sendMessage({
+          action: "scrap_element",
+          data: scrapData,
+        });
+        window.__pilotHighlightTarget = null;
+        window.__pilotHighlightActive = false;
+      }
+    },
+    true
+  );
+}
+
+// UI 패널 및 관련 코드는 최상위 window에서만 실행
+if (window.self === window.top) {
+  // Alt 키 상태를 background.js로 전달
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Alt") {
+      chrome.runtime.sendMessage({
+        action: "alt_key_state_changed",
+        isAltPressed: true,
+      });
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") {
+      chrome.runtime.sendMessage({
+        action: "alt_key_state_changed",
+        isAltPressed: false,
+      });
+    }
+  });
+  // ...기존 UI 패널 생성 및 렌더링 코드...
 }
 
 // background.js에 Firebase 저장 요청 및 결과 출력
-// background.js에 Firebase 저장 요청 및 결과 출력
-chrome.runtime.sendMessage({ action: 'firebase-test-write' }, (response) => {
+chrome.runtime.sendMessage({ action: "firebase-test-write" }, (response) => {
   if (response && response.success) {
-    console.log('Firebase 저장 성공!', response.data);
+    console.log("Firebase 저장 성공!", response.data);
   } else {
-    console.error('Firebase 저장 실패:', response && response.error);
+    console.error("Firebase 저장 실패:", response && response.error);
   }
 });
 
@@ -180,7 +214,7 @@ function renderPanelHeader() {
         .join("")}
     </div>
   `;
-// 파일 끝 중괄호 정리
+  // 파일 끝 중괄호 정리
 }
 
 // 로그인/로그아웃 클릭 핸들러 (임시)
