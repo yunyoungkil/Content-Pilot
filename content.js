@@ -1,42 +1,70 @@
-// ===== 스크랩 후보 하이라이트 기능 =====
-let pilotHighlightTarget = null;
-let pilotHighlightActive = false;
+// ===== 스크랩 후보 하이라이트 기능(중복 선언 방지) =====
+if (!window.__pilotHighlightInitialized) {
+  window.__pilotHighlightInitialized = true;
+  window.__pilotHighlightTarget = null;
+  window.__pilotHighlightActive = false;
 
-// Alt 키 상태 추적
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Alt') pilotHighlightActive = true;
-});
-window.addEventListener('keyup', (e) => {
-  if (e.key === 'Alt') {
-    pilotHighlightActive = false;
-    if (pilotHighlightTarget) {
-      pilotHighlightTarget.classList.remove('pilot-highlight');
-      pilotHighlightTarget = null;
+  window.addEventListener('keydown', (e) => {
+    // 카드 플로팅 버튼이 보일 때만 Alt 하이라이트 활성화
+    const cardBtn = document.getElementById('cp-card-float-btn');
+    const panel = document.getElementById('content-pilot-panel');
+    if (e.key === 'Alt') {
+      if (cardBtn && (!panel || panel.style.display === 'none')) {
+        window.__pilotHighlightActive = true;
+      } else {
+        window.__pilotHighlightActive = false;
+      }
     }
-  }
-});
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Alt') {
+      window.__pilotHighlightActive = false;
+      if (window.__pilotHighlightTarget) {
+        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+        window.__pilotHighlightTarget = null;
+      }
+    }
+  });
 
-// 마우스 오버 시 하이라이트
-window.addEventListener('mouseover', (e) => {
-  if (!pilotHighlightActive) return;
-  const el = e.target;
-  if (pilotHighlightTarget && pilotHighlightTarget !== el) {
-    pilotHighlightTarget.classList.remove('pilot-highlight');
-  }
-  if (el && el !== document.body && el !== document.documentElement) {
-    el.classList.add('pilot-highlight');
-    pilotHighlightTarget = el;
-  }
-});
+  // Alt키를 다시 누를 때도 하이라이트가 정상 동작하도록 mousemove에서 Alt키 상태를 체크
+  window.addEventListener('mousemove', (e) => {
+  // 카드 플로팅 버튼이 보일 때만 Alt 하이라이트 동작
+  const cardBtn = document.getElementById('cp-card-float-btn');
+  const panel = document.getElementById('content-pilot-panel');
+  if (window.__pilotHighlightActive && cardBtn && (!panel || panel.style.display === 'none')) {
+      const el = e.target;
+      // 패널 내부에서는 하이라이트 동작 금지
+      const panel = document.getElementById('content-pilot-panel');
+      if (panel && (el === panel || panel.contains(el))) {
+        if (window.__pilotHighlightTarget) {
+          window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+          window.__pilotHighlightTarget = null;
+        }
+        return;
+      }
+      // 이전 타겟과 다를 때만 처리
+      if (window.__pilotHighlightTarget && window.__pilotHighlightTarget !== el) {
+        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+        window.__pilotHighlightTarget = null;
+      }
+      // 새 타겟이 body, html이 아니고, 이미 하이라이트가 안 되어 있으면 add
+      if (el && el !== document.body && el !== document.documentElement) {
+        if (!el.classList.contains('pilot-highlight')) {
+          el.classList.add('pilot-highlight');
+        }
+        window.__pilotHighlightTarget = el;
+      }
+    } else {
+      if (window.__pilotHighlightTarget) {
+        window.__pilotHighlightTarget.classList.remove('pilot-highlight');
+        window.__pilotHighlightTarget = null;
+      }
+    }
+  });
+// ...existing code...
+}
 
-// 마우스가 요소를 벗어날 때 하이라이트 해제
-window.addEventListener('mouseout', (e) => {
-  if (pilotHighlightTarget && e.target === pilotHighlightTarget) {
-    pilotHighlightTarget.classList.remove('pilot-highlight');
-    pilotHighlightTarget = null;
-  }
-});
-
+// background.js에 Firebase 저장 요청 및 결과 출력
 // background.js에 Firebase 저장 요청 및 결과 출력
 chrome.runtime.sendMessage({ action: 'firebase-test-write' }, (response) => {
   if (response && response.success) {
@@ -90,9 +118,9 @@ function renderPanelHeader() {
     const style = document.createElement("style");
     style.id = "cp-material-symbols-style";
     style.textContent = `.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }`;
+    document.head.appendChild(style);
   }
 }
-
 function renderPanelHeader() {
   // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
   if (!document.getElementById("cp-material-symbols-font")) {
