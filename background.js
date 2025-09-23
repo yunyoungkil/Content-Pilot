@@ -17,8 +17,47 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
+// Firebase scraps 실시간 구독 및 모든 탭에 브로드캐스트
+let lastScrapsJson = "";
+firebase
+  .database()
+  .ref("scraps")
+  .on("value", (snapshot) => {
+    const val = snapshot.val() || {};
+    const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+    const json = JSON.stringify(arr);
+    if (json !== lastScrapsJson) {
+      lastScrapsJson = json;
+      // 모든 탭에 브로드캐스트
+      chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+          if (tab.id) {
+            chrome.tabs.sendMessage(
+              tab.id,
+              {
+                action: "cp_firebase_scraps",
+                data: arr,
+              },
+              () => {}
+            );
+          }
+        }
+      });
+    }
+  });
+
 // Alt 키 상태 변경 메시지 및 스크랩 데이터 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // content.js가 최신 스크랩 데이터 요청 시 응답
+  if (msg && msg.action === "cp_get_firebase_scraps") {
+    try {
+      const arr = JSON.parse(lastScrapsJson || "[]");
+      sendResponse({ data: arr });
+    } catch (e) {
+      sendResponse({ data: [] });
+    }
+    return; // 동기 응답이므로 return true 불필요
+  }
   if (msg.action === "alt_key_state_changed") {
     // 현재 탭의 모든 프레임에 메시지 전달
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -31,13 +70,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           .catch((e) => console.error("Could not send message to tab", e));
       }
     });
-    return true;
+    // 동기 처리이므로 return true 제거 (경고 방지)
   }
   if (msg.action === "scrap_element" && msg.data) {
-    // 스크랩 데이터 수신 처리 (예: 콘솔 출력, 추후 Firebase 저장 등)
-    console.log("스크랩 데이터 수신:", msg.data);
-    sendResponse({ success: true });
-    return true;
+    // 스크랩 데이터 수신 시 Firebase에 저장
+    const scrapRef = firebase.database().ref("scraps").push();
+    const scrapPayload = {
+      ...msg.data,
+      timestamp: Date.now(),
+    };
+    scrapRef
+      .set(scrapPayload)
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err.message });
+      });
+    return true; // 비동기 응답
   }
   // content.js에서 메시지 수신 시 Firebase에 데이터 저장
   if (msg && msg.action === "firebase-test-write") {

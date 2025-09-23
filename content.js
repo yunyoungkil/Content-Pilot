@@ -59,16 +59,31 @@ if (!window.__pilotHighlightInitialized) {
         // 하이라이트 제거
         targetElement.classList.remove("pilot-highlight");
         // 스크랩 로직 (예: background.js로 데이터 전송)
+        // 이미지 링크 추출 (요소 내부 첫 번째 <img>의 src)
+        let image = null;
+        const imgEl = targetElement.querySelector("img");
+        if (imgEl && imgEl.src) {
+          image = imgEl.src;
+        }
         const scrapData = {
           text: targetElement.innerText,
           html: targetElement.outerHTML,
           tag: targetElement.tagName,
           url: location.href,
+          image, // 이미지 링크(없으면 null)
         };
-        chrome.runtime.sendMessage({
-          action: "scrap_element",
-          data: scrapData,
-        });
+        if (
+          typeof chrome !== "undefined" &&
+          chrome.runtime &&
+          chrome.runtime.sendMessage
+        ) {
+          chrome.runtime.sendMessage({
+            action: "scrap_element",
+            data: scrapData,
+          });
+        } else {
+          console.warn("chrome.runtime.sendMessage를 사용할 수 없습니다.");
+        }
         window.__pilotHighlightTarget = null;
         window.__pilotHighlightActive = false;
       }
@@ -79,6 +94,18 @@ if (!window.__pilotHighlightInitialized) {
 
 // UI 패널 및 관련 코드는 최상위 window에서만 실행
 if (window.self === window.top) {
+  // 프로그램 시작 시(최초 로드 시) background에 최신 스크랩 데이터 요청
+  chrome.runtime.sendMessage(
+    { action: "cp_get_firebase_scraps" },
+    (response) => {
+      if (response && response.data) {
+        firebaseScraps = Array.isArray(response.data)
+          ? response.data.map(({ tag, html, ...rest }) => rest)
+          : [];
+        renderScrapbook();
+      }
+    }
+  );
   // Alt 키 상태를 background.js로 전달
   window.addEventListener("keydown", (e) => {
     if (e.key === "Alt") {
@@ -99,17 +126,17 @@ if (window.self === window.top) {
   // ...기존 UI 패널 생성 및 렌더링 코드...
 }
 
-// background.js에 Firebase 저장 요청 및 결과 출력
-chrome.runtime.sendMessage({ action: "firebase-test-write" }, (response) => {
-  if (response && response.success) {
-    console.log("Firebase 저장 성공!", response.data);
-  } else {
-    console.error("Firebase 저장 실패:", response && response.error);
-  }
-});
-
 // 확장 아이콘 클릭 시 패널 강제 오픈 메시지 수신
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // background.js에서 파이어베이스 scraps 브로드캐스트 수신
+  if (msg && msg.action === "cp_firebase_scraps") {
+    // 태그, html 필드 제외하고 반영
+    firebaseScraps = Array.isArray(msg.data)
+      ? msg.data.map(({ tag, html, ...rest }) => rest)
+      : [];
+    renderScrapbook();
+    return;
+  }
   if (msg && msg.action === "open_content_pilot_panel") {
     // 패널이 없으면 생성, 있으면 보이게
     let panel = document.getElementById("content-pilot-panel");
@@ -137,24 +164,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 // 공통 헤더 렌더링 함수
-function renderPanelHeader() {
-  // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
-  if (!document.getElementById("cp-material-symbols-font")) {
-    const link = document.createElement("link");
-    link.id = "cp-material-symbols-font";
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap";
-    document.head.appendChild(link);
-  }
-  // 스타일은 항상 한 번만 추가
-  if (!document.getElementById("cp-material-symbols-style")) {
-    const style = document.createElement("style");
-    style.id = "cp-material-symbols-style";
-    style.textContent = `.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }`;
-    document.head.appendChild(style);
-  }
-}
 function renderPanelHeader() {
   // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
   if (!document.getElementById("cp-material-symbols-font")) {
@@ -405,112 +414,44 @@ function showFloatingButton() {
 }
 
 // Scrapbook 샘플 데이터 (UI 테스트용)
-const sampleScraps = [
-  {
-    id: "s1",
-    title: "콘텐츠 마케팅 전략",
-    snippet: "최신 AI 동향과 전망을 한눈에!",
-    image:
-      "https://storage.googleapis.com/static.fastcampus.co.kr/prod/uploads/202304/011837-982/7.jpg",
-    content:
-      "2025년 AI는 생성형 모델, 멀티모달, 에이전트 등 다양한 분야에서 혁신을 이끌 전망입니다.",
-  },
-  {
-    id: "s2",
-    title: "UX 디자인 가이드",
-    snippet: "사용자 경험을 높이는 실전 팁",
-    image:
-      "https://storage.googleapis.com/static.fastcampus.co.kr/prod/uploads/202310/164619-1143/don-t-read,-just-look.png",
-    content:
-      "효과적인 UX 설계는 직관적 네비게이션, 일관된 UI, 접근성 강화가 핵심입니다.",
-  },
-  {
-    id: "s3",
-    title: "2025 AI 트렌드",
-    snippet: "AI 시대의 콘텐츠 기획법",
-    image:
-      "https://cdn.prod.website-files.com/646742ada26b6e8f3a121721/67b7dbaf5b377dd7fc089f67_2%EC%9B%94%201%EC%A3%BC%EC%B0%A8%20KR_%EC%8D%B8%EB%84%A4%EC%9D%BC.webp",
-    content:
-      "AI를 활용한 타겟팅, 데이터 기반 기획, 자동화 도구 활용이 중요합니다.",
-  },
-  {
-    id: "s4",
-    title: "마케팅 자동화 도구 비교",
-    snippet: "2025년 추천 마케팅 툴 TOP 5",
-    image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb",
-    content:
-      "마케팅 자동화는 효율적인 캠페인 운영과 데이터 분석에 필수적입니다.",
-  },
-  {
-    id: "s5",
-    title: "콘텐츠 SEO 최적화",
-    snippet: "검색엔진 상위 노출 전략",
-    image: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6",
-    content: "키워드 분석, 메타데이터 최적화, 내부 링크 구조가 중요합니다.",
-  },
-  {
-    id: "s6",
-    title: "브랜딩 성공 사례",
-    snippet: "글로벌 브랜드의 비밀",
-    image: "https://images.unsplash.com/photo-1519125323398-675f0ddb6308",
-    content: "일관된 메시지와 감성적 스토리텔링이 브랜딩의 핵심입니다.",
-  },
-  {
-    id: "s7",
-    title: "소셜 미디어 트렌드 2025",
-    snippet: "플랫폼별 공략법",
-    image: "https://images.unsplash.com/photo-1465101046530-73398c7f28ca",
-    content: "숏폼 영상, 인플루언서 마케팅, 커뮤니티 빌딩이 대세입니다.",
-  },
-  {
-    id: "s8",
-    title: "콘텐츠 캘린더 만들기",
-    snippet: "효율적인 일정 관리 팁",
-    image: "https://images.unsplash.com/photo-1503676382389-4809596d5290",
-    content: "정기적인 콘텐츠 발행과 팀 협업이 중요합니다.",
-  },
-  {
-    id: "s9",
-    title: "AI 기반 카피라이팅",
-    snippet: "자동화된 문장 생성의 미래",
-    image: "https://images.unsplash.com/photo-1515378791036-0648a3ef77b2",
-    content: "AI 카피라이팅 도구는 빠른 제작과 A/B 테스트에 유용합니다.",
-  },
-  {
-    id: "s10",
-    title: "콘텐츠 퍼널 설계",
-    snippet: "고객 여정에 맞춘 전략",
-    image:
-      "https://www.salesforce.com/content/dam/web/ko_kr/www/images/Hub/marketing/ai-marketing.jpg",
-    content: "퍼널 단계별 맞춤 콘텐츠가 전환율을 높입니다.",
-  },
-  {
-    id: "s11",
-    title: "이메일 마케팅 가이드",
-    snippet: "오픈율을 높이는 비법",
-    image: "https://images.unsplash.com/photo-1464983953574-0892a716854b",
-    content: "개인화, 타이밍, 명확한 CTA가 핵심입니다.",
-  },
-  {
-    id: "s12",
-    title: "콘텐츠 큐레이션 전략",
-    snippet: "효과적인 정보 선별법",
-    image: "https://images.unsplash.com/photo-1465101046530-73398c7f28ca",
-    content: "신뢰할 수 있는 소스와 주제별 분류가 중요합니다.",
-  },
-  {
-    id: "s13",
-    title: "디자인 시스템 구축",
-    snippet: "일관된 UI/UX의 시작",
-    image: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6",
-    content: "컴포넌트화, 가이드라인 문서화, 협업 툴 활용이 필수입니다.",
-  },
-];
+// Firebase 실시간 스크랩 데이터 관리
+let firebaseScraps = [];
+let firebaseScrapsUnsubscribe = null;
+
+// Firebase compat SDK가 이미 background.js에서 importScripts로 로드됨을 가정
+if (typeof firebase !== "undefined" && firebase.database) {
+  // 실시간 구독 함수
+  function subscribeScrapsRealtime() {
+    if (firebaseScrapsUnsubscribe) return; // 중복 구독 방지
+    const ref = firebase.database().ref("scraps");
+    const handler = (snapshot) => {
+      const val = snapshot.val() || {};
+      // firebaseScraps: [{id, ...data}]
+      firebaseScraps = Object.entries(val).map(([id, data]) => ({
+        id,
+        ...data,
+      }));
+      // 콘솔에 실시간 데이터 출력
+      console.log(
+        "[Content-Pilot] 파이어베이스 스크랩 데이터:",
+        firebaseScraps
+      );
+      // 스크랩북이 열려 있으면 새로고침
+      if (window.__cp_active_mode === "scrapbook") {
+        renderScrapbook();
+      }
+    };
+    ref.on("value", handler);
+    firebaseScrapsUnsubscribe = () => ref.off("value", handler);
+  }
+  subscribeScrapsRealtime();
+}
 // Scrapbook UI 렌더링
 function renderScrapbook(
   selectedId,
   sortType = "latest",
   filterKeyword = "",
+  filterMode = "or",
   cardRect
 ) {
   // 전체 레이아웃 초기화 (헤더 포함, 덮어쓰기)
@@ -519,7 +460,7 @@ function renderScrapbook(
     renderPanelHeader() +
     `<div class="scrapbook-root">
       <div class="scrapbook-list-section">
-        <div class="scrapbook-list-header">
+  <div class="scrapbook-list-header" style="max-width:340px;width:100%;margin:0 auto;">
           <span class="scrapbook-list-title">스크랩 리스트</span>
           <div class="scrapbook-sort-group">
             <button class="scrapbook-sort-btn${
@@ -531,13 +472,21 @@ function renderScrapbook(
             <button class="scrapbook-sort-btn${
               sortType === "keyword" ? " active" : ""
             }" data-sort="keyword">키워드</button>
-            <input class="scrapbook-keyword-input" type="text" placeholder="키워드" value="${
-              filterKeyword || ""
-            }">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <input class="scrapbook-keyword-input" type="text" placeholder="키워드" value="${
+                filterKeyword || ""
+              }" style="height:32px; font-size:15px; border-radius:6px; border:1px solid #d0d0d0; padding:0 10px;">
+              <select class="scrapbook-keyword-mode" style="height:32px; font-size:15px; border-radius:6px; border:1px solid #d0d0d0; padding:0 8px;">
+                <option value="or">부분일치(OR)</option>
+                <option value="and">모두포함(AND)</option>
+                <option value="exact">완전일치</option>
+                <option value="text">텍스트만</option>
+              </select>
+            </div>
           </div>
         </div>
-        <div class="scrapbook-list-cards"></div>
-      </div>
+  <div class="scrapbook-list-cards" style="max-width:340px;width:100%;margin:0 auto;overflow-y:auto;min-height:120px;"></div>
+  </div>
       <div class="scrapbook-detail-section" style="
         display: flex;
         flex-direction: column;
@@ -558,17 +507,45 @@ function renderScrapbook(
   bindTabClickEvents();
 
   // 정렬/필터 적용
-  let scraps = [...sampleScraps];
+  let scraps = [...firebaseScraps];
   if (filterKeyword) {
-    scraps = scraps.filter(
-      (s) =>
-        s.title.includes(filterKeyword) || s.snippet.includes(filterKeyword)
-    );
+    const mode = filterMode || "or";
+    const keywords = filterKeyword.trim().split(/\s+/).filter(Boolean);
+    if (mode === "or") {
+      scraps = scraps.filter((s) =>
+        keywords.some(
+          (kw) =>
+            (s.text && s.text.includes(kw)) ||
+            (s.url && s.url.includes(kw)) ||
+            (s.tag && s.tag.includes(kw))
+        )
+      );
+    } else if (mode === "and") {
+      scraps = scraps.filter((s) =>
+        keywords.every(
+          (kw) =>
+            (s.text && s.text.includes(kw)) ||
+            (s.url && s.url.includes(kw)) ||
+            (s.tag && s.tag.includes(kw))
+        )
+      );
+    } else if (mode === "exact") {
+      scraps = scraps.filter(
+        (s) =>
+          (s.text && s.text === filterKeyword) ||
+          (s.url && s.url === filterKeyword) ||
+          (s.tag && s.tag === filterKeyword)
+      );
+    } else if (mode === "text") {
+      scraps = scraps.filter((s) =>
+        keywords.some((kw) => s.text && s.text.includes(kw))
+      );
+    }
   }
   if (sortType === "popular") {
-    scraps.sort((a, b) => a.id.localeCompare(b.id));
+    scraps.sort((a, b) => (a.id || "").localeCompare(b.id || ""));
   } else if (sortType === "latest") {
-    scraps.reverse();
+    scraps.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }
 
   // 카드 리스트 렌더링
@@ -580,14 +557,30 @@ function renderScrapbook(
       scrap.id === selectedId ? " active" : ""
     }" data-id="${scrap.id}" tabindex="0">
       <div class="scrap-card-img-wrap" style="width: 112px; height: 84px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(66,133,244,0.10); background: #f7f8fa; display: flex; align-items: center; justify-content: center;">
-        <img src="${
-          scrap.image
-        }" alt="scrap" style="width: 104px; height: 76px; object-fit: cover; border-radius: 10px;">
+        <img src="${scrap.image ? scrap.image : ""}" alt="${
+        scrap.image ? "스크랩 이미지" : "이미지 없음"
+      }"
+        style="width: 104px; height: 76px; object-fit: cover; border-radius: 10px; background: #f0f0f0; position:relative; display:${
+          scrap.image ? "block" : "none"
+        };">
+        ${
+          !scrap.image
+            ? '<span style="width:104px;height:76px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#888;background:#f0f0f0;border-radius:10px;">이미지 없음</span>'
+            : ""
+        }
       </div>
       <div class="scrap-card-info">
-        <div class="scrap-card-title">${scrap.title}</div>
-        <div class="scrap-card-snippet">${scrap.snippet}</div>
-        <div class="scrap-card-source">source.com/...</div>
+        <div class="scrap-card-title" style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;">${
+          scrap.text ? scrap.text.substring(0, 30) : "(텍스트 없음)"
+        }</div>
+        <div class="scrap-card-snippet" style="color:#888;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;">${
+          scrap.url
+            ? scrap.url.replace(/^https?:\/\//, "").substring(0, 40)
+            : ""
+        }</div>
+        <div class="scrap-card-source" style="color:#b0b0b0;font-size:12px;">${
+          scrap.tag || ""
+        }</div>
       </div>
     </div>
   `
@@ -614,8 +607,8 @@ function renderScrapbook(
       renderScrapbook(selectedId, btn.dataset.sort, filterKeyword);
   });
   const filterInput = panel.querySelector(".scrapbook-keyword-input");
-  // debounce 변수는 window에 저장 (모드 전환 시에도 유지)
-  if (!window.__cp_keyword_input_timer) window.__cp_keyword_input_timer = null;
+  const filterModeSelect = panel.querySelector(".scrapbook-keyword-mode");
+
   filterInput.oninput = (e) => {
     const value = e.target.value;
     const selectionStart = e.target.selectionStart;
@@ -623,8 +616,7 @@ function renderScrapbook(
     if (window.__cp_keyword_input_timer)
       clearTimeout(window.__cp_keyword_input_timer);
     window.__cp_keyword_input_timer = setTimeout(() => {
-      renderScrapbook(selectedId, sortType, value);
-      // 렌더 후 커서 위치 복원
+      renderScrapbook(selectedId, sortType, value, filterModeSelect.value);
       setTimeout(() => {
         const newInput = panel.querySelector(".scrapbook-keyword-input");
         if (newInput) {
@@ -633,6 +625,15 @@ function renderScrapbook(
         }
       }, 0);
     }, 200);
+  };
+
+  filterModeSelect.onchange = () => {
+    renderScrapbook(
+      selectedId,
+      sortType,
+      filterInput.value,
+      filterModeSelect.value
+    );
   };
 
   // 상세 패널 렌더링 (스켈레톤)
@@ -683,20 +684,27 @@ function renderScrapbook(
     detailPanel.innerHTML = `
       <div class="scrapbook-detail-card" style="${detailStyle}">
         <div style="width: 100%; display: flex; justify-content: center;">
-          <img src="${selected.image}" alt="scrap" class="scrapbook-detail-img" style="
-            width: 320px; height: 200px; object-fit: cover; border-radius: 18px; box-shadow: 0 2px 16px rgba(0,0,0,0.13); background: #f7f8fa; border: 2px solid #e0e0e0;">
+          <img src="${selected.image ? selected.image : ""}" alt="${
+      selected.image ? "스크랩 이미지" : "이미지 없음"
+    }"
+          class="scrapbook-detail-img" style="width: 320px; height: 200px; object-fit: cover; border-radius: 18px; box-shadow: 0 2px 16px rgba(0,0,0,0.13); background: #f7f8fa; border: 2px solid #e0e0e0; position:relative; display:${
+            selected.image ? "block" : "none"
+          };">
+        ${
+          !selected.image
+            ? '<div style="width:320px;height:200px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#888;background:#f7f8fa;border-radius:18px;border:2px solid #e0e0e0;">이미지 없음</div>'
+            : ""
+        }
         </div>
         <div class="scrapbook-detail-title" style="
           font-size: 1.5rem; font-weight: 800; color: #1a237e; text-align: center; margin-top: 8px; letter-spacing: 0.01em; line-height: 1.3;">
-          ${selected.title}
+          ${selected.text ? selected.text.substring(0, 60) : "(텍스트 없음)"}
         </div>
         <div class="scrapbook-detail-meta" style="
           font-size: 1.02rem; color: #4285F4; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.01em; text-align:center;">
-          <span style="vertical-align:middle; margin-right:4px; font-size:1.1em;">🔗</span>source.com/...
-        </div>
-        <div class="scrapbook-detail-desc" style="
-          font-size: 1.13rem; color: #333; line-height: 1.8; text-align: left; margin-top: 2px; font-weight: 400;">
-          ${selected.content}
+          <span style="vertical-align:middle; margin-right:4px; font-size:1.1em;">🔗</span>${
+            selected.url ? selected.url : ""
+          }
         </div>
       </div>
       <style>
