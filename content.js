@@ -1,3 +1,51 @@
+// ===== 스크랩 후보 하이라이트 기능 =====
+let pilotHighlightTarget = null;
+let pilotHighlightActive = false;
+
+// Alt 키 상태 추적
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Alt') pilotHighlightActive = true;
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Alt') {
+    pilotHighlightActive = false;
+    if (pilotHighlightTarget) {
+      pilotHighlightTarget.classList.remove('pilot-highlight');
+      pilotHighlightTarget = null;
+    }
+  }
+});
+
+// 마우스 오버 시 하이라이트
+window.addEventListener('mouseover', (e) => {
+  if (!pilotHighlightActive) return;
+  const el = e.target;
+  if (pilotHighlightTarget && pilotHighlightTarget !== el) {
+    pilotHighlightTarget.classList.remove('pilot-highlight');
+  }
+  if (el && el !== document.body && el !== document.documentElement) {
+    el.classList.add('pilot-highlight');
+    pilotHighlightTarget = el;
+  }
+});
+
+// 마우스가 요소를 벗어날 때 하이라이트 해제
+window.addEventListener('mouseout', (e) => {
+  if (pilotHighlightTarget && e.target === pilotHighlightTarget) {
+    pilotHighlightTarget.classList.remove('pilot-highlight');
+    pilotHighlightTarget = null;
+  }
+});
+
+// background.js에 Firebase 저장 요청 및 결과 출력
+chrome.runtime.sendMessage({ action: 'firebase-test-write' }, (response) => {
+  if (response && response.success) {
+    console.log('Firebase 저장 성공!', response.data);
+  } else {
+    console.error('Firebase 저장 실패:', response && response.error);
+  }
+});
+
 // 확장 아이콘 클릭 시 패널 강제 오픈 메시지 수신
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.action === "open_content_pilot_panel") {
@@ -42,10 +90,27 @@ function renderPanelHeader() {
     const style = document.createElement("style");
     style.id = "cp-material-symbols-style";
     style.textContent = `.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }`;
+  }
+}
+
+function renderPanelHeader() {
+  // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
+  if (!document.getElementById("cp-material-symbols-font")) {
+    const link = document.createElement("link");
+    link.id = "cp-material-symbols-font";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap";
+    document.head.appendChild(link);
+  }
+  // 스타일은 항상 한 번만 추가
+  if (!document.getElementById("cp-material-symbols-style")) {
+    const style = document.createElement("style");
+    style.id = "cp-material-symbols-style";
+    style.textContent = `.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }`;
     document.head.appendChild(style);
   }
   const iconUrl = chrome.runtime.getURL("images/icon-32.png");
-  // 현재 모드 파악 (탭 강조용)
   let activeMode = window.__cp_active_mode || "scrapbook";
   const tabs = [
     { key: "scrapbook", label: "스크랩북 모드", color: "#4285F4" },
@@ -87,6 +152,7 @@ function renderPanelHeader() {
         .join("")}
     </div>
   `;
+// 파일 끝 중괄호 정리
 }
 
 // 로그인/로그아웃 클릭 핸들러 (임시)

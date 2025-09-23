@@ -13,13 +13,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["css/style.css"]
-    }
-  ],
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",
