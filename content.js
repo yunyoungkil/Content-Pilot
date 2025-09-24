@@ -18,10 +18,11 @@ if (!window.__pilotHighlightInitialized) {
 
   window.addEventListener("mousemove", (e) => {
     const panel = document.getElementById("content-pilot-panel");
+    const cardBtn = document.getElementById("cp-card-float-btn");
     if (window.__pilotHighlightActive) {
       const el = e.target;
-      // 패널 내부에서는 하이라이트 동작 금지
-      if (panel && (el === panel || panel.contains(el))) {
+      // 패널 또는 최소화 카드 버튼 내부에서는 하이라이트 동작 금지
+      if ((panel && (el === panel || panel.contains(el))) || (cardBtn && (el === cardBtn || cardBtn.contains(el)))) {
         if (window.__pilotHighlightTarget) {
           window.__pilotHighlightTarget.classList.remove("pilot-highlight");
           window.__pilotHighlightTarget = null;
@@ -54,8 +55,14 @@ if (!window.__pilotHighlightInitialized) {
     "click",
     (e) => {
       if (window.__pilotHighlightActive) {
-        e.preventDefault();
+        const panel = document.getElementById("content-pilot-panel");
+        const cardBtn = document.getElementById("cp-card-float-btn");
         const targetElement = e.target;
+        // 패널 또는 최소화 카드 버튼 클릭 시 무시
+        if ((panel && (targetElement === panel || panel.contains(targetElement))) || (cardBtn && (targetElement === cardBtn || cardBtn.contains(targetElement)))) {
+          return;
+        }
+        e.preventDefault();
         // 하이라이트 제거
         targetElement.classList.remove("pilot-highlight");
         // 스크랩 로직 (예: background.js로 데이터 전송)
@@ -106,63 +113,67 @@ if (window.self === window.top) {
       }
     }
   );
-  // Alt 키 상태를 background.js로 전달
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Alt") {
-      chrome.runtime.sendMessage({
-        action: "alt_key_state_changed",
-        isAltPressed: true,
-      });
-    }
-  });
-  window.addEventListener("keyup", (e) => {
-    if (e.key === "Alt") {
-      chrome.runtime.sendMessage({
-        action: "alt_key_state_changed",
-        isAltPressed: false,
-      });
-    }
-  });
+  // Alt 키 상태를 background.js로 전달 (최상위 window에서만 실행)
+  if (window.self === window.top) {
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Alt") {
+        chrome.runtime.sendMessage({
+          action: "alt_key_state_changed",
+          isAltPressed: true,
+        });
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "Alt") {
+        chrome.runtime.sendMessage({
+          action: "alt_key_state_changed",
+          isAltPressed: false,
+        });
+      }
+    });
+  }
   // ...기존 UI 패널 생성 및 렌더링 코드...
 }
 
-// 확장 아이콘 클릭 시 패널 강제 오픈 메시지 수신
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // background.js에서 파이어베이스 scraps 브로드캐스트 수신
-  if (msg && msg.action === "cp_firebase_scraps") {
-    // 태그, html 필드 제외하고 반영
-    firebaseScraps = Array.isArray(msg.data)
-      ? msg.data.map(({ tag, html, ...rest }) => rest)
-      : [];
-    renderScrapbook();
-    return;
-  }
-  if (msg && msg.action === "open_content_pilot_panel") {
-    // 패널이 없으면 생성, 있으면 보이게
-    let panel = document.getElementById("content-pilot-panel");
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = "content-pilot-panel";
-      panel.style.position = "fixed";
-      panel.style.right = "32px";
-      panel.style.bottom = "32px";
-      panel.style.zIndex = "2147483647";
-      panel.style.boxShadow = "0px 4px 24px rgba(0,0,0,0.13)";
-      panel.style.borderRadius = "12px";
-      panel.style.background = "#fff";
-      panel.style.minWidth = "fit-content";
-      panel.style.overflow = "auto";
-      panel.style.top = "0";
-      panel.style.left = "0";
-      panel.innerHTML = renderPanelHeader();
-      document.body.appendChild(panel);
-      panel.querySelector("#cp-panel-close").onclick = closePanel;
+// 확장 아이콘 클릭 시 패널 강제 오픈 메시지 수신 및 패널 생성은 최상위 window에서만 실행
+if (window.self === window.top) {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // background.js에서 파이어베이스 scraps 브로드캐스트 수신
+    if (msg && msg.action === "cp_firebase_scraps") {
+      // 태그, html 필드 제외하고 반영
+      firebaseScraps = Array.isArray(msg.data)
+        ? msg.data.map(({ tag, html, ...rest }) => rest)
+        : [];
+      renderScrapbook();
+      return;
     }
-    panel.style.display = "";
-    // Scrapbook 모드로 진입(최초)
-    renderScrapbook();
-  }
-});
+    if (msg && msg.action === "open_content_pilot_panel") {
+      // 패널이 없으면 생성, 있으면 보이게
+      let panel = document.getElementById("content-pilot-panel");
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "content-pilot-panel";
+        panel.style.position = "fixed";
+        panel.style.right = "32px";
+        panel.style.bottom = "32px";
+        panel.style.zIndex = "2147483647";
+        panel.style.boxShadow = "0px 4px 24px rgba(0,0,0,0.13)";
+        panel.style.borderRadius = "12px";
+        panel.style.background = "#fff";
+        panel.style.minWidth = "fit-content";
+        panel.style.overflow = "auto";
+        panel.style.top = "0";
+        panel.style.left = "0";
+        panel.innerHTML = renderPanelHeader();
+        document.body.appendChild(panel);
+        panel.querySelector("#cp-panel-close").onclick = closePanel;
+      }
+      panel.style.display = "";
+      // Scrapbook 모드로 진입(최초)
+      renderScrapbook();
+    }
+  });
+}
 // 공통 헤더 렌더링 함수
 function renderPanelHeader() {
   // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
@@ -237,6 +248,7 @@ function onLogoutClick() {
 }
 // 로그인 버튼 UI 렌더링 함수
 function renderLoginButton() {
+  if (!panel) return;
   // 헤더와 본문을 한 번에 렌더링 (덮어쓰기)
   panel.innerHTML =
     renderPanelHeader() +
@@ -248,6 +260,7 @@ function renderLoginButton() {
 
 // 프로필 UI 렌더링 함수
 function renderProfileUI(user) {
+  if (!panel) return;
   // 헤더와 프로필 UI를 한 번에 렌더링 (덮어쓰기)
   panel.innerHTML =
     renderPanelHeader() +
@@ -262,36 +275,37 @@ function renderProfileUI(user) {
   document.getElementById("cp-logout-btn").onclick = onLogoutClick;
 }
 // Content-Pilot UI 패널 및 Google 로그인/로그아웃 UI 구현
+// 모든 패널 관련 전역 변수/함수 선언 및 패널 생성 코드는 반드시 최상위 window에서만 실행
+let panel;
+if (window.self === window.top) {
+  panel = document.getElementById("content-pilot-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "content-pilot-panel";
+    // 우측 하단 고정 스타일 기본 적용
+    panel.style.position = "fixed";
+    panel.style.right = "32px";
+    panel.style.bottom = "32px";
+    panel.style.zIndex = "2147483647";
+    panel.style.boxShadow = "0px 4px 24px rgba(0,0,0,0.13)";
+    panel.style.borderRadius = "12px";
+    panel.style.background = "#fff";
+    panel.style.minWidth = "fit-content";
+    // panel.style.maxWidth = "600px";
+    // panel.style.maxHeight = "90vh";
+    panel.style.overflow = "auto";
+    panel.style.top = "0";
+    panel.style.left = "0";
+    // 헤더 추가
+    panel.innerHTML = renderPanelHeader();
+    document.body.appendChild(panel);
+    panel.querySelector("#cp-panel-close").onclick = closePanel;
+  }
 
-// 패널 생성
-let panel = document.getElementById("content-pilot-panel");
-if (!panel) {
-  panel = document.createElement("div");
-  panel.id = "content-pilot-panel";
-  // 우측 하단 고정 스타일 기본 적용
-  panel.style.position = "fixed";
-  panel.style.right = "32px";
-  panel.style.bottom = "32px";
-  panel.style.zIndex = "2147483647";
-  panel.style.boxShadow = "0px 4px 24px rgba(0,0,0,0.13)";
-  panel.style.borderRadius = "12px";
-  panel.style.background = "#fff";
-  panel.style.minWidth = "fit-content";
-  // panel.style.maxWidth = "600px";
-  // panel.style.maxHeight = "90vh";
-  panel.style.overflow = "auto";
-  panel.style.top = "0";
-  panel.style.left = "0";
-  // 헤더 추가
-  panel.innerHTML = renderPanelHeader();
-  document.body.appendChild(panel);
-  panel.querySelector("#cp-panel-close").onclick = closePanel;
-}
-
-// 패널 닫기 및 재오픈 플로팅 버튼 구현
-
-function closePanel() {
-  panel.style.display = "none";
+  // 패널 닫기 및 재오픈 플로팅 버튼 구현
+  function closePanel() {
+    panel.style.display = "none";
+  }
 }
 
 // 패널 최소화(카드화) 및 좌하단 카드 버튼 표시 (전역)
@@ -454,6 +468,7 @@ function renderScrapbook(
   filterMode = "or",
   cardRect
 ) {
+  if (!panel) return;
   // 전체 레이아웃 초기화 (헤더 포함, 덮어쓰기)
   window.__cp_active_mode = "scrapbook";
   panel.innerHTML =
@@ -828,6 +843,7 @@ function renderKanban() {
 
 // 상단 모드 전환 탭
 function renderModeTabs(active) {
+  if (!panel) return;
   const tabs = [
     { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
     { key: "kanban", label: "기획 보드", color: "#34A853" },

@@ -116,23 +116,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 // 확장 아이콘 클릭 시 현재 탭에 content.js가 없으면 주입 후 메시지 전송
 chrome.action.onClicked.addListener((tab) => {
-  chrome.scripting.insertCSS(
-    {
-      target: { tabId: tab.id },
-      files: ["css/style.css"],
-    },
-    () => {
-      chrome.scripting.executeScript(
-        {
-          target: { tabId: tab.id },
-          files: ["content.js"],
-        },
-        () => {
-          chrome.tabs.sendMessage(tab.id, {
-            action: "open_content_pilot_panel",
-          });
-        }
-      );
-    }
-  );
+  chrome.tabs.sendMessage(tab.id, {
+    action: "open_content_pilot_panel",
+  });
 });
