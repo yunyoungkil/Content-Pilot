@@ -48,6 +48,19 @@ firebase
 
 // Alt 키 상태 변경 메시지 및 스크랩 데이터 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.action === "cp_delete_firebase_scrap" && msg.id) {
+    firebase
+      .database()
+      .ref("scraps/" + msg.id)
+      .remove()
+      .then(() => {
+        sendResponse && sendResponse({ success: true });
+      })
+      .catch((err) => {
+        sendResponse && sendResponse({ success: false, error: err.message });
+      });
+    return true; // 비동기 응답
+  }
   // content.js가 최신 스크랩 데이터 요청 시 응답
   if (msg && msg.action === "cp_get_firebase_scraps") {
     try {
@@ -88,30 +101,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ success: false, error: err.message });
       });
     return true; // 비동기 응답
-  }
-  // content.js에서 메시지 수신 시 Firebase에 데이터 저장
-  if (msg && msg.action === "firebase-test-write") {
-    const testRef = firebase.database().ref("test/testWrite");
-    testRef
-      .set({
-        message: "테스트 저장",
-        timestamp: Date.now(),
-      })
-      .then(() => {
-        return testRef.get();
-      })
-      .then((snapshot) => {
-        if (snapshot.exists()) {
-          sendResponse({ success: true, data: snapshot.val() });
-        } else {
-          sendResponse({ success: false, error: "No data available" });
-        }
-      })
-      .catch((err) => {
-        sendResponse({ success: false, error: err.message });
-      });
-    // 비동기 응답을 위해 true 반환
-    return true;
   }
 });
 // 확장 아이콘 클릭 시 현재 탭에 content.js가 없으면 주입 후 메시지 전송
