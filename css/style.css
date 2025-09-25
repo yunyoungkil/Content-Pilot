@@ -108,7 +108,8 @@
 .scrap-card-delete-btn {
   position: absolute;
   top: 6px;
-  right: 6px;
+  left: 6px;
+  right: auto;
   z-index: 2;
   background: transparent;
   border: none;
@@ -147,6 +148,7 @@
   border-radius: 6px;
 }
 .scrap-card-info {
+  position: static;
   flex: 1;
   min-width: 0;
   display: flex;

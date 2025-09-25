@@ -887,7 +887,7 @@ function renderScrapbook(
           }
         })()}
       </div>
-  <div class="scrap-card-info" style="position:relative;">
+  <div class="scrap-card-info">
         <div class="scrap-card-title" style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;">${
           scrap.text ? scrap.text.substring(0, 30) : "(텍스트 없음)"
         }</div>
@@ -901,7 +901,7 @@ function renderScrapbook(
         }</div>
         <button class="scrap-card-delete-btn" data-id="${
           scrap.id
-        }" title="삭제" style="position:absolute;top:6px;left:6px;right:auto;width:22px;height:22px;border:none;background:rgba(255,255,255,0.85);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background 0.15s;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5" stroke="#d32f2f" stroke-width="2" stroke-linecap="round"/></svg></button>
+        }" title="삭제" style="width:22px;height:22px;border:none;background:rgba(255,255,255,0.85);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background 0.15s;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5" stroke="#d32f2f" stroke-width="2" stroke-linecap="round"/></svg></button>
       </div>
     </div>
   `
