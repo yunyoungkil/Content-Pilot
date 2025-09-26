@@ -16,9 +16,21 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
-  "css": ["css/style.css"],
-  "all_frames": true
+      "js": [
+        "js/constants.js",
+        "js/state.js",
+        "js/utils.js",
+        "js/core/highlighter.js",
+        "js/core/scrapbook.js",
+        "js/ui/panel.js",
+        "js/ui/header.js",
+        "js/ui/scrapbookMode.js",
+        "js/ui/kanbanMode.js",
+        "js/ui/draftMode.js",
+        "js/main.js"
+      ],
+      "css": ["css/style.css"],
+      "all_frames": true
     }
   ],
   "action": {
