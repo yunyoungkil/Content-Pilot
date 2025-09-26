@@ -2,20 +2,55 @@
 
 ```
 Content-Pilot/
-├── manifest.json
-├── content.js
+├── .babelrc
 ├── background.js
-├── popup.html
-├── popup.js
-├── images/
-│   └── icon.png
+├── content.js
 ├── css/
 │   └── style.css
-└── lib/
-    ├── firebase-app.js
-    ├── firebase-auth.js
-    ├── firebase-firestore.js
-    └── firebase-storage.js
+├── dist/
+│   ├── bundle.js
+│   ├── bundle.js.map
+│   ├── highlighter.bundle.js
+│   ├── highlighter.bundle.js.map
+│   ├── main.bundle.js
+│   └── main.bundle.js.map
+├── firebase-cdn.html
+├── highlighter-entry.js
+├── images/
+│   ├── icon-16.png
+│   ├── icon-32.png
+│   ├── icon-48.png
+│   └── icon-128.png
+├── js/
+│   ├── constants.js
+│   ├── core/
+│   │   ├── highlighter.js
+│   │   └── scrapbook.js
+│   ├── main.js
+│   ├── state.js
+│   ├── ui/
+│   │   ├── draftMode.js
+│   │   ├── header.js
+│   │   ├── kanbanMode.js
+│   │   ├── panel.js
+│   │   ├── preview.js
+│   │   └── scrapbookMode.js
+│   └── utils.js
+├── lib/
+│   ├── firebase-app-compat.js
+│   ├── firebase-app.js
+│   ├── firebase-auth.js
+│   ├── firebase-database-compat.js
+│   ├── firebase-firestore.js
+│   └── firebase-storage.js
+├── manifest.json
+├── node_modules/
+├── package-lock.json
+├── package.json
+├── popup.html
+├── popup.js
+├── README.md
+└── webpack.config.js
 ```
 
 ## 각 파일 및 폴더 설명

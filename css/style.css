@@ -9,13 +9,13 @@
 /* Scrapbook Mode (예시 UI) */
 .scrapbook-root {
   display: flex;
-  min-width: 800px;
-  min-height: 420px;
+  width: 100%; /* 너비 추가 */
+  height: 100%; /* 높이 추가 */
   background: #f7f8fa;
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
   font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+  /* min-height와 overflow: hidden 제거 */
 }
 .scrapbook-list-section {
   width: 320px;
@@ -107,15 +107,16 @@
 /* 스크랩 카드 삭제 버튼 우상단 배치 */
 .scrap-card-delete-btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 0;
+  right: 0;
   z-index: 2;
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 2px;
+  padding: 6px 6px 2px 2px;
   border-radius: 50%;
   transition: background 0.15s;
+  line-height: 1;
 }
 .scrap-card-delete-btn:hover {
   background: #fbe9e7;
@@ -178,7 +179,9 @@
   background: #f7f8fa;
   display: flex;
   flex-direction: column;
-  padding: 0 0 0 0;
+  padding: 0;
+  min-height: 0; /* Flex 자식 요소의 높이 제어를 위해 추가 */
+  overflow-y: auto; /* 내용이 넘칠 경우 세로 스크롤 생성 */
 }
 .scrapbook-detail-header {
   font-size: 19px;
@@ -187,11 +190,11 @@
   padding: 24px 0 12px 32px;
 }
 .scrapbook-detail-content {
-  flex: 1;
+  /* flex: 1; 제거 */
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
-  padding: 0 0 0 32px;
+  padding: 0 32px 32px 32px; /* 패딩으로 여백 확보 */
 }
 .scrapbook-detail-empty {
   color: #b0b0b0;
@@ -235,6 +238,9 @@
   color: #444;
   line-height: 1.7;
   text-align: left;
+  width: 100%; /* 너비를 100%로 설정 */
+  word-wrap: break-word; /* 긴 단어가 영역을 벗어나지 않도록 줄바꿈 */
+  white-space: normal; /* 공백과 줄바꿈을 정상적으로 처리 */
 }
 .scrapbook-detail-skeleton {
   width: 340px;
@@ -504,4 +510,34 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+}
+.scrap-card {
+  position: relative; /* 삭제 버튼의 위치 기준이 되도록 설정 */
+}
+
+.scrap-card-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 5;
+}
+
+.scrap-card:hover .scrap-card-delete-btn {
+  opacity: 1; /* 카드에 마우스를 올렸을 때만 표시 */
+}
+
+.scrap-card-delete-btn:hover {
+  background-color: rgba(255, 0, 0, 0.8);
 }

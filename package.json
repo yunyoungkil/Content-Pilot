@@ -1,0 +1,31 @@
+{
+  "name": "content-pilot",
+  "version": "1.0.0",
+  "description": "```\r Content-Pilot/\r ├── manifest.json\r ├── content.js\r ├── background.js\r ├── popup.html\r ├── popup.js\r ├── images/\r │   └── icon.png\r ├── css/\r │   └── style.css\r └── lib/\r     ├── firebase-app.js\r     ├── firebase-auth.js\r     ├── firebase-firestore.js\r     └── firebase-storage.js\r ```",
+  "main": "background.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yunyoungkil/Content-Pilot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yunyoungkil/Content-Pilot/issues"
+  },
+  "homepage": "https://github.com/yunyoungkil/Content-Pilot#readme",
+  "devDependencies": {
+    "@babel/core": "^7.28.4",
+    "@babel/preset-env": "^7.28.3",
+    "babel-loader": "^10.0.0",
+    "webpack": "^5.101.3",
+    "webpack-cli": "^6.0.1"
+  }
+}

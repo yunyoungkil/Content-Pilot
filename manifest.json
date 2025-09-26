@@ -13,14 +13,14 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-  "css": ["css/style.css"],
-  "all_frames": true
-    }
-  ],
+"content_scripts": [
+  {
+    "matches": ["<all_urls>"],
+    "js": ["dist/bundle.js"],
+    "css": ["css/style.css"],
+    "all_frames": true
+  }
+],
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",
@@ -35,7 +35,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "images/icon-32.png",
+        "images/*.png",
         "lib/firebase-app-compat.js",
         "lib/firebase-database-compat.js"
       ],
