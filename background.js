@@ -15,7 +15,7 @@ const firebaseConfig = {
 };
 
 // ▼▼▼ 중요: 여기에 발급받은 YouTube Data API v3 키를 입력하세요. ▼▼▼
-const YOUTUBE_API_KEY = 'AIzaSyCyYQDnwIPrjQijXStHpw3p1tXc2VKbP74'; // 실제 키로 교체 필요
+const YOUTUBE_API_KEY = ''; // 실제 키로 교체 필요
 
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
@@ -178,7 +178,7 @@ async function fetchRssFeed(url, channelType) {
 
 async function fetchYoutubeChannel(channelId, channelType) {
   // ▼▼▼ "YOUR_YOUTUBE_API_KEY" 라는 초기 placeholder 값과 비교하도록 수정 ▼▼▼
-  if (YOUTUBE_API_KEY === 'AIzaSyCyYQDnwIPrjQijXStHpw3p1tXc2VKbP74' || !YOUTUBE_API_KEY) {
+  if (YOUTUBE_API_KEY === '' || !YOUTUBE_API_KEY) {
     console.warn('YouTube API Key is not set. Skipping YouTube fetch.');
     return;
   }
