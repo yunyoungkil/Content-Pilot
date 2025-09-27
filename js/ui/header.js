@@ -21,9 +21,12 @@ export function renderPanelHeader() {
   const iconUrl = chrome.runtime.getURL("images/icon-32.png");
   let activeMode = window.__cp_active_mode || "scrapbook";
   const tabs = [
-    { key: "scrapbook", label: "스크랩북 모드", color: "#4285F4" },
-    { key: "kanban", label: "기획 보드 모드", color: "#34A853" },
-    { key: "draft", label: "초안 작성 모드", color: "#FBBC05" },
+     { key: "dashboard", label: "대시보드", color: "#1a73e8" }, 
+    { key: "scrapbook", label: "스크랩북", color: "#4285F4" }, // 이름 변경
+    { key: "kanban", label: "기획 보드", color: "#34A853" }, // 이름 변경
+    { key: "draft", label: "초안 작성", color: "#FBBC05" }, // 이름 변경
+    // ▼▼▼ 이 부분을 추가하세요 ▼▼▼
+    { key: "channel", label: "채널 연동", color: "#EA4335" },
   ];
   // 레이아웃 모드 상태를 window 전역에 저장
   const isLayoutMode = !!window.__cp_layout_mode_active;

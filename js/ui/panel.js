@@ -2,6 +2,8 @@
 
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
+import { renderChannelMode } from "./channelMode.js";
+import { renderDashboard } from "./dashboardMode.js";
 
 // --- ▼▼▼ 패널 상태 및 UI 제어 함수 ▼▼▼ ---
 
@@ -125,15 +127,21 @@ function addEventListenersToPanel(panel) {
             window.__cp_active_mode = activeKey;
             renderHeaderAndTabs(panel);
 
-            if (activeKey === 'scrapbook') {
+            if (activeKey === 'dashboard') { // ◀◀◀ 2. Dashboard 렌더링 조건 추가
+                renderDashboard(mainArea);
+            } else if (activeKey === 'scrapbook') {
                 renderScrapbook(mainArea);
             } else if (activeKey === 'kanban') {
                 mainArea.innerHTML = '<h1 style="text-align:center; margin-top: 50px;">기획 보드 모드는 구현 예정입니다.</h1>';
             } else if (activeKey === 'draft') {
                 mainArea.innerHTML = '<h1 style="text-align:center; margin-top: 50px;">초안 작성 모드는 구현 예정입니다.</h1>';
+            } else if (activeKey === 'channel') {
+                renderChannelMode(mainArea);
             }
         });
     });
+// ▼▼▼ 3. 패널이 처음 열릴 때 대시보드를 기본으로 렌더링하도록 수정 ▼▼▼
+    renderDashboard(mainArea); 
 }
 
 // 좌하단 카드 버튼 표시 함수
