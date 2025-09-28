@@ -68,38 +68,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     // API 키는 chrome.storage에, 나머지 채널 정보는 Firebase에 저장
   else if (msg.action === "save_channels_and_key") {
-    chrome.storage.local.set({ youtubeApiKey: msg.data.apiKey }, () => {
-      const channelData = { ...msg.data };
-      delete channelData.apiKey;
-      const userId = 'default_user';
-      firebase.database().ref(`channels/${userId}`).set(channelData)
-        .then(() => {
-          // ▼▼▼ [핵심 수정] 저장이 성공하면 즉시 데이터 수집 함수를 호출! ▼▼▼
-          console.log('New channels saved. Triggering immediate data fetch.');
-          fetchAllChannelData(); 
-          
-          sendResponse({ success: true });
-        })
-        .catch(error => sendResponse({ success: false, error: error.message }));
-    });
+    const { youtubeApiKey, geminiApiKey, ...channelData } = msg.data;
+      // API 키들은 chrome.storage.local에 저장
+      chrome.storage.local.set({ youtubeApiKey, geminiApiKey }, () => {
+        const userId = 'default_user';
+        // 채널 정보는 Firebase에 저장
+        firebase.database().ref(`channels/${userId}`).set(channelData)
+          .then(() => {
+            console.log('New channels saved. Triggering immediate data fetch.');
+            fetchAllChannelData(); 
+            sendResponse({ success: true });
+          })
+          .catch(error => sendResponse({ success: false, error: error.message }));
+      });
     return true;
   }
   else if (msg.action === "get_channels_and_key") {
-    const userId = 'default_user';
-    // 두 비동기 작업을 Promise.all로 함께 처리
-    Promise.all([
-      chrome.storage.local.get('youtubeApiKey'),
-      firebase.database().ref(`channels/${userId}`).once("value")
-    ]).then(([storage, snapshot]) => {
-      const channelData = snapshot.val() || {}; // Firebase 데이터가 null일 경우 빈 객체로 처리
-      const responseData = {
-        ...channelData,
-        apiKey: storage.youtubeApiKey 
-      };
-      sendResponse({ success: true, data: responseData });
-    }).catch(error => {
-      sendResponse({ success: false, error: error.message });
-    });
+      const userId = 'default_user';
+      Promise.all([
+        chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']), // Gemini 키도 함께 가져옴
+        firebase.database().ref(`channels/${userId}`).once("value")
+      ]).then(([storage, snapshot]) => {
+        const channelData = snapshot.val() || {};
+        const responseData = {
+          ...channelData,
+          youtubeApiKey: storage.youtubeApiKey,
+          geminiApiKey: storage.geminiApiKey // 응답 데이터에 추가
+        };
+        sendResponse({ success: true, data: responseData });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
     return true; // 비동기 응답을 위해 true 반환
   }
     // 채널 정보 저장
@@ -161,6 +160,121 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       
       sendResponse({ success: true, data: responseData });
     }).catch(error => sendResponse({ success: false, error: error.message }));
+    
+    return true; // 비동기 응답
+  }
+  // ▼▼▼ [추가] AI 채널 분석 요청 처리 ▼▼▼
+  else if (msg.action === "analyze_my_channel") {
+        const contentData = msg.data;
+        const dataSummary = contentData
+            .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)) // 조회수 순으로 정렬
+            .slice(0, 20) // 성능을 위해 최신/인기 20개 데이터만 사용
+            .map(item => `제목: ${item.title}, 조회수: ${item.viewCount || 0}, 좋아요: ${item.likeCount || 0}`)
+            .join('\n');
+
+        // callGeminiAPI 함수 호출 (async/await 사용을 위해 즉시 실행 함수로 감싸기)
+        (async () => {
+            const analysisResult = await callGeminiAPI(dataSummary);
+            sendResponse({ success: true, analysis: analysisResult });
+        })();
+        
+        return true; // 비동기 응답임을 명시
+  }
+
+   // ▼▼▼ [추가] 콘텐츠 아이디어 생성 요청 처리 ▼▼▼
+  else if (msg.action === "generate_content_ideas") {
+    const { myContent, competitorContent } = msg.data;
+
+    // 각 채널의 데이터를 요약
+    const myDataSummary = myContent
+        .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+        .slice(0, 10) // 상위 10개 데이터 사용
+        .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
+        .join('\n');
+
+    const competitorDataSummary = competitorContent
+        .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+        .slice(0, 10)
+        .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
+        .join('\n');
+    
+    // Gemini API 호출을 위한 새로운 프롬프트
+    const newPrompt = `
+        당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 두 채널의 데이터를 분석하고, 두 채널의 강점을 조합하여 시청자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+
+        [내 채널의 인기 영상 목록]
+        ${myDataSummary}
+
+        [경쟁 채널의 인기 영상 목록]
+        ${competitorDataSummary}
+
+        [요청]
+        1. 내 채널의 성공 요인과 경쟁 채널의 인기 비결을 각각 한 문장으로 요약해주세요.
+        2. 두 채널의 강점을 결합하여 만들 수 있는 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+        3. 각 아이디어는 시청자의 시선을 사로잡을 만한 **매력적인 유튜브 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
+        4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+    `;
+
+    (async () => {
+        // 기존에 만든 callGeminiAPI 함수를 재사용
+        const ideasResult = await callGeminiAPI(newPrompt); 
+        sendResponse({ success: true, ideas: ideasResult });
+    })();
+    
+    return true; // 비동기 응답
+  }
+    else if (msg.action === "analyze_video_comments") {
+    const videoId = msg.videoId;
+    (async () => {
+        const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
+        if (!youtubeApiKey) {
+            sendResponse({ success: false, error: "YouTube API 키가 설정되지 않았습니다." });
+            return;
+        }
+
+        // 1. YouTube API로 영상 댓글 가져오기
+        // 참고: 댓글 분석은 API 사용량이 많으므로, 결과 개수를 50개 정도로 제한하는 것이 좋습니다.
+        const commentsUrl = `https://www.googleapis.com/youtube/v3/commentThreads?key=${youtubeApiKey}&videoId=${videoId}&part=snippet&maxResults=50&order=relevance`;
+        
+        try {
+            const commentsResponse = await fetch(commentsUrl);
+            const commentsData = await commentsResponse.json();
+
+            if (commentsData.error) {
+                throw new Error(commentsData.error.message);
+            }
+
+            const comments = commentsData.items.map(item => item.snippet.topLevelComment.snippet.textOriginal);
+            if (comments.length === 0) {
+                sendResponse({ success: false, error: "분석할 댓글이 없습니다." });
+                return;
+            }
+
+            const commentsSummary = comments.join('\n---\n');
+
+            // 2. Gemini API에 전달할 새로운 프롬프트
+            const commentAnalysisPrompt = `
+                당신은 데이터 분석가이자 콘텐츠 전략가입니다. 아래는 특정 유튜브 영상에 달린 시청자들의 댓글 모음입니다. 이 댓글들을 분석하여 채널 운영자에게 유용한 인사이트와 새로운 콘텐츠 아이디어를 제공해주세요.
+
+                [댓글 데이터]
+                ${commentsSummary}
+
+                [분석 및 제안 요청]
+                1. **핵심 니즈 파악**: 댓글에서 공통적으로 나타나는 시청자들의 질문, 문제점, 또는 원하는 정보를 3가지 핵심 주제로 요약해주세요.
+                2. **콘텐츠 아이디어 제안**: 위에서 파악한 니즈를 해결해 줄 수 있는 새로운 유튜브 영상 아이디어 3가지를 제안해주세요.
+                3. 각 아이디어는 **매력적인 유튜브 제목**과 **영상의 핵심 내용을 설명하는 짧은 문장**을 포함해야 합니다.
+                4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+            `;
+
+            // 3. Gemini API 호출 및 결과 반환
+            const analysisResult = await callGeminiAPI(commentAnalysisPrompt);
+            sendResponse({ success: true, analysis: analysisResult });
+
+        } catch (error) {
+            console.error("Error fetching or analyzing comments:", error);
+            sendResponse({ success: false, error: error.message });
+        }
+    })();
     
     return true; // 비동기 응답
   }
@@ -338,5 +452,67 @@ async function fetchYoutubeChannel(channelId, channelType) {
         }
     } catch (error) {
         console.error(`Failed to fetch YouTube channel ${channelId}:`, error);
+    }
+}
+
+
+// ▼▼▼ [수정] Gemini API 호출 함수 (에러 핸들링 강화) ▼▼▼
+// background.js 파일의 기존 callGeminiAPI 함수를 아래 내용으로 전체 교체하세요.
+
+async function callGeminiAPI(dataSummary) {
+    try {
+        const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
+        if (!geminiApiKey) {
+            return "오류: Gemini API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+        }
+
+        // ▼▼▼ [핵심 수정] curl 명령어와 동일한 'gemini-2.0-flash' 모델을 사용하도록 최종 변경 ▼▼▼
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+
+        const prompt = `
+            당신은 전문 콘텐츠 전략가입니다. 아래 제공되는 유튜브 채널의 영상 데이터 목록을 분석해주세요.
+
+            [데이터]
+            ${dataSummary}
+
+            [분석 요청]
+            1. 어떤 주제의 영상들이 가장 높은 조회수와 좋아요를 기록했나요? (상위 3개 주제)
+            2. 성공적인 영상들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
+            3. 위 분석 결과를 바탕으로, 이 채널이 다음에 만들면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
+
+            결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
+        `;
+
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{ text: prompt }]
+                }]
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("Gemini API Error Details:", JSON.stringify(errorData, null, 2)); 
+            const errorMessage = errorData.error?.message || "자세한 내용은 서비스 워커 콘솔을 확인하세요.";
+            return `오류: Gemini API 호출에 실패했습니다.\n상태: ${response.status}\n원인: ${errorMessage}`;
+        }
+
+        const responseData = await response.json();
+        
+        if (!responseData.candidates || !responseData.candidates[0]?.content?.parts[0]?.text) {
+            console.error("Unexpected Gemini API response structure:", responseData);
+            return "오류: AI로부터 예상치 못한 형식의 응답을 받았습니다.";
+        }
+        
+        return responseData.candidates[0].content.parts[0].text;
+
+    } catch (error) {
+        console.error("Error calling Gemini API:", error);
+        return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
     }
 }

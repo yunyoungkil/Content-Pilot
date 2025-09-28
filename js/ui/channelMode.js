@@ -66,7 +66,14 @@ export function renderChannelMode(container) {
           <div class="channel-input-item">
               <label for="youtube-api-key">YouTube Data API v3 Key</label>
               <div class="input-wrapper">
-                <input type="password" id="youtube-api-key" placeholder="AIzaSy...로 시작하는 API 키를 입력하세요" style="width: 100%;">
+                <input type="password" id="youtube-api-key" placeholder="AIzaSy...로 시작하는 YouTube API 키" style="width: 100%;">
+              </div>
+          </div>
+          
+          <div class="channel-input-item" style="margin-top: 15px;">
+              <label for="gemini-api-key">Google AI Gemini API Key</label>
+              <div class="input-wrapper">
+                <input type="password" id="gemini-api-key" placeholder="AIzaSy...로 시작하는 Gemini API 키" style="width: 100%;">
               </div>
           </div>
       </div>
@@ -113,12 +120,16 @@ export function renderChannelMode(container) {
     }
     if (e.target.classList.contains('channel-save-btn')) {
       const getValues = (listId) => Array.from(document.querySelectorAll(`#${listId} input`)).map(input => input.value).filter(Boolean);
-      const apiKey = document.getElementById('youtube-api-key').value;
+      const youtubeApiKey = document.getElementById('youtube-api-key').value;
+      const geminiApiKey = document.getElementById('gemini-api-key').value; // Gemini 키 값 가져오기
+      
       const channelData = {
-        apiKey: apiKey,
+        youtubeApiKey: youtubeApiKey,
+        geminiApiKey: geminiApiKey, // 저장할 데이터에 추가
         myChannels: { blogs: getValues('my-blog-list'), youtubes: getValues('my-youtube-list') },
         competitorChannels: { blogs: getValues('competitor-blog-list'), youtubes: getValues('competitor-youtube-list') }
       };
+      
       chrome.runtime.sendMessage({ action: 'save_channels_and_key', data: channelData }, (response) => {
         if (response && response.success) alert('채널 및 API 키 정보가 성공적으로 저장되었습니다.');
         else alert('저장 중 오류가 발생했습니다: ' + response?.error);
@@ -129,7 +140,9 @@ export function renderChannelMode(container) {
   chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
     if (response && response.success && response.data) {
       const data = response.data;
-      if (data.apiKey) document.getElementById('youtube-api-key').value = data.apiKey;
+      if (data.youtubeApiKey) document.getElementById('youtube-api-key').value = data.youtubeApiKey;
+      if (data.geminiApiKey) document.getElementById('gemini-api-key').value = data.geminiApiKey; // Gemini 키 값 불러오기
+   
       
       const renderSavedChannels = (type, platform) => {
           const channels = data[type]?.[platform];
