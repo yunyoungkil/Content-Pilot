@@ -25,7 +25,18 @@ export function renderChannelMode(container) {
       .remove-channel-btn { width: 28px; height: 28px; border-radius: 50%; border: none; background: #f1f3f5; color: #868e96; font-size: 20px; cursor: pointer; line-height: 28px; }
       .channel-save-btn { display: block; width: 100%; padding: 12px; font-size: 16px; font-weight: 600; background-color: #34A853; color: white; border: none; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; }
       .channel-save-btn:hover { background-color: #1e8e3e; }
+      .api-key-section { padding-top: 10px; }
+      .channel-save-btn { margin-top: 20px; }
     </style>
+
+        <div class="channel-container">
+      <div class="channel-section">
+          <h2>🔑 API 키 설정</h2>
+          <div class="channel-input-group api-key-section">
+              <label for="youtube-api-key">YouTube Data API v3 Key</label>
+              <input type="password" id="youtube-api-key" placeholder="AIzaSy...로 시작하는 API 키를 입력하세요">
+          </div>
+      </div>
 
     <div class="channel-container">
       <div class="channel-section" data-channel-type="my-channels">
@@ -48,7 +59,7 @@ export function renderChannelMode(container) {
         <div id="competitor-youtube-list" class="channel-input-list" style="margin-top: 10px;"></div>
       </div>
       
-      <button class="channel-save-btn">연동 정보 저장</button>
+      <button class="channel-save-btn">연동 정보 및 API 키 저장</button>
     </div>
   `;
 
@@ -88,21 +99,17 @@ export function renderChannelMode(container) {
       return Array.from(document.querySelectorAll(`#${listId} input`)).map(input => input.value).filter(Boolean);
     };
 
+    const apiKey = document.getElementById('youtube-api-key').value;
+
     const channelData = {
-      myChannels: {
-        blogs: getValues('my-blog-list'),
-        youtubes: getValues('my-youtube-list'),
-      },
-      competitorChannels: {
-        blogs: getValues('competitor-blog-list'),
-        youtubes: getValues('competitor-youtube-list'),
-      }
+      apiKey: apiKey, // API 키 추가
+      myChannels: { blogs: getValues('my-blog-list'), youtubes: getValues('my-youtube-list') },
+      competitorChannels: { blogs: getValues('competitor-blog-list'), youtubes: getValues('competitor-youtube-list') }
     };
 
-    // ▼▼▼ [수정] background.js로 채널 저장 메시지 전송 ▼▼▼
-    chrome.runtime.sendMessage({ action: 'save_channels', data: channelData }, (response) => {
+    chrome.runtime.sendMessage({ action: 'save_channels_and_key', data: channelData }, (response) => {
       if (response.success) {
-        alert('채널 정보가 성공적으로 저장되었습니다.');
+        alert('채널 및 API 키 정보가 성공적으로 저장되었습니다.');
       } else {
         alert('저장 중 오류가 발생했습니다: ' + response.error);
       }
@@ -110,24 +117,46 @@ export function renderChannelMode(container) {
   });
 
  // ▼▼▼ [추가] Firebase에서 저장된 채널 정보를 불러와서 화면에 렌더링 ▼▼▼
-  chrome.runtime.sendMessage({ action: 'get_channels' }, (response) => {
-    if (response.success && response.data) {
+  chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
+    // 불러온 데이터가 있는지 확인할 플래그
+    let hasMyBlogs = false;
+    let hasCompetitorBlogs = false;
+
+    if (response && response.success && response.data) {
       const data = response.data;
+      
+      if (data.apiKey) {
+        document.getElementById('youtube-api-key').value = data.apiKey;
+      }
       
       // 내 채널 데이터 렌더링
       if (data.myChannels) {
-        data.myChannels.blogs?.forEach(url => document.getElementById('my-blog-list').appendChild(createChannelInput('내 블로그 RSS 주소', url)));
-        data.myChannels.youtubes?.forEach(id => document.getElementById('my-youtube-list').appendChild(createChannelInput('내 유튜브 채널 ID', id)));
+        if (data.myChannels.blogs && data.myChannels.blogs.length > 0) {
+          hasMyBlogs = true;
+          data.myChannels.blogs.forEach(url => document.getElementById('my-blog-list').appendChild(createChannelInput('내 블로그 RSS 주소', url)));
+        }
+        if (data.myChannels.youtubes && data.myChannels.youtubes.length > 0) {
+          data.myChannels.youtubes.forEach(id => document.getElementById('my-youtube-list').appendChild(createChannelInput('내 유튜브 채널 ID', id)));
+        }
       }
       
       // 경쟁 채널 데이터 렌더링
       if (data.competitorChannels) {
-        data.competitorChannels.blogs?.forEach(url => document.getElementById('competitor-blog-list').appendChild(createChannelInput('경쟁 블로그 RSS 주소', url)));
-        data.competitorChannels.youtubes?.forEach(id => document.getElementById('competitor-youtube-list').appendChild(createChannelInput('경쟁 유튜브 채널 ID', id)));
+        if (data.competitorChannels.blogs && data.competitorChannels.blogs.length > 0) {
+          hasCompetitorBlogs = true;
+          data.competitorChannels.blogs.forEach(url => document.getElementById('competitor-blog-list').appendChild(createChannelInput('경쟁 블로그 RSS 주소', url)));
+        }
+        if (data.competitorChannels.youtubes && data.competitorChannels.youtubes.length > 0) {
+          data.competitorChannels.youtubes.forEach(id => document.getElementById('competitor-youtube-list').appendChild(createChannelInput('경쟁 유튜브 채널 ID', id)));
+        }
       }
-    } else {
-      // 저장된 데이터가 없으면 기본 입력창 하나씩 추가
+    }
+
+    // 저장된 채널이 하나도 없을 경우 기본 입력창을 1개씩 생성
+    if (!hasMyBlogs) {
       document.querySelector('#my-blog-list').appendChild(createChannelInput('내 블로그 RSS 주소'));
+    }
+    if (!hasCompetitorBlogs) {
       document.querySelector('#competitor-blog-list').appendChild(createChannelInput('경쟁 블로그 RSS 주소'));
     }
   });

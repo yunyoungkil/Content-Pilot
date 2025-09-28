@@ -14,8 +14,6 @@ const firebaseConfig = {
   appId: "1:1062923832161:web:1062923832161:web:12dc37c0bfd2fb1ac05320",
 };
 
-// ▼▼▼ 중요: 여기에 발급받은 YouTube Data API v3 키를 입력하세요. ▼▼▼
-const YOUTUBE_API_KEY = ''; // 실제 키로 교체 필요
 
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
@@ -68,6 +66,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return true;
     }
+    // API 키는 chrome.storage에, 나머지 채널 정보는 Firebase에 저장
+  else if (msg.action === "save_channels_and_key") {
+    chrome.storage.local.set({ youtubeApiKey: msg.data.apiKey }, () => {
+      const channelData = { ...msg.data };
+      delete channelData.apiKey;
+      const userId = 'default_user';
+      firebase.database().ref(`channels/${userId}`).set(channelData)
+        .then(() => {
+          // ▼▼▼ [핵심 수정] 저장이 성공하면 즉시 데이터 수집 함수를 호출! ▼▼▼
+          console.log('New channels saved. Triggering immediate data fetch.');
+          fetchAllChannelData(); 
+          
+          sendResponse({ success: true });
+        })
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    });
+    return true;
+  }
+  else if (msg.action === "get_channels_and_key") {
+    const userId = 'default_user';
+    // 두 비동기 작업을 Promise.all로 함께 처리
+    Promise.all([
+      chrome.storage.local.get('youtubeApiKey'),
+      firebase.database().ref(`channels/${userId}`).once("value")
+    ]).then(([storage, snapshot]) => {
+      const channelData = snapshot.val() || {}; // Firebase 데이터가 null일 경우 빈 객체로 처리
+      const responseData = {
+        ...channelData,
+        apiKey: storage.youtubeApiKey 
+      };
+      sendResponse({ success: true, data: responseData });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+    return true; // 비동기 응답을 위해 true 반환
+  }
     // 채널 정보 저장
     else if (msg.action === "save_channels") {
         const userId = 'default_user';
@@ -76,22 +110,59 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
     }
-    // 채널 정보 불러오기
-    else if (msg.action === "get_channels") {
-        const userId = 'default_user';
-        firebase.database().ref(`channels/${userId}`).once("value", (snapshot) => {
-            sendResponse({ success: true, data: snapshot.val() });
-        }).catch(error => sendResponse({ success: false, error: error.message }));
-        return true;
-    }
-      else if (msg.action === "get_channel_content") {
-    firebase.database().ref('channel_content').once('value', (snapshot) => {
-      const content = snapshot.val() || {};
+  
+  else if (msg.action === "get_channel_content") {
+    const userId = 'default_user';
+    Promise.all([
+      firebase.database().ref('channel_content').once('value'),
+      firebase.database().ref('channel_meta').once('value'),
+      firebase.database().ref(`channels/${userId}`).once('value') // 어떤 채널이 '내 채널'인지 확인
+    ]).then(([contentSnap, metaSnap, channelsSnap]) => {
+      const content = contentSnap.val() || {};
+      const metas = metaSnap.val() || {};
+      const channels = channelsSnap.val() || {};
+
       const blogs = Object.values(content.blogs || {});
       const youtubes = Object.values(content.youtubes || {});
-      sendResponse({ success: true, data: [...blogs, ...youtubes] });
+      const allContent = [...blogs, ...youtubes];
+      
+      const responseData = {
+        content: allContent,
+        metas: metas,
+        channels: channels
+      };
+      
+      sendResponse({ success: true, data: responseData });
     }).catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // 비동기 응답을 위해 true 반환
+    
+    return true; // 비동기 응답
+  }
+
+  else if (msg.action === "get_channel_content") {
+    const userId = 'default_user';
+    Promise.all([
+      firebase.database().ref('channel_content').once('value'),
+      firebase.database().ref('channel_meta').once('value'),
+      firebase.database().ref(`channels/${userId}`).once('value') // 어떤 채널이 '내 채널'인지 확인
+    ]).then(([contentSnap, metaSnap, channelsSnap]) => {
+      const content = contentSnap.val() || {};
+      const metas = metaSnap.val() || {};
+      const channels = channelsSnap.val() || { myChannels: {}, competitorChannels: {} }; // 데이터 없을 시 기본 구조 보장
+
+      const blogs = Object.values(content.blogs || {});
+      const youtubes = Object.values(content.youtubes || {});
+      const allContent = [...blogs, ...youtubes];
+      
+      const responseData = {
+        content: allContent,
+        metas: metas,
+        channels: channels
+      };
+      
+      sendResponse({ success: true, data: responseData });
+    }).catch(error => sendResponse({ success: false, error: error.message }));
+    
+    return true; // 비동기 응답
   }
 });
 
@@ -127,7 +198,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 
 // --- 4. 데이터 수집 함수들 ---
-
 function fetchAllChannelData() {
     const userId = 'default_user';
     firebase.database().ref(`channels/${userId}`).once('value', (snapshot) => {
@@ -150,25 +220,48 @@ async function fetchRssFeed(url, channelType) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const text = await response.text();
-        const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
+        
+        // ... (channelTitle, sourceId 추출 로직은 그대로) ...
+        const channelTitleMatch = text.match(/<channel>[\s\S]*?<title><!\[CDATA\[(.*?)\]\]><\/title>[\s\S]*?<\/channel>/) || text.match(/<channel>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<\/channel>/);
+        const channelTitle = channelTitleMatch ? channelTitleMatch[1] : url;
+        const sourceId = btoa(url).replace(/=/g, '');
+        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url });
 
+        const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
         for (const itemText of items) {
             const titleMatch = itemText.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || itemText.match(/<title>(.*?)<\/title>/);
             const linkMatch = itemText.match(/<link>(.*?)<\/link>/);
             const pubDateMatch = itemText.match(/<pubDate>(.*?)<\/pubDate>/);
-            const descriptionMatch = itemText.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || itemText.match(/<description>(.*?)<\/description>/);
-            const title = titleMatch ? titleMatch[1] : '';
-            const link = linkMatch ? linkMatch[1] : '';
-            const pubDate = pubDateMatch ? pubDateMatch[1] : '';
-            const description = descriptionMatch ? descriptionMatch[1] : '';
-
-            if (link) {
-                const contentId = btoa(link).replace(/=/g, '');
-                firebase.database().ref(`channel_content/blogs/${contentId}`).set({
-                    title, link, pubDate: new Date(pubDate).getTime(), description,
-                    channelType, sourceUrl: url, fetchedAt: Date.now()
-                });
+            
+            // ▼▼▼ [핵심 수정] 데이터가 하나라도 없으면 이 항목은 건너뜀 ▼▼▼
+            if (!titleMatch || !linkMatch || !pubDateMatch) {
+                continue; 
             }
+
+            const title = titleMatch[1];
+            const link = linkMatch[1];
+            const pubDateStr = pubDateMatch[1];
+            const timestamp = new Date(pubDateStr).getTime();
+
+            // ▼▼▼ [핵심 수정] 날짜가 유효하지 않으면 이 항목은 건너뜀 ▼▼▼
+            if (isNaN(timestamp)) {
+                continue;
+            }
+            
+            // ... (description, thumbnail 추출 로직은 그대로) ...
+            const descriptionMatch = itemText.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || itemText.match(/<description>(.*?)<\/description>/);
+            const description = descriptionMatch ? descriptionMatch[1].trim() : '';
+            let thumbnail = '';
+            // ... (썸네일 추출 로직)
+
+            const contentId = btoa(link).replace(/=/g, '');
+            firebase.database().ref(`channel_content/blogs/${contentId}`).set({
+                title, link, description, thumbnail,
+                pubDate: timestamp,
+                sourceId: sourceId,
+                channelType: channelType,
+                fetchedAt: Date.now()
+            });
         }
         console.log(`Successfully parsed RSS for: ${url}`);
     } catch (error) {
@@ -176,42 +269,64 @@ async function fetchRssFeed(url, channelType) {
     }
 }
 
+
 async function fetchYoutubeChannel(channelId, channelType) {
-  // ▼▼▼ "YOUR_YOUTUBE_API_KEY" 라는 초기 placeholder 값과 비교하도록 수정 ▼▼▼
-  if (YOUTUBE_API_KEY === '' || !YOUTUBE_API_KEY) {
-    console.warn('YouTube API Key is not set. Skipping YouTube fetch.');
-    return;
-  }
-  
-  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${channelId}&part=snippet,id&order=date&maxResults=10`;
+    const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
 
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.items) {
-      data.items.forEach(item => {
-        if (item.id.videoId) {
-          const video = {
-            videoId: item.id.videoId,
-            title: item.snippet.title,
-            description: item.snippet.description,
-            publishedAt: new Date(item.snippet.publishedAt).getTime(),
-            thumbnail: item.snippet.thumbnails.default.url,
-            channelId,
-            channelType,
-            fetchedAt: Date.now()
-          };
-          // 비디오 ID를 키로 사용
-          firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
-        }
-      });
-      console.log(`Successfully fetched YouTube data for channel: ${channelId}`);
-    } else {
-        // API 키가 유효하지 않거나 제한에 걸렸을 때 에러가 여기에 표시됩니다.
-        console.error(`Error fetching YouTube data for ${channelId}:`, data.error?.message || 'Unknown error');
+    if (!youtubeApiKey) {
+        console.warn('YouTube API Key is not set in storage. Skipping YouTube fetch.');
+        return;
     }
-  } catch (error) {
-    console.error(`Failed to fetch YouTube channel ${channelId}:`, error);
-  }
+    
+    // 채널 메타 정보 수집
+    const channelInfoUrl = `https://www.googleapis.com/youtube/v3/channels?key=${youtubeApiKey}&id=${channelId}&part=snippet`;
+    try {
+        const channelInfoResponse = await fetch(channelInfoUrl);
+        const channelInfoData = await channelInfoResponse.json();
+        if (channelInfoData.items && channelInfoData.items.length > 0) {
+            const channelTitle = channelInfoData.items[0].snippet.title;
+            firebase.database().ref(`channel_meta/${channelId}`).set({
+                title: channelTitle,
+                type: 'youtube',
+                source: channelId
+            });
+        }
+    } catch(error) {
+        console.error(`Failed to fetch YouTube channel info for ${channelId}:`, error);
+    }
+
+    // 동영상 목록 수집
+    const videoListUrl = `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=10`;
+    try {
+        const response = await fetch(videoListUrl);
+        const data = await response.json();
+        if (data.items) {
+            data.items.forEach(item => {
+                const videoId = item?.id?.videoId;
+                const snippet = item?.snippet;
+                if (videoId && snippet && snippet.title && snippet.publishedAt) {
+                    const timestamp = new Date(snippet.publishedAt).getTime();
+                    if (isNaN(timestamp)) return;
+
+                    const video = {
+                        videoId: videoId,
+                        title: snippet.title,
+                        description: snippet.description,
+                        publishedAt: timestamp,
+                        thumbnail: snippet.thumbnails?.default?.url,
+                        channelId: channelId,
+                        sourceId: channelId,
+                        channelType: channelType,
+                        fetchedAt: Date.now()
+                    };
+                    firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
+                }
+            });
+            console.log(`Successfully fetched YouTube data for channel: ${channelId}`);
+        } else {
+            console.error(`Error fetching YouTube data for ${channelId}:`, data.error?.message || 'Unknown error');
+        }
+    } catch (error) {
+        console.error(`Failed to fetch YouTube channel ${channelId}:`, error);
+    }
 }
