@@ -46,11 +46,20 @@ export function createAndShowPanel() {
     panel.appendChild(panelContent);
     document.body.appendChild(panel);
 
+    // [핵심] 기본 활성 모드를 'dashboard'로 설정
+    window.__cp_active_mode = 'dashboard'; 
+    
+
     // 최초 렌더링 및 이벤트 리스너 설정
     renderHeaderAndTabs(panel);
     addEventListenersToPanel(panel); // 이벤트 리스너는 한 번만 등록
     renderDashboard(mainArea); // 기본으로 대시보드 표시
   }
+    // 패널을 열 때 스크랩 기능 활성화 상태를 저장
+    chrome.storage.local.set({ 
+    isScrapingActive: true,
+    highlightToggleState: false // 토글 상태를 항상 꺼짐으로 초기화
+  });
 }
 
 // 패널을 닫는 함수

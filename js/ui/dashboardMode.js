@@ -118,10 +118,9 @@ function updateDashboardUI(container) {
         const sourceUrls = cachedData.channels[type]?.[selectedPlatform === 'blog' ? 'blogs' : 'youtubes'] || [];
         const sourceIds = sourceUrls.map(source => selectedPlatform === 'blog' ? btoa(source).replace(/=/g, '') : source);
 
-        if (analyzeButtonsWrapper) {
-            analyzeButtonsWrapper.style.display = (type === 'myChannels' && selectedPlatform === 'youtube' && sourceIds.length > 0) ? 'flex' : 'none';
-        }
-
+if (type === 'myChannels' && analyzeButtonsWrapper) {
+    analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && sourceIds.length > 0) ? 'flex' : 'none';
+}
         if (sourceIds.length > 0) {
             selectElement.style.display = 'block';
             selectElement.innerHTML = sourceIds.map(id => `<option value="${id}">${cachedData.metas[id]?.title || id}</option>`).join('');
@@ -130,6 +129,7 @@ function updateDashboardUI(container) {
             selectElement.style.display = 'none';
             contentListElement.innerHTML = `<p class="loading-placeholder">연동된 ${selectedPlatform === 'blog' ? '블로그' : '유튜브'} 채널이 없습니다.</p>`;
         }
+
     });
 }
 
@@ -330,18 +330,34 @@ function addDashboardEventListeners(container) {
             return;
         }
         
+        // '성과 분석' 버튼 클릭
         if (target.closest('#myChannels-analyze-btn')) {
-             if (!cachedData) return;
+            if (!cachedData) return;
             const selectedChannelId = container.querySelector('#myChannels-select').value;
             const channelContent = cachedData.content.filter(item => item.sourceId === selectedChannelId && item.videoId);
+            
             if (channelContent.length > 0) {
+                // ▼▼▼ [수정 시작] alert 대신 ideasContent 영역을 사용하도록 변경 ▼▼▼
+                const ideasContent = container.querySelector('#ai-ideas-content');
+                ideasContent.innerHTML = `<p class="ai-ideas-placeholder">AI가 채널 성과를 분석하는 중... 📈</p>`;
+
                 chrome.runtime.sendMessage({ action: 'analyze_my_channel', data: channelContent }, (response) => {
                     if (response && response.success) {
-                        alert("✨ AI 분석 결과 ✨\n\n" + response.analysis);
+                        // AI가 생성한 마크다운을 간단한 HTML로 변환
+                        const formattedHtml = response.analysis
+                            .replace(/\n/g, '<br>')
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/### (.*?)/g, '<h3>$1</h3>')
+                            .replace(/\* (.*?)(<br>|$)/g, '<li>$1</li>');
+                        
+                        // h2 제목을 변경하고, 결과를 ul 태그로 감싸서 표시
+                        container.querySelector('.ai-ideas-section h2').textContent = '✨ AI 채널 성과 분석';
+                        ideasContent.innerHTML = `<ul class="ai-ideas-list">${formattedHtml}</ul>`;
                     } else {
-                        alert("분석 중 오류가 발생했습니다.");
+                        ideasContent.innerHTML = `<p class="ai-ideas-placeholder">성과 분석 중 오류가 발생했습니다.</p>`;
                     }
                 });
+                // ▲▲▲ [수정 끝] ▲▲▲
             } else {
                 alert("분석할 유튜브 영상 데이터가 없습니다.");
             }
