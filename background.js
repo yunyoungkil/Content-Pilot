@@ -295,36 +295,46 @@ async function fetchYoutubeChannel(channelId, channelType) {
         console.error(`Failed to fetch YouTube channel info for ${channelId}:`, error);
     }
 
-    // 동영상 목록 수집
-    const videoListUrl = `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=snippet,id&order=date&maxResults=10`;
+     // 1. 채널의 최신 동영상 ID 목록 가져오기
+    const videoListUrl = `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=id&order=date&maxResults=10`;
     try {
-        const response = await fetch(videoListUrl);
-        const data = await response.json();
-        if (data.items) {
-            data.items.forEach(item => {
-                const videoId = item?.id?.videoId;
-                const snippet = item?.snippet;
-                if (videoId && snippet && snippet.title && snippet.publishedAt) {
-                    const timestamp = new Date(snippet.publishedAt).getTime();
-                    if (isNaN(timestamp)) return;
+        const videoListResponse = await fetch(videoListUrl);
+        const videoListData = await videoListResponse.json();
+        if (!videoListData.items) {
+            console.error(`Error fetching YouTube video list for ${channelId}:`, videoListData.error?.message || 'Unknown error');
+            return;
+        }
 
-                    const video = {
-                        videoId: videoId,
-                        title: snippet.title,
-                        description: snippet.description,
-                        publishedAt: timestamp,
-                        thumbnail: snippet.thumbnails?.default?.url,
-                        channelId: channelId,
-                        sourceId: channelId,
-                        channelType: channelType,
-                        fetchedAt: Date.now()
-                    };
-                    firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
-                }
+        const videoIds = videoListData.items.map(item => item.id.videoId).filter(Boolean);
+        if (videoIds.length === 0) return;
+
+        // 2. 동영상 ID들을 사용하여 상세 정보(성과 지표 포함) 한 번에 요청
+        const videoDetailsUrl = `https://www.googleapis.com/youtube/v3/videos?key=${youtubeApiKey}&id=${videoIds.join(',')}&part=snippet,statistics`;
+        const detailsResponse = await fetch(videoDetailsUrl);
+        const detailsData = await detailsResponse.json();
+        
+        if (detailsData.items) {
+            detailsData.items.forEach(item => {
+                const { id, snippet, statistics } = item;
+                const timestamp = new Date(snippet.publishedAt).getTime();
+                
+                const video = {
+                    videoId: id,
+                    title: snippet.title,
+                    description: snippet.description,
+                    publishedAt: timestamp,
+                    thumbnail: snippet.thumbnails?.default?.url,
+                    viewCount: statistics?.viewCount ? parseInt(statistics.viewCount, 10) : 0,
+                    likeCount: statistics?.likeCount ? parseInt(statistics.likeCount, 10) : 0,
+                    commentCount: statistics?.commentCount ? parseInt(statistics.commentCount, 10) : 0,
+                    channelId: channelId,
+                    sourceId: channelId,
+                    channelType: channelType,
+                    fetchedAt: Date.now()
+                };
+                firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
             });
-            console.log(`Successfully fetched YouTube data for channel: ${channelId}`);
-        } else {
-            console.error(`Error fetching YouTube data for ${channelId}:`, data.error?.message || 'Unknown error');
+            console.log(`Successfully fetched YouTube details for channel: ${channelId}`);
         }
     } catch (error) {
         console.error(`Failed to fetch YouTube channel ${channelId}:`, error);
