@@ -3,7 +3,7 @@ importScripts("lib/firebase-app-compat.js", "lib/firebase-database-compat.js");
 
 // Firebase 초기화 (중복 방지)
 const firebaseConfig = {
-  apiKey: "AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY",
+  apiKey: "====",
   authDomain: "content-pilot-7eb03.firebaseapp.com",
   databaseURL:
     "https://content-pilot-7eb03-default-rtdb.asia-southeast1.firebasedatabase.app",
