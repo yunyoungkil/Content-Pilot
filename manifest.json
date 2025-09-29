@@ -21,12 +21,12 @@
     "*://*/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "dist/background.bundle.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dist/bundle.js"],
+      "js": ["dist/content.bundle.js"],
       "css": ["css/style.css"],
       "all_frames": true
     }

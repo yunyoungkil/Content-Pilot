@@ -6,8 +6,8 @@ const ITEMS_PER_PAGE = 5;
 
 // 각 목록의 정렬 기준과 페이지를 독립적으로 관리하는 객체
 let viewState = {
-    myChannels: { sortOrder: 'publishedAt', currentPage: 0 },
-    competitorChannels: { sortOrder: 'publishedAt', currentPage: 0 }
+    myChannels: { sortOrder: 'pubDate', currentPage: 0 },
+    competitorChannels: { sortOrder: 'pubDate', currentPage: 0 }
 };
 
 // --- UI 렌더링 함수 ---
@@ -17,8 +17,11 @@ function createContentCard(item, type) {
     const isVideo = !!item.videoId;
     const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.link;
     const thumbnail = item.thumbnail || '';
-    const date = item.publishedAt && !isNaN(Number(item.publishedAt)) ? new Date(Number(item.publishedAt)) : null;
+    
+    const dateSource = item.publishedAt || item.pubDate;
+    const date = dateSource && !isNaN(Number(dateSource)) ? new Date(Number(dateSource)) : null;
     const dateString = date ? date.toLocaleDateString() : '날짜 정보 없음';
+    
     const metrics = isVideo ? `
         <div class="card-metrics">
             <span>조회수: ${item.viewCount || 0}</span>
@@ -29,7 +32,6 @@ function createContentCard(item, type) {
     
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
 
-    // [핵심] <a> 태그가 wrapper 역할을 하고, 버튼을 그 안에 포함시킵니다.
     return `
         <a href="${link}" target="_blank" class="content-card">
             <div class="card-thumbnail">
@@ -93,7 +95,7 @@ function renderKeyContent(container, sourceId, allContent, type) {
 // 블로그 콘텐츠 (단순 목록)
 function renderBlogContent(container, sourceId, allContent, type) {
     const filteredContent = allContent.filter(item => item.sourceId === sourceId && !item.videoId);
-    filteredContent.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
+    filteredContent.sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0));
     
     if (filteredContent.length > 0) {
         container.innerHTML = `<div class="content-list">${filteredContent.map(item => createContentCard(item, type)).join('')}</div>`;
@@ -118,9 +120,36 @@ function updateDashboardUI(container) {
         const sourceUrls = cachedData.channels[type]?.[selectedPlatform === 'blog' ? 'blogs' : 'youtubes'] || [];
         const sourceIds = sourceUrls.map(source => selectedPlatform === 'blog' ? btoa(source).replace(/=/g, '') : source);
 
-if (type === 'myChannels' && analyzeButtonsWrapper) {
-    analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && sourceIds.length > 0) ? 'flex' : 'none';
-}
+        const header = container.querySelector(`#${type}-col .dashboard-col-header`);
+        if (header && sourceIds.length > 0) {
+            const currentSourceId = selectElement.value || sourceIds[0];
+            const meta = cachedData.metas[currentSourceId];
+            if (meta && meta.fetchedAt) {
+                const now = Date.now();
+                const fetchedAt = meta.fetchedAt;
+                const minutesAgo = Math.floor((now - fetchedAt) / 60000);
+                const updateInfoHtml = `
+                    <div style="font-size: 12px; color: #888; display: flex; align-items: center; gap: 4px;">
+                        <span>업데이트: ${minutesAgo}분 전</span>
+                        <button class="refresh-btn" data-type="${type}" data-platform="${selectedPlatform}" data-source-id="${currentSourceId}" style="background:none; border:none; color:#1a73e8; cursor:pointer; padding:0; font-size: 12px; line-height: 1;">↻</button>
+                    </div>
+                `;
+                let existingInfo = header.querySelector('.refresh-btn')?.parentElement;
+                if(existingInfo) {
+                    existingInfo.innerHTML = `
+                        <span>업데이트: ${minutesAgo}분 전</span>
+                        <button class="refresh-btn" data-type="${type}" data-platform="${selectedPlatform}" data-source-id="${currentSourceId}" style="background:none; border:none; color:#1a73e8; cursor:pointer; padding:0; font-size: 12px; line-height: 1;">↻</button>
+                    `;
+                } else {
+                    const infoWrapper = document.createElement('div');
+                    infoWrapper.innerHTML = updateInfoHtml;
+                    header.appendChild(infoWrapper.firstElementChild);
+                }
+            }
+        }
+        if (type === 'myChannels' && analyzeButtonsWrapper) {
+            analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && sourceIds.length > 0) ? 'flex' : 'none';
+        }
         if (sourceIds.length > 0) {
             selectElement.style.display = 'block';
             selectElement.innerHTML = sourceIds.map(id => `<option value="${id}">${cachedData.metas[id]?.title || id}</option>`).join('');
@@ -404,9 +433,8 @@ function addDashboardEventListeners(container) {
             const col = target.closest('.dashboard-col');
             const type = col.id.includes('myChannels') ? 'myChannels' : 'competitorChannels';
             
-            viewState[type] = { sortOrder: 'publishedAt', currentPage: 0 }; // 상태 초기화
+            viewState[type] = { sortOrder: 'publishedAt', currentPage: 0 };
             
-            // ▼▼▼ [핵심 수정] 전체 UI 대신 해당 목록만 다시 그리기 ▼▼▼
             const contentListElement = col.querySelector('.content-list');
             const sourceId = target.value;
             const platform = col.querySelector('.platform-tab.active').dataset.platform;
@@ -420,9 +448,8 @@ function addDashboardEventListeners(container) {
             const type = col.id.includes('myChannels') ? 'myChannels' : 'competitorChannels';
             
             viewState[type].sortOrder = target.value;
-            viewState[type].currentPage = 0; // 페이지 초기화
+            viewState[type].currentPage = 0;
 
-            // ▼▼▼ [핵심 수정] 전체 UI 대신 해당 목록만 다시 그리기 ▼▼▼
             const contentListElement = col.querySelector('.content-list');
             const sourceId = col.querySelector('.channel-selector').value;
             const platform = col.querySelector('.platform-tab.active').dataset.platform;
