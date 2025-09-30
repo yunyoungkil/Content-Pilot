@@ -1,7 +1,6 @@
-// background.js (최종 패치: Firebase 라이브러리 로딩 경로 수정)
+// background.js (유튜브 채널 ID 변환 로직 최종 수정 완료)
 
 // Firebase 라이브러리 import
-// dist/background.bundle.js에서 상위 폴더(..)의 lib 폴더를 참조하도록 경로를 수정합니다.
 importScripts("../lib/firebase-app-compat.js", "../lib/firebase-database-compat.js");
 
 // --- 1. 설정 ---
@@ -20,84 +19,51 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
-// --- URL Resolution Helpers (G-1 구현: 일반 URL -> RSS 주소/채널 ID 변환 로직) ---
+// --- URL Resolution Helpers ---
 
-/**
- * 블로그 일반 URL에서 RSS 피드 주소를 추출합니다.
- * 플랫폼별 패턴을 먼저 시도하여 안정성을 높입니다.
- * @param {string} url - 사용자가 입력한 블로그 URL
- * @returns {Promise<string|null>} - 추출된 RSS 주소 또는 null
- */
 async function resolveBlogUrl(url) {
     if (!url || !url.startsWith('http')) return null;
-
     let urlObj;
     try {
         urlObj = new URL(url);
     } catch (e) {
-        return null; // 유효하지 않은 URL
+        return null;
     }
     const host = urlObj.hostname.toLowerCase();
     const origin = urlObj.origin;
-
-    // 1. 플랫폼 기반의 명시적인 RSS 주소 패턴 시도 (Naver, Blogspot 고유 패턴 적용)
     let platformRssPath = null;
-    
-    // Tistory 패턴 적용: /rss
     if (host.includes('tistory.com')) {
         platformRssPath = urlObj.pathname.endsWith('/') ? 'rss' : '/rss';
-    } 
-    // Naver Blog 패턴 적용: ID 추출 후 고유 XML URL 생성
-    else if (host.includes('blog.naver.com')) {
+    } else if (host.includes('blog.naver.com')) {
         let naverId = null;
-
-        // 1. URL 경로에서 ID 추출 (예: /masteri0100)
         const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
         if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
             naverId = pathMatch[1];
         }
-        
-        // 2. 경로에서 추출 실패 시 쿼리 파라미터에서 ID 추출 (예: ?blogId=masteri0100)
         if (!naverId) {
             const params = new URLSearchParams(urlObj.search);
             naverId = params.get('blogId');
         }
-
         if (naverId) {
-            // Naver의 고유 RSS 패턴을 따르는 URL 생성 후 즉시 반환
             return `https://rss.blog.naver.com/${naverId}.xml`;
         }
-        platformRssPath = '/rss'; // ID 추출 실패 시 대체 경로 시도 (낮은 확률)
-    }
-
-    // WordPress, Medium 등 /feed 패턴 적용
-    else if (host.includes('wordpress.com') || host.includes('medium.com')) {
+        platformRssPath = '/rss';
+    } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
         platformRssPath = '/feed';
-    }
-    // Blogspot/Blogger 명시적 대응: /feeds/posts/default?alt=rss
-    else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
+    } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
         platformRssPath = '/feeds/posts/default?alt=rss';
     }
-
-    // 명시적 패턴이 발견되면, 최종 RSS URL을 생성하여 반환 (최우선)
     if (platformRssPath) {
-        let finalUrl = platformRssPath.startsWith('/') ? origin + platformRssPath : origin + '/' + platformRssPath;
-        return finalUrl;
+        return platformRssPath.startsWith('/') ? origin + platformRssPath : origin + '/' + platformRssPath;
     }
-    
-    // 2. (Fallback) HTML Fetch 및 <link> 태그 분석 (표준 방식 - 2차 도메인 등)
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
         const html = await response.text();
-
-        // 표준 RSS link 태그 패턴 검색
         const rssMatch = html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/rss\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i) ||
-                        html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/atom\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i);
-
+            html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/atom\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i);
         if (rssMatch && rssMatch[1]) {
             let rssUrl = rssMatch[1];
-            // 상대 경로를 절대 경로로 변환 처리
             if (rssUrl.startsWith('//')) {
                 rssUrl = `https:${rssUrl}`;
             } else if (rssUrl.startsWith('/')) {
@@ -105,107 +71,86 @@ async function resolveBlogUrl(url) {
             }
             return rssUrl;
         }
-
-        // 3. (Final Fallback) 일반적인 /feed 경로 시도 
-        const fallbackUrl = url.endsWith('/') ? url + 'feed' : url + '/feed';
-        return fallbackUrl;
+        return url.endsWith('/') ? url + 'feed' : url + '/feed';
     } catch (error) {
         console.error(`RSS 주소 확인 실패 (${url}):`, error);
         return null;
     }
 }
 
+
 /**
- * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환합니다. (G-1 A/C-2)
- * 영상 재생 주소(watch?v=)까지 처리하도록 보완되었습니다.
+ * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환 (최종 수정)
  * @param {string} url - 사용자가 입력한 유튜브 URL 또는 ID
  * @param {string} apiKey - YouTube Data API 키
  * @returns {Promise<string|null>} - 추출된 채널 ID 또는 null
  */
 async function resolveYoutubeUrl(url, apiKey) {
-    if (!url || !url.startsWith('http')) {
-        // 'UC'로 시작하는 24자리 문자열이면 이미 채널 ID로 간주
-        if (url.startsWith('UC') && url.length === 24) return url;
+    if (!url) return null;
+
+    if (url.startsWith('UC') && url.length === 24) {
+        return url;
+    }
+
+    if (!url.startsWith('http')) {
         return null;
     }
     
-    let path = '';
     let urlObj;
     try {
         urlObj = new URL(url);
-        path = urlObj.pathname;
     } catch (e) {
         return null;
     }
-
-    // 1. [보완 로직] 영상 주소 (watch?v=) 처리
-    if (path.includes('/watch') || path.includes('/embed')) {
-        const videoId = urlObj.searchParams.get('v'); // 'v' 파라미터에서 Video ID 추출
-        if (videoId && apiKey) {
-            // videos 엔드포인트를 사용하여 Channel ID 검색
-            const videoApi = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
-            try {
-                const response = await fetch(videoApi);
-                const data = await response.json();
-                
-                if (data.items && data.items.length > 0) {
-                    return data.items[0].snippet.channelId; // Channel ID 반환
-                }
-            } catch (error) {
-                console.error(`Video URL에서 채널 ID 변환 실패 (${videoId}):`, error);
-                return null;
-            }
-        }
-    }
-
-
-    // 2. [기존 로직] 채널 주소 기반 ID 추출 (/@handle, /user, /channel)
-    let identifier = null;
-    let endpoint = null;
-    const channelIdMatch = path.match(/\/channel\/([UC|c][a-zA-Z0-9_-]{22,24})/i);
-    const handleMatch = path.match(/\/@([a-zA-Z0-9_-]+)/i);
-    const userMatch = path.match(/\/user\/([a-zA-Z0-9_-]+)/i);
-
-    // 이미 채널 ID가 URL에 포함된 경우 바로 반환
+    const path = urlObj.pathname;
+    
+    const channelIdMatch = path.match(/\/channel\/([a-zA-Z0-9_-]{24})/);
     if (channelIdMatch && channelIdMatch[1]) {
         return channelIdMatch[1];
-    } 
-    // 핸들 URL (@handle)인 경우
-    else if (handleMatch && handleMatch[1]) {
-        identifier = handleMatch[1];
-        endpoint = `forHandle=@${identifier}`; // forHandle 파라미터 사용
-    } 
-    // 사용자 이름 URL (/user/username)인 경우
-    else if (userMatch && userMatch[1]) {
-        identifier = userMatch[1];
-        endpoint = `forUsername=${identifier}`; // forUsername 파라미터 사용
-    } else {
-        // 유효한 형태가 아니면 null 반환
+    }
+    
+    if (!apiKey) {
+        console.error("YouTube API Key is missing for URL resolution.");
         return null;
     }
 
-    // 3. [기존 로직] API 호출을 통해 핸들/사용자 이름 변환
-    if (endpoint && apiKey) {
-        const api = `https://www.googleapis.com/youtube/v3/channels?part=id&${endpoint}&key=${apiKey}`;
+    const videoIdMatch = url.match(/(?:v=|\/embed\/|youtu\.be\/)([\w-]{11})/);
+    if (videoIdMatch && videoIdMatch[1]) {
+        const videoId = videoIdMatch[1];
+        const videoApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
         try {
-            const response = await fetch(api);
+            const response = await fetch(videoApiUrl);
             const data = await response.json();
             if (data.items && data.items.length > 0) {
-                return data.items[0].id; 
+                return data.items[0].snippet.channelId;
             }
         } catch (error) {
-            console.error(`YouTube API를 통한 ID 변환 실패 (${identifier}):`, error);
-            return null;
+            console.error(`영상 URL에서 채널 ID 변환 실패 (${videoId}):`, error);
         }
     }
-    
+
+    const customNameMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
+    if (customNameMatch && customNameMatch[1]) {
+        const name = customNameMatch[1];
+        const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
+        try {
+            const response = await fetch(searchApiUrl);
+            const data = await response.json();
+            if (data.items && data.items.length > 0) {
+                return data.items[0].id.channelId;
+            }
+        } catch (error) {
+            console.error(`YouTube 맞춤 URL (${name}) -> 채널 ID 변환 실패:`, error);
+        }
+    }
+
+    console.warn(`YouTube URL을 채널 ID로 변환할 수 없습니다: ${url}`);
     return null;
 }
 
 
 // --- 2. 핵심 이벤트 리스너 ---
 
-// ▼▼▼ [핵심] 누락되었던 아이콘 클릭 이벤트 리스너 복원 ▼▼▼
 chrome.action.onClicked.addListener((tab) => {
   if (tab.id) {
     chrome.tabs.sendMessage(tab.id, {
@@ -214,9 +159,7 @@ chrome.action.onClicked.addListener((tab) => {
   }
 });
 
-// 콘텐츠 스크립트로부터 오는 메시지 처리
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    // 스크랩 저장
     if (msg.action === "scrap_element" && msg.data) {
         const scrapRef = firebase.database().ref("scraps").push();
         const scrapPayload = { ...msg.data, timestamp: Date.now() };
@@ -231,7 +174,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true;
     }
-    // 스크랩 목록 요청
     else if (msg.action === "cp_get_firebase_scraps") {
         firebase.database().ref("scraps").once("value", (snapshot) => {
             const val = snapshot.val() || {};
@@ -240,7 +182,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true;
     }
-    // 스크랩 삭제
     else if (msg.action === "delete_scrap") {
         const scrapIdToDelete = msg.id;
         if (scrapIdToDelete) {
@@ -250,80 +191,100 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return true;
     }
-    // ▼▼▼ [추가] 블로그 콘텐츠 데이터 전체 삭제 기능 ▼▼▼
     else if (msg.action === "clear_blog_content") {
         firebase.database().ref('channel_content/blogs').remove()
             .then(() => sendResponse({ success: true, message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.' }))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; 
     }
-    // ▲▲▲ [추가 끝] ▲▲▲
-    // API 키 및 채널 정보 저장 (G-1 로직 적용)
   else if (msg.action === "save_channels_and_key") {
     const { youtubeApiKey, geminiApiKey, ...channelData } = msg.data;
       
-      // 1. API 키들은 chrome.storage.local에 저장
       chrome.storage.local.set({ youtubeApiKey, geminiApiKey }, async () => {
         const userId = 'default_user';
-        const apiKey = youtubeApiKey; // YouTube API 키를 URL 변환에 사용
+        const apiKey = youtubeApiKey;
 
         const resolvedChannels = {
             myChannels: { blogs: [], youtubes: [] },
             competitorChannels: { blogs: [], youtubes: [] }
         };
 
-        // 2. URL Resolution Logic 실행 (G-1 구현)
         for (const type of ['myChannels', 'competitorChannels']) {
-            // 블로그 처리: URL -> RSS Feed URL로 변환
             if (channelData[type]?.blogs) {
                 const blogPromises = channelData[type].blogs
                     .filter(url => url.trim().length > 0)
-                    .map(url => resolveBlogUrl(url.trim()));
+                    .map(async (url) => {
+                        const resolvedUrl = await resolveBlogUrl(url.trim());
+                        if (resolvedUrl) {
+                            return { 
+                                inputUrl: url.trim(), 
+                                apiUrl: resolvedUrl 
+                            }; 
+                        }
+                        return null;
+                    });
                 const results = await Promise.all(blogPromises);
-                resolvedChannels[type].blogs = results.filter(url => url !== null); // null 값 필터링
+                resolvedChannels[type].blogs = results.filter(item => item !== null);
             }
 
-            // 유튜브 처리: URL -> 채널 ID로 변환
             if (channelData[type]?.youtubes) {
                 const youtubePromises = channelData[type].youtubes
                     .filter(url => url.trim().length > 0)
-                    .map(url => resolveYoutubeUrl(url.trim(), apiKey));
+                    .map(async (url) => {
+                        const resolvedId = await resolveYoutubeUrl(url.trim(), apiKey);
+                        if (resolvedId) {
+                            return { 
+                                inputUrl: url.trim(), 
+                                apiUrl: resolvedId 
+                            };
+                        }
+                        return null;
+                    });
                 const results = await Promise.all(youtubePromises);
-                // 변환된 채널 ID (UC...)만 저장
-                resolvedChannels[type].youtubes = results.filter(id => id !== null); 
+                resolvedChannels[type].youtubes = results.filter(item => item !== null); 
             }
         }
         
-        // 3. 변환이 완료된 채널 정보를 Firebase에 저장
         firebase.database().ref(`channels/${userId}`).set(resolvedChannels)
           .then(() => {
             console.log('새 채널이 저장되었습니다. 즉시 데이터 수집을 시작합니다.');
-            fetchAllChannelData(); // 데이터 수집 즉시 실행
+            fetchAllChannelData();
             sendResponse({ success: true, message: '채널 및 API 키 정보가 성공적으로 저장되었습니다.' });
           })
           .catch(error => sendResponse({ success: false, error: error.message }));
       });
-    return true; // 비동기 응답을 위해 true 반환
+    return true;
   }
   else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
-      Promise.all([
-        chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']), // Gemini 키도 함께 가져옴
-        firebase.database().ref(`channels/${userId}`).once("value")
-      ]).then(([storage, snapshot]) => {
-        const channelData = snapshot.val() || {};
-        const responseData = {
-          ...channelData,
-          youtubeApiKey: storage.youtubeApiKey,
-          geminiApiKey: storage.geminiApiKey // 응답 데이터에 추가
-        };
-        sendResponse({ success: true, data: responseData });
-      }).catch(error => {
+    Promise.all([
+      chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']),
+      firebase.database().ref(`channels/${userId}`).once("value")
+    ]).then(([storage, snapshot]) => {
+      const rawChannelData = snapshot.val() || {};
+      
+      const channelDataForUI = {
+        myChannels: {
+          blogs: (rawChannelData.myChannels?.blogs || []).map(c => c.inputUrl),
+          youtubes: (rawChannelData.myChannels?.youtubes || []).map(c => c.inputUrl),
+        },
+        competitorChannels: {
+          blogs: (rawChannelData.competitorChannels?.blogs || []).map(c => c.inputUrl),
+          youtubes: (rawChannelData.competitorChannels?.youtubes || []).map(c => c.inputUrl),
+        }
+      };
+
+      const responseData = {
+        ...channelDataForUI,
+        youtubeApiKey: storage.youtubeApiKey,
+        geminiApiKey: storage.geminiApiKey
+      };
+      sendResponse({ success: true, data: responseData });
+    }).catch(error => {
         sendResponse({ success: false, error: error.message });
       });
-    return true; // 비동기 응답을 위해 true 반환
+    return true;
   }
-    // 채널 정보 저장 (레거시 코드, save_channels_and_key로 통합됨)
     else if (msg.action === "save_channels") {
         const userId = 'default_user';
         firebase.database().ref(`channels/${userId}`).set(msg.data)
@@ -337,16 +298,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     Promise.all([
       firebase.database().ref('channel_content').once('value'),
       firebase.database().ref('channel_meta').once('value'),
-      firebase.database().ref(`channels/${userId}`).once('value') // 어떤 채널이 '내 채널'인지 확인
+      firebase.database().ref(`channels/${userId}`).once('value')
     ]).then(([contentSnap, metaSnap, channelsSnap]) => {
       const content = contentSnap.val() || {};
       const metas = metaSnap.val() || {};
-      const channels = channelsSnap.val() || { myChannels: {}, competitorChannels: {} }; // 데이터 없을 시 기본 구조 보장
+      const channels = channelsSnap.val() || { myChannels: {}, competitorChannels: {} };
 
-      const blogs = Object.values(content.blogs || {});
-      const youtubes = Object.values(content.youtubes || {});
+      const blogs = Object.values(content.blogs || {}).filter(item => item !== null);
+      const youtubes = Object.values(content.youtubes || {}).filter(item => item !== null);
       const allContent = [...blogs, ...youtubes];
-      
+
       const responseData = {
         content: allContent,
         metas: metas,
@@ -356,9 +317,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: true, data: responseData });
     }).catch(error => sendResponse({ success: false, error: error.message }));
     
-    return true; // 비동기 응답을 위해 true 반환
+    return true;
   }
-    // ▼▼▼ [G-5 백그라운드 로직 패치] 메시지 리스너 추가 ▼▼▼
     else if (msg.action === "refresh_channel_data") {
       const { sourceId, platform } = msg;
       
@@ -370,56 +330,64 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return;
         }
 
-        let urlToFetch = null;
-        if (platform === 'blog') {
-            const allUrls = channels.myChannels?.blogs || [];
-            urlToFetch = allUrls.find(url => btoa(url).replace(/=/g, '') === sourceId);
-            if (urlToFetch) {
-                fetchRssFeed(urlToFetch, 'myChannels');
-            }
-        } else if (platform === 'youtube') {
-            const allIds = channels.myChannels?.youtubes || [];
-            urlToFetch = allIds.find(id => id === sourceId);
-            if (urlToFetch) {
-                fetchYoutubeChannel(urlToFetch, 'myChannels');
+        let channelToFetch = null;
+        let channelType = null;
+        
+        for (const type of ['myChannels', 'competitorChannels']) {
+            const blogs = channels[type]?.blogs || [];
+            const channel = blogs.find(c => btoa(c.apiUrl).replace(/=/g, '') === sourceId);
+            if (channel) {
+                channelToFetch = channel;
+                channelType = type;
+                break;
             }
         }
 
-        if (urlToFetch) {
+        if (!channelToFetch) {
+            for (const type of ['myChannels', 'competitorChannels']) {
+                const youtubes = channels[type]?.youtubes || [];
+                const channel = youtubes.find(c => c.apiUrl === sourceId);
+                if (channel) {
+                    channelToFetch = channel;
+                    channelType = type;
+                    break;
+                }
+            }
+        }
+
+        if (channelToFetch) {
+            if (platform === 'blog') {
+                fetchRssFeed(channelToFetch.apiUrl, channelType);
+            } else if (platform === 'youtube') {
+                fetchYoutubeChannel(channelToFetch.apiUrl, channelType);
+            }
             sendResponse({ success: true, message: '데이터 수집을 시작합니다.' });
         } else {
             sendResponse({ success: false, error: '요청한 채널을 찾을 수 없습니다.' });
         }
       });
-      return true; // 비동기 응답
+      return true;
     }
-    // ▲▲▲ [G-5 백그라운드 로직 패치 끝] ▲▲▲
-  // AI 채널 분석 요청 처리
   else if (msg.action === "analyze_my_channel") {
         const contentData = msg.data;
         const dataSummary = contentData
-            .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)) // 조회수 순으로 정렬
-            .slice(0, 20) // 성능을 위해 최신/인기 20개 데이터만 사용
+            .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+            .slice(0, 20)
             .map(item => `제목: ${item.title}, 조회수: ${item.viewCount || 0}, 좋아요: ${item.likeCount || 0}`)
             .join('\n');
 
-        // callGeminiAPI 함수 호출 (async/await 사용을 위해 즉시 실행 함수로 감싸기)
         (async () => {
             const analysisResult = await callGeminiAPI(dataSummary);
             sendResponse({ success: true, analysis: analysisResult });
         })();
         
-        return true; // 비동기 응답임을 명시
+        return true;
   }
-
-   // 콘텐츠 아이디어 생성 요청 처리
   else if (msg.action === "generate_content_ideas") {
     const { myContent, competitorContent } = msg.data;
-
-    // 각 채널의 데이터를 요약
     const myDataSummary = myContent
         .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-        .slice(0, 10) // 상위 10개 데이터 사용
+        .slice(0, 10)
         .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
         .join('\n');
 
@@ -429,7 +397,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
         .join('\n');
     
-    // Gemini API 호출을 위한 새로운 프롬프트
     const newPrompt = `
         당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 두 채널의 데이터를 분석하고, 두 채널의 강점을 조합하여 시청자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
 
@@ -447,14 +414,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     `;
 
     (async () => {
-        // 기존에 만든 callGeminiAPI 함수를 재사용
         const ideasResult = await callGeminiAPI(newPrompt); 
         sendResponse({ success: true, ideas: ideasResult });
     })();
     
-    return true; // 비동기 응답임을 명시
+    return true;
   }
-    // 유튜브 댓글 분석 요청 처리
     else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
     (async () => {
@@ -464,7 +429,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return;
         }
 
-        // 1. YouTube API로 영상 댓글 가져오기 (댓글 분석은 API 사용량이 많으므로, 결과 개수를 50개로 제한)
         const commentsUrl = `https://www.googleapis.com/youtube/v3/commentThreads?key=${youtubeApiKey}&videoId=${videoId}&part=snippet&maxResults=50&order=relevance`;
         
         try {
@@ -483,7 +447,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             const commentsSummary = comments.join('\n---\n');
 
-            // 2. Gemini API에 전달할 새로운 프롬프트
             const commentAnalysisPrompt = `
                 당신은 데이터 분석가이자 콘텐츠 전략가입니다. 아래는 특정 유튜브 영상에 달린 시청자들의 댓글 모음입니다. 이 댓글들을 분석하여 채널 운영자에게 유용한 인사이트와 새로운 콘텐츠 아이디어를 제공해주세요.
 
@@ -497,7 +460,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
             `;
 
-            // 3. Gemini API 호출 및 결과 반환
             const analysisResult = await callGeminiAPI(commentAnalysisPrompt);
             sendResponse({ success: true, analysis: analysisResult });
 
@@ -507,24 +469,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
     })();
     
-    return true; // 비동기 응답임을 명시
+    return true;
   }
 });
 
 
 // --- 3. 주기적 데이터 수집 로직 ---
 
-// 확장 프로그램 설치 시 기본값 설정 및 알람 생성
 chrome.runtime.onInstalled.addListener(() => {
     console.log("Content Pilot 설치됨. 알람을 설정합니다.");
     chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
     chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 60 });
 });
 
-// 브라우저 시작 시 알람 생성
 chrome.runtime.onStartup.addListener(() => {
     console.log("Content Pilot 시작됨. 알람을 확인/설정합니다.");
-    // 알람이 없으면 새로 생성
     chrome.alarms.get('fetch-channels', (alarm) => {
         if (!alarm) {
             chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 60 });
@@ -532,7 +491,6 @@ chrome.runtime.onStartup.addListener(() => {
     });
 });
 
-// 알람 수신 시 데이터 수집 실행
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'fetch-channels') {
         console.log("알람 발생: 모든 채널 데이터를 수집합니다...");
@@ -550,11 +508,10 @@ function fetchAllChannelData() {
             console.log('설정된 채널 정보가 없습니다.');
             return;
         }
-        // 내 채널과 경쟁 채널 모두에 대해 데이터 수집 시작
         ['myChannels', 'competitorChannels'].forEach(type => {
             if (channels[type]) {
-                channels[type].blogs?.forEach(url => fetchRssFeed(url, type));
-                channels[type].youtubes?.forEach(id => fetchYoutubeChannel(id, type));
+                channels[type].blogs?.forEach(channel => fetchRssFeed(channel.apiUrl, type));
+                channels[type].youtubes?.forEach(channel => fetchYoutubeChannel(channel.apiUrl, type));
             }
         });
     });
@@ -565,20 +522,36 @@ async function fetchRssFeed(url, channelType) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
         const text = await response.text();
-        
-        // 채널 제목 및 소스 ID 추출
+ 
         const channelTitleMatch = text.match(/<channel>[\s\S]*?<title><!\[CDATA\[(.*?)\]\]><\/title>[\s\S]*?<\/channel>/) || text.match(/<channel>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<\/channel>/);
         const channelTitle = channelTitleMatch ? channelTitleMatch[1] : url;
         const sourceId = btoa(url).replace(/=/g, '');
-        // ▼▼▼ [G-5 백그라운드 로직 패치] channel_meta에 fetchedAt 기록 ▼▼▼
-        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url, fetchedAt: Date.now() });
-        // ▲▲▲ [G-5 백그라운드 로직 패치 끝]
 
-        // 개별 포스트 아이템 추출 및 파싱
-        const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
+        const userId = 'default_user';
+        const channelDataSnap = await firebase.database().ref(`channels/${userId}`).once('value');
+        const channelData = channelDataSnap.val();
         
+        const allChannels = (channelData?.myChannels?.blogs || []).concat(channelData?.competitorChannels?.blogs || []);
+        const storedChannel = allChannels.find(c => c.apiUrl === url);
+        const inputUrl = storedChannel ? storedChannel.inputUrl : url;
+        
+        firebase.database().ref(`channel_meta/${sourceId}`).set({ 
+            title: channelTitle, 
+            type: 'blog', 
+            source: url, 
+            inputUrl: inputUrl,
+            fetchedAt: Date.now() 
+        });
+
+
+        const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
+
+        if (items.length === 0) {
+            console.log(`RSS 피드에는 게시물이 없습니다: ${url}`);
+            return;
+        }
+
         for (const itemText of items) {
-            // 정규식 매칭 함수 정의
             const matchAndClean = (regex) => {
                 const match = itemText.match(regex);
                 if (match && match[1]) {
@@ -590,7 +563,9 @@ async function fetchRssFeed(url, channelType) {
             const title = matchAndClean(/<title>(.*?)<\/title>/);
             const linkMatch = itemText.match(/<link>([\s\S]*?)<\/link>/i); 
             let link = null;
-            if (linkMatch && linkMatch[1]) {
+
+            
+            if (linkMatch && linkMatch[1]) { 
                 link = linkMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
             }
             const pubDateStr = matchAndClean(/<pubDate>(.*?)<\/pubDate>/) || matchAndClean(/<atom:updated>(.*?)<\/atom:updated>/);
@@ -610,7 +585,7 @@ async function fetchRssFeed(url, channelType) {
             let imageAlt = '';
 
             const contentEncodedMatch = itemText.match(/<content:encoded>(.*?)<\/content:encoded>/s);
-            const contentToAnalyze = contentEncodedMatch ? contentEncodedMatch[1] : description;
+            const contentToAnalyze = (contentEncodedMatch ? contentEncodedMatch[1] : description) || '';
 
             const encodedImgMatch = contentToAnalyze.match(/<img[^>]*src=&quot;([^&]*)&quot;/i);
             if (encodedImgMatch && encodedImgMatch[1]) {
@@ -671,27 +646,36 @@ async function fetchYoutubeChannel(channelId, channelType) {
         return;
     }
     
-    // 채널 메타 정보 수집
+    let channelTitle = channelId;
+    
     const channelInfoUrl = `https://www.googleapis.com/youtube/v3/channels?key=${youtubeApiKey}&id=${channelId}&part=snippet`;
     try {
         const channelInfoResponse = await fetch(channelInfoUrl);
         const channelInfoData = await channelInfoResponse.json();
         if (channelInfoData.items && channelInfoData.items.length > 0) {
-            const channelTitle = channelInfoData.items[0].snippet.title;
-            // ▼▼▼ [G-5 백그라운드 로직 패치] channel_meta에 fetchedAt 기록 ▼▼▼
-            firebase.database().ref(`channel_meta/${channelId}`).set({
-                title: channelTitle,
-                type: 'youtube',
-                source: channelId,
-                fetchedAt: Date.now()
-            });
-            // ▲▲▲ [G-5 백그라운드 로직 패치 끝]
+            channelTitle = channelInfoData.items[0].snippet.title;
         }
     } catch(error) {
         console.error(`YouTube 채널 정보 조회 실패 (${channelId}):`, error);
     }
+    
+    const userId = 'default_user';
+    const channelDataSnap = await firebase.database().ref(`channels/${userId}`).once('value');
+    const channelData = channelDataSnap.val();
+    
+    const allChannels = (channelData?.myChannels?.youtubes || []).concat(channelData?.competitorChannels?.youtubes || []);
+    const storedChannel = allChannels.find(c => c.apiUrl === channelId);
+    const inputUrl = storedChannel ? storedChannel.inputUrl : channelId; 
+        
+    firebase.database().ref(`channel_meta/${channelId}`).set({
+        title: channelTitle,
+        type: 'youtube',
+        source: channelId,
+        inputUrl: inputUrl,
+        fetchedAt: Date.now()
+    });
 
-     // 1. 채널의 최신 동영상 ID 목록 가져오기 (최대 10개)
+
     const videoListUrl = `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=id&order=date&maxResults=10`;
     try {
         const videoListResponse = await fetch(videoListUrl);
@@ -704,7 +688,6 @@ async function fetchYoutubeChannel(channelId, channelType) {
         const videoIds = videoListData.items.map(item => item.id.videoId).filter(Boolean);
         if (videoIds.length === 0) return;
 
-        // 2. 동영상 ID들을 사용하여 상세 정보(성과 지표 포함) 한 번에 요청
         const videoDetailsUrl = `https://www.googleapis.com/youtube/v3/videos?key=${youtubeApiKey}&id=${videoIds.join(',')}&part=snippet,statistics`;
         const detailsResponse = await fetch(videoDetailsUrl);
         const detailsData = await detailsResponse.json();
@@ -726,7 +709,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
                     channelId: channelId,
                     sourceId: channelId,
                     channelType: channelType,
-                    fetchedAt: Date.now() // G-5: 콘텐츠 아이템에도 수집 시간 기록
+                    fetchedAt: Date.now()
                 };
                 firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
             });
@@ -735,10 +718,10 @@ async function fetchYoutubeChannel(channelId, channelType) {
     } catch (error) {
         console.error(`YouTube 채널 데이터 수집 실패 (${channelId}):`, error);
     }
+
 }
 
 
-// Gemini API 호출 함수 (AI 분석용)
 async function callGeminiAPI(dataSummary) {
     try {
         const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');

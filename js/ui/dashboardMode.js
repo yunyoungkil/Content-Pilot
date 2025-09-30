@@ -1,4 +1,4 @@
-// js/ui/dashboardMode.js
+// js/ui/dashboardMode.js (수정 완료)
 
 // --- 상태 관리 변수 ---
 let cachedData = null; // 데이터 캐싱
@@ -61,7 +61,9 @@ function renderKeyContent(container, sourceId, allContent, type) {
     const state = viewState[type];
     const filteredContent = allContent.filter(item => item.sourceId === sourceId && item.videoId);
     
-    filteredContent.sort((a, b) => (b[state.sortOrder] || 0) - (a[state.sortOrder] || 0));
+    // 유튜브는 publishedAt 기준으로 정렬
+    const sortKey = state.sortOrder === 'pubDate' ? 'publishedAt' : state.sortOrder;
+    filteredContent.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
 
     const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
     if (state.currentPage >= totalPages && totalPages > 0) state.currentPage = totalPages - 1;
@@ -74,7 +76,7 @@ function renderKeyContent(container, sourceId, allContent, type) {
         container.innerHTML = `
             <div class="top5-controls">
                 <select class="top5-sort-select" data-type="${type}">
-                    <option value="publishedAt" ${state.sortOrder === 'publishedAt' ? 'selected' : ''}>최신 순</option>
+                    <option value="pubDate" ${state.sortOrder === 'pubDate' ? 'selected' : ''}>최신 순</option>
                     <option value="viewCount" ${state.sortOrder === 'viewCount' ? 'selected' : ''}>조회수 높은 순</option>
                     <option value="likeCount" ${state.sortOrder === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
                     <option value="commentCount" ${state.sortOrder === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
@@ -92,9 +94,10 @@ function renderKeyContent(container, sourceId, allContent, type) {
     }
 }
 
-// 블로그 콘텐츠 (단순 목록)
+// 블로그 콘텐츠 (단순 목록, 정렬 기준 수정)
 function renderBlogContent(container, sourceId, allContent, type) {
     const filteredContent = allContent.filter(item => item.sourceId === sourceId && !item.videoId);
+    // [버그 수정] 블로그는 pubDate 기준으로 정렬
     filteredContent.sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0));
     
     if (filteredContent.length > 0) {
@@ -104,7 +107,7 @@ function renderBlogContent(container, sourceId, allContent, type) {
     }
 }
 
-// UI 업데이트 통합 함수
+// UI 업데이트 통합 함수 (데이터 구조 처리 로직 수정)
 function updateDashboardUI(container) {
     if (!cachedData) return;
     
@@ -117,12 +120,14 @@ function updateDashboardUI(container) {
         if (!platformTabs || !selectElement || !contentListElement) return;
 
         const selectedPlatform = platformTabs.querySelector('.active').dataset.platform;
-        const sourceUrls = cachedData.channels[type]?.[selectedPlatform === 'blog' ? 'blogs' : 'youtubes'] || [];
-        const sourceIds = sourceUrls.map(source => selectedPlatform === 'blog' ? btoa(source).replace(/=/g, '') : source);
+        const platformKey = selectedPlatform === 'blog' ? 'blogs' : 'youtubes';
+        
+        // [수정] 채널 '객체' 배열 가져오기
+        const channelObjects = cachedData.channels[type]?.[platformKey] || [];
 
         const header = container.querySelector(`#${type}-col .dashboard-col-header`);
-        if (header && sourceIds.length > 0) {
-            const currentSourceId = selectElement.value || sourceIds[0];
+        if (header) { // 헤더 업데이트 로직은 항상 실행하도록 개선
+            const currentSourceId = selectElement.value;
             const meta = cachedData.metas[currentSourceId];
             if (meta && meta.fetchedAt) {
                 const now = Date.now();
@@ -147,20 +152,30 @@ function updateDashboardUI(container) {
                 }
             }
         }
+
         if (type === 'myChannels' && analyzeButtonsWrapper) {
-            analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && sourceIds.length > 0) ? 'flex' : 'none';
+            analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && channelObjects.length > 0) ? 'flex' : 'none';
         }
-        if (sourceIds.length > 0) {
+
+        if (channelObjects.length > 0) {
             selectElement.style.display = 'block';
-            selectElement.innerHTML = sourceIds.map(id => `<option value="${id}">${cachedData.metas[id]?.title || id}</option>`).join('');
+            
+            // [수정] 채널 객체 배열을 순회하며 <option> 생성
+            selectElement.innerHTML = channelObjects.map(channel => {
+                const id = selectedPlatform === 'blog' ? btoa(channel.apiUrl).replace(/=/g, '') : channel.apiUrl;
+                const title = cachedData.metas[id]?.title || channel.inputUrl; // 제목 없으면 inputUrl 사용
+                return `<option value="${id}">${title}</option>`;
+            }).join('');
+
+            // 올바르게 생성된 selectElement의 현재 값으로 콘텐츠 렌더링
             renderContentForType(contentListElement, selectElement.value, cachedData.content, type, selectedPlatform);
         } else {
             selectElement.style.display = 'none';
             contentListElement.innerHTML = `<p class="loading-placeholder">연동된 ${selectedPlatform === 'blog' ? '블로그' : '유튜브'} 채널이 없습니다.</p>`;
         }
-
     });
 }
+
 
 // 대시보드 메인 렌더링 함수
 export function renderDashboard(container) {
@@ -182,73 +197,71 @@ export function renderDashboard(container) {
             .comment-analyze-btn { position: absolute; bottom: 10px; right: 10px; background: #34A853; color: white; border: none; padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; opacity: 0; transform: translateY(5px); transition: all 0.2s ease-out; z-index: 2; }
 
             .content-card {
-    position: relative;
-    display: flex;
-    align-items: center; /* ▼▼▼ 세로 중앙 정렬 추가 */
-    gap: 12px;
-    background: #fff;
-    border-radius: 8px;
-    padding: 10px;
-    text-decoration: none;
-    color: inherit;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    width: 100%;
-    box-sizing: border-box;
-    height: 110px;
-    overflow: hidden; 
-    opacity: 1;
-    transform: translateY(0);
-}
-.content-card:hover .comment-analyze-btn {
-    opacity: 1;
-    transform: translateY(0);
-}
-.card-thumbnail {
-    width: 100px; /* ▼▼▼ 너비를 약간 늘려 균형을 맞춤 */
-    height: 80px;
-    flex-shrink: 0; /* 절대 줄어들지 않도록 설정 */
-}
-.card-thumbnail img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 4px;
-    background: #f0f0f0;
-}
-.card-info {
-    flex: 1; /* ▼▼▼ 남은 공간을 모두 차지하도록 flex: 1 사용 */
-    min-width: 0; /* flex 아이템이 넘치는 것을 방지하는 핵심 속성 */
-    height: 100%; /* ▼▼▼ 높이를 100%로 설정하여 내부 정렬 기준 마련 */
-    display: flex;
-    flex-direction: column;
-}
-.card-title {
-    font-weight: 600;
-    font-size: 15px;
-    line-height: 1.4;
-    flex-grow: 1; /* ▼▼▼ 남는 세로 공간을 모두 차지해 아래 요소를 밀어냄 */
-    
-    /* 텍스트 줄바꿈 및 말줄임표 처리 */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    word-break: break-all;
-}
-.card-meta {
-    font-size: 12px;
-    color: #888;
-    margin-top: 4px;
-}
-.card-metrics {
-    font-size: 11px;
-    color: #555;
-    display: flex;
-    gap: 8px;
-    margin-top: 4px;
-    flex-wrap: wrap;
-}
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                background: #fff;
+                border-radius: 8px;
+                padding: 10px;
+                text-decoration: none;
+                color: inherit;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+                width: 100%;
+                box-sizing: border-box;
+                height: 110px;
+                overflow: hidden; 
+                opacity: 1;
+                transform: translateY(0);
+            }
+            .content-card:hover .comment-analyze-btn {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            .card-thumbnail {
+                width: 100px;
+                height: 80px;
+                flex-shrink: 0;
+            }
+            .card-thumbnail img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                border-radius: 4px;
+                background: #f0f0f0;
+            }
+            .card-info {
+                flex: 1;
+                min-width: 0;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            }
+            .card-title {
+                font-weight: 600;
+                font-size: 15px;
+                line-height: 1.4;
+                flex-grow: 1;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                word-break: break-all;
+            }
+            .card-meta {
+                font-size: 12px;
+                color: #888;
+                margin-top: 4px;
+            }
+            .card-metrics {
+                font-size: 11px;
+                color: #555;
+                display: flex;
+                gap: 8px;
+                margin-top: 4px;
+                flex-wrap: wrap;
+            }
 
             .loading-placeholder { text-align: center; color: #888; margin-top: 40px; }
             .ai-ideas-section { grid-column: 1 / 3; background: #fff; border-radius: 8px; padding: 20px 24px; margin-top: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
@@ -323,7 +336,7 @@ function addDashboardEventListeners(container) {
             tabGroup.querySelector('.active').classList.remove('active');
             tab.classList.add('active');
             const type = tabGroup.dataset.type;
-            viewState[type] = { sortOrder: 'publishedAt', currentPage: 0 };
+            viewState[type] = { sortOrder: 'pubDate', currentPage: 0 };
             updateDashboardUI(container);
             return;
         }
@@ -343,7 +356,7 @@ function addDashboardEventListeners(container) {
         }
 
         if (target.closest('.comment-analyze-btn')) {
-            e.preventDefault(); // ▼▼▼ 이 한 줄을 추가하여 링크 이동을 막습니다 ▼▼▼
+            e.preventDefault();
             const btn = target.closest('.comment-analyze-btn');
             const videoId = btn.dataset.videoId;
             if (!videoId) return;
@@ -359,34 +372,29 @@ function addDashboardEventListeners(container) {
             return;
         }
         
-        // '성과 분석' 버튼 클릭
         if (target.closest('#myChannels-analyze-btn')) {
             if (!cachedData) return;
             const selectedChannelId = container.querySelector('#myChannels-select').value;
             const channelContent = cachedData.content.filter(item => item.sourceId === selectedChannelId && item.videoId);
             
             if (channelContent.length > 0) {
-                // ▼▼▼ [수정 시작] alert 대신 ideasContent 영역을 사용하도록 변경 ▼▼▼
                 const ideasContent = container.querySelector('#ai-ideas-content');
                 ideasContent.innerHTML = `<p class="ai-ideas-placeholder">AI가 채널 성과를 분석하는 중... 📈</p>`;
 
                 chrome.runtime.sendMessage({ action: 'analyze_my_channel', data: channelContent }, (response) => {
                     if (response && response.success) {
-                        // AI가 생성한 마크다운을 간단한 HTML로 변환
                         const formattedHtml = response.analysis
                             .replace(/\n/g, '<br>')
                             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                             .replace(/### (.*?)/g, '<h3>$1</h3>')
                             .replace(/\* (.*?)(<br>|$)/g, '<li>$1</li>');
                         
-                        // h2 제목을 변경하고, 결과를 ul 태그로 감싸서 표시
                         container.querySelector('.ai-ideas-section h2').textContent = '✨ AI 채널 성과 분석';
                         ideasContent.innerHTML = `<ul class="ai-ideas-list">${formattedHtml}</ul>`;
                     } else {
                         ideasContent.innerHTML = `<p class="ai-ideas-placeholder">성과 분석 중 오류가 발생했습니다.</p>`;
                     }
                 });
-                // ▲▲▲ [수정 끝] ▲▲▲
             } else {
                 alert("분석할 유튜브 영상 데이터가 없습니다.");
             }
@@ -423,17 +431,52 @@ function addDashboardEventListeners(container) {
             });
             return;
         }
+
+        if (target.closest('.refresh-btn')) {
+            e.preventDefault();
+            const btn = target.closest('.refresh-btn');
+            const type = btn.dataset.type;
+            const platform = btn.dataset.platform;
+            const sourceId = btn.dataset.sourceId;
+
+            const col = btn.closest('.dashboard-col');
+            const contentListElement = col.querySelector('.content-list');
+            contentListElement.innerHTML = `<p class="loading-placeholder">데이터를 새로고침 중입니다... 잠시만 기다려주세요.</p>`;
+            
+            chrome.runtime.sendMessage({ 
+                action: 'refresh_channel_data', 
+                sourceId: sourceId,
+                platform: platform 
+            }, (response) => {
+                if (response && response.success) {
+                    setTimeout(() => {
+                        chrome.runtime.sendMessage({ action: 'get_channel_content' }, (newResponse) => {
+                            if (newResponse && newResponse.success) {
+                                cachedData = newResponse.data;
+                                updateDashboardUI(container);
+                            } else {
+                                contentListElement.innerHTML = `<p class="loading-placeholder">새로고침된 데이터를 불러오지 못했습니다.</p>`;
+                            }
+                        });
+                    }, 1500);
+                } else {
+                    alert(`새로고침 실패: ${response.error || '백그라운드 오류'}`);
+                    updateDashboardUI(container);
+                }
+            });
+            return;
+        }
+
     });
 
     container.addEventListener('change', e => {
         const target = e.target;
 
-        // 채널 선택
         if (target.classList.contains('channel-selector')) {
             const col = target.closest('.dashboard-col');
             const type = col.id.includes('myChannels') ? 'myChannels' : 'competitorChannels';
             
-            viewState[type] = { sortOrder: 'publishedAt', currentPage: 0 };
+            viewState[type] = { sortOrder: 'pubDate', currentPage: 0 };
             
             const contentListElement = col.querySelector('.content-list');
             const sourceId = target.value;
@@ -442,7 +485,6 @@ function addDashboardEventListeners(container) {
             return;
         }
 
-        // 정렬 기준 선택
         if (target.classList.contains('top5-sort-select')) {
             const col = target.closest('.dashboard-col');
             const type = col.id.includes('myChannels') ? 'myChannels' : 'competitorChannels';
