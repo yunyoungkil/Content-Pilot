@@ -115,25 +115,46 @@ async function resolveYoutubeUrl(url, apiKey) {
         return null;
     }
     
+    // --- 1단계: 페이지 직접 분석 (Scraping) ---
+    // @핸들, /c/, /user/ 등 모든 맞춤 URL에 대해 먼저 시도합니다.
+    try {
+        const response = await fetch(url);
+        const html = await response.text();
+        
+        // 페이지 소스코드의 <meta property="og:url" ...> 태그에서 채널 ID를 찾습니다.
+        const metaTagMatch = html.match(/<meta\s+property="og:url"\s+content="https?:\/\/www\.youtube\.com\/channel\/([a-zA-Z0-9_-]{24})"/);
+        
+        if (metaTagMatch && metaTagMatch[1]) {
+            console.log(`페이지 분석 성공: ${url} -> ${metaTagMatch[1]}`);
+            return metaTagMatch[1]; // UC... 형태의 채널 ID를 찾았으면 바로 반환
+        }
+    } catch (e) {
+        console.warn(`페이지 직접 분석 실패 (${url}):`, e.message);
+    }
+    
+    // --- 2단계: API를 이용한 분석 (Fallback) ---
+    // 1단계가 실패했을 경우에만 API를 호출합니다.
     let urlObj;
     try {
         urlObj = new URL(url);
     } catch (e) {
-        console.warn(`유튜브 URL 파싱 실패: ${url}`);
         return null;
     }
     const path = urlObj.pathname;
     
-     const customUrlMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
+    if (!apiKey) {
+        console.error("YouTube API 키가 설정되지 않았습니다.");
+        return null;
+    }
+
+    const customUrlMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
     if (customUrlMatch && customUrlMatch[1]) {
         const name = customUrlMatch[1];
-        // 'search' API를 사용하여 채널명으로 검색
         const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
         try {
             const response = await fetch(searchApiUrl);
             const data = await response.json();
             if (data.items && data.items.length > 0) {
-                // 검색 결과의 첫 번째 채널 ID를 반환
                 return data.items[0].id.channelId;
             } else {
                 console.warn(`YouTube API 검색으로 맞춤 URL(${name})에 해당하는 채널을 찾을 수 없습니다.`);
@@ -152,8 +173,6 @@ async function resolveYoutubeUrl(url, apiKey) {
             const data = await response.json();
             if (data.items && data.items.length > 0) {
                 return data.items[0].snippet.channelId;
-            } else {
-                console.warn(`YouTube API에서 영상 정보(채널 ID 포함)를 찾을 수 없습니다: ${videoId}.`);
             }
         } catch (error) {
             console.error(`영상 URL (${videoId})에서 채널 ID 변환 중 API 오류:`, error);
@@ -494,14 +513,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(() => {
     console.log("Content Pilot 설치됨. 알람을 설정합니다.");
     chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
-    chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 60 });
+    chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 240 });
 });
 
 chrome.runtime.onStartup.addListener(() => {
     console.log("Content Pilot 시작됨. 알람을 확인/설정합니다.");
     chrome.alarms.get('fetch-channels', (alarm) => {
         if (!alarm) {
-            chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 60 });
+            chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 240 });
         }
     });
 });
