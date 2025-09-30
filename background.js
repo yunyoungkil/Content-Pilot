@@ -1,5 +1,23 @@
 // background.js (유튜브 채널 ID 변환 로직 최종 수정 완료)
+let creating; // Offscreen Document 생성 중인지 확인하는 플래그
 
+// Offscreen Document를 생성하고 가져오는 헬퍼 함수
+async function getOffscreenDocument() {
+    if (await chrome.offscreen.hasDocument()) {
+        return;
+    }
+    if (creating) {
+        await creating;
+    } else {
+        creating = chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: ['DOM_PARSER'],
+            justification: 'HTML 문자열을 파싱하기 위함',
+        });
+        await creating;
+        creating = null;
+    }
+}
 // Firebase 라이브러리 import
 importScripts("../lib/firebase-app-compat.js", "../lib/firebase-database-compat.js");
 
@@ -93,6 +111,7 @@ async function resolveYoutubeUrl(url, apiKey) {
     }
 
     if (!url.startsWith('http')) {
+        console.warn(`유효하지 않은 유튜브 URL 형식: ${url}`);
         return null;
     }
     
@@ -100,18 +119,28 @@ async function resolveYoutubeUrl(url, apiKey) {
     try {
         urlObj = new URL(url);
     } catch (e) {
+        console.warn(`유튜브 URL 파싱 실패: ${url}`);
         return null;
     }
     const path = urlObj.pathname;
     
-    const channelIdMatch = path.match(/\/channel\/([a-zA-Z0-9_-]{24})/);
-    if (channelIdMatch && channelIdMatch[1]) {
-        return channelIdMatch[1];
-    }
-    
-    if (!apiKey) {
-        console.error("YouTube API Key is missing for URL resolution.");
-        return null;
+     const customUrlMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
+    if (customUrlMatch && customUrlMatch[1]) {
+        const name = customUrlMatch[1];
+        // 'search' API를 사용하여 채널명으로 검색
+        const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
+        try {
+            const response = await fetch(searchApiUrl);
+            const data = await response.json();
+            if (data.items && data.items.length > 0) {
+                // 검색 결과의 첫 번째 채널 ID를 반환
+                return data.items[0].id.channelId;
+            } else {
+                console.warn(`YouTube API 검색으로 맞춤 URL(${name})에 해당하는 채널을 찾을 수 없습니다.`);
+            }
+        } catch (error) {
+            console.error(`YouTube 맞춤 URL(${name}) -> 채널 ID 변환 중 API 오류:`, error);
+        }
     }
 
     const videoIdMatch = url.match(/(?:v=|\/embed\/|youtu\.be\/)([\w-]{11})/);
@@ -123,31 +152,17 @@ async function resolveYoutubeUrl(url, apiKey) {
             const data = await response.json();
             if (data.items && data.items.length > 0) {
                 return data.items[0].snippet.channelId;
+            } else {
+                console.warn(`YouTube API에서 영상 정보(채널 ID 포함)를 찾을 수 없습니다: ${videoId}.`);
             }
         } catch (error) {
-            console.error(`영상 URL에서 채널 ID 변환 실패 (${videoId}):`, error);
+            console.error(`영상 URL (${videoId})에서 채널 ID 변환 중 API 오류:`, error);
         }
     }
-
-    const customNameMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
-    if (customNameMatch && customNameMatch[1]) {
-        const name = customNameMatch[1];
-        const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
-        try {
-            const response = await fetch(searchApiUrl);
-            const data = await response.json();
-            if (data.items && data.items.length > 0) {
-                return data.items[0].id.channelId;
-            }
-        } catch (error) {
-            console.error(`YouTube 맞춤 URL (${name}) -> 채널 ID 변환 실패:`, error);
-        }
-    }
-
-    console.warn(`YouTube URL을 채널 ID로 변환할 수 없습니다: ${url}`);
+    
+    console.warn(`모든 방법을 시도했지만 YouTube URL을 채널 ID로 변환할 수 없습니다: ${url}`);
     return null;
 }
-
 
 // --- 2. 핵심 이벤트 리스너 ---
 
@@ -520,120 +535,75 @@ function fetchAllChannelData() {
 async function fetchRssFeed(url, channelType) {
     try {
         const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const text = await response.text();
- 
-        const channelTitleMatch = text.match(/<channel>[\s\S]*?<title><!\[CDATA\[(.*?)\]\]><\/title>[\s\S]*?<\/channel>/) || text.match(/<channel>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<\/channel>/);
+
+        const channelTitleMatch = text.match(/<channel>[\s\S]*?<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>[\s\S]*?<\/channel>/);
         const channelTitle = channelTitleMatch ? channelTitleMatch[1] : url;
         const sourceId = btoa(url).replace(/=/g, '');
-
-        const userId = 'default_user';
-        const channelDataSnap = await firebase.database().ref(`channels/${userId}`).once('value');
-        const channelData = channelDataSnap.val();
-        
-        const allChannels = (channelData?.myChannels?.blogs || []).concat(channelData?.competitorChannels?.blogs || []);
-        const storedChannel = allChannels.find(c => c.apiUrl === url);
-        const inputUrl = storedChannel ? storedChannel.inputUrl : url;
-        
-        firebase.database().ref(`channel_meta/${sourceId}`).set({ 
-            title: channelTitle, 
-            type: 'blog', 
-            source: url, 
-            inputUrl: inputUrl,
-            fetchedAt: Date.now() 
-        });
-
+        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url });
 
         const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
 
-        if (items.length === 0) {
-            console.log(`RSS 피드에는 게시물이 없습니다: ${url}`);
-            return;
-        }
+        for (const itemText of items.slice(0, 10)) {
+            const titleMatch = itemText.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
+            const linkMatch = itemText.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/);
+            const pubDateMatch = itemText.match(/<pubDate>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/pubDate>/);
 
-        for (const itemText of items) {
-            const matchAndClean = (regex) => {
-                const match = itemText.match(regex);
-                if (match && match[1]) {
-                    return match[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-                }
-                return null;
-            };
-
-            const title = matchAndClean(/<title>(.*?)<\/title>/);
-            const linkMatch = itemText.match(/<link>([\s\S]*?)<\/link>/i); 
-            let link = null;
-
+            if (!linkMatch || !titleMatch) continue;
             
-            if (linkMatch && linkMatch[1]) { 
-                link = linkMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
-            }
-            const pubDateStr = matchAndClean(/<pubDate>(.*?)<\/pubDate>/) || matchAndClean(/<atom:updated>(.*?)<\/atom:updated>/);
-            
-            if (!title || !link || !pubDateStr) {
-                continue; 
-            }
+            const title = titleMatch[1];
+            const link = linkMatch[1];
+            const timestamp = new Date(pubDateMatch ? pubDateMatch[1] : Date.now()).getTime();
 
-            const timestamp = new Date(pubDateStr).getTime();
-            if (isNaN(timestamp)) {
-                continue;
-            }
-            
-            const description = matchAndClean(/<description>(.*?)<\/description>/);
-            
-            let thumbnail = '';
-            let imageAlt = '';
+            if (isNaN(timestamp)) continue;
 
-            const contentEncodedMatch = itemText.match(/<content:encoded>(.*?)<\/content:encoded>/s);
-            const contentToAnalyze = (contentEncodedMatch ? contentEncodedMatch[1] : description) || '';
-
-            const encodedImgMatch = contentToAnalyze.match(/<img[^>]*src=&quot;([^&]*)&quot;/i);
-            if (encodedImgMatch && encodedImgMatch[1]) {
-                thumbnail = encodedImgMatch[1];
-                const altMatch = contentToAnalyze.match(/alt=&quot;([^&]*)&quot;/i);
-                if (altMatch && altMatch[1]) {
-                    imageAlt = altMatch[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-                }
-            } else {
-                const standardImgMatch = contentToAnalyze.match(/<img[^>]*src=["']([^"']*)["']/i);
-                if (standardImgMatch && standardImgMatch[1]) {
-                    thumbnail = standardImgMatch[1];
-                    const standardAltMatch = contentToAnalyze.match(/alt=["']([^"']*)["']/i);
-                    if (standardAltMatch && standardAltMatch[1]) {
-                        imageAlt = standardAltMatch[1];
+            try {
+                const postResponse = await fetch(link);
+                if (!postResponse.ok) continue;
+                let postHtml = await postResponse.text();
+                
+                // ▼▼▼ [핵심 수정] 네이버 블로그 아이프레임 처리 로직 추가 ▼▼▼
+                const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
+                if (naverIframeMatch && naverIframeMatch[1]) {
+                    const iframeSrc = naverIframeMatch[1];
+                    // 아이프레임 주소가 상대 경로일 수 있으므로, new URL()로 절대 경로 생성
+                    const iframeUrl = new URL(iframeSrc, "https://blog.naver.com").href;
+                    
+                    const iframeResponse = await fetch(iframeUrl);
+                    if (iframeResponse.ok) {
+                        // 실제 콘텐츠가 담긴 아이프레임의 HTML로 postHtml을 교체
+                        postHtml = await iframeResponse.text();
                     }
                 }
-            }
-            
-            let tags = '';
-            const categoryMatches = itemText.match(/<category>(.*?)<\/category>/ig);
-            
-            if (categoryMatches) {
-                tags = categoryMatches.map(m => {
-                    let tagContent = m.replace(/<!\[CDATA\[|\]\]>/g, '');
-                    const contentMatch = tagContent.match(/<category[^>]*>(.*?)<\/category>/i);
-                    return contentMatch ? contentMatch[1].trim() : '';
-                }).filter(t => t.length > 0).join(',');
-            }
-            if (!tags) {
-                const tagMatch = itemText.match(/<tag><!\[CDATA\[(.*?)\]\]><\/tag>/);
-                if (tagMatch) {
-                    tags = tagMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-                }
-            }
+                // ▲▲▲ 수정 완료 ▲▲▲
 
-            const contentId = btoa(link).replace(/=/g, '');
-            firebase.database().ref(`channel_content/blogs/${contentId}`).set({
-                title, link, description, thumbnail, tags, imageAlt,
-                pubDate: timestamp,
-                sourceId: sourceId,
-                channelType: channelType,
-                fetchedAt: Date.now()
-            });
+                await getOffscreenDocument();
+                const parsedData = await chrome.runtime.sendMessage({
+                    action: 'parse_html_in_offscreen',
+                    html: postHtml,
+                    baseUrl: link 
+                });
+
+                if (parsedData && parsedData.success) {
+                    const contentId = btoa(link).replace(/=/g, '');
+                    firebase.database().ref(`channel_content/blogs/${contentId}`).set({
+                        title, link, pubDate: timestamp,
+                        description: parsedData.description,
+                        thumbnail: parsedData.thumbnail,
+                        allImages: parsedData.allImages,
+                        sourceId: sourceId,
+                        channelType: channelType,
+                        fetchedAt: Date.now()
+                    });
+                }
+            } catch (postError) {
+                console.error(`Error processing post ${link}:`, postError);
+            }
         }
-        console.log(`RSS 피드 파싱 성공: ${url}`);
+        console.log(`Successfully parsed RSS for: ${url}`);
     } catch (error) {
-        console.error(`RSS 피드 조회 또는 파싱 실패 (${url}):`, error);
+        console.error(`Failed to fetch or parse RSS for ${url}:`, error);
     }
 }
 
