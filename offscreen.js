@@ -46,12 +46,12 @@ function parseContentAndMetrics(doc, urlObj) {
 
     if (host.includes("blog.naver.com")) {
         contentElement = doc.querySelector('.se-viewer') || doc.querySelector('.se-main-container');
-        commentSelector = '#commentCount._commentCount';
-        likeSelector = '.u_likeit_text._count.num';
+        commentSelector = '#commentCount, ._commentCount';
+        likeSelector = 'u_likeit_text_count';
     } else if (host.includes("tistory.com")) {
         contentElement = findTistoryContentElement(doc);
         commentSelector = '.txt_댓글, .comment-count, #commentCount, .link_comment, [id^="commentCount"]';
-        likeSelector = '.txt_like, .uoc-count';
+        likeSelector = '.txt_like';
     } else {
         contentElement = findTistoryContentElement(doc);
         commentSelector = '.comments-count, #comments, .comment-count, [id^="comment-"]';
@@ -109,7 +109,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // --- ▼▼▼ [핵심 수정] 변수명을 'html'로 통일하고 콘솔 로그 추가 ▼▼▼ ---
         const { html, baseUrl } = request;
           //console.log(`[Offscreen] Background로부터 다음 URL의 HTML 데이터를 수신했습니다:`, baseUrl);
-          console.log(`[Offscreen] 수신된 HTML 원본:`, html);
+          //console.log(`[Offscreen] 수신된 HTML 원본:`, html);
         
         try {
             const urlObj = new URL(baseUrl);

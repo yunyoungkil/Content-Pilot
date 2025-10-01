@@ -384,6 +384,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
     return true;
   }
+
+  
   else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
     Promise.all([
@@ -732,7 +734,7 @@ async function fetchRssFeed(url, channelType) {
                         ...parsedData.metrics,
                         ...dynamicMetrics // HTML 파싱 결과에 API 결과를 덮어쓰기
                     };
-                    console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, finalData);
+                     console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, finalData);
                   
                     firebase.database().ref(`channel_content/blogs/${contentId}`).set(finalData);
                 }
