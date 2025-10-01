@@ -646,6 +646,8 @@ function fetchAllChannelData() {
     });
 }
 
+// background.js 내 fetchRssFeed 함수
+
 async function fetchRssFeed(url, channelType) {
     try {
         const response = await fetch(url);
@@ -673,49 +675,72 @@ async function fetchRssFeed(url, channelType) {
             if (isNaN(timestamp)) continue;
 
             try {
+                const postUrl = new URL(link);
+                let dynamicMetrics = {}; 
+
+                // --- ▼▼▼ [핵심 수정] 네이버 '좋아요' API만 호출하도록 변경 ▼▼▼ ---
+                if (postUrl.hostname.includes("blog.naver.com")) {
+                    const blogIdMatch = postUrl.pathname.match(/^\/([a-zA-Z0-9_-]+)\/(\d+)/);
+                    if (blogIdMatch) {
+                        const blogId = blogIdMatch[1];
+                        const logNo = blogIdMatch[2];
+                        
+                        try {
+                            const likeApiUrl = `https://blog.like.naver.com/v1/search/contents?blogId=${blogId}&logNo=${logNo}`;
+                            const likeResponse = await fetch(likeApiUrl, { headers: { 'Referer': postUrl.href } });
+                            if (likeResponse.ok) {
+                                const likeData = await likeResponse.json();
+                                dynamicMetrics.likeCount = likeData.contents[0]?.likeItCount || 0;
+                            }
+                        } catch (e) { console.error(`Naver Like API Error for ${link}:`, e); }
+                    }
+                }
+                // --- ▲▲▲ 수정 완료 ▲▲▲ ---
+
                 const postResponse = await fetch(link);
                 if (!postResponse.ok) continue;
                 let postHtml = await postResponse.text();
                 
-                // ▼▼▼ [핵심 수정] 네이버 블로그 아이프레임 처리 로직 추가 ▼▼▼
                 const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
                 if (naverIframeMatch && naverIframeMatch[1]) {
-                    const iframeSrc = naverIframeMatch[1];
-                    // 아이프레임 주소가 상대 경로일 수 있으므로, new URL()로 절대 경로 생성
-                    const iframeUrl = new URL(iframeSrc, "https://blog.naver.com").href;
-                    
+                    const iframeUrl = new URL(naverIframeMatch[1], "https://blog.naver.com").href;
                     const iframeResponse = await fetch(iframeUrl);
-                    if (iframeResponse.ok) {
-                        // 실제 콘텐츠가 담긴 아이프레임의 HTML로 postHtml을 교체
-                        postHtml = await iframeResponse.text();
-                    }
+                    if (iframeResponse.ok) postHtml = await iframeResponse.text();
                 }
-                // ▲▲▲ 수정 완료 ▲▲▲
-
+                
                 await getOffscreenDocument();
-                const parsedData = await chrome.runtime.sendMessage({
-                    action: 'parse_html_in_offscreen',
-                    html: postHtml,
-                    baseUrl: link 
+
+                const parsedData = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: link }, 
+                        (response) => {
+                            if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+                            else resolve(response);
+                        }
+                    );
                 });
 
                 if (parsedData && parsedData.success) {
                     const contentId = btoa(link).replace(/=/g, '');
-                    firebase.database().ref(`channel_content/blogs/${contentId}`).set({
+                    
+                    const finalData = {
                         title, link, pubDate: timestamp,
                         description: parsedData.description,
                         thumbnail: parsedData.thumbnail,
-                        allImages: parsedData.allImages,
-                        sourceId: sourceId,
-                        channelType: channelType,
-                        fetchedAt: Date.now()
-                    });
+                        cleanText: parsedData.cleanText,
+                        sourceId, channelType,
+                        fetchedAt: Date.now(),
+                        ...parsedData.metrics,
+                        ...dynamicMetrics // HTML 파싱 결과에 API 결과를 덮어쓰기
+                    };
+                    console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, finalData);
+                  
+                    firebase.database().ref(`channel_content/blogs/${contentId}`).set(finalData);
                 }
+
             } catch (postError) {
                 console.error(`Error processing post ${link}:`, postError);
             }
         }
-        console.log(`Successfully parsed RSS for: ${url}`);
     } catch (error) {
         console.error(`Failed to fetch or parse RSS for ${url}:`, error);
     }
