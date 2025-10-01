@@ -1,15 +1,20 @@
-// webpack.config.js (수정 후)
+// webpack.config.js (수정 완료)
 const path = require("path");
 
 module.exports = {
   mode: "development",
   entry: {
-    content: './content.js', // content.js와 그 종속성들을 번들링
-    background: './background.js' // background.js만 독립적으로 번들링
+    content: './content.js',
+    // ▼▼▼ [수정] background 부분을 아래와 같이 배열로 변경 ▼▼▼
+    background: [
+      './lib/firebase-app-compat.js',
+      './lib/firebase-database-compat.js',
+      './background.js'
+    ]
   }, 
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: '[name].bundle.js', // 'content.bundle.js'와 'background.bundle.js' 파일 생성
+    filename: '[name].bundle.js',
   },
   devtool: "cheap-module-source-map",
   module: {

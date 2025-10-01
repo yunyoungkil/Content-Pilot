@@ -1,7 +1,5 @@
-// background.js (유튜브 채널 ID 변환 로직 최종 수정 완료)
+// background.js (중복 함수 선언 오류 수정 완료)
 
-// Firebase 라이브러리 import
-importScripts("../lib/firebase-app-compat.js", "../lib/firebase-database-compat.js");
 
 // --- 1. 설정 ---
 const firebaseConfig = {
@@ -148,7 +146,6 @@ async function resolveYoutubeUrl(url, apiKey) {
     return null;
 }
 
-
 // --- 2. 핵심 이벤트 리스너 ---
 
 chrome.action.onClicked.addListener((tab) => {
@@ -160,6 +157,7 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // ... (이하 다른 action 처리 로직들은 변경 없음) ...
     if (msg.action === "scrap_element" && msg.data) {
         const scrapRef = firebase.database().ref("scraps").push();
         const scrapPayload = { ...msg.data, timestamp: Date.now() };
@@ -491,7 +489,7 @@ chrome.runtime.onStartup.addListener(() => {
     });
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.runtime.onAlarm.addListener((alarm) => {
     if (alarm.name === 'fetch-channels') {
         console.log("알람 발생: 모든 채널 데이터를 수집합니다...");
         fetchAllChannelData();
@@ -582,26 +580,31 @@ async function fetchRssFeed(url, channelType) {
             const description = matchAndClean(/<description>(.*?)<\/description>/);
             
             let thumbnail = '';
-            let imageAlt = '';
-
-            const contentEncodedMatch = itemText.match(/<content:encoded>(.*?)<\/content:encoded>/s);
-            const contentToAnalyze = (contentEncodedMatch ? contentEncodedMatch[1] : description) || '';
-
-            const encodedImgMatch = contentToAnalyze.match(/<img[^>]*src=&quot;([^&]*)&quot;/i);
-            if (encodedImgMatch && encodedImgMatch[1]) {
-                thumbnail = encodedImgMatch[1];
-                const altMatch = contentToAnalyze.match(/alt=&quot;([^&]*)&quot;/i);
-                if (altMatch && altMatch[1]) {
-                    imageAlt = altMatch[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-                }
+            
+            const mediaThumbnailMatch = itemText.match(/<media:thumbnail[^>]*url=["']([^"']*)["']/);
+            if (mediaThumbnailMatch && mediaThumbnailMatch[1]) {
+                thumbnail = mediaThumbnailMatch[1];
             } else {
-                const standardImgMatch = contentToAnalyze.match(/<img[^>]*src=["']([^"']*)["']/i);
-                if (standardImgMatch && standardImgMatch[1]) {
-                    thumbnail = standardImgMatch[1];
-                    const standardAltMatch = contentToAnalyze.match(/alt=["']([^"']*)["']/i);
-                    if (standardAltMatch && standardAltMatch[1]) {
-                        imageAlt = standardAltMatch[1];
-                    }
+                const mediaContentMatch = itemText.match(/<media:content[^>]*url=["']([^"']*)["'][^>]*medium=["']image["']/);
+                if (mediaContentMatch && mediaContentMatch[1]) {
+                    thumbnail = mediaContentMatch[1];
+                }
+            }
+
+            if (!thumbnail) {
+                const enclosureMatch = itemText.match(/<enclosure[^>]*url=["']([^"']*)["'][^>]*type=["']image/);
+                if (enclosureMatch && enclosureMatch[1]) {
+                    thumbnail = enclosureMatch[1];
+                }
+            }
+
+            if (!thumbnail) {
+                const contentEncodedMatch = itemText.match(/<content:encoded>(.*?)<\/content:encoded>/s);
+                const contentToAnalyze = (contentEncodedMatch ? contentEncodedMatch[1] : description) || '';
+
+                const imgMatch = contentToAnalyze.match(/<img[^>]*src=["']([^"']*)["']/);
+                if (imgMatch && imgMatch[1]) {
+                    thumbnail = imgMatch[1];
                 }
             }
             
@@ -624,7 +627,7 @@ async function fetchRssFeed(url, channelType) {
 
             const contentId = btoa(link).replace(/=/g, '');
             firebase.database().ref(`channel_content/blogs/${contentId}`).set({
-                title, link, description, thumbnail, tags, imageAlt,
+                title, link, description, thumbnail, tags,
                 pubDate: timestamp,
                 sourceId: sourceId,
                 channelType: channelType,
