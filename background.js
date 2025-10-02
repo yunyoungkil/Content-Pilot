@@ -1,4 +1,36 @@
 // background.js (유튜브 채널 ID 변환 로직 최종 수정 완료)
+
+/**
+ * 객체 내의 모든 undefined 값을 재귀적으로 제거(null로 변환)하는, 더 안정적인 함수.
+ * Firebase에 저장하기 전 데이터를 정제하는 데 사용됩니다.
+ * @param {any} data - 정제할 객체, 배열, 또는 원시 값
+ * @returns {any} - undefined가 제거된 데이터
+ */
+function cleanDataForFirebase(data) {
+    if (data === undefined) {
+        return null;
+    }
+    if (data === null || typeof data !== 'object') {
+        return data; // null, string, number, boolean 등은 그대로 반환
+    }
+    if (Array.isArray(data)) {
+        // 배열인 경우, 각 항목을 재귀적으로 처리
+        return data.map(item => cleanDataForFirebase(item));
+    }
+    // 일반 객체인 경우, 각 속성을 재귀적으로 처리
+    const cleanedObj = {};
+    for (const key in data) {
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+            const value = data[key];
+            // 값이 undefined가 아닐 때만 새로운 객체에 추가
+            if (value !== undefined) {
+                cleanedObj[key] = cleanDataForFirebase(value);
+            }
+        }
+    }
+    return cleanedObj;
+}
+
 let creating; // Offscreen Document 생성 중인지 확인하는 플래그
 
 // Offscreen Document를 생성하고 가져오는 헬퍼 함수
@@ -284,20 +316,41 @@ async function resolveYoutubeUrl(url, apiKey) {
  * @returns {Promise<string[]|null>} - 추출된 키워드 배열 또는 null
  */
 async function extractKeywords(text) {
-    if (!text || text.trim().length < 20) { // 너무 짧은 텍스트는 분석에서 제외
+    console.log("키워드 추출 시도:", text.substring(0, 100) + "...");
+
+    if (!text || text.trim().length < 20) {
+        console.warn("텍스트가 너무 짧아 키워드 추출을 건너뜁니다.");
+        return null;
+    }
+    
+    const { isKeywordExtractionEnabled, geminiApiKey } = await chrome.storage.local.get(['isKeywordExtractionEnabled', 'geminiApiKey']);
+    if (!isKeywordExtractionEnabled || !geminiApiKey) {
+        console.warn("키워드 추출 기능이 비활성화되었거나 API 키가 없습니다.");
         return null;
     }
 
-    // G-11: 사용자가 기능을 활성화했는지 확인
-    const { isKeywordExtractionEnabled, geminiApiKey } = await chrome.storage.local.get(['isKeywordExtractionEnabled', 'geminiApiKey']);
-    if (!isKeywordExtractionEnabled || !geminiApiKey) {
-        return null; // 기능이 비활성화되었거나 API 키가 없으면 실행 안 함
-    }
     const MODEL_NAME = "gemini-2.0-flash";
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
     // G-6 (A/C-2): 명확하고 간결한 프롬프트 설계
-    const prompt = `다음 텍스트에서 가장 중요한 핵심 키워드를 5개만 추출해서, 다른 설명 없이 JavaScript 배열 형식으로만 응답해 줘. 텍스트: "${text.substring(0, 2000)}"`;
+    const prompt = 
+`당신은 전문 SEO 분석가이자 콘텐츠 전략가입니다. 다음 텍스트의 핵심 주제를 파악하여, 콘텐츠를 분류하고 검색 엔진 최적화(SEO)에 도움이 될 키워드를 추출해주세요.
+
+[추출 규칙]
+1.  **키워드 조합**: 총 5~7개의 키워드를 추출하며, 아래 두 종류를 적절히 조합해주세요.
+    -   **핵심 키워드 (1-2 단어)**: 콘텐츠의 가장 중심이 되는 주제 (예: 'Gemini API', '콘텐츠 전략')
+    -   **롱테일 키워드 (3단어 이상)**: 사용자의 구체적인 검색 의도가 담긴 긴 구문 (예: 'AI로 블로그 태그 자동 생성하기', '유튜브 채널 데이터 분석 방법')
+2.  **구체성 및 명사 위주**: 명사, 고유명사, 전문 용어를 우선으로 사용합니다.
+3.  **불용어 제외**: '방법', '소개', '정리' 등 일반적인 단어는 피합니다.
+
+[응답 형식]
+- 반드시 다른 설명이나 줄바꿈, \`\`\`json 같은 마크다운 없이, 순수한 JavaScript 배열 형식으로만 응답해주세요.
+- 예: ["Gemini API", "콘텐츠 전략", "AI로 블로그 태그 자동 생성하기", "유튜브 채널 데이터 분석 방법", "SEO 키워드 추출"]
+
+[분석할 텍스트]
+"""
+${text.substring(0, 2000)}
+"""`;
 
     try {
         const response = await fetch(API_URL, {
@@ -306,25 +359,105 @@ async function extractKeywords(text) {
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
 
-        if (!response.ok) throw new Error(`Gemini API 호출 실패: ${response.status}`);
-
         const responseData = await response.json();
+
+        if (!response.ok) {
+            console.error("Gemini API 오류 응답:", responseData);
+            throw new Error(`Gemini API 호출 실패: ${response.status}`);
+        }
+        if (!responseData.candidates || responseData.candidates.length === 0) {
+            console.warn("Gemini API가 안전 필터링 등의 이유로 응답을 반환하지 않았습니다.", responseData);
+            return null;
+        }
+
         const rawResult = responseData.candidates[0]?.content?.parts[0]?.text;
+        
+        console.log("Gemini 원본 응답:", rawResult); 
 
         if (rawResult) {
-            // 응답에서 순수한 배열 부분만 추출 (가끔 ```json ... ``` 같은 마크다운이 포함될 수 있음)
-            const arrayStringMatch = rawResult.match(/\[.*\]/);
+            const arrayStringMatch = rawResult.match(/\[.*\]/s); 
             if (arrayStringMatch) {
-                return JSON.parse(arrayStringMatch[0]);
+                try {
+                    const parsed = JSON.parse(arrayStringMatch[0]);
+                    console.log("✅ 추출된 키워드:", parsed);
+                    return parsed;
+                } catch (e) {
+                    console.error("❌ JSON 파싱 오류:", e, "원본 문자열:", arrayStringMatch[0]);
+                    return null;
+                }
             }
         }
+        console.warn("AI 응답에서 유효한 배열 형식을 찾지 못했습니다.");
         return null;
     } catch (error) {
-        console.error("Gemini 키워드 추출 중 오류:", error);
+        console.error("❌ Gemini 키워드 추출 중 전체 오류:", error);
         return null;
     }
 }
 
+// --- ▼▼▼ [신규] 채널 및 관련 데이터 삭제를 위한 재사용 함수 ▼▼▼ ---
+/**
+ * 지정된 URL의 채널과 관련된 모든 데이터를 Firebase에서 삭제합니다.
+ * @param {string} urlToDelete - 삭제할 채널의 원본 입력 URL
+ * @returns {Promise<boolean>} - 성공 시 true, 실패 시 에러 throw
+ */
+async function deleteChannelData(urlToDelete) {
+    const userId = 'default_user';
+    const channelsRef = firebase.database().ref(`channels/${userId}`);
+    const channelsSnap = await channelsRef.once('value');
+    const allChannels = channelsSnap.val();
+
+    if (!allChannels) throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
+
+    let sourceIdToDelete = null;
+    let platformToDelete = null;
+
+    // 모든 채널 유형과 플랫폼을 순회하며 삭제할 채널 찾기
+    for (const type of ['myChannels', 'competitorChannels']) {
+        for (const platform of ['blogs', 'youtubes']) {
+            const channels = allChannels[type]?.[platform] || [];
+            const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
+
+            if (channelIndex > -1) {
+                const channelInfo = channels[channelIndex];
+                sourceIdToDelete = platform === 'blogs' 
+                    ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
+                    : channelInfo.apiUrl;
+                
+                platformToDelete = platform;
+
+                // DB에서 해당 채널 정보 제거 (이 부분은 set으로 덮어쓸 것이므로 여기서는 제거 안함)
+                break;
+            }
+        }
+        if (sourceIdToDelete) break;
+    }
+
+    if (!sourceIdToDelete) {
+        // 이미 UI에서 지워지고 없는 상태일 수 있으므로 오류 대신 경고만 출력
+        console.warn(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다. 이미 처리되었을 수 있습니다.`);
+        return true;
+    }
+
+    // 1. /channel_meta/ 경로에서 메타 정보 삭제
+    await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
+    
+    // 2. /channel_content/ 경로에서 수집된 모든 콘텐츠 삭제
+    const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
+    const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
+    const contentToDelete = contentSnap.val();
+
+    if (contentToDelete) {
+        const updates = {};
+        for (const contentId in contentToDelete) {
+            updates[contentId] = null; // null로 설정하여 삭제
+        }
+        await contentRef.update(updates);
+    }
+    
+    console.log(`'${urlToDelete}' 채널과 관련된 모든 데이터 삭제 완료.`);
+    return true;
+}
 
 // --- 2. 핵심 이벤트 리스너 ---
 
@@ -340,12 +473,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "scrap_element" && msg.data) {
         (async () => {
             const tags = await extractKeywords(msg.data.text);
-            const scrapPayload = { ...msg.data, timestamp: Date.now(), tags: tags || null };
+            let scrapPayload = { ...msg.data, timestamp: Date.now(), tags: tags || null };
+            
+            const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
 
             const scrapRef = firebase.database().ref("scraps").push();
-            scrapRef.set(scrapPayload).then(() => {
+            scrapRef.set(cleanedScrapPayload).then(() => {
                 if (sender.tab?.id) {
-                    chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_preview', data: scrapPayload }, { frameId: 0 });
+                    chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_preview', data: cleanedScrapPayload }, { frameId: 0 });
                 }
             }).catch(err => {
                 if (sender.tab?.id) {
@@ -353,7 +488,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
             });
         })();
-        return true; // 비동기 처리를 위해 true 반환
+        return true;
     }
     else if (msg.action === "cp_get_firebase_scraps") {
         firebase.database().ref("scraps").once("value", (snapshot) => {
@@ -378,65 +513,98 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; 
     }
-  else if (msg.action === "save_channels_and_key") {
-    const { youtubeApiKey, geminiApiKey, ...channelData } = msg.data;
-      
-      chrome.storage.local.set({ youtubeApiKey, geminiApiKey }, async () => {
+    else if (msg.action === "save_channels_and_key") {
+        const { youtubeApiKey, geminiApiKey, ...newChannelData } = msg.data;
         const userId = 'default_user';
-        const apiKey = youtubeApiKey;
 
-        const resolvedChannels = {
-            myChannels: { blogs: [], youtubes: [] },
-            competitorChannels: { blogs: [], youtubes: [] }
-        };
+        (async () => {
+            try {
+                // 1. 기존에 저장된 채널 목록 가져오기
+                const channelsRef = firebase.database().ref(`channels/${userId}`);
+                const oldChannelsSnap = await channelsRef.once('value');
+                const oldChannels = oldChannelsSnap.val();
 
-        for (const type of ['myChannels', 'competitorChannels']) {
-            if (channelData[type]?.blogs) {
-                const blogPromises = channelData[type].blogs
-                    .filter(url => url.trim().length > 0)
-                    .map(async (url) => {
-                        const resolvedUrl = await resolveBlogUrl(url.trim());
-                        if (resolvedUrl) {
-                            return { 
+                // 2. 새로 제출된 채널 목록 처리 (기존 로직과 동일)
+                const apiKey = youtubeApiKey;
+                const resolvedChannels = {
+                    myChannels: { blogs: [], youtubes: [] },
+                    competitorChannels: { blogs: [], youtubes: [] }
+                };
+                for (const type of ['myChannels', 'competitorChannels']) {
+                    if (newChannelData[type]?.blogs) {
+                        const blogPromises = newChannelData[type].blogs
+                            .filter(url => url.trim().length > 0)
+                            .map(async (url) => ({ 
                                 inputUrl: url.trim(), 
-                                apiUrl: resolvedUrl 
-                            }; 
-                        }
-                        return null;
+                                apiUrl: await resolveBlogUrl(url.trim()) 
+                            }));
+                        resolvedChannels[type].blogs = (await Promise.all(blogPromises)).filter(c => c.apiUrl);
+                    }
+                    if (newChannelData[type]?.youtubes) {
+                        const youtubePromises = newChannelData[type].youtubes
+                            .filter(url => url.trim().length > 0)
+                            .map(async (url) => ({
+                                inputUrl: url.trim(),
+                                apiUrl: await resolveYoutubeUrl(url.trim(), apiKey)
+                            }));
+                        resolvedChannels[type].youtubes = (await Promise.all(youtubePromises)).filter(c => c.apiUrl);
+                    }
+                }
+                
+                // 3. 삭제된 채널 찾아서 데이터 삭제하기
+                if (oldChannels) {
+                    const oldUrls = new Set();
+                    ['myChannels', 'competitorChannels'].forEach(type => {
+                        ['blogs', 'youtubes'].forEach(platform => {
+                            (oldChannels[type]?.[platform] || []).forEach(c => oldUrls.add(c.inputUrl));
+                        });
                     });
-                const results = await Promise.all(blogPromises);
-                resolvedChannels[type].blogs = results.filter(item => item !== null);
-            }
 
-            if (channelData[type]?.youtubes) {
-                const youtubePromises = channelData[type].youtubes
-                    .filter(url => url.trim().length > 0)
-                    .map(async (url) => {
-                        const resolvedId = await resolveYoutubeUrl(url.trim(), apiKey);
-                        if (resolvedId) {
-                            return { 
-                                inputUrl: url.trim(), 
-                                apiUrl: resolvedId 
-                            };
-                        }
-                        return null;
+                    const newUrls = new Set();
+                    ['myChannels', 'competitorChannels'].forEach(type => {
+                        ['blogs', 'youtubes'].forEach(platform => {
+                            (resolvedChannels[type]?.[platform] || []).forEach(c => newUrls.add(c.inputUrl));
+                        });
                     });
-                const results = await Promise.all(youtubePromises);
-                resolvedChannels[type].youtubes = results.filter(item => item !== null); 
-            }
-        }
-        
-        firebase.database().ref(`channels/${userId}`).set(resolvedChannels)
-          .then(() => {
-            console.log('새 채널이 저장되었습니다. 즉시 데이터 수집을 시작합니다.');
-            fetchAllChannelData();
-            sendResponse({ success: true, message: '채널 및 API 키 정보가 성공적으로 저장되었습니다.' });
-          })
-          .catch(error => sendResponse({ success: false, error: error.message }));
-      });
-    return true;
-  }
 
+                    const deletedUrls = [...oldUrls].filter(url => !newUrls.has(url));
+
+                    // 삭제된 각 URL에 대해 데이터 삭제 함수 호출
+                    for (const url of deletedUrls) {
+                        await deleteChannelData(url);
+                    }
+                }
+
+                // 4. 최종적으로 새로운 채널 목록과 API 키 저장
+                await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
+                await channelsRef.set(resolvedChannels);
+
+                console.log('채널 정보가 성공적으로 업데이트되었습니다. 즉시 데이터 수집을 시작합니다.');
+                fetchAllChannelData(); // 새로 추가되거나 변경된 채널 데이터 수집
+                sendResponse({ success: true, message: '채널 정보가 성공적으로 저장 및 업데이트되었습니다.' });
+
+            } catch (error) {
+                console.error('채널 저장/업데이트 처리 중 오류:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true;
+    }
+
+    // --- ▼▼▼ [수정] "delete_channel" 핸들러 ▼▼▼ ---
+    else if (msg.action === "delete_channel") {
+        (async () => {
+            try {
+                await deleteChannelData(msg.url);
+                sendResponse({ success: true });
+            } catch (error) {
+                console.error('채널 삭제 처리 중 오류:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true;
+    }
+    
   
   else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
@@ -653,7 +821,81 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     
     return true;
-  }
+  }    // --- ▼▼▼ [추가] 채널 삭제 로직 ▼▼▼ ---
+    else if (msg.action === "delete_channel") {
+        const urlToDelete = msg.url;
+        const userId = 'default_user';
+
+        (async () => {
+            try {
+                const channelsRef = firebase.database().ref(`channels/${userId}`);
+                const channelsSnap = await channelsRef.once('value');
+                const allChannels = channelsSnap.val();
+
+                if (!allChannels) {
+                    throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
+                }
+
+                let sourceIdToDelete = null;
+                let platformToDelete = null; // 'blogs' 또는 'youtubes'
+                let typeToDelete = null; // 'myChannels' 또는 'competitorChannels'
+
+                // 모든 채널 유형과 플랫폼을 순회하며 삭제할 채널 찾기
+                for (const type of ['myChannels', 'competitorChannels']) {
+                    for (const platform of ['blogs', 'youtubes']) {
+                        const channels = allChannels[type]?.[platform] || [];
+                        const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
+
+                        if (channelIndex > -1) {
+                            const channelInfo = channels[channelIndex];
+                            sourceIdToDelete = platform === 'blogs' 
+                                ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
+                                : channelInfo.apiUrl;
+                            
+                            platformToDelete = platform;
+                            typeToDelete = type;
+
+                            // DB에서 해당 채널 정보 제거
+                            allChannels[type][platform].splice(channelIndex, 1);
+                            break;
+                        }
+                    }
+                    if (sourceIdToDelete) break;
+                }
+
+                if (!sourceIdToDelete) {
+                    throw new Error(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다.`);
+                }
+
+                // 1. /channels/ 경로에서 채널 정보 업데이트
+                await channelsRef.set(allChannels);
+
+                // 2. /channel_meta/ 경로에서 메타 정보 삭제
+                await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
+                
+                // 3. /channel_content/ 경로에서 수집된 모든 콘텐츠 삭제
+                const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
+                const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
+                const contentToDelete = contentSnap.val();
+
+                if (contentToDelete) {
+                    const updates = {};
+                    for (const contentId in contentToDelete) {
+                        updates[contentId] = null; // null로 설정하여 삭제
+                    }
+                    await contentRef.update(updates);
+                }
+
+                sendResponse({ success: true });
+
+            } catch (error) {
+                console.error('채널 삭제 처리 중 오류:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+
+        return true; // 비동기 응답을 위해 true 반환
+    }
 });
 
 
@@ -775,13 +1017,12 @@ async function fetchRssFeed(url, channelType) {
 
                 if (parsedData && parsedData.success) {
                     const contentId = btoa(link).replace(/=/g, '');
- 
                     const existingDataSnap = await firebase.database().ref(`channel_content/blogs/${contentId}`).once('value');
                     const existingData = existingDataSnap.val();
 
                     let tags = null;
                     if (existingData && existingData.tags) {
-                        tags = existingData.tags; // 이미 태그가 있으면 그대로 사용
+                        tags = existingData.tags;
                     } else if (parsedData.cleanText) {
                         tags = await extractKeywords(parsedData.cleanText);
                     }
@@ -794,21 +1035,16 @@ async function fetchRssFeed(url, channelType) {
                         sourceId, channelType,
                         fetchedAt: Date.now(),
                         ...parsedData.metrics,
-                        ...dynamicMetrics, // HTML 파싱 결과에 API 결과를 덮어쓰기
-                         tags: tags || null, // 추출된 태그 추가
-                        ...parsedData.metrics
+                        ...dynamicMetrics,
+                        tags: tags || null
                     };
 
-                    for (const key in finalData) {
-                        if (finalData[key] === undefined) {
-                            finalData[key] = null;
-                        }
-                    }                   
-                     console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, finalData);
-                  
-                    firebase.database().ref(`channel_content/blogs/${contentId}`).set(finalData);
-                }
+                    const cleanedFinalData = cleanDataForFirebase(finalData);
+                      
+                    console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, cleanedFinalData);
 
+                    firebase.database().ref(`channel_content/blogs/${contentId}`).set(cleanedFinalData);
+                }
             } catch (postError) {
                 console.error(`Error processing post ${link}:`, postError);
             }
@@ -876,24 +1112,11 @@ async function fetchYoutubeChannel(channelId, channelType) {
         if (detailsData.items) {
             for (const item of detailsData.items) {
                 const { id, snippet, statistics } = item;
-
-                // --- ▼▼▼ [G-7, G-10] 유튜브 콘텐츠 키워드 추출 (중복 방지 포함) ▼▼▼ ---
                 const existingDataSnap = await firebase.database().ref(`channel_content/youtubes/${id}`).once('value');
                 const existingData = existingDataSnap.val();
-
-                let tags = null;
-                // G-10: 이미 태그가 있으면 API 호출 없이 기존 태그 사용
-                if (existingData && existingData.tags) {
-                    tags = existingData.tags;
-                } 
-                // G-7: 태그가 없고 설명이 있으면 키워드 추출
-                else if (snippet.description) {
-                    tags = await extractKeywords(snippet.description);
-                }
-
-
-                const timestamp = new Date(snippet.publishedAt).getTime();
+                let tags = (existingData && existingData.tags) ? existingData.tags : await extractKeywords(snippet.description);
                 
+                const timestamp = new Date(snippet.publishedAt).getTime();
                 const video = {
                     videoId: id,
                     title: snippet.title,
@@ -903,20 +1126,21 @@ async function fetchYoutubeChannel(channelId, channelType) {
                     viewCount: statistics?.viewCount ? parseInt(statistics.viewCount, 10) : 0,
                     likeCount: statistics?.likeCount ? parseInt(statistics.likeCount, 10) : 0,
                     commentCount: statistics?.commentCount ? parseInt(statistics.commentCount, 10) : 0,
-                    channelId: channelId,
+                    channelId,
                     sourceId: channelId,
-                    channelType: channelType,
+                    channelType,
                     fetchedAt: Date.now(),
                     tags: tags || null
                 };
-                firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
-            };
+                
+                const cleanedVideoData = cleanDataForFirebase(video);
+                firebase.database().ref(`channel_content/youtubes/${cleanedVideoData.videoId}`).set(cleanedVideoData);
+            }
             console.log(`YouTube 채널 상세 정보 수집 성공: ${channelId}`);
         }
     } catch (error) {
         console.error(`YouTube 채널 데이터 수집 실패 (${channelId}):`, error);
     }
-
 }
 
 

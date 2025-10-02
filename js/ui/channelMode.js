@@ -123,8 +123,28 @@ export function renderChannelMode(container) {
       const placeholder = type === 'blog' ? '블로그 RSS 주소' : '유튜브 채널 ID';
       document.getElementById(targetListId).appendChild(createChannelInput(placeholder, '', type));
     }
+    // --- ▼▼▼ [수정] 삭제 버튼 클릭 이벤트 핸들러 ▼▼▼ ---
     if (e.target.classList.contains('remove-channel-btn')) {
-      e.target.closest('.channel-input-item').remove();
+      const inputItem = e.target.closest('.channel-input-item');
+      const inputElement = inputItem.querySelector('input');
+      const urlToDelete = inputElement.value;
+
+      // URL 값이 있는 경우 (이미 저장된 채널)에만 삭제 메시지 전송
+      if (urlToDelete) {
+        if (confirm(`'${urlToDelete}' 채널과 수집된 모든 데이터를 삭제하시겠습니까?`)) {
+          chrome.runtime.sendMessage({ action: 'delete_channel', url: urlToDelete }, (response) => {
+            if (response && response.success) {
+              console.log('채널이 성공적으로 삭제되었습니다.');
+              inputItem.remove(); // 성공적으로 삭제된 후에만 UI에서 제거
+            } else {
+              alert('채널 삭제 중 오류가 발생했습니다: ' + (response?.error || '알 수 없는 오류'));
+            }
+          });
+        }
+      } else {
+        // URL 값이 없는 경우 (새로 추가된 빈 입력 필드)에는 그냥 UI에서만 제거
+        inputItem.remove();
+      }
     }
     if (e.target.classList.contains('help-icon')) {
       showHelpModal(container);

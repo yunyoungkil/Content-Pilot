@@ -79,7 +79,7 @@ function renderScrapList(scraps) {
               <div class="scrap-card-info">
                 <div class="scrap-card-title">${scrap.text ? scrap.text.substring(0, 20) : '제목 없음'}...</div>
                 <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
-                ${tagsHtml} {/* 태그 삽입 */}
+                ${tagsHtml}
               </div>
             </div>
         `;

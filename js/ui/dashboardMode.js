@@ -21,7 +21,11 @@ function createContentCard(item, type) {
     const dateSource = item.publishedAt || item.pubDate;
     const date = dateSource && !isNaN(Number(dateSource)) ? new Date(Number(dateSource)) : null;
     const dateString = date ? date.toLocaleDateString() : '날짜 정보 없음';
-    
+
+    const tagsHtml = item.tags && Array.isArray(item.tags) && item.tags.length > 0 
+    ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
+    : '';
+
     const metrics = isVideo ? `
         <div class="card-metrics">
             <span>조회수: ${item.viewCount || 0}</span>
@@ -31,10 +35,8 @@ function createContentCard(item, type) {
     ` : '';
     
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
-    // --- ▼▼▼ [G-8] 태그 표시 UI 추가 ▼▼▼ ---
-    const tagsHtml = item.tags && item.tags.length > 0 
-        ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
-        : '';
+
+
     return `
         <a href="${link}" target="_blank" class="content-card">
             <div class="card-thumbnail">
@@ -42,6 +44,9 @@ function createContentCard(item, type) {
             </div>
             <div class="card-info">
                 <div class="card-title">${item.title}</div>
+
+                ${tagsHtml}
+
                 <div class="card-meta">${dateString}</div>
                 ${metrics}
             </div>
