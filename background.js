@@ -942,8 +942,8 @@ function fetchAllChannelData() {
     });
 }
 
-// background.js 내 fetchRssFeed 함수
 
+// --- ▼▼▼ [하이브리드 방식] 블로그 데이터 수집 함수 수정 ▼▼▼ ---
 async function fetchRssFeed(url, channelType) {
     try {
         const response = await fetch(url);
@@ -953,50 +953,69 @@ async function fetchRssFeed(url, channelType) {
         const channelTitleMatch = text.match(/<channel>[\s\S]*?<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>[\s\S]*?<\/channel>/);
         const channelTitle = channelTitleMatch ? channelTitleMatch[1] : url;
         const sourceId = btoa(url).replace(/=/g, '');
-        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url });
+        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url, fetchedAt: Date.now() });
 
         const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
 
         for (const itemText of items.slice(0, 10)) {
-            const titleMatch = itemText.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
             const linkMatch = itemText.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/);
-            const pubDateMatch = itemText.match(/<pubDate>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/pubDate>/);
-
-            if (!linkMatch || !titleMatch) continue;
+            if (!linkMatch) continue;
             
-            const title = titleMatch[1];
             const link = linkMatch[1];
-            const timestamp = new Date(pubDateMatch ? pubDateMatch[1] : Date.now()).getTime();
+            const contentId = btoa(link).replace(/=/g, '');
+            const contentRef = firebase.database().ref(`channel_content/blogs/${contentId}`);
 
-            if (isNaN(timestamp)) continue;
+            const existingDataSnap = await contentRef.once('value');
 
-            try {
-                const postUrl = new URL(link);
-                let dynamicMetrics = {}; 
+            // --- [핵심 개선 로직] ---
+            if (existingDataSnap.exists()) {
+                // 1. 기존 데이터가 있으면 '가벼운 업데이트'만 수행
+                console.log(`[하이브리드] '${link}'는 이미 존재하므로, 가벼운 업데이트를 시도합니다.`);
+                try {
+                    const postResponse = await fetch(link);
+                    if (!postResponse.ok) continue;
+                    let postHtml = await postResponse.text();
 
-                // --- ▼▼▼ [핵심 수정] 네이버 '좋아요' API만 호출하도록 변경 ▼▼▼ ---
-                if (postUrl.hostname.includes("blog.naver.com")) {
-                    const blogIdMatch = postUrl.pathname.match(/^\/([a-zA-Z0-9_-]+)\/(\d+)/);
-                    if (blogIdMatch) {
-                        const blogId = blogIdMatch[1];
-                        const logNo = blogIdMatch[2];
-                        
-                        try {
-                            const likeApiUrl = `https://blog.like.naver.com/v1/search/contents?blogId=${blogId}&logNo=${logNo}`;
-                            const likeResponse = await fetch(likeApiUrl, { headers: { 'Referer': postUrl.href } });
-                            if (likeResponse.ok) {
-                                const likeData = await likeResponse.json();
-                                dynamicMetrics.likeCount = likeData.contents[0]?.likeItCount || 0;
-                            }
-                        } catch (e) { console.error(`Naver Like API Error for ${link}:`, e); }
+                    // 네이버 iframe 처리
+                    const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
+                    if (naverIframeMatch && naverIframeMatch[1]) {
+                        const iframeUrl = new URL(naverIframeMatch[1], "https://blog.naver.com").href;
+                        const iframeResponse = await fetch(iframeUrl);
+                        if (iframeResponse.ok) postHtml = await iframeResponse.text();
                     }
-                }
-                // --- ▲▲▲ 수정 완료 ▲▲▲ ---
+                    
+                    await getOffscreenDocument();
+                    // offscreen.js로 보내 댓글 수 등 일부 지표만 파싱
+                    const parsedData = await new Promise(resolve => {
+                        chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: link }, 
+                            (response) => resolve(response)
+                        );
+                    });
 
+                    if (parsedData && parsedData.success) {
+                        // 2. 전체를 덮어쓰는 set() 대신, 변경된 부분만 갱신하는 update() 사용
+                        contentRef.update({
+                            commentCount: parsedData.metrics.commentCount,
+                            likeCount: parsedData.metrics.likeCount || null, // 좋아요는 없을 수 있으므로 null 처리
+                            fetchedAt: Date.now()
+                        });
+                    }
+                } catch (updateError) {
+                    console.error(`'${link}' 가벼운 업데이트 중 오류:`, updateError);
+                }
+
+            } else {
+                // 3. 신규 데이터일 경우에만 '무거운 전체 파싱' 수행
+                console.log(`[하이브리드] 새로운 콘텐츠 '${link}'를 파싱합니다.`);
+                const titleMatch = itemText.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
+                const pubDateMatch = itemText.match(/<pubDate>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/pubDate>/);
+                // ... (이하 새로운 콘텐츠를 파싱하고 저장하는 기존 로직은 모두 동일)
+                const title = titleMatch ? titleMatch[1] : '제목 없음';
+                const timestamp = new Date(pubDateMatch ? pubDateMatch[1] : Date.now()).getTime();
+
+                // ... (나머지 전체 파싱 및 저장 로직)
                 const postResponse = await fetch(link);
-                if (!postResponse.ok) continue;
                 let postHtml = await postResponse.text();
-                
                 const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
                 if (naverIframeMatch && naverIframeMatch[1]) {
                     const iframeUrl = new URL(naverIframeMatch[1], "https://blog.naver.com").href;
@@ -1014,19 +1033,9 @@ async function fetchRssFeed(url, channelType) {
                         }
                     );
                 });
-
+                
                 if (parsedData && parsedData.success) {
-                    const contentId = btoa(link).replace(/=/g, '');
-                    const existingDataSnap = await firebase.database().ref(`channel_content/blogs/${contentId}`).once('value');
-                    const existingData = existingDataSnap.val();
-
-                    let tags = null;
-                    if (existingData && existingData.tags) {
-                        tags = existingData.tags;
-                    } else if (parsedData.cleanText) {
-                        tags = await extractKeywords(parsedData.cleanText);
-                    }
-
+                    const tags = await extractKeywords(parsedData.cleanText);
                     const finalData = {
                         title, link, pubDate: timestamp,
                         description: parsedData.description,
@@ -1035,26 +1044,18 @@ async function fetchRssFeed(url, channelType) {
                         sourceId, channelType,
                         fetchedAt: Date.now(),
                         ...parsedData.metrics,
-                        ...dynamicMetrics,
                         tags: tags || null
                     };
-
                     const cleanedFinalData = cleanDataForFirebase(finalData);
-                      
-                    console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, cleanedFinalData);
-
-                    firebase.database().ref(`channel_content/blogs/${contentId}`).set(cleanedFinalData);
+                    contentRef.set(cleanedFinalData);
                 }
-            } catch (postError) {
-                console.error(`Error processing post ${link}:`, postError);
             }
+            // --- [개선 로직 끝] ---
         }
     } catch (error) {
         console.error(`Failed to fetch or parse RSS for ${url}:`, error);
     }
 }
-
-
 async function fetchYoutubeChannel(channelId, channelType) {
     const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
 
