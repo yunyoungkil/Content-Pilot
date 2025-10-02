@@ -278,6 +278,54 @@ async function resolveYoutubeUrl(url, apiKey) {
 }
 
 
+/**
+ * 텍스트에서 AI를 통해 키워드를 추출하는 함수.
+ * @param {string} text - 분석할 텍스트
+ * @returns {Promise<string[]|null>} - 추출된 키워드 배열 또는 null
+ */
+async function extractKeywords(text) {
+    if (!text || text.trim().length < 20) { // 너무 짧은 텍스트는 분석에서 제외
+        return null;
+    }
+
+    // G-11: 사용자가 기능을 활성화했는지 확인
+    const { isKeywordExtractionEnabled, geminiApiKey } = await chrome.storage.local.get(['isKeywordExtractionEnabled', 'geminiApiKey']);
+    if (!isKeywordExtractionEnabled || !geminiApiKey) {
+        return null; // 기능이 비활성화되었거나 API 키가 없으면 실행 안 함
+    }
+    const MODEL_NAME = "gemini-2.0-flash";
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
+
+    // G-6 (A/C-2): 명확하고 간결한 프롬프트 설계
+    const prompt = `다음 텍스트에서 가장 중요한 핵심 키워드를 5개만 추출해서, 다른 설명 없이 JavaScript 배열 형식으로만 응답해 줘. 텍스트: "${text.substring(0, 2000)}"`;
+
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+
+        if (!response.ok) throw new Error(`Gemini API 호출 실패: ${response.status}`);
+
+        const responseData = await response.json();
+        const rawResult = responseData.candidates[0]?.content?.parts[0]?.text;
+
+        if (rawResult) {
+            // 응답에서 순수한 배열 부분만 추출 (가끔 ```json ... ``` 같은 마크다운이 포함될 수 있음)
+            const arrayStringMatch = rawResult.match(/\[.*\]/);
+            if (arrayStringMatch) {
+                return JSON.parse(arrayStringMatch[0]);
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error("Gemini 키워드 추출 중 오류:", error);
+        return null;
+    }
+}
+
+
 // --- 2. 핵심 이벤트 리스너 ---
 
 chrome.action.onClicked.addListener((tab) => {
@@ -290,18 +338,22 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "scrap_element" && msg.data) {
-        const scrapRef = firebase.database().ref("scraps").push();
-        const scrapPayload = { ...msg.data, timestamp: Date.now() };
-        scrapRef.set(scrapPayload).then(() => {
-            if (sender.tab?.id) {
-                chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_preview', data: scrapPayload }, { frameId: 0 });
-            }
-        }).catch(err => {
-            if (sender.tab?.id) {
-                chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_toast', message: '❌ 스크랩 실패' }, { frameId: 0 });
-            }
-        });
-        return true;
+        (async () => {
+            const tags = await extractKeywords(msg.data.text);
+            const scrapPayload = { ...msg.data, timestamp: Date.now(), tags: tags || null };
+
+            const scrapRef = firebase.database().ref("scraps").push();
+            scrapRef.set(scrapPayload).then(() => {
+                if (sender.tab?.id) {
+                    chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_preview', data: scrapPayload }, { frameId: 0 });
+                }
+            }).catch(err => {
+                if (sender.tab?.id) {
+                    chrome.tabs.sendMessage(sender.tab.id, { action: 'cp_show_toast', message: '❌ 스크랩 실패' }, { frameId: 0 });
+                }
+            });
+        })();
+        return true; // 비동기 처리를 위해 true 반환
     }
     else if (msg.action === "cp_get_firebase_scraps") {
         firebase.database().ref("scraps").once("value", (snapshot) => {
@@ -723,7 +775,17 @@ async function fetchRssFeed(url, channelType) {
 
                 if (parsedData && parsedData.success) {
                     const contentId = btoa(link).replace(/=/g, '');
-                    
+ 
+                    const existingDataSnap = await firebase.database().ref(`channel_content/blogs/${contentId}`).once('value');
+                    const existingData = existingDataSnap.val();
+
+                    let tags = null;
+                    if (existingData && existingData.tags) {
+                        tags = existingData.tags; // 이미 태그가 있으면 그대로 사용
+                    } else if (parsedData.cleanText) {
+                        tags = await extractKeywords(parsedData.cleanText);
+                    }
+
                     const finalData = {
                         title, link, pubDate: timestamp,
                         description: parsedData.description,
@@ -732,8 +794,16 @@ async function fetchRssFeed(url, channelType) {
                         sourceId, channelType,
                         fetchedAt: Date.now(),
                         ...parsedData.metrics,
-                        ...dynamicMetrics // HTML 파싱 결과에 API 결과를 덮어쓰기
+                        ...dynamicMetrics, // HTML 파싱 결과에 API 결과를 덮어쓰기
+                         tags: tags || null, // 추출된 태그 추가
+                        ...parsedData.metrics
                     };
+
+                    for (const key in finalData) {
+                        if (finalData[key] === undefined) {
+                            finalData[key] = null;
+                        }
+                    }                   
                      console.log(`[디버그 2/3] Firebase 저장 예정 데이터 for ${title}:`, finalData);
                   
                     firebase.database().ref(`channel_content/blogs/${contentId}`).set(finalData);
@@ -804,8 +874,24 @@ async function fetchYoutubeChannel(channelId, channelType) {
         const detailsData = await detailsResponse.json();
         
         if (detailsData.items) {
-            detailsData.items.forEach(item => {
+            for (const item of detailsData.items) {
                 const { id, snippet, statistics } = item;
+
+                // --- ▼▼▼ [G-7, G-10] 유튜브 콘텐츠 키워드 추출 (중복 방지 포함) ▼▼▼ ---
+                const existingDataSnap = await firebase.database().ref(`channel_content/youtubes/${id}`).once('value');
+                const existingData = existingDataSnap.val();
+
+                let tags = null;
+                // G-10: 이미 태그가 있으면 API 호출 없이 기존 태그 사용
+                if (existingData && existingData.tags) {
+                    tags = existingData.tags;
+                } 
+                // G-7: 태그가 없고 설명이 있으면 키워드 추출
+                else if (snippet.description) {
+                    tags = await extractKeywords(snippet.description);
+                }
+
+
                 const timestamp = new Date(snippet.publishedAt).getTime();
                 
                 const video = {
@@ -820,10 +906,11 @@ async function fetchYoutubeChannel(channelId, channelType) {
                     channelId: channelId,
                     sourceId: channelId,
                     channelType: channelType,
-                    fetchedAt: Date.now()
+                    fetchedAt: Date.now(),
+                    tags: tags || null
                 };
                 firebase.database().ref(`channel_content/youtubes/${video.videoId}`).set(video);
-            });
+            };
             console.log(`YouTube 채널 상세 정보 수집 성공: ${channelId}`);
         }
     } catch (error) {

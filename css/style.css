@@ -545,3 +545,31 @@
   background-color: #e9ecef00;
   color: #e41212;
 }
+
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 22px; /* 태그가 너무 많아도 한 줄만 보이도록 */
+  overflow: hidden;
+}
+
+.tag {
+  background-color: #e8f0fe;
+  color: #4285F4;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* 스크랩북 카드 안의 태그는 약간 더 작게 */
+.scrap-card .card-tags {
+  margin-top: 4px;
+}
+.scrap-card .tag {
+  font-size: 10px;
+  padding: 2px 6px;
+}

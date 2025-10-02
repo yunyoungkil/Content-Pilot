@@ -31,7 +31,10 @@ function createContentCard(item, type) {
     ` : '';
     
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
-
+    // --- ▼▼▼ [G-8] 태그 표시 UI 추가 ▼▼▼ ---
+    const tagsHtml = item.tags && item.tags.length > 0 
+        ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
+        : '';
     return `
         <a href="${link}" target="_blank" class="content-card">
             <div class="card-thumbnail">

@@ -69,7 +69,18 @@ export function renderChannelMode(container) {
                 <input type="password" id="youtube-api-key" placeholder="AIzaSy...로 시작하는 YouTube API 키" style="width: 100%;">
               </div>
           </div>
-          
+
+
+          <div class="settings-section">
+            <div class="setting-item">
+              <label class="toggle-switch">
+                <input type="checkbox" id="keyword-extraction-toggle">
+                <span class="slider"></span>
+              </label>
+              <label for="keyword-extraction-toggle">AI 키워드 자동 추출 활성화</label>
+            </div>
+          </div>          
+
           <div class="channel-input-item" style="margin-top: 15px;">
               <label for="gemini-api-key">Google AI Gemini API Key</label>
               <div class="input-wrapper">
@@ -122,7 +133,12 @@ export function renderChannelMode(container) {
       const getValues = (listId) => Array.from(document.querySelectorAll(`#${listId} input`)).map(input => input.value).filter(Boolean);
       const youtubeApiKey = document.getElementById('youtube-api-key').value;
       const geminiApiKey = document.getElementById('gemini-api-key').value; // Gemini 키 값 가져오기
-      
+
+      // --- ▼▼▼ [G-11] 설정 값 가져오기 ▼▼▼ ---
+      const isKeywordExtractionEnabled = document.getElementById('keyword-extraction-toggle').checked;
+      chrome.storage.local.set({ isKeywordExtractionEnabled });      
+
+
       const channelData = {
         youtubeApiKey: youtubeApiKey,
         geminiApiKey: geminiApiKey, // 저장할 데이터에 추가
@@ -143,6 +159,10 @@ export function renderChannelMode(container) {
       if (data.youtubeApiKey) document.getElementById('youtube-api-key').value = data.youtubeApiKey;
       if (data.geminiApiKey) document.getElementById('gemini-api-key').value = data.geminiApiKey; // Gemini 키 값 불러오기
    
+      // --- ▼▼▼ [G-11] 저장된 설정 값 불러와서 UI에 반영 ▼▼▼ ---
+      chrome.storage.local.get('isKeywordExtractionEnabled', (result) => {
+          document.getElementById('keyword-extraction-toggle').checked = !!result.isKeywordExtractionEnabled;
+      });
       
       const renderSavedChannels = (type, platform) => {
           const channels = data[type]?.[platform];

@@ -66,19 +66,25 @@ function renderScrapList(scraps) {
         listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
         return;
     }
-    listContainer.innerHTML = sortedScraps.map(scrap => `
-        <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}">
-          <button class="scrap-card-delete-btn" data-id="${scrap.id}">
-             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 6L18 18" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : `<div class="scrap-card-img-wrap" style="font-size: 24px;">📝</div>`}
-          <div class="scrap-card-info">
-            <div class="scrap-card-title">${scrap.text ? scrap.text.substring(0, 20) : '제목 없음'}...</div>
-            <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
-          </div>
-        </div>
-    `).join('');
+    listContainer.innerHTML = sortedScraps.map(scrap => {
+        // --- ▼▼▼ [G-8] 태그 표시 UI 추가 ▼▼▼ ---
+        const tagsHtml = scrap.tags && scrap.tags.length > 0
+            ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
+            : '';
+        // --- ▲▲▲ UI 추가 완료 ▲▲▲ ---
 
+        return `
+            <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}">
+              ...
+              <div class="scrap-card-info">
+                <div class="scrap-card-title">${scrap.text ? scrap.text.substring(0, 20) : '제목 없음'}...</div>
+                <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
+                ${tagsHtml} {/* 태그 삽입 */}
+              </div>
+            </div>
+        `;
+    }).join('');
+    
     listContainer.querySelectorAll('.scrap-card').forEach(card => {
         card.addEventListener('click', (e) => {
             if(e.target.closest('.scrap-card-delete-btn')) return;
