@@ -1,28 +1,18 @@
-// background.js (유튜브 채널 ID 변환 로직 최종 수정 완료)
+// background.js (수정 완료된 최종 버전)
 
 /**
- * 객체 내의 모든 undefined 값을 재귀적으로 제거(null로 변환)하는, 더 안정적인 함수.
+ * 객체 내의 모든 undefined 값을 재귀적으로 null로 변환하는 함수.
  * Firebase에 저장하기 전 데이터를 정제하는 데 사용됩니다.
- * @param {any} data - 정제할 객체, 배열, 또는 원시 값
- * @returns {any} - undefined가 제거된 데이터
  */
 function cleanDataForFirebase(data) {
-    if (data === undefined) {
-        return null;
-    }
-    if (data === null || typeof data !== 'object') {
-        return data; // null, string, number, boolean 등은 그대로 반환
-    }
-    if (Array.isArray(data)) {
-        // 배열인 경우, 각 항목을 재귀적으로 처리
-        return data.map(item => cleanDataForFirebase(item));
-    }
-    // 일반 객체인 경우, 각 속성을 재귀적으로 처리
+    if (data === undefined) return null;
+    if (data === null || typeof data !== 'object') return data;
+    if (Array.isArray(data)) return data.map(item => cleanDataForFirebase(item));
+    
     const cleanedObj = {};
     for (const key in data) {
         if (Object.prototype.hasOwnProperty.call(data, key)) {
             const value = data[key];
-            // 값이 undefined가 아닐 때만 새로운 객체에 추가
             if (value !== undefined) {
                 cleanedObj[key] = cleanDataForFirebase(value);
             }
@@ -31,13 +21,10 @@ function cleanDataForFirebase(data) {
     return cleanedObj;
 }
 
-let creating; // Offscreen Document 생성 중인지 확인하는 플래그
+let creating; // Offscreen Document 생성 플래그
 
-// Offscreen Document를 생성하고 가져오는 헬퍼 함수
 async function getOffscreenDocument() {
-    if (await chrome.offscreen.hasDocument()) {
-        return;
-    }
+    if (await chrome.offscreen.hasDocument()) return;
     if (creating) {
         await creating;
     } else {
@@ -50,10 +37,9 @@ async function getOffscreenDocument() {
         creating = null;
     }
 }
-// Firebase 라이브러리 import
+
 importScripts("../lib/firebase-app-compat.js", "../lib/firebase-database-compat.js");
 
-// --- 1. 설정 ---
 const firebaseConfig = {
   apiKey: "AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY",
   authDomain: "content-pilot-7eb03.firebaseapp.com",
@@ -61,16 +47,16 @@ const firebaseConfig = {
   projectId: "content-pilot-7eb03",
   storageBucket: "content-pilot-7eb03.firebasestorage.app",
   messagingSenderId: "1062923832161",
-  appId: "1:1062923832161:web:1062923832161:web:12dc37c0bfd2fb1ac05320",
+  appId: "1:1062923832161:web:12dc37c0bfd2fb1ac05320",
 };
-
 
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
-// --- URL Resolution Helpers ---
-
+/**
+ * 블로그 일반 URL에서 RSS 피드 주소를 추출합니다. (개선된 버전)
+ */
 async function resolveBlogUrl(url) {
     if (!url || !url.startsWith('http')) return null;
     let urlObj;
@@ -81,71 +67,55 @@ async function resolveBlogUrl(url) {
     }
     const host = urlObj.hostname.toLowerCase();
     const origin = urlObj.origin;
+
     let platformRssPath = null;
     if (host.includes('tistory.com')) {
-        platformRssPath = urlObj.pathname.endsWith('/') ? 'rss' : '/rss';
+        platformRssPath = '/rss';
     } else if (host.includes('blog.naver.com')) {
         let naverId = null;
         const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
         if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
             naverId = pathMatch[1];
+        } else {
+            naverId = new URLSearchParams(urlObj.search).get('blogId');
         }
-        if (!naverId) {
-            const params = new URLSearchParams(urlObj.search);
-            naverId = params.get('blogId');
-        }
-        if (naverId) {
-            return `https://rss.blog.naver.com/${naverId}.xml`;
-        }
+        if (naverId) return `https://rss.blog.naver.com/${naverId}.xml`;
         platformRssPath = '/rss';
     } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
         platformRssPath = '/feed';
     } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
         platformRssPath = '/feeds/posts/default?alt=rss';
     }
-    if (platformRssPath) {
-        return platformRssPath.startsWith('/') ? origin + platformRssPath : origin + '/' + platformRssPath;
-    }
+
+    if (platformRssPath) return origin + platformRssPath;
+    
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
         const html = await response.text();
-        const rssMatch = html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/rss\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i) ||
-            html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/atom\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i);
-        if (rssMatch && rssMatch[1]) {
-            let rssUrl = rssMatch[1];
-            if (rssUrl.startsWith('//')) {
-                rssUrl = `https:${rssUrl}`;
-            } else if (rssUrl.startsWith('/')) {
-                rssUrl = `${urlObj.protocol}//${urlObj.host}${rssUrl}`;
-            }
+        const rssMatch = html.match(/<link[^>]*type=["']application\/(rss|atom)\+xml["'][^>]*href=["']([^"']*)["']/i);
+        if (rssMatch && rssMatch[2]) {
+            let rssUrl = rssMatch[2];
+            if (rssUrl.startsWith('//')) rssUrl = `https:${rssUrl}`;
+            else if (rssUrl.startsWith('/')) rssUrl = `${origin}${rssUrl}`;
             return rssUrl;
         }
-        return url.endsWith('/') ? url + 'feed' : url + '/feed';
+        const fallbackUrl = url.endsWith('/') ? url + 'feed' : url + '/feed';
+        return fallbackUrl;
     } catch (error) {
         console.error(`RSS 주소 확인 실패 (${url}):`, error);
         return null;
     }
 }
 
-
 /**
- * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환 (최종 수정)
- * @param {string} url - 사용자가 입력한 유튜브 URL 또는 ID
- * @param {string} apiKey - YouTube Data API 키
- * @returns {Promise<string|null>} - 추출된 채널 ID 또는 null
+ * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환합니다. (개선된 버전)
  */
 async function resolveYoutubeUrl(url, apiKey) {
-      if (!url) return null;
+    if (!url) return null;
+    if (url.startsWith('UC') && url.length === 24) return url;
+    if (!url.startsWith('http')) return null;
 
-    if (url.startsWith('UC') && url.length === 24) {
-        return url;
-    }
-
-    if (!url.startsWith('http')) {
-        return null;
-    }
-    
     let urlObj;
     try {
         urlObj = new URL(url);
@@ -153,51 +123,52 @@ async function resolveYoutubeUrl(url, apiKey) {
         return null;
     }
     const path = urlObj.pathname;
-    
-    const channelIdMatch = path.match(/\/channel\/([a-zA-Z0-9_-]{24})/);
-    if (channelIdMatch && channelIdMatch[1]) {
-        return channelIdMatch[1];
+
+    if (path.includes('/watch') || path.includes('/embed')) {
+        const videoId = urlObj.searchParams.get('v');
+        if (videoId && apiKey) {
+            const videoApi = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
+            try {
+                const response = await fetch(videoApi);
+                const data = await response.json();
+                if (data.items && data.items.length > 0) return data.items[0].snippet.channelId;
+            } catch (error) {
+                console.error(`Video URL에서 채널 ID 변환 실패 (${videoId}):`, error);
+                return null;
+            }
+        }
     }
-    
-    if (!apiKey) {
-        console.error("YouTube API Key is missing for URL resolution.");
+
+    const channelIdMatch = path.match(/\/channel\/([UC|c][a-zA-Z0-9_-]{22,24})/i);
+    if (channelIdMatch && channelIdMatch[1]) return channelIdMatch[1];
+
+    let identifier = null;
+    let endpoint = null;
+    const handleMatch = path.match(/\/@([a-zA-Z0-9_-]+)/i);
+    const userMatch = path.match(/\/user\/([a-zA-Z0-9_-]+)/i);
+
+    if (handleMatch && handleMatch[1]) {
+        identifier = handleMatch[1];
+        endpoint = `forHandle=@${identifier}`;
+    } else if (userMatch && userMatch[1]) {
+        identifier = userMatch[1];
+        endpoint = `forUsername=${identifier}`;
+    } else {
         return null;
     }
 
-    const videoIdMatch = url.match(/(?:v=|\/embed\/|youtu\.be\/)([\w-]{11})/);
-    if (videoIdMatch && videoIdMatch[1]) {
-        const videoId = videoIdMatch[1];
-        const videoApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
+    if (endpoint && apiKey) {
+        const api = `https://www.googleapis.com/youtube/v3/channels?part=id&${endpoint}&key=${apiKey}`;
         try {
-            const response = await fetch(videoApiUrl);
+            const response = await fetch(api);
             const data = await response.json();
-            if (data.items && data.items.length > 0) {
-                return data.items[0].snippet.channelId;
-            }
+            if (data.items && data.items.length > 0) return data.items[0].id;
         } catch (error) {
-            console.error(`영상 URL에서 채널 ID 변환 실패 (${videoId}):`, error);
+            console.error(`YouTube API를 통한 ID 변환 실패 (${identifier}):`, error);
         }
     }
-
-    const customNameMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
-    if (customNameMatch && customNameMatch[1]) {
-        const name = customNameMatch[1];
-        const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
-        try {
-            const response = await fetch(searchApiUrl);
-            const data = await response.json();
-            if (data.items && data.items.length > 0) {
-                return data.items[0].id.channelId;
-            }
-        } catch (error) {
-            console.error(`YouTube 맞춤 URL (${name}) -> 채널 ID 변환 실패:`, error);
-        }
-    }
-
-    console.warn(`YouTube URL을 채널 ID로 변환할 수 없습니다: ${url}`);
     return null;
 }
-
 /**
  * 텍스트에서 AI를 통해 키워드를 추출하는 함수.
  * @param {string} text - 분석할 텍스트
@@ -468,7 +439,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 await channelsRef.set(resolvedChannels);
 
                 console.log('채널 정보가 성공적으로 업데이트되었습니다. 즉시 데이터 수집을 시작합니다.');
-                fetchAllChannelData(); // 새로 추가되거나 변경된 채널 데이터 수집
+                
+                // ▼▼▼ [수정] 데이터 수집이 끝날 때까지 기다린 후 UI 새로고침 메시지 전송 ▼▼▼
+                await fetchAllChannelData(); 
+                
+                // 모든 탭에 데이터가 새로고침되었다는 메시지를 보냅니다.
+                chrome.tabs.query({}, (tabs) => {
+                    tabs.forEach(tab => {
+                        if (tab.id) {
+                           chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }).catch(e => console.log(e));
+                        }
+                    });
+                });
+                // ▲▲▲ 수정 완료 ▲▲▲
+
                 sendResponse({ success: true, message: '채널 정보가 성공적으로 저장 및 업데이트되었습니다.' });
 
             } catch (error) {
@@ -813,21 +797,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 
 // --- 4. 데이터 수집 함수들 ---
-function fetchAllChannelData() {
+async function fetchAllChannelData() {
     const userId = 'default_user';
-    firebase.database().ref(`channels/${userId}`).once('value', (snapshot) => {
-        const channels = snapshot.val();
-        if (!channels) {
-            console.log('설정된 채널 정보가 없습니다.');
-            return;
+    // .once('value')는 Promise를 반환하므로 await를 사용합니다.
+    const snapshot = await firebase.database().ref(`channels/${userId}`).once('value');
+    const channels = snapshot.val();
+    if (!channels) {
+        console.log('설정된 채널 정보가 없습니다.');
+        return; // Promise<void>를 반환하며 종료
+    }
+
+    const promises = [];
+    ['myChannels', 'competitorChannels'].forEach(type => {
+        if (channels[type]) {
+            // 각 fetch 함수 호출을 promises 배열에 추가합니다.
+            channels[type].blogs?.forEach(channel => promises.push(fetchRssFeed(channel.apiUrl, type)));
+            channels[type].youtubes?.forEach(channel => promises.push(fetchYoutubeChannel(channel.apiUrl, type)));
         }
-        ['myChannels', 'competitorChannels'].forEach(type => {
-            if (channels[type]) {
-                channels[type].blogs?.forEach(channel => fetchRssFeed(channel.apiUrl, type));
-                channels[type].youtubes?.forEach(channel => fetchYoutubeChannel(channel.apiUrl, type));
-            }
-        });
     });
+
+    // 모든 데이터 수집 작업이 끝날 때까지 기다립니다.
+    await Promise.all(promises);
+    console.log("모든 채널 데이터 수집 완료.");
 }
 
 
@@ -849,18 +840,32 @@ async function fetchRssFeed(url, channelType) {
             const linkMatch = itemText.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/);
             if (!linkMatch) continue;
             
-            const link = linkMatch[1];
-            const contentId = btoa(link).replace(/=/g, '');
+            const fullLink = linkMatch[1].replace(/\s/g, ''); // \n 등 모든 공백 제거
+            const linkForId = fullLink.split('?')[0]; // '?' 앞부분만 사용
+            const contentId = btoa(linkForId).replace(/=/g, '');
             const contentRef = firebase.database().ref(`channel_content/blogs/${contentId}`);
 
             const existingDataSnap = await contentRef.once('value');
 
             // --- [핵심 개선 로직] ---
             if (existingDataSnap.exists()) {
+                const existingData = existingDataSnap.val();
                 // 1. 기존 데이터가 있으면 '가벼운 업데이트'만 수행
-                console.log(`[하이브리드] '${link}'는 이미 존재하므로, 가벼운 업데이트를 시도합니다.`);
+                if (!existingData.tags && existingData.cleanText) {
+                    console.log(`[태그 추가] '${fullLink}'에 태그가 없어 AI 키워드 추출을 시도합니다.`);
+                    try {
+                        const tags = await extractKeywords(existingData.cleanText);
+                        if (tags) {
+                            contentRef.update({ tags: tags });
+                        }
+                    } catch (e) {
+                        console.error(`'${fullLink}' 태그 추가 중 오류:`, e);
+                    }
+                }
+                // 
+                console.log(`[하이브리드] '${fullLink}'는 이미 존재하므로, 가벼운 업데이트를 시도합니다.`);
                 try {
-                    const postResponse = await fetch(link);
+                    const postResponse = await fetch(fullLink);
                     if (!postResponse.ok) continue;
                     let postHtml = await postResponse.text();
 
@@ -875,7 +880,7 @@ async function fetchRssFeed(url, channelType) {
                     await getOffscreenDocument();
                     // offscreen.js로 보내 댓글 수 등 일부 지표만 파싱
                     const parsedData = await new Promise(resolve => {
-                        chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: link }, 
+                        chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: fullLink }, 
                             (response) => resolve(response)
                         );
                     });
@@ -884,17 +889,18 @@ async function fetchRssFeed(url, channelType) {
                         // 2. 전체를 덮어쓰는 set() 대신, 변경된 부분만 갱신하는 update() 사용
                         contentRef.update({
                             commentCount: parsedData.metrics.commentCount,
-                            likeCount: parsedData.metrics.likeCount || null, // 좋아요는 없을 수 있으므로 null 처리
+                            likeCount: parsedData.metrics.likeCount || null,
+                            readTimeInSeconds: parsedData.metrics.readTimeInSeconds || null,
                             fetchedAt: Date.now()
                         });
                     }
                 } catch (updateError) {
-                    console.error(`'${link}' 가벼운 업데이트 중 오류:`, updateError);
+                    console.error(`'${fullLink}' 가벼운 업데이트 중 오류:`, updateError);
                 }
 
             } else {
                 // 3. 신규 데이터일 경우에만 '무거운 전체 파싱' 수행
-                console.log(`[하이브리드] 새로운 콘텐츠 '${link}'를 파싱합니다.`);
+                console.log(`[하이브리드] 새로운 콘텐츠 '${fullLink}'를 파싱합니다.`);
                 const titleMatch = itemText.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
                 const pubDateMatch = itemText.match(/<pubDate>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/pubDate>/);
                 // ... (이하 새로운 콘텐츠를 파싱하고 저장하는 기존 로직은 모두 동일)
@@ -902,7 +908,7 @@ async function fetchRssFeed(url, channelType) {
                 const timestamp = new Date(pubDateMatch ? pubDateMatch[1] : Date.now()).getTime();
 
                 // ... (나머지 전체 파싱 및 저장 로직)
-                const postResponse = await fetch(link);
+                const postResponse = await fetch(fullLink);
                 let postHtml = await postResponse.text();
                 const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
                 if (naverIframeMatch && naverIframeMatch[1]) {
@@ -914,7 +920,7 @@ async function fetchRssFeed(url, channelType) {
                 await getOffscreenDocument();
 
                 const parsedData = await new Promise((resolve) => {
-                    chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: link }, 
+                    chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: fullLink }, 
                         (response) => {
                             if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
                             else resolve(response);
@@ -925,7 +931,7 @@ async function fetchRssFeed(url, channelType) {
                 if (parsedData && parsedData.success) {
                     const tags = await extractKeywords(parsedData.cleanText);
                     const finalData = {
-                        title, link, pubDate: timestamp,
+                        title, fullLink, pubDate: timestamp,
                         description: parsedData.description,
                         thumbnail: parsedData.thumbnail,
                         cleanText: parsedData.cleanText,

@@ -1,10 +1,10 @@
-// js/ui/channelMode.js (Shadow DOM 호환 최종 수정)
+// js/ui/channelMode.js (Shadow DOM 호환 최종 수정 완료)
 
 // 입력 필드와 도움말 아이콘을 생성하는 헬퍼 함수
 function createChannelInput(placeholder, value = '', type) {
   const div = document.createElement('div');
   div.className = 'channel-input-item';
-  const helpIcon = type === 'youtube' ? '<span class="help-icon" title="채널 ID 찾는 법">?</span>' : '';
+  const helpIcon = type === 'youtube' ? `<span class="help-icon" title="채널 ID 찾는 법">?</span>` : '';
   div.innerHTML = `
     <label>${placeholder} ${helpIcon}</label>
     <div class="input-wrapper">
@@ -24,17 +24,13 @@ function showHelpModal(container) {
     modal.innerHTML = `
         <div class="cp-modal-content">
             <button class="cp-modal-close">×</button>
-            <h3>YouTube 채널 ID 찾는 법</h3>
+            <h3>YouTube 채널 주소/ID 찾는 법</h3>
             <ol>
-                <li>채널 페이지로 이동합니다 (예: youtube.com/@채널이름).</li>
-                <li>페이지의 빈 공간을 마우스 오른쪽 클릭 후 <strong>'페이지 소스 보기'</strong>를 선택합니다.</li>
-                <li>새로 열린 코드 페이지에서 <strong>Ctrl+F</strong> (Mac: Cmd+F)를 누릅니다.</li>
-                <li>검색창에 <strong>channelId</strong> 라고 입력합니다.</li>
-                <li><code>"channelId":"UC..."</code> 와 같이 "UC"로 시작하는 긴 문자열이 바로 채널 ID입니다.</li>
+                <li>가장 간단한 방법은 채널의 URL(예: youtube.com/@채널이름)을 그대로 입력하는 것입니다.</li>
+                <li>또는, 페이지 소스 보기에서 <strong>Ctrl+F</strong>로 <strong>channelId</strong>를 검색하여 "UC..."로 시작하는 ID를 직접 입력할 수도 있습니다.</li>
             </ol>
         </div>
     `;
-    // 모달을 Shadow DOM의 최상위 컨테이너에 추가해야 전체 화면을 덮을 수 있습니다.
     container.querySelector('.channel-container').appendChild(modal);
     modal.querySelector('.cp-modal-close').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
@@ -99,8 +95,7 @@ export function renderChannelMode(container) {
     if (e.target.classList.contains('add-channel-btn')) {
       const type = e.target.dataset.type;
       const targetListId = e.target.dataset.target;
-      const placeholder = type === 'blog' ? '블로그 RSS 주소' : '유튜브 채널 ID';
-      // ▼▼▼ [수정] document 대신 channelContainer(Shadow DOM 내부)에서 요소를 찾습니다. ▼▼▼
+      const placeholder = type === 'blog' ? '블로그 주소' : '유튜브 채널 주소';
       channelContainer.querySelector(`#${targetListId}`).appendChild(createChannelInput(placeholder, '', type));
     }
     
@@ -130,7 +125,6 @@ export function renderChannelMode(container) {
     }
 
     if (e.target.classList.contains('channel-save-btn')) {
-      // ▼▼▼ [수정] document 대신 channelContainer에서 요소를 찾습니다. ▼▼▼
       const getValues = (listId) => Array.from(channelContainer.querySelectorAll(`#${listId} input`)).map(input => input.value).filter(Boolean);
       const youtubeApiKey = channelContainer.querySelector('#youtube-api-key').value;
       const geminiApiKey = channelContainer.querySelector('#gemini-api-key').value;
@@ -146,8 +140,11 @@ export function renderChannelMode(container) {
       };
       
       chrome.runtime.sendMessage({ action: 'save_channels_and_key', data: channelData }, (response) => {
-        if (response && response.success) alert('채널 및 API 키 정보가 성공적으로 저장되었습니다.');
-        else alert('저장 중 오류가 발생했습니다: ' + response?.error);
+        if (response && response.success) {
+          alert('채널 및 API 키 정보가 성공적으로 저장되었습니다.');
+        } else {
+          alert('저장 중 오류가 발생했습니다: ' + (response?.error || '알 수 없는 오류'));
+        }
       });
     }
   });
@@ -155,7 +152,6 @@ export function renderChannelMode(container) {
   chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
     if (response && response.success && response.data) {
       const data = response.data;
-      // ▼▼▼ [수정] document 대신 channelContainer에서 요소를 찾습니다. ▼▼▼
       if (data.youtubeApiKey) channelContainer.querySelector('#youtube-api-key').value = data.youtubeApiKey;
       if (data.geminiApiKey) channelContainer.querySelector('#gemini-api-key').value = data.geminiApiKey;
    
@@ -164,11 +160,11 @@ export function renderChannelMode(container) {
       });
       
       const renderSavedChannels = (type, platform) => {
-          const channels = data[type]?.[platform];
+          const channels = data[type]?.[platform] || [];
           const listId = `${type.replace('Channels', '')}-${platform.slice(0,-1)}-list`;
-          const placeholder = `${type === 'myChannels' ? '내' : '경쟁'} ${platform === 'blogs' ? '블로그 RSS 주소' : '유튜브 채널 ID'}`;
+          const placeholder = `${type === 'myChannels' ? '내' : '경쟁'} ${platform === 'blogs' ? '블로그 주소' : '유튜브 채널 주소'}`;
           const channelType = platform === 'blogs' ? 'blog' : 'youtube';
-          const listElement = channelContainer.querySelector(`#${listId}`); // ▼▼▼ [수정]
+          const listElement = channelContainer.querySelector(`#${listId}`);
 
           if (channels?.length > 0) {
               channels.forEach(val => listElement.appendChild(createChannelInput(placeholder, val, channelType)));
@@ -182,9 +178,8 @@ export function renderChannelMode(container) {
       renderSavedChannels('competitorChannels', 'blogs');
       renderSavedChannels('competitorChannels', 'youtubes');
     } else {
-        // ▼▼▼ [수정] document 대신 channelContainer에서 요소를 찾습니다. ▼▼▼
-        channelContainer.querySelector('#my-blog-list').appendChild(createChannelInput('블로그 RSS 주소', '', 'blog'));
-        channelContainer.querySelector('#my-youtube-list').appendChild(createChannelInput('유튜브 채널 ID', '', 'youtube'));
+        channelContainer.querySelector('#my-blog-list').appendChild(createChannelInput('블로그 주소', '', 'blog'));
+        channelContainer.querySelector('#my-youtube-list').appendChild(createChannelInput('유튜브 채널 주소', '', 'youtube'));
     }
   });
 }

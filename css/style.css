@@ -661,3 +661,16 @@
 .cp-modal-content h3 { margin-top: 0; }
 .cp-modal-content ol { padding-left: 20px; line-height: 1.6; }
 .cp-modal-close { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 24px; cursor: pointer; color: #888; }
+.card-metric-item {
+  display: inline-flex; /* 아이콘과 텍스트를 한 줄에 정렬 */
+  align-items: center;  /* 세로 중앙 정렬 */
+  gap: 4px;             /* 아이콘과 텍스트 사이 간격 */
+  font-size: 11px;
+  color: #555;
+  white-space: nowrap;
+}
+
+.card-metric-item .material-symbols-outlined {
+  font-size: 14px; /* 아이콘 크기 조정 */
+  font-weight: 300;
+}

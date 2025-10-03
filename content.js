@@ -17,6 +17,19 @@ if (window.self === window.top) {
     if (msg.action === "open_content_pilot_panel") {
       createAndShowPanel();
     }
+    // ▼▼▼ [추가] 데이터 새로고침 메시지를 수신하여 대시보드를 다시 렌더링합니다. ▼▼▼
+    if (msg.action === 'cp_data_refreshed') {
+        const host = document.getElementById("content-pilot-host");
+        if (isPanelVisible() && host && host.shadowRoot) {
+            const mainArea = host.shadowRoot.querySelector('#cp-main-area');
+            // 현재 활성화된 모드가 'dashboard'일 때만 다시 렌더링합니다.
+            if (mainArea && window.__cp_active_mode === 'dashboard') {
+                console.log('대시보드 데이터 새로고침 신호를 수신하여 UI를 다시 렌더링합니다.');
+                renderDashboard(mainArea);
+            }
+        }
+    }
+    // ▲▲▲ 추가 완료 ▲▲▲
   });
 
   // 아이프레임으로부터 미리보기/토스트 메시지 요청 수신

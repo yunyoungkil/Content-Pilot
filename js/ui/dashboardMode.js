@@ -13,9 +13,10 @@ let viewState = {
 // --- UI 렌더링 함수 ---
 
 function createContentCard(item, type) {
+    console.log('createContentCard에 전달된 item:', item);
     if (!item || !item.title) return '';
     const isVideo = !!item.videoId;
-    const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.link;
+    const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.fullLink || item.link || '#';
     const thumbnail = item.thumbnail || '';
     
     const dateSource = item.publishedAt || item.pubDate;
@@ -26,21 +27,42 @@ function createContentCard(item, type) {
     ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
     : '';
 
-    // ▼▼▼ [수정] metrics 변수가 div 대신 span들만 반환하도록 변경 ▼▼▼
     let metricsSpans = '';
     if (isVideo) {
         metricsSpans = `
-            <span class="card-metric-item">조회수: ${item.viewCount || 0}</span>
+             <span class="card-metric-item">조회수: ${item.viewCount || 0}</span>
             <span class="card-metric-item">좋아요: ${item.likeCount || 0}</span>
             <span class="card-metric-item">댓글: ${item.commentCount || 0}</span>
         `;
     } else { // 블로그 게시물일 경우
+        // ▼▼▼ [핵심 수정] 초 단위를 'X분 Y초' 형식으로 변환합니다. ▼▼▼
+        const totalSeconds = item.readTimeInSeconds || 0;
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        
+        let readTimeText = '';
+        if (minutes > 0) {
+            readTimeText += `${minutes}분 `;
+        }
+        // 초가 0보다 크거나, 분이 0일 때만 초를 표시합니다. (예: 0분 36초 -> 36초)
+        if (seconds > 0 || minutes === 0) {
+            readTimeText += `${seconds}초`;
+        }
+        readTimeText = readTimeText.trim();
+        if (readTimeText === '') readTimeText = '1초 미만';
+
+        const readTimeFullText = `약 ${readTimeText} (${(item.textLength || 0).toLocaleString()}자)`;
+        const videoIcon = item.hasVideo ? `<span class="card-metric-item">동영상: 포함</span>` : '';
+        
         metricsSpans = `
+            <span class="card-metric-item">시간: ${readTimeFullText}</span>
             <span class="card-metric-item">좋아요: ${item.likeCount || 0}</span>
             <span class="card-metric-item">댓글: ${item.commentCount || 0}</span>
+            <span class="card-metric-item">링크: ${item.linkCount || 0}</span>
+            ${videoIcon}
         `;
+        // ▲▲▲ 수정 완료 ▲▲▲
     }
-    // ▲▲▲ 수정 완료 ▲▲▲
     
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
 
@@ -52,17 +74,17 @@ function createContentCard(item, type) {
             <div class="card-info">
                 <div class="card-title">${item.title}</div>
                 ${tagsHtml}
-
                 <div class="card-footer">
                     <span class="card-meta">${dateString}</span>
                     ${metricsSpans}
                 </div>
-
             </div>
             ${commentAnalysisButton}
         </a>
     `;
 }
+
+
 // 콘텐츠 목록을 그리는 통합 렌더링 함수
 function renderContentForType(container, sourceId, allContent, type, platform) {
     if (platform === 'youtube') {
@@ -138,8 +160,12 @@ function updateDashboardUI(container) {
         const selectedPlatform = platformTabs.querySelector('.active').dataset.platform;
         const platformKey = selectedPlatform === 'blog' ? 'blogs' : 'youtubes';
         
-        // [수정] 채널 '객체' 배열 가져오기
-        const channelObjects = cachedData.channels[type]?.[platformKey] || [];
+        // ▼▼▼ [버그 수정] Firebase로부터 받은 객체를 배열로 변환 ▼▼▼
+        let channelObjects = cachedData.channels[type]?.[platformKey] || [];
+        if (!Array.isArray(channelObjects) && typeof channelObjects === 'object') {
+            channelObjects = Object.values(channelObjects);
+        }
+        // ▲▲▲ [버그 수정 완료] ▲▲▲
 
         const header = container.querySelector(`#${type}-col .dashboard-col-header`);
         if (header) { // 헤더 업데이트 로직은 항상 실행하도록 개선
@@ -176,7 +202,7 @@ function updateDashboardUI(container) {
         if (channelObjects.length > 0) {
             selectElement.style.display = 'block';
             
-            // [수정] 채널 객체 배열을 순회하며 <option> 생성
+            // 이제 channelObjects가 항상 배열이므로 이 코드는 안전하게 실행됩니다.
             selectElement.innerHTML = channelObjects.map(channel => {
                 const id = selectedPlatform === 'blog' ? btoa(channel.apiUrl).replace(/=/g, '') : channel.apiUrl;
                 const title = cachedData.metas[id]?.title || channel.inputUrl; // 제목 없으면 inputUrl 사용
@@ -192,7 +218,6 @@ function updateDashboardUI(container) {
     });
 }
 
-
 // 대시보드 메인 렌더링 함수
 export function renderDashboard(container) {
     container.innerHTML = `
@@ -207,8 +232,9 @@ export function renderDashboard(container) {
                         </div>
                     </div>
                     <div class="platform-tabs" data-type="myChannels">
-                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
                         <div class="platform-tab" data-platform="blog">블로그</div>
+                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
+
                     </div>
                     <select id="myChannels-select" class="channel-selector" style="display: none;"></select>
                     <div id="myChannels-content-list" class="content-list"><p class="loading-placeholder">채널 정보를 불러오는 중...</p></div>
@@ -218,8 +244,8 @@ export function renderDashboard(container) {
                         <h2>⚔️ 경쟁사 주요 콘텐츠</h2>
                     </div>
                     <div class="platform-tabs" data-type="competitorChannels">
-                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
                         <div class="platform-tab" data-platform="blog">블로그</div>
+                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
                     </div>
                     <select id="competitorChannels-select" class="channel-selector" style="display: none;"></select>
                     <div id="competitorChannels-content-list" class="content-list"></div>
@@ -250,6 +276,27 @@ export function renderDashboard(container) {
 function addDashboardEventListeners(container) {
     if (container.dataset.listenersAttached) return;
     container.dataset.listenersAttached = 'true';
+
+    // ▼▼▼ [추가] 백그라운드로부터 데이터 새로고침 메시지를 수신하는 리스너 ▼▼▼
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.action === 'cp_data_refreshed') {
+            // 대시보드 UI가 현재 화면에 보이는 경우에만 데이터를 다시 불러옵니다.
+            const dashboardGrid = container.querySelector('.dashboard-grid');
+            if (dashboardGrid) {
+                console.log("대시보드: 백그라운드로부터 데이터 새로고침 신호를 수신했습니다. UI를 업데이트합니다.");
+                
+                // 데이터를 다시 요청하고 UI를 새로 그리는 로직
+                chrome.runtime.sendMessage({ action: 'get_channel_content' }, (response) => {
+                    if (!response || !response.success) {
+                        container.querySelectorAll('.content-list').forEach(list => list.innerHTML = '<p class="loading-placeholder">콘텐츠를 새로고침하지 못했습니다.</p>');
+                        return;
+                    }
+                    cachedData = response.data;
+                    updateDashboardUI(container);
+                });
+            }
+        }
+    });
 
     container.addEventListener('click', e => {
         const target = e.target;

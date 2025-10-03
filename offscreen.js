@@ -58,7 +58,9 @@ function parseContentAndMetrics(doc, urlObj) {
         likeSelector = '.like-count, .btn-like, .post-like-count, .lb-count, .likebtn-button';
     }
 
-    let textLength = 0, imageCount = 0, cleanText = '';
+    let textLength = 0, imageCount = 0, cleanText = '', readTimeInSeconds = 0;
+    let hasVideo = false, linkCount = 0;
+
     if (contentElement) {
         const contentClone = contentElement.cloneNode(true);
         const unnecessarySelectors = 'ins.adsbygoogle, div[id*="ad-"], .ad-section, .ssp_adcontent_inner, .se-module-oglink, script, style, .another_category';
@@ -66,6 +68,20 @@ function parseContentAndMetrics(doc, urlObj) {
         cleanText = formatCleanText(contentClone.innerText);
         textLength = cleanText.length;
         imageCount = contentClone.querySelectorAll('img').length;
+
+
+        // 한국어 평균 독서 속도를 분당 약 1500자 내외로 가정하여 계산합니다.
+        // 1분 미만은 '1분'으로 표시하기 위해 Math.ceil을 사용합니다.
+    if (textLength > 0) {
+        // 초당 읽는 글자 수 (Characters Per Second)를 약 25자로 설정 (1500자/분)
+        const CPS = 25; 
+        readTimeInSeconds = Math.round(textLength / CPS);
+    }
+
+        // ▼▼▼ [추가] 동영상 및 링크 수 계산 로직 ▼▼▼
+        const videoIframes = contentClone.querySelectorAll('iframe[src*="youtube.com"], iframe[src*="vimeo.com"]');
+        hasVideo = videoIframes.length > 0;
+        linkCount = contentClone.querySelectorAll('a[href^="http"]').length;
     }
     
     let commentCount = 0;
@@ -97,7 +113,7 @@ function parseContentAndMetrics(doc, urlObj) {
     
     
     return {
-        metrics: { commentCount, textLength, imageCount, likeCount },
+        metrics: { commentCount, textLength, imageCount, likeCount, readTimeInSeconds, hasVideo, linkCount },
         cleanText: cleanText 
     };
 }
