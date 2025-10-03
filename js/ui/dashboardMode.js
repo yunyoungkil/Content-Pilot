@@ -2,7 +2,7 @@
 
 // --- 상태 관리 변수 ---
 let cachedData = null; // 데이터 캐싱
-const ITEMS_PER_PAGE = 5;
+const ITEMS_PER_PAGE = 10;
 
 // 각 목록의 정렬 기준과 페이지를 독립적으로 관리하는 객체
 let viewState = {
@@ -85,22 +85,15 @@ function createContentCard(item, type) {
 }
 
 
-// 콘텐츠 목록을 그리는 통합 렌더링 함수
-function renderContentForType(container, sourceId, allContent, type, platform) {
-    if (platform === 'youtube') {
-        renderKeyContent(container, sourceId, allContent, type);
-    } else {
-        renderBlogContent(container, sourceId, allContent, type);
-    }
-}
-
-// 유튜브 콘텐츠 (정렬, 페이징 기능 포함)
-function renderKeyContent(container, sourceId, allContent, type) {
+function renderPaginatedContent(container, sourceId, allContent, type, platform) {
     const state = viewState[type];
-    const filteredContent = allContent.filter(item => item.sourceId === sourceId && item.videoId);
+    const isVideo = platform === 'youtube';
+
+    const filteredContent = allContent.filter(item => {
+        return item.sourceId === sourceId && (isVideo ? !!item.videoId : !item.videoId);
+    });
     
-    // 유튜브는 publishedAt 기준으로 정렬
-    const sortKey = state.sortOrder === 'pubDate' ? 'publishedAt' : state.sortOrder;
+    const sortKey = state.sortOrder;
     filteredContent.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
 
     const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
@@ -110,14 +103,23 @@ function renderKeyContent(container, sourceId, allContent, type) {
     const startIndex = state.currentPage * ITEMS_PER_PAGE;
     const paginatedContent = filteredContent.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
+    const sortOptions = isVideo ? `
+        <option value="publishedAt" ${sortKey === 'publishedAt' ? 'selected' : ''}>최신 순</option>
+        <option value="viewCount" ${sortKey === 'viewCount' ? 'selected' : ''}>조회수 높은 순</option>
+        <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
+        <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
+    ` : `
+        <option value="pubDate" ${sortKey === 'pubDate' ? 'selected' : ''}>최신 순</option>
+        <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
+        <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
+        <option value="textLength" ${sortKey === 'textLength' ? 'selected' : ''}>분량 많은 순</option>
+    `;
+
     if (paginatedContent.length > 0) {
         container.innerHTML = `
             <div class="top5-controls">
                 <select class="top5-sort-select" data-type="${type}">
-                    <option value="pubDate" ${state.sortOrder === 'pubDate' ? 'selected' : ''}>최신 순</option>
-                    <option value="viewCount" ${state.sortOrder === 'viewCount' ? 'selected' : ''}>조회수 높은 순</option>
-                    <option value="likeCount" ${state.sortOrder === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
-                    <option value="commentCount" ${state.sortOrder === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
+                    ${sortOptions}
                 </select>
                 <div class="top5-pagination">
                     <button class="pagination-btn" data-direction="prev" ${state.currentPage === 0 ? 'disabled' : ''}>&lt;</button>
@@ -128,24 +130,11 @@ function renderKeyContent(container, sourceId, allContent, type) {
             <div class="content-list">${paginatedContent.map(item => createContentCard(item, type)).join('')}</div>
         `;
     } else {
-        container.innerHTML = '<p class="loading-placeholder">표시할 유튜브 영상이 없습니다.</p>';
+        container.innerHTML = `<p class="loading-placeholder">표시할 ${isVideo ? '유튜브 영상이' : '블로그 게시물이'} 없습니다.</p>`;
     }
 }
 
-// 블로그 콘텐츠 (단순 목록, 정렬 기준 수정)
-function renderBlogContent(container, sourceId, allContent, type) {
-    const filteredContent = allContent.filter(item => item.sourceId === sourceId && !item.videoId);
-    // [버그 수정] 블로그는 pubDate 기준으로 정렬
-    filteredContent.sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0));
-    
-    if (filteredContent.length > 0) {
-        container.innerHTML = `<div class="content-list">${filteredContent.map(item => createContentCard(item, type)).join('')}</div>`;
-    } else {
-        container.innerHTML = '<p class="loading-placeholder">표시할 블로그 게시물이 없습니다.</p>';
-    }
-}
-
-// UI 업데이트 통합 함수 (데이터 구조 처리 로직 수정)
+// UI 업데이트 통합 함수
 function updateDashboardUI(container) {
     if (!cachedData) return;
     
@@ -153,64 +142,28 @@ function updateDashboardUI(container) {
         const platformTabs = container.querySelector(`.platform-tabs[data-type="${type}"]`);
         const selectElement = container.querySelector(`#${type}-select`);
         const contentListElement = container.querySelector(`#${type}-content-list`);
-        const analyzeButtonsWrapper = container.querySelector(`#myChannels-analyze-buttons`);
-
         if (!platformTabs || !selectElement || !contentListElement) return;
 
         const selectedPlatform = platformTabs.querySelector('.active').dataset.platform;
         const platformKey = selectedPlatform === 'blog' ? 'blogs' : 'youtubes';
         
-        // ▼▼▼ [버그 수정] Firebase로부터 받은 객체를 배열로 변환 ▼▼▼
         let channelObjects = cachedData.channels[type]?.[platformKey] || [];
         if (!Array.isArray(channelObjects) && typeof channelObjects === 'object') {
             channelObjects = Object.values(channelObjects);
         }
-        // ▲▲▲ [버그 수정 완료] ▲▲▲
-
-        const header = container.querySelector(`#${type}-col .dashboard-col-header`);
-        if (header) { // 헤더 업데이트 로직은 항상 실행하도록 개선
-            const currentSourceId = selectElement.value;
-            const meta = cachedData.metas[currentSourceId];
-            if (meta && meta.fetchedAt) {
-                const now = Date.now();
-                const fetchedAt = meta.fetchedAt;
-                const minutesAgo = Math.floor((now - fetchedAt) / 60000);
-                const updateInfoHtml = `
-                    <div style="font-size: 12px; color: #888; display: flex; align-items: center; gap: 4px;">
-                        <span>업데이트: ${minutesAgo}분 전</span>
-                        <button class="refresh-btn" data-type="${type}" data-platform="${selectedPlatform}" data-source-id="${currentSourceId}" style="background:none; border:none; color:#1a73e8; cursor:pointer; padding:0; font-size: 12px; line-height: 1;">↻</button>
-                    </div>
-                `;
-                let existingInfo = header.querySelector('.refresh-btn')?.parentElement;
-                if(existingInfo) {
-                    existingInfo.innerHTML = `
-                        <span>업데이트: ${minutesAgo}분 전</span>
-                        <button class="refresh-btn" data-type="${type}" data-platform="${selectedPlatform}" data-source-id="${currentSourceId}" style="background:none; border:none; color:#1a73e8; cursor:pointer; padding:0; font-size: 12px; line-height: 1;">↻</button>
-                    `;
-                } else {
-                    const infoWrapper = document.createElement('div');
-                    infoWrapper.innerHTML = updateInfoHtml;
-                    header.appendChild(infoWrapper.firstElementChild);
-                }
-            }
-        }
-
-        if (type === 'myChannels' && analyzeButtonsWrapper) {
-            analyzeButtonsWrapper.style.display = (selectedPlatform === 'youtube' && channelObjects.length > 0) ? 'flex' : 'none';
-        }
 
         if (channelObjects.length > 0) {
             selectElement.style.display = 'block';
+            const currentSelection = selectElement.value;
             
-            // 이제 channelObjects가 항상 배열이므로 이 코드는 안전하게 실행됩니다.
             selectElement.innerHTML = channelObjects.map(channel => {
                 const id = selectedPlatform === 'blog' ? btoa(channel.apiUrl).replace(/=/g, '') : channel.apiUrl;
-                const title = cachedData.metas[id]?.title || channel.inputUrl; // 제목 없으면 inputUrl 사용
-                return `<option value="${id}">${title}</option>`;
+                const title = cachedData.metas[id]?.title || channel.inputUrl;
+                return `<option value="${id}" ${id === currentSelection ? 'selected' : ''}>${title}</option>`;
             }).join('');
-
-            // 올바르게 생성된 selectElement의 현재 값으로 콘텐츠 렌더링
-            renderContentForType(contentListElement, selectElement.value, cachedData.content, type, selectedPlatform);
+            
+            // [수정] 분리되었던 함수 호출을 통합된 함수 호출로 변경
+            renderPaginatedContent(contentListElement, selectElement.value, cachedData.content, type, selectedPlatform);
         } else {
             selectElement.style.display = 'none';
             contentListElement.innerHTML = `<p class="loading-placeholder">연동된 ${selectedPlatform === 'blog' ? '블로그' : '유튜브'} 채널이 없습니다.</p>`;
@@ -323,7 +276,7 @@ function addDashboardEventListeners(container) {
             const contentListElement = col.querySelector('.content-list');
             const sourceId = col.querySelector('.channel-selector').value;
             const platform = col.querySelector('.platform-tab.active').dataset.platform;
-            renderContentForType(contentListElement, sourceId, cachedData.content, type, platform);
+            renderPaginatedContent(contentListElement, sourceId, cachedData.content, type, platform);
             return;
         }
 
@@ -453,7 +406,8 @@ function addDashboardEventListeners(container) {
             const contentListElement = col.querySelector('.content-list');
             const sourceId = target.value;
             const platform = col.querySelector('.platform-tab.active').dataset.platform;
-            renderContentForType(contentListElement, sourceId, cachedData.content, type, platform);
+            viewState[type] = { sortOrder: platform === 'youtube' ? 'publishedAt' : 'pubDate', currentPage: 0 };
+            updateDashboardUI(container);
             return;
         }
 
@@ -467,7 +421,7 @@ function addDashboardEventListeners(container) {
             const contentListElement = col.querySelector('.content-list');
             const sourceId = col.querySelector('.channel-selector').value;
             const platform = col.querySelector('.platform-tab.active').dataset.platform;
-            renderContentForType(contentListElement, sourceId, cachedData.content, type, platform);
+            renderPaginatedContent(contentListElement, sourceId, cachedData.content, type, platform);
             return;
         }
     });
