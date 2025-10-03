@@ -26,16 +26,23 @@ function createContentCard(item, type) {
     ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
     : '';
 
-    const metrics = isVideo ? `
-        <div class="card-metrics">
-            <span>조회수: ${item.viewCount || 0}</span>
-            <span>좋아요: ${item.likeCount || 0}</span>
-            <span>댓글: ${item.commentCount || 0}</span>
-        </div>
-    ` : '';
+    // ▼▼▼ [수정] metrics 변수가 div 대신 span들만 반환하도록 변경 ▼▼▼
+    let metricsSpans = '';
+    if (isVideo) {
+        metricsSpans = `
+            <span class="card-metric-item">조회수: ${item.viewCount || 0}</span>
+            <span class="card-metric-item">좋아요: ${item.likeCount || 0}</span>
+            <span class="card-metric-item">댓글: ${item.commentCount || 0}</span>
+        `;
+    } else { // 블로그 게시물일 경우
+        metricsSpans = `
+            <span class="card-metric-item">좋아요: ${item.likeCount || 0}</span>
+            <span class="card-metric-item">댓글: ${item.commentCount || 0}</span>
+        `;
+    }
+    // ▲▲▲ 수정 완료 ▲▲▲
     
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
-
 
     return `
         <a href="${link}" target="_blank" class="content-card">
@@ -44,17 +51,18 @@ function createContentCard(item, type) {
             </div>
             <div class="card-info">
                 <div class="card-title">${item.title}</div>
-
                 ${tagsHtml}
 
-                <div class="card-meta">${dateString}</div>
-                ${metrics}
+                <div class="card-footer">
+                    <span class="card-meta">${dateString}</span>
+                    ${metricsSpans}
+                </div>
+
             </div>
             ${commentAnalysisButton}
         </a>
     `;
 }
-
 // 콘텐츠 목록을 그리는 통합 렌더링 함수
 function renderContentForType(container, sourceId, allContent, type, platform) {
     if (platform === 'youtube') {
@@ -188,97 +196,6 @@ function updateDashboardUI(container) {
 // 대시보드 메인 렌더링 함수
 export function renderDashboard(container) {
     container.innerHTML = `
-        <style>
-            .dashboard-container { height: 100%; display: flex; flex-direction: column; }
-            .dashboard-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 24px; overflow-y: auto; align-content: start; }
-            .dashboard-col-header { display: flex; justify-content: space-between; align-items: center; }
-            .dashboard-col h2 { margin-top: 0; font-size: 18px; color: #333; }
-            .analyze-buttons-wrapper { display: none; gap: 8px; }
-            .analyze-btn { background: #1a73e8; color: white; border: none; padding: 6px 12px; border-radius: 5px; font-size: 13px; font-weight: 600; cursor: pointer; }
-            .platform-tabs { display: flex; gap: 8px; margin: 10px 0; border-bottom: 2px solid #eee; }
-            .platform-tab { padding: 8px 12px; cursor: pointer; color: #888; font-weight: 600; border-bottom: 2px solid transparent; }
-            .platform-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
-            .channel-selector { width: 100%; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; margin-bottom: 15px; }
-            .content-list { display: flex; flex-direction: column; gap: 12px; }
-            .content-card-wrapper { position: relative; }
-            .content-card { display: flex; gap: 12px; background: #fff; border-radius: 8px; padding: 10px; text-decoration: none; color: inherit; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%; box-sizing: border-box; height: 110px; }
-            .comment-analyze-btn { position: absolute; bottom: 10px; right: 10px; background: #34A853; color: white; border: none; padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; opacity: 0; transform: translateY(5px); transition: all 0.2s ease-out; z-index: 2; }
-
-            .content-card {
-                position: relative;
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                background: #fff;
-                border-radius: 8px;
-                padding: 10px;
-                text-decoration: none;
-                color: inherit;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-                width: 100%;
-                box-sizing: border-box;
-                height: 110px;
-                overflow: hidden; 
-                opacity: 1;
-                transform: translateY(0);
-            }
-            .content-card:hover .comment-analyze-btn {
-                opacity: 1;
-                transform: translateY(0);
-            }
-            .card-thumbnail {
-                width: 100px;
-                height: 80px;
-                flex-shrink: 0;
-            }
-            .card-thumbnail img {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-                border-radius: 4px;
-                background: #f0f0f0;
-            }
-            .card-info {
-                flex: 1;
-                min-width: 0;
-                height: 100%;
-                display: flex;
-                flex-direction: column;
-            }
-            .card-title {
-                font-weight: 600;
-                font-size: 15px;
-                line-height: 1.4;
-                flex-grow: 1;
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                word-break: break-all;
-            }
-            .card-meta {
-                font-size: 12px;
-                color: #888;
-                margin-top: 4px;
-            }
-            .card-metrics {
-                font-size: 11px;
-                color: #555;
-                display: flex;
-                gap: 8px;
-                margin-top: 4px;
-                flex-wrap: wrap;
-            }
-
-            .loading-placeholder { text-align: center; color: #888; margin-top: 40px; }
-            .ai-ideas-section { grid-column: 1 / 3; background: #fff; border-radius: 8px; padding: 20px 24px; margin-top: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
-            .top5-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-            .top5-sort-select { padding: 6px; font-size: 13px; border-radius: 4px; border: 1px solid #ccc; }
-            .top5-pagination { display: flex; align-items: center; gap: 8px; }
-            .pagination-btn { background: #f1f3f5; border: 1px solid #ddd; border-radius: 4px; width: 28px; height: 28px; cursor: pointer; }
-            .pagination-btn:disabled { cursor: not-allowed; opacity: 0.5; }
-        </style>
         <div class="dashboard-container">
             <div class="dashboard-grid">
                 <div id="my-channels-col" class="dashboard-col">

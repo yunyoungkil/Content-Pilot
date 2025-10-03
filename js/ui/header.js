@@ -2,22 +2,6 @@
 
 // 공통 헤더 렌더링 함수
 export function renderPanelHeader() {
-  // 구글 머티리얼 심볼 폰트가 없으면 동적으로 head에 추가
-  if (!document.getElementById("cp-material-symbols-font")) {
-    const link = document.createElement("link");
-    link.id = "cp-material-symbols-font";
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap";
-    document.head.appendChild(link);
-  }
-  // 스타일은 항상 한 번만 추가
-  if (!document.getElementById("cp-material-symbols-style")) {
-    const style = document.createElement("style");
-    style.id = "cp-material-symbols-style";
-    style.textContent = `.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }`;
-    document.head.appendChild(style);
-  }
   const iconUrl = chrome.runtime.getURL("images/icon-32.png");
   let activeMode = window.__cp_active_mode || "scrapbook";
   const tabs = [

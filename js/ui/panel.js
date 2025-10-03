@@ -1,4 +1,4 @@
-// js/ui/panel.js
+// js/ui/panel.js (Shadow DOM 적용)
 
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
@@ -9,23 +9,45 @@ import { renderDashboard } from "./dashboardMode.js";
 
 // 패널이 현재 보이는지 확인하는 함수
 export function isPanelVisible() {
-    const panel = document.getElementById("content-pilot-panel");
-    return panel && panel.style.display !== 'none';
+    // 이제 Shadow DOM을 호스팅하는 'host' 요소의 존재 여부로 확인합니다.
+    const host = document.getElementById("content-pilot-host");
+    return host && host.style.display !== 'none';
 }
 
 // 메인 패널을 생성하고 화면에 표시하는 함수
 export function createAndShowPanel() {
-  let panel = document.getElementById("content-pilot-panel");
-  if (panel) {
-    panel.style.display = "flex";
+  let host = document.getElementById("content-pilot-host");
+  if (host) {
+    host.style.display = "block";
   } else {
-    panel = document.createElement("div");
+    // 1. Shadow DOM을 호스팅할 최상위 부모(host) 요소를 생성합니다.
+    host = document.createElement("div");
+    host.id = "content-pilot-host";
+    document.body.appendChild(host);
+
+    // 2. host에 Shadow Root를 연결합니다. 'open' 모드는 외부 JS에서 접근 가능하게 합니다.
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+
+    // 3. Shadow DOM 내부에 외부 CSS 파일을 링크합니다.
+    // 이렇게 하면 외부 페이지의 스타일로부터 완벽하게 격리됩니다.
+    const styleLink = document.createElement('link');
+    styleLink.rel = 'stylesheet';
+    styleLink.href = chrome.runtime.getURL('css/style.css');
+    shadowRoot.appendChild(styleLink);
+
+    // 4. 기존 panel 로직을 Shadow DOM 내부에 생성합니다.
+    const panel = document.createElement("div");
     panel.id = "content-pilot-panel";
     panel.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background-color: rgba(0, 0, 0, 0.4); z-index: 2147483647;
       display: flex; align-items: center; justify-content: center;
+      /* CSS 초기화: 외부 폰트 스타일 상속 방지 */
+      font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
     `;
+    
     const panelContent = document.createElement("div");
     panelContent.id = "cp-panel-content-wrapper";
     panelContent.style.cssText = `
@@ -44,44 +66,44 @@ export function createAndShowPanel() {
     panelContent.appendChild(headerArea);
     panelContent.appendChild(mainArea);
     panel.appendChild(panelContent);
-    document.body.appendChild(panel);
 
-    // [핵심] 기본 활성 모드를 'dashboard'로 설정
+    // 5. 생성된 panel을 document가 아닌 shadowRoot에 추가합니다.
+    shadowRoot.appendChild(panel);
+
     window.__cp_active_mode = 'dashboard'; 
     
-
-    // 최초 렌더링 및 이벤트 리스너 설정
-    renderHeaderAndTabs(panel);
-    addEventListenersToPanel(panel); // 이벤트 리스너는 한 번만 등록
-    renderDashboard(mainArea); // 기본으로 대시보드 표시
+    // 이제 모든 UI 렌더링과 이벤트 리스너는 shadowRoot를 기준으로 동작해야 합니다.
+    renderHeaderAndTabs(shadowRoot);
+    addEventListenersToPanel(shadowRoot); 
+    renderDashboard(mainArea);
   }
-    // 패널을 열 때 스크랩 기능 활성화 상태를 저장
-    chrome.storage.local.set({ 
+
+  chrome.storage.local.set({ 
     isScrapingActive: true,
-    highlightToggleState: false // 토글 상태를 항상 꺼짐으로 초기화
+    highlightToggleState: false
   });
 }
 
 // 패널을 닫는 함수
 export function closePanel() {
-  const panel = document.getElementById("content-pilot-panel");
-  if (panel) panel.style.display = "none";
+  const host = document.getElementById("content-pilot-host");
+  if (host) host.style.display = "none"; // 호스트를 숨깁니다.
   chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
 }
 
 // 패널을 최소화하는 함수
 export function minimizePanelToCard() {
-  const panel = document.getElementById("content-pilot-panel");
-  if (panel) panel.style.display = "none";
+  const host = document.getElementById("content-pilot-host");
+  if (host) host.style.display = "none";
   showCardFloatingButton();
   chrome.storage.local.set({ isScrapingActive: true, highlightToggleState: false });
 }
 
 // 스크랩을 위해 패널을 잠시 숨기는 함수
 export function hidePanelForScrap() {
-  const panel = document.getElementById("content-pilot-panel");
-  if (panel && panel.style.display !== 'none') {
-    panel.style.display = 'none';
+  const host = document.getElementById("content-pilot-host");
+  if (host && host.style.display !== 'none') {
+    host.style.display = 'none';
     return true;
   }
   return false;
@@ -90,52 +112,47 @@ export function hidePanelForScrap() {
 // 스크랩 후 패널을 원래 상태로 복원하는 함수
 export function restorePanelAfterScrap(wasVisible) {
   if (wasVisible) {
-    const panel = document.getElementById("content-pilot-panel");
-    if (panel) {
-      panel.style.display = 'flex';
+    const host = document.getElementById("content-pilot-host");
+    if (host) {
+      host.style.display = 'block';
     }
   }
 }
 
 // --- UI 렌더링 및 이벤트 연결 함수 ---
 
-// 헤더와 탭 영역만 다시 렌더링하는 함수
-function renderHeaderAndTabs(panel) {
-    const headerArea = panel.querySelector("#cp-header-area");
+// 헤더와 탭 영역만 다시 렌더링하는 함수 (기준이 shadowRoot로 변경)
+function renderHeaderAndTabs(shadowRoot) {
+    const headerArea = shadowRoot.querySelector("#cp-header-area");
     if (headerArea) {
         headerArea.innerHTML = renderPanelHeader();
     }
 }
 
-// ▼▼▼ [핵심 수정] 이벤트 위임 방식으로 이벤트 리스너를 한 번만 등록 ▼▼▼
-function addEventListenersToPanel(panel) {
-    const mainArea = panel.querySelector("#cp-main-area");
-    const headerArea = panel.querySelector("#cp-header-area");
+// 이벤트 리스너 등록 함수 (기준이 shadowRoot로 변경)
+function addEventListenersToPanel(shadowRoot) {
+    const mainArea = shadowRoot.querySelector("#cp-main-area");
+    const headerArea = shadowRoot.querySelector("#cp-header-area");
 
-    // 헤더 영역에서 발생하는 클릭 이벤트를 감지
     headerArea.addEventListener('click', (e) => {
         const target = e.target;
         
-        // 1. 닫기 버튼 클릭 처리
         if (target.closest("#cp-panel-close")) {
             closePanel();
             return;
         }
 
-        // 2. 최소화 버튼 클릭 처리
         if (target.closest("#cp-panel-fullscreen-exit")) {
             minimizePanelToCard();
             return;
         }
 
-        // 3. 탭 클릭 처리
         const tab = target.closest('.cp-mode-tab');
         if (tab) {
             const activeKey = tab.dataset.key;
-            window.__cp_active_mode = activeKey; // 현재 활성화된 모드 저장
-            renderHeaderAndTabs(panel); // 헤더를 다시 그려서 활성 탭 스타일 업데이트
+            window.__cp_active_mode = activeKey;
+            renderHeaderAndTabs(shadowRoot); // shadowRoot 기준으로 헤더 다시 렌더링
 
-            // activeKey에 따라 메인 컨텐츠 영역을 다시 그림
             if (activeKey === 'dashboard') {
                 renderDashboard(mainArea);
             } else if (activeKey === 'scrapbook') {
@@ -151,8 +168,7 @@ function addEventListenersToPanel(panel) {
     });
 }
 
-
-// 좌하단 카드 버튼 표시 함수
+// 좌하단 카드 버튼 표시 함수 (이 함수는 Shadow DOM과 무관하므로 수정 없음)
 function showCardFloatingButton() {
   if (document.getElementById("cp-dock-container")) return;
 
@@ -173,8 +189,7 @@ function showCardFloatingButton() {
     transition: all 0.2s ease-in-out; z-index: 2;
   `;
   const iconUrl = chrome.runtime.getURL("images/icon-48.png");
-  cardBtn.innerHTML = `<img src="${iconUrl}" alt="Content Pilot" style="width: 32px; height: 32px; pointer-events: none; opacity: 0.65;">`;
-
+cardBtn.innerHTML = `<img src="${iconUrl}" alt="Content Pilot" style="width: 32px; height: 32px; pointer-events: none; opacity: 0.65;">`;
   const iconImg = cardBtn.querySelector('img');
 
   cardBtn.onmouseover = () => {

@@ -130,185 +130,73 @@ async function resolveBlogUrl(url) {
 
 
 /**
- * 블로그 일반 URL에서 RSS 피드 주소를 추출합니다.
- * 플랫폼별 패턴을 먼저 시도하여 안정성을 높입니다.
- * @param {string} url - 사용자가 입력한 블로그 URL
- * @returns {Promise<string|null>} - 추출된 RSS 주소 또는 null
- */
-async function resolveBlogUrl(url) {
-    if (!url || !url.startsWith('http')) return null;
-
-    let urlObj;
-    try {
-        urlObj = new URL(url);
-    } catch (e) {
-        return null; // 유효하지 않은 URL
-    }
-    const host = urlObj.hostname.toLowerCase();
-    const origin = urlObj.origin;
-
-    // 1. 플랫폼 기반의 명시적인 RSS 주소 패턴 시도 (Naver, Blogspot 고유 패턴 적용)
-    let platformRssPath = null;
-    
-    // Tistory 패턴 적용: /rss
-    if (host.includes('tistory.com')) {
-        platformRssPath = urlObj.pathname.endsWith('/') ? 'rss' : '/rss';
-    } 
-    // Naver Blog 패턴 적용: ID 추출 후 고유 XML URL 생성
-    else if (host.includes('blog.naver.com')) {
-        let naverId = null;
-
-        // 1. URL 경로에서 ID 추출 (예: /masteri0100)
-        const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
-        if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
-            naverId = pathMatch[1];
-        }
-        
-        // 2. 경로에서 추출 실패 시 쿼리 파라미터에서 ID 추출 (예: ?blogId=masteri0100)
-        if (!naverId) {
-            const params = new URLSearchParams(urlObj.search);
-            naverId = params.get('blogId');
-        }
-
-        if (naverId) {
-            // Naver의 고유 RSS 패턴을 따르는 URL 생성 후 즉시 반환
-            return `https://rss.blog.naver.com/${naverId}.xml`;
-        }
-        platformRssPath = '/rss'; // ID 추출 실패 시 대체 경로 시도 (낮은 확률)
-    }
-
-    // WordPress, Medium 등 /feed 패턴 적용
-    else if (host.includes('wordpress.com') || host.includes('medium.com')) {
-        platformRssPath = '/feed';
-    }
-    // Blogspot/Blogger 명시적 대응: /feeds/posts/default?alt=rss
-    else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
-        platformRssPath = '/feeds/posts/default?alt=rss';
-    }
-
-    // 명시적 패턴이 발견되면, 최종 RSS URL을 생성하여 반환 (최우선)
-    if (platformRssPath) {
-        let finalUrl = platformRssPath.startsWith('/') ? origin + platformRssPath : origin + '/' + platformRssPath;
-        return finalUrl;
-    }
-    
-    // 2. (Fallback) HTML Fetch 및 <link> 태그 분석 (표준 방식 - 2차 도메인 등)
-    try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
-        const html = await response.text();
-
-        // 표준 RSS link 태그 패턴 검색
-        const rssMatch = html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/rss\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i) ||
-                        html.match(/<link[^>]*rel=["']alternate["'][^>]*type=["']application\/atom\+xml["'][^>]*href=["']([^"']*)["'][^>]*>/i);
-
-        if (rssMatch && rssMatch[1]) {
-            let rssUrl = rssMatch[1];
-            // 상대 경로를 절대 경로로 변환 처리
-            if (rssUrl.startsWith('//')) {
-                rssUrl = `https:${rssUrl}`;
-            } else if (rssUrl.startsWith('/')) {
-                rssUrl = `${urlObj.protocol}//${urlObj.host}${rssUrl}`;
-            }
-            return rssUrl;
-        }
-
-        // 3. (Final Fallback) 일반적인 /feed 경로 시도 
-        const fallbackUrl = url.endsWith('/') ? url + 'feed' : url + '/feed';
-        return fallbackUrl;
-    } catch (error) {
-        console.error(`RSS 주소 확인 실패 (${url}):`, error);
-        return null;
-    }
-}
-
-/**
- * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환합니다. (G-1 A/C-2)
- * 영상 재생 주소(watch?v=)까지 처리하도록 보완되었습니다.
+ * 유튜브 일반 URL에서 채널 ID(UC...)를 추출하거나 API를 통해 변환 (최종 수정)
  * @param {string} url - 사용자가 입력한 유튜브 URL 또는 ID
  * @param {string} apiKey - YouTube Data API 키
  * @returns {Promise<string|null>} - 추출된 채널 ID 또는 null
  */
 async function resolveYoutubeUrl(url, apiKey) {
-    if (!url || !url.startsWith('http')) {
-        // 'UC'로 시작하는 24자리 문자열이면 이미 채널 ID로 간주
-        if (url.startsWith('UC') && url.length === 24) return url;
+      if (!url) return null;
+
+    if (url.startsWith('UC') && url.length === 24) {
+        return url;
+    }
+
+    if (!url.startsWith('http')) {
         return null;
     }
     
-    let path = '';
     let urlObj;
     try {
         urlObj = new URL(url);
-        path = urlObj.pathname;
     } catch (e) {
         return null;
     }
-
-    // 1. [보완 로직] 영상 주소 (watch?v=) 처리
-    if (path.includes('/watch') || path.includes('/embed')) {
-        const videoId = urlObj.searchParams.get('v'); // 'v' 파라미터에서 Video ID 추출
-        if (videoId && apiKey) {
-            // videos 엔드포인트를 사용하여 Channel ID 검색
-            const videoApi = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
-            try {
-                const response = await fetch(videoApi);
-                const data = await response.json();
-                
-                if (data.items && data.items.length > 0) {
-                    return data.items[0].snippet.channelId; // Channel ID 반환
-                }
-            } catch (error) {
-                console.error(`Video URL에서 채널 ID 변환 실패 (${videoId}):`, error);
-                return null;
-            }
-        }
-    }
-
-
-    // 2. [기존 로직] 채널 주소 기반 ID 추출 (/@handle, /user, /channel)
-    let identifier = null;
-    let endpoint = null;
-    const channelIdMatch = path.match(/\/channel\/([UC|c][a-zA-Z0-9_-]{22,24})/i);
-    const handleMatch = path.match(/\/@([a-zA-Z0-9_-]+)/i);
-    const userMatch = path.match(/\/user\/([a-zA-Z0-9_-]+)/i);
-
-    // 이미 채널 ID가 URL에 포함된 경우 바로 반환
+    const path = urlObj.pathname;
+    
+    const channelIdMatch = path.match(/\/channel\/([a-zA-Z0-9_-]{24})/);
     if (channelIdMatch && channelIdMatch[1]) {
         return channelIdMatch[1];
-    } 
-    // 핸들 URL (@handle)인 경우
-    else if (handleMatch && handleMatch[1]) {
-        identifier = handleMatch[1];
-        endpoint = `forHandle=@${identifier}`; // forHandle 파라미터 사용
-    } 
-    // 사용자 이름 URL (/user/username)인 경우
-    else if (userMatch && userMatch[1]) {
-        identifier = userMatch[1];
-        endpoint = `forUsername=${identifier}`; // forUsername 파라미터 사용
-    } else {
-        // 유효한 형태가 아니면 null 반환
+    }
+    
+    if (!apiKey) {
+        console.error("YouTube API Key is missing for URL resolution.");
         return null;
     }
 
-    // 3. [기존 로직] API 호출을 통해 핸들/사용자 이름 변환
-    if (endpoint && apiKey) {
-        const api = `https://www.googleapis.com/youtube/v3/channels?part=id&${endpoint}&key=${apiKey}`;
+    const videoIdMatch = url.match(/(?:v=|\/embed\/|youtu\.be\/)([\w-]{11})/);
+    if (videoIdMatch && videoIdMatch[1]) {
+        const videoId = videoIdMatch[1];
+        const videoApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
         try {
-            const response = await fetch(api);
+            const response = await fetch(videoApiUrl);
             const data = await response.json();
             if (data.items && data.items.length > 0) {
-                return data.items[0].id; 
+                return data.items[0].snippet.channelId;
             }
         } catch (error) {
-            console.error(`YouTube API를 통한 ID 변환 실패 (${identifier}):`, error);
-            return null;
+            console.error(`영상 URL에서 채널 ID 변환 실패 (${videoId}):`, error);
         }
     }
-    
+
+    const customNameMatch = path.match(/\/(?:@|c\/|user\/)([a-zA-Z0-9_.-]+)/);
+    if (customNameMatch && customNameMatch[1]) {
+        const name = customNameMatch[1];
+        const searchApiUrl = `https://www.googleapis.com/youtube/v3/search?part=id&q=${name}&type=channel&maxResults=1&key=${apiKey}`;
+        try {
+            const response = await fetch(searchApiUrl);
+            const data = await response.json();
+            if (data.items && data.items.length > 0) {
+                return data.items[0].id.channelId;
+            }
+        } catch (error) {
+            console.error(`YouTube 맞춤 URL (${name}) -> 채널 ID 변환 실패:`, error);
+        }
+    }
+
+    console.warn(`YouTube URL을 채널 ID로 변환할 수 없습니다: ${url}`);
     return null;
 }
-
 
 /**
  * 텍스트에서 AI를 통해 키워드를 추출하는 함수.

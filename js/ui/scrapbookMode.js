@@ -1,26 +1,12 @@
-// js/ui/scrapbookMode.js (최종 통합본)
+// js/ui/scrapbookMode.js (Shadow DOM 호환 수정 완료)
 import { shortenLink, showConfirmationToast } from "../utils.js";
-
 
 let selectedScrapId = null;
 let allScraps = [];
 
-// --- ▼▼▼ 실시간 업데이트 리스너를 이 파일로 가져옴 ▼▼▼ ---
-chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === 'cp_scraps_updated') {
-        allScraps = msg.data;
-        // 현재 스크랩북 모드가 활성화 상태일 때만 목록을 다시 그림
-        if(document.querySelector('.scrapbook-root')) {
-            const listContainer = document.querySelector('.scrapbook-list-cards');
-            const keyword = document.getElementById('scrapbook-keyword-input')?.value || '';
-            const filteredScraps = keyword ? allScraps.filter(s => s.text.includes(keyword)) : allScraps;
-            renderScrapList(filteredScraps);
-        }
-    }
-});
-
 // 스크랩북 모드 UI 렌더링 함수
 export function renderScrapbook(container) {
+  // container는 이제 Shadow DOM 내부의 #cp-main-area 입니다.
   container.innerHTML = `
     <div class="scrapbook-root">
       <div class="scrapbook-list-section">
@@ -34,48 +20,56 @@ export function renderScrapbook(container) {
       </div>
     </div>
   `;
-  requestScrapsAndRender();
+  
+  // ▼▼▼ [수정] container를 인자로 넘겨줍니다. ▼▼▼
+  requestScrapsAndRender(container);
 
-  // 검색창 이벤트 리스너 추가
-  const keywordInput = document.getElementById('scrapbook-keyword-input');
+  const keywordInput = container.querySelector('#scrapbook-keyword-input');
   keywordInput.addEventListener('keyup', () => {
       const keyword = keywordInput.value;
       const filteredScraps = allScraps.filter(s => s.text && s.text.toLowerCase().includes(keyword.toLowerCase()));
-      renderScrapList(filteredScraps);
+      // ▼▼▼ [수정] container를 인자로 넘겨줍니다. ▼▼▼
+      renderScrapList(filteredScraps, container);
   });
 }
 
-function requestScrapsAndRender() {
+// ▼▼▼ [수정] container를 인자로 받도록 변경 ▼▼▼
+function requestScrapsAndRender(container) {
     chrome.runtime.sendMessage({ action: "cp_get_firebase_scraps" }, (response) => {
         if (response && response.data) {
-            allScraps = response.data;
-            renderScrapList(allScraps);
+            allScraps = response.data.sort((a, b) => b.timestamp - a.timestamp);
+            // ▼▼▼ [수정] container를 인자로 넘겨줍니다. ▼▼▼
+            renderScrapList(allScraps, container);
         } else {
-            const listContainer = document.querySelector('.scrapbook-list-cards');
+            // ▼▼▼ [수정] document 대신 container에서 요소를 찾습니다. ▼▼▼
+            const listContainer = container.querySelector('.scrapbook-list-cards');
             if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
         }
     });
 }
 
-// 이 파일에 있는 renderScrapList가 항상 호출되도록 보장
-function renderScrapList(scraps) {
-    const listContainer = document.querySelector('.scrapbook-list-cards');
+// ▼▼▼ [수정] container를 인자로 받도록 변경 ▼▼▼
+function renderScrapList(scraps, container) {
+    // ▼▼▼ [수정] document 대신 container에서 요소를 찾습니다. ▼▼▼
+    const listContainer = container.querySelector('.scrapbook-list-cards');
     if (!listContainer) return;
-    const sortedScraps = [...scraps].sort((a, b) => b.timestamp - a.timestamp);
-    if (sortedScraps.length === 0) {
+
+    if (scraps.length === 0) {
         listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
         return;
     }
-    listContainer.innerHTML = sortedScraps.map(scrap => {
-        // --- ▼▼▼ [G-8] 태그 표시 UI 추가 ▼▼▼ ---
-        const tagsHtml = scrap.tags && scrap.tags.length > 0
+
+    listContainer.innerHTML = scraps.map(scrap => {
+        const tagsHtml = scrap.tags && Array.isArray(scrap.tags) && scrap.tags.length > 0
             ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
             : '';
-        // --- ▲▲▲ UI 추가 완료 ▲▲▲ ---
 
         return `
             <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}">
-              ...
+              <button class="scrap-card-delete-btn" data-id="${scrap.id}">
+                <span class="material-symbols-outlined" style="font-size: 18px; pointer-events: none;">delete</span>
+              </button>
+              ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ''}
               <div class="scrap-card-info">
                 <div class="scrap-card-title">${scrap.text ? scrap.text.substring(0, 20) : '제목 없음'}...</div>
                 <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
@@ -89,45 +83,45 @@ function renderScrapList(scraps) {
         card.addEventListener('click', (e) => {
             if(e.target.closest('.scrap-card-delete-btn')) return;
             selectedScrapId = card.dataset.id;
-            renderScrapList(sortedScraps);
-            renderDetailView(selectedScrapId);
+            // ▼▼▼ [수정] container를 재귀적으로 넘겨줍니다. ▼▼▼
+            renderScrapList(scraps, container);
+            renderDetailView(selectedScrapId, container);
         });
     });
 
-// 삭제 버튼 클릭 이벤트 리스너
-listContainer.querySelectorAll('.scrap-card-delete-btn').forEach(button => {
-  button.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const scrapIdToDelete = button.dataset.id;
+    listContainer.querySelectorAll('.scrap-card-delete-btn').forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const scrapIdToDelete = button.dataset.id;
 
-    showConfirmationToast("정말로 삭제하시겠습니까?", () => {
-      // "삭제"를 눌렀을 때 실행될 로직
-      chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapIdToDelete });
-
-      // --- ▼▼▼ 이 부분이 핵심입니다 ▼▼▼ ---
-      // 만약 현재 상세 정보에 보고 있는 스크랩이 지금 삭제한 것이라면,
-      // 상세 정보 창을 즉시 비웁니다.
-      if (selectedScrapId === scrapIdToDelete) {
-        const detailContainer = document.getElementById('scrapbook-detail-content-area');
-        if (detailContainer) {
-          detailContainer.innerHTML = `<div class="scrapbook-detail-empty">왼쪽 목록에서 스크랩을 선택하세요.</div>`;
-        }
-        // 선택된 ID도 초기화
-        selectedScrapId = null;
-      }
+        showConfirmationToast("정말로 삭제하시겠습니까?", () => {
+          chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapIdToDelete }, response => {
+              if (response && response.success) {
+                  // 성공적으로 삭제되면 다시 데이터를 요청하여 화면을 갱신합니다.
+                  requestScrapsAndRender(container);
+                  if (selectedScrapId === scrapIdToDelete) {
+                      renderDetailView(null, container); // 상세 뷰 비우기
+                  }
+              }
+          });
+        });
+      });
     });
-  });
-});
 }
 
-function renderDetailView(scrapId) {
-    const detailContainer = document.getElementById('scrapbook-detail-content-area');
+// ▼▼▼ [수정] container를 인자로 받도록 변경 ▼▼▼
+function renderDetailView(scrapId, container) {
+    // ▼▼▼ [수정] document 대신 container에서 요소를 찾습니다. ▼▼▼
+    const detailContainer = container.querySelector('#scrapbook-detail-content-area');
     if(!detailContainer) return;
+
     const scrap = allScraps.find(s => s.id === scrapId);
     if (!scrap) {
-        detailContainer.innerHTML = `<div class="scrapbook-detail-empty">스크랩을 찾을 수 없습니다.</div>`;
+        detailContainer.innerHTML = `<div class="scrapbook-detail-empty">왼쪽 목록에서 스크랩을 선택하세요.</div>`;
+        selectedScrapId = null; // 선택된 ID 초기화
         return;
     }
+
     detailContainer.innerHTML = `
         <div class="scrapbook-detail-card">
             ${scrap.image ? `<img src="${scrap.image}" class="scrapbook-detail-img" alt="detail image">` : ''}
@@ -137,3 +131,19 @@ function renderDetailView(scrapId) {
         </div>
     `;
 }
+
+// background.js로부터 실시간 업데이트 수신 (이제 Shadow DOM 내부를 찾도록 수정)
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === 'cp_scraps_updated') {
+        // Shadow DOM 호스트를 먼저 찾습니다.
+        const host = document.getElementById("content-pilot-host");
+        // 호스트와 Shadow Root가 존재하고, 그 안에 스크랩북 UI가 있는지 확인합니다.
+        if (host && host.shadowRoot) {
+            const container = host.shadowRoot.querySelector('#cp-main-area');
+            if (container && container.querySelector('.scrapbook-root')) {
+                // container를 인자로 넘겨주어 UI를 올바르게 업데이트합니다.
+                requestScrapsAndRender(container);
+            }
+        }
+    }
+});

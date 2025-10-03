@@ -45,7 +45,8 @@
         "images/*.png",
         "lib/firebase-app-compat.js",
         "lib/firebase-database-compat.js",
-        "offscreen.html"
+        "offscreen.html",
+        "css/style.css"
       ],
       "matches": ["<all_urls>"]
     }
