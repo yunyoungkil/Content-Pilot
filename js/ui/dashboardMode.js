@@ -18,7 +18,13 @@ function createContentCard(item, type) {
     const isVideo = !!item.videoId;
     const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.fullLink || item.link || '#';
     const thumbnail = item.thumbnail || '';
-    
+
+    // ▼▼▼ [핵심 수정] 제목이 40자를 초과하면 잘라내고 "..."를 붙입니다. ▼▼▼
+    const title = item.title.length > 40
+        ? `${item.title.substring(0, 40)} ...` 
+        : item.title;
+
+
     const dateSource = item.publishedAt || item.pubDate;
     const date = dateSource && !isNaN(Number(dateSource)) ? new Date(Number(dateSource)) : null;
     const dateString = date ? date.toLocaleDateString() : '날짜 정보 없음';
@@ -26,6 +32,22 @@ function createContentCard(item, type) {
     const tagsHtml = item.tags && Array.isArray(item.tags) && item.tags.length > 0 
     ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
     : '';
+
+    let imagesPreviewHtml = '';
+    if (item.allImages) {
+        // 1. 객체를 실제 배열로 변환합니다.
+        const imagesArray = Array.isArray(item.allImages) ? item.allImages : Object.values(item.allImages);
+
+        if (imagesArray.length > 0) {
+            imagesPreviewHtml = `
+                <div class="card-images-preview">
+                    ${imagesArray.slice(0, 4).map(image => `
+                        <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" referrerpolicy="no-referrer">
+                    `).join('')}
+                </div>
+            `;
+        }
+    }
 
     let metricsSpans = '';
     if (isVideo) {
@@ -59,6 +81,7 @@ function createContentCard(item, type) {
             <span class="card-metric-item">좋아요: ${item.likeCount || 0}</span>
             <span class="card-metric-item">댓글: ${item.commentCount || 0}</span>
             <span class="card-metric-item">링크: ${item.linkCount || 0}</span>
+            <span class="card-metric-item">이미지: ${item.imageCount || 0}</span>
             ${videoIcon}
         `;
         // ▲▲▲ 수정 완료 ▲▲▲
@@ -72,8 +95,9 @@ function createContentCard(item, type) {
                 ${thumbnail ? `<img src="${thumbnail}" alt="Thumbnail" referrerpolicy="no-referrer">` : `<div class="no-image">${isVideo ? '▶' : '📄'}</div>`}
             </div>
             <div class="card-info">
-                <div class="card-title">${item.title}</div>
+                <div class="card-title">${title}</div>
                 ${tagsHtml}
+                ${imagesPreviewHtml}
                 <div class="card-footer">
                     <span class="card-meta">${dateString}</span>
                     ${metricsSpans}
