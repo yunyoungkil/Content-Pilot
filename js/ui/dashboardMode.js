@@ -29,9 +29,22 @@ function createContentCard(item, type) {
     const date = dateSource && !isNaN(Number(dateSource)) ? new Date(Number(dateSource)) : null;
     const dateString = date ? date.toLocaleDateString() : '날짜 정보 없음';
 
-    const tagsHtml = item.tags && Array.isArray(item.tags) && item.tags.length > 0 
-    ? `<div class="card-tags">${item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
-    : '';
+    let tagsContent = '';
+    if (item.tags === undefined) {
+        // 1. 아직 추출 시도 전
+        tagsContent = `<span class="tag-placeholder">태그 분석 예정...</span>`;
+    } else if (item.tags === null) {
+        // 2. 추출 실패
+        tagsContent = `<span class="tag-placeholder error">태그 분석 실패 (API 오류)</span>`;
+    } else if (Array.isArray(item.tags) && item.tags.length > 0) {
+        // 3. 추출 성공 및 태그 있음
+        tagsContent = item.tags.map(tag => `<span class="tag">#${tag}</span>`).join('');
+    } else {
+        // 4. 추출 성공했으나 관련 태그 없음
+        tagsContent = `<span class="tag-placeholder">관련 태그 없음</span>`;
+    }
+    
+    const tagsHtml = `<div class="card-tags">${tagsContent}</div>`;
 
     let imagesPreviewHtml = '';
     if (item.allImages) {
@@ -41,7 +54,7 @@ function createContentCard(item, type) {
         if (imagesArray.length > 0) {
             imagesPreviewHtml = `
                 <div class="card-images-preview">
-                    ${imagesArray.slice(0, 4).map(image => `
+                    ${imagesArray.slice(0, 10).map(image => `
                         <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" referrerpolicy="no-referrer">
                     `).join('')}
                 </div>

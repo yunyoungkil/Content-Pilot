@@ -562,8 +562,22 @@
   margin-top: 6px;
   max-height: 22px; /* 태그가 너무 많아도 한 줄만 보이도록 */
   overflow: hidden;
+  min-height: 22px; /* 일관된 높이 유지를 위해 유지 */
+  align-items: center; /* 내부 아이템을 세로 중앙 정렬 */
+}
+/* 안내 메시지 스타일 */
+.tag-placeholder {
+  font-size: 12px;
+  font-weight: 500;
+  color: #999;
+  padding: 3px 8px;
 }
 
+/* 에러 메시지 스타일 */
+.tag-placeholder.error {
+  color: #D93025; /* 구글의 에러 색상 */
+  font-weight: 600;
+}
 .tag {
   background-color: #e8f0fe;
   color: #4285F4;
@@ -595,33 +609,38 @@
 .channel-selector { width: 100%; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; margin-bottom: 15px; }
 .content-list { display: flex; flex-direction: column; gap: 12px; }
 .content-card-wrapper { position: relative; }
-.content-card { position: relative; display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 8px; padding: 10px; text-decoration: none; color: inherit; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%; box-sizing: border-box; height: 110px; overflow: hidden; }
+.content-card { position: relative; display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 8px; padding: 10px; text-decoration: none; color: inherit; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%; box-sizing: border-box; height: 110px; overflow: hidden; height: auto; min-height: 110px;}
 .content-card:hover .comment-analyze-btn { opacity: 1; transform: translateY(0); }
 .comment-analyze-btn { position: absolute; bottom: 10px; right: 10px; background: #34A853; color: white; border: none; padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; opacity: 0; transform: translateY(5px); transition: all 0.2s ease-out; z-index: 2; }
 .card-thumbnail { width: 100px; height: 80px; flex-shrink: 0; }
 .card-thumbnail img, .card-thumbnail .no-image { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; background: #f0f0f0; }
 .no-image { display: flex; align-items: center; justify-content: center; font-size: 24px; color: #ccc; }
-.card-info { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
+.card-info {
+  flex: 1;
+  min-width: 0;
+  /* height: 100%; 속성을 삭제합니다. */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between; /* 내부 요소들을 위아래로 정렬 */
+  }
 .card-title { 
-  font-weight: 600; 
-  font-size: 15px; 
-  line-height: 1.4; 
-  
-  /* ▼▼▼ [핵심 수정] 아래 4줄을 추가하여 한 줄 줄임표 스타일을 적용합니다. ▼▼▼ */
-  white-space: nowrap;      /* 텍스트가 줄바꿈되지 않도록 설정 */
-  overflow: hidden;         /* 요소의 영역을 넘어가는 텍스트를 숨김 */
-  text-overflow: ellipsis;  /* 숨겨진 텍스트를 ... 으로 표시 */
-  display: block;             /* 위의 속성들을 적용하기 위해 블록 요소로 변경 */
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
 }
 .card-footer {
   display: flex;
   align-items: center;
-  flex-wrap: wrap; /* 너비가 좁아지면 줄바꿈 처리 */
-  gap: 4px 12px;     /* 세로 4px, 가로 12px 간격 */
-  margin-top: auto;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  /* margin-top: auto; 속성을 삭제합니다. */
   padding-top: 4px;
-  font-size: 12px;   /* 모든 하단 정보의 폰트 크기 통일 */
+  font-size: 12px;
   color: #888;
+  margin-top: 8px; /* 위 요소(이미지 목록)와의 간격을 위해 추가합니다. */
 }
 .card-meta {
   white-space: nowrap; /* 날짜는 줄바꿈되지 않도록 */
