@@ -438,23 +438,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
                 await channelsRef.set(resolvedChannels);
 
-                console.log('채널 정보가 성공적으로 업데이트되었습니다. 즉시 데이터 수집을 시작합니다.');
-                
-                // ▼▼▼ [수정] 데이터 수집이 끝날 때까지 기다린 후 UI 새로고침 메시지 전송 ▼▼▼
-                await fetchAllChannelData(); 
-                
-                // 모든 탭에 데이터가 새로고침되었다는 메시지를 보냅니다.
-                chrome.tabs.query({}, (tabs) => {
-                    tabs.forEach(tab => {
-                        if (tab.id) {
-                           chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }).catch(e => console.log(e));
-                        }
-                    });
+            // 5. 먼저 UI에 "저장 완료" 팝업을 띄우기 위해 응답을 보냅니다.
+            sendResponse({ 
+                success: true, 
+                message: '채널 정보가 저장되었습니다. 데이터 수집을 백그라운드에서 시작합니다.' 
+            });
+
+            // "수집 시작" 신호를 모든 탭에 전송
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    if(tab.id) chrome.tabs.sendMessage(tab.id, { action: 'cp_sync_started' }).catch(e => {});
                 });
-                // ▲▲▲ 수정 완료 ▲▲▲
+            });
 
-                sendResponse({ success: true, message: '채널 정보가 성공적으로 저장 및 업데이트되었습니다.' });
+            // 데이터 수집 실행
+            await fetchAllChannelData(); 
 
+            // "수집 완료" 신호를 모든 탭에 전송
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    if(tab.id) chrome.tabs.sendMessage(tab.id, { action: 'cp_sync_finished' }).catch(e => {});
+                });
+            });
+                        
+            // 6. 응답을 보낸 후, 백그라운드에서 데이터 수집 및 UI 새로고침을 진행합니다.
+            console.log('채널 정보 저장 완료. 백그라운드 데이터 수집을 시작합니다.');
+            await fetchAllChannelData(); 
+            
+            // 7. 모든 데이터 수집이 끝나면 UI에 새로고침 신호를 보냅니다.
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    if (tab.id) {
+                       chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }).catch(e => {});
+                    }
+                });
+            });
+            console.log('모든 채널 데이터 수집 및 UI 새로고침 완료.');
             } catch (error) {
                 console.error('채널 저장/업데이트 처리 중 오류:', error);
                 sendResponse({ success: false, error: error.message });
@@ -942,6 +961,16 @@ async function fetchRssFeed(url, channelType) {
                     };
                     const cleanedFinalData = cleanDataForFirebase(finalData);
                     contentRef.set(cleanedFinalData);
+
+                    // ▼▼▼ 아이템 1개 수집 완료 신호 전송 ▼▼▼
+                    chrome.tabs.query({}, (tabs) => {
+                        tabs.forEach(tab => {
+                            if(tab.id) chrome.tabs.sendMessage(tab.id, { 
+                                action: 'cp_item_updated',
+                                data: cleanedFinalData // 방금 저장한 데이터를 함께 보냄
+                            }).catch(e => {});
+                        });
+                    });
                 }
             }
             // --- [개선 로직 끝] ---

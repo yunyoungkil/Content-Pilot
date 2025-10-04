@@ -54,8 +54,9 @@ function createContentCard(item, type) {
         if (imagesArray.length > 0) {
             imagesPreviewHtml = `
                 <div class="card-images-preview">
-                    ${imagesArray.slice(0, 10).map(image => `
-                        <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" referrerpolicy="no-referrer">
+                    ${imagesArray.slice(0, 4).map(image => `
+                        <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" 
+                             onerror="this.style.display='none'">
                     `).join('')}
                 </div>
             `;
@@ -216,6 +217,9 @@ export function renderDashboard(container) {
                 <div id="my-channels-col" class="dashboard-col">
                     <div class="dashboard-col-header">
                         <h2>🚀 내 주요 콘텐츠</h2>
+                        <div class="loading-indicator" id="myChannels-loading" style="display: none;">
+                            <span>수집 중...</span>
+                        </div>
                         <div id="myChannels-analyze-buttons" class="analyze-buttons-wrapper">
                             <button id="myChannels-analyze-btn" class="analyze-btn">성과 분석</button>
                             <button id="competitor-compare-btn" class="analyze-btn">경쟁 비교 분석</button>
@@ -463,3 +467,29 @@ function addDashboardEventListeners(container) {
         }
     });
 }
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'cp_sync_started') {
+        // 데이터 수집 시작 신호를 받으면 로딩 UI를 보여줍니다.
+        container.querySelectorAll('.loading-indicator').forEach(el => el.style.display = 'flex');
+    } 
+    else if (msg.action === 'cp_item_updated') {
+        // 개별 아이템이 수집될 때마다 UI에 실시간으로 추가합니다.
+        const newItem = msg.data;
+        const listId = `${newItem.channelType}-content-list`;
+        const listElement = container.querySelector(`#${listId}`);
+
+        if (listElement) {
+            const cardHtml = createContentCard(newItem);
+            listElement.insertAdjacentHTML('afterbegin', cardHtml); // 새 항목을 목록 맨 위에 추가
+            
+            // "표시할 콘텐츠가 없습니다" 같은 플레이스홀더가 있다면 제거
+            const placeholder = listElement.querySelector('.loading-placeholder');
+            if (placeholder) placeholder.remove();
+        }
+    }
+    else if (msg.action === 'cp_sync_finished') {
+        // 데이터 수집 완료 신호를 받으면 로딩 UI를 숨깁니다.
+        container.querySelectorAll('.loading-indicator').forEach(el => el.style.display = 'none');
+    }
+});

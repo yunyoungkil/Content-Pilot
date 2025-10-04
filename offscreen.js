@@ -79,19 +79,55 @@ function parseContentAndMetrics(doc, urlObj) {
         const unnecessarySelectors = 'ins, script, style, .adsbygoogle, [id*="ad-"], .ad-section';
         contentClone.querySelectorAll(unnecessarySelectors).forEach(el => el.remove());
         
-        // ▼▼▼ [복원된 핵심 로직] data-src를 우선으로 확인하여 이미지를 수집합니다. ▼▼▼
+        // ▼▼▼ [핵심 로직] data-src를 우선으로 확인하여 이미지를 수집합니다. ▼▼▼
         const images = contentClone.querySelectorAll('img');
         images.forEach(img => {
-            const isIrrelevant = img.closest('.se-module-usertool, .profile_area, .writer_info, [class*="profile"], [id*="profile"]');
-            const imageUrl = img.getAttribute('data-src') || img.src;
+    let imageUrl = '';
+    const parentSpan = img.closest('span[data-url]'); // <img>를 감싸는 span[data-url] 태그 찾기
+    const parentLink = img.closest('a.__se_image_link'); // <img>를 감싸는 a 태그 찾기
 
-            if (!isIrrelevant && imageUrl) {
-                const src = new URL(imageUrl, doc.baseURI).href;
-                const alt = img.alt || '';
-                allImages.push({ src, alt });
-            }
-        });
-        imageCount = allImages.length;
+    // 1. (티스토리) 부모 <span>의 data-url에 원본 URL이 있는지 최우선 확인
+    if (parentSpan && parentSpan.dataset.url) {
+        imageUrl = parentSpan.dataset.url;
+    }
+    // 2. (네이버) 부모 <a>의 data-linkdata에 원본 URL이 있는지 확인
+    else if (parentLink && parentLink.dataset.linkdata) {
+        try {
+            const linkData = JSON.parse(parentLink.dataset.linkdata);
+            if (linkData.src) imageUrl = linkData.src;
+        } catch (e) {}
+    }
+    // 3. (티스토리 CDN) srcset에 CDN 주소가 있는지 확인
+    if (!imageUrl) {
+        const srcset = img.getAttribute('srcset');
+        if (srcset && srcset.includes('daumcdn.net')) {
+            imageUrl = srcset.split(',')[0].trim().split(' ')[0];
+        }
+    }
+    // 4. 위의 방법으로 찾지 못했을 경우, 기존 속성들에서 URL 탐색
+    if (!imageUrl) {
+        imageUrl = img.getAttribute('data-lazy-src') || img.getAttribute('data-src') || img.src;
+    }
+
+    // 필터링 로직 (스티커, 지도 등 제외)
+    const isIrrelevant = img.closest('.se-module-usertool, .profile_area, .writer_info, [class*="profile"], [id*="profile"]');
+    const isSticker = img.classList.contains('se-sticker-image');
+    const isDthumb = imageUrl && imageUrl.includes('dthumb-phinf.pstatic.net');
+    const isStaticMap = imageUrl && imageUrl.includes('simg.pstatic.net');
+
+    if (imageUrl && !isIrrelevant && !isSticker && !isDthumb && !isStaticMap) {
+        
+        // 네이버 이미지(pstatic.net)일 경우에만 화질 저하 파라미터를 제거
+        if (imageUrl.includes('pstatic.net') && imageUrl.includes('?')) {
+            imageUrl = imageUrl.split('?')[0];
+        }
+
+        const src = new URL(imageUrl, doc.baseURI).href;
+        const alt = img.alt || '';
+        allImages.push({ src, alt });
+    }
+});
+imageCount = allImages.length;
         // ▲▲▲ 복원 완료 ▲▲▲
 
         cleanText = formatCleanText(contentClone.innerText);
