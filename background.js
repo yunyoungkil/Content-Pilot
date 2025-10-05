@@ -613,58 +613,131 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       return true;
     }
-  else if (msg.action === "analyze_my_channel") {
+    else if (msg.action === "analyze_my_channel") {
         const contentData = msg.data;
         const dataSummary = contentData
             .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
             .slice(0, 20)
             .map(item => `제목: ${item.title}, 조회수: ${item.viewCount || 0}, 좋아요: ${item.likeCount || 0}`)
             .join('\n');
+        
+        const youtubeAnalysisPrompt = `
+            당신은 전문 콘텐츠 전략가입니다. 아래 제공되는 유튜브 채널의 영상 데이터 목록을 분석해주세요.
+            [데이터]
+            ${dataSummary}
+            [분석 요청]
+            1. 어떤 주제의 영상들이 가장 높은 조회수와 좋아요를 기록했나요? (상위 3개 주제)
+            2. 성공적인 영상들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
+            3. 위 분석 결과를 바탕으로, 이 채널이 다음에 만들면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
+            결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
+        `;
 
         (async () => {
-            const analysisResult = await callGeminiAPI(dataSummary);
+            const analysisResult = await callGeminiAPI(youtubeAnalysisPrompt);
             sendResponse({ success: true, analysis: analysisResult });
         })();
         
         return true;
-  }
-  else if (msg.action === "generate_content_ideas") {
-    const { myContent, competitorContent } = msg.data;
-    const myDataSummary = myContent
-        .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-        .slice(0, 10)
-        .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
-        .join('\n');
+    }
 
-    const competitorDataSummary = competitorContent
-        .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-        .slice(0, 10)
-        .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
-        .join('\n');
-    
-    const newPrompt = `
-        당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 두 채널의 데이터를 분석하고, 두 채널의 강점을 조합하여 시청자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+    else if (msg.action === "generate_content_ideas") {
+        const { myContent, competitorContent } = msg.data;
+        const myDataSummary = myContent
+            .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+            .slice(0, 10)
+            .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
+            .join('\n');
 
-        [내 채널의 인기 영상 목록]
-        ${myDataSummary}
+        const competitorDataSummary = competitorContent
+            .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+            .slice(0, 10)
+            .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
+            .join('\n');
+        
+        const youtubeIdeasPrompt = `
+            당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 두 채널의 데이터를 분석하고, 두 채널의 강점을 조합하여 시청자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+            [내 채널의 인기 영상 목록]
+            ${myDataSummary}
+            [경쟁 채널의 인기 영상 목록]
+            ${competitorDataSummary}
+            [요청]
+            1. 내 채널의 성공 요인과 경쟁 채널의 인기 비결을 각각 한 문장으로 요약해주세요.
+            2. 두 채널의 강점을 결합하여 만들 수 있는 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+            3. 각 아이디어는 시청자의 시선을 사로잡을 만한 **매력적인 유튜브 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
+            4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+        `;
 
-        [경쟁 채널의 인기 영상 목록]
-        ${competitorDataSummary}
+        (async () => {
+            const ideasResult = await callGeminiAPI(youtubeIdeasPrompt); 
+            sendResponse({ success: true, ideas: ideasResult });
+        })();
+        
+        return true;
+    }
+    // --- ▼▼▼ [신규 추가] 블로그 성과 분석 핸들러 (B-1) ▼▼▼ ---
+    else if (msg.action === "analyze_my_blog") {
+        const contentData = msg.data;
+        const dataSummary = contentData
+            .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+            .slice(0, 20)
+            .map(item => `제목: ${item.title}, 댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0}, 글자수: ${item.textLength || 0}`)
+            .join('\n');
 
-        [요청]
-        1. 내 채널의 성공 요인과 경쟁 채널의 인기 비결을 각각 한 문장으로 요약해주세요.
-        2. 두 채널의 강점을 결합하여 만들 수 있는 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
-        3. 각 아이디어는 시청자의 시선을 사로잡을 만한 **매력적인 유튜브 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
-        4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
-    `;
+        const blogAnalysisPrompt = `
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 제공되는 블로그의 게시물 데이터 목록을 분석해주세요.
+            [데이터]
+            ${dataSummary}
+            [분석 요청]
+            1. 어떤 주제의 게시물들이 가장 높은 참여도(댓글, 좋아요)를 기록했나요? (상위 3개 주제)
+            2. 성공적인 게시물들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
+            3. 위 분석 결과를 바탕으로, 이 블로그가 다음에 작성하면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
+            결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
+        `;
 
-    (async () => {
-        const ideasResult = await callGeminiAPI(newPrompt); 
-        sendResponse({ success: true, ideas: ideasResult });
-    })();
-    
-    return true;
-  }
+        (async () => {
+            const analysisResult = await callGeminiAPI(blogAnalysisPrompt);
+            sendResponse({ success: true, analysis: analysisResult });
+        })();
+        
+        return true;
+    }
+
+    // --- ▼▼▼ [신규 추가] 블로그 경쟁 비교 및 아이디어 생성 핸들러 (B-2) ▼▼▼ ---
+    else if (msg.action === "generate_blog_ideas") {
+        const { myContent, competitorContent } = msg.data;
+        const myDataSummary = myContent
+            .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+            .slice(0, 10)
+            .map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
+            .join('\n');
+
+        const competitorDataSummary = competitorContent
+            .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+            .slice(0, 10)
+            .map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
+            .join('\n');
+        
+        const blogIdeasPrompt = `
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 두 블로그의 데이터를 분석하고, 두 채널의 강점을 조합하여 독자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
+            [내 블로그의 인기 포스트 목록]
+            ${myDataSummary}
+            [경쟁 블로그의 인기 포스트 목록]
+            ${competitorDataSummary}
+            [요청]
+            1. 내 블로그의 성공 요인과 경쟁 블로그의 인기 비결을 각각 한 문장으로 요약해주세요.
+            2. 두 블로그의 강점을 결합하여 만들 수 있는 새로운 블로그 포스트 아이디어 5가지를 제안해주세요.
+            3. 각 아이디어는 독자의 시선을 사로잡을 만한 **매력적인 블로그 포스트 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
+            4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+        `;
+
+        (async () => {
+            const ideasResult = await callGeminiAPI(blogIdeasPrompt); 
+            sendResponse({ success: true, ideas: ideasResult });
+        })();
+        
+        return true;
+    }    
+
     else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
     (async () => {
@@ -768,7 +841,6 @@ async function fetchAllChannelData() {
     await Promise.all(promises);
     console.log("모든 채널 데이터 수집 완료.");
 }
-
 
 // --- ▼▼▼ [하이브리드 방식] 블로그 데이터 수집 함수 수정 ▼▼▼ ---
 async function fetchRssFeed(url, channelType) {
@@ -908,6 +980,7 @@ async function fetchRssFeed(url, channelType) {
         console.error(`Failed to fetch or parse RSS for ${url}:`, error);
     }
 }
+
 async function fetchYoutubeChannel(channelId, channelType) {
     const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
 
@@ -997,7 +1070,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
 }
 
 
-async function callGeminiAPI(dataSummary) {
+async function callGeminiAPI(prompt) {
     try {
         const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
         if (!geminiApiKey) {
@@ -1006,35 +1079,16 @@ async function callGeminiAPI(dataSummary) {
 
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
 
-        const prompt = `
-            당신은 전문 콘텐츠 전략가입니다. 아래 제공되는 유튜브 채널의 영상 데이터 목록을 분석해주세요.
-
-            [데이터]
-            ${dataSummary}
-
-            [분석 요청]
-            1. 어떤 주제의 영상들이 가장 높은 조회수와 좋아요를 기록했나요? (상위 3개 주제)
-            2. 성공적인 영상들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
-            3. 위 분석 결과를 바탕으로, 이 채널이 다음에 만들면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
-
-            결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
-        `;
-
         const response = await fetch(API_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: prompt }]
-                }]
+                contents: [{ parts: [{ text: prompt }] }]
             })
         });
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error("Gemini API 오류 상세:", JSON.stringify(errorData, null, 2)); 
             const errorMessage = errorData.error?.message || "자세한 내용은 서비스 워커 콘솔을 확인하세요.";
             return `오류: Gemini API 호출에 실패했습니다.\n상태: ${response.status}\n원인: ${errorMessage}`;
         }
@@ -1042,14 +1096,12 @@ async function callGeminiAPI(dataSummary) {
         const responseData = await response.json();
         
         if (!responseData.candidates || !responseData.candidates[0]?.content?.parts[0]?.text) {
-            console.error("예상치 못한 Gemini API 응답 구조:", responseData);
             return "오류: AI로부터 예상치 못한 형식의 응답을 받았습니다.";
         }
         
         return responseData.candidates[0].content.parts[0].text;
 
     } catch (error) {
-        console.error("Gemini API 호출 중 오류 발생:", error);
         return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
     }
 }

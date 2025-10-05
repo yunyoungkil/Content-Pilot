@@ -180,11 +180,24 @@ function updateDashboardUI(container) {
     if (!cachedData) return;
     
     ['myChannels', 'competitorChannels'].forEach(type => {
-        const platformTabs = container.querySelector(`.platform-tabs[data-type="${type}"]`);
-        const selectElement = container.querySelector(`#${type}-select`);
-        const contentListElement = container.querySelector(`#${type}-content-list`);
+        // 각 컬럼(my-channels-col, competitor-channels-col)을 기준으로 요소를 찾도록 변경
+        const colElement = container.querySelector(`#${type.replace('Channels', '-channels-col')}`);
+        if (!colElement) return;
+
+        const platformTabs = colElement.querySelector(`.platform-tabs[data-type="${type}"]`);
+        const selectElement = colElement.querySelector(`#${type}-select`);
+        const contentListElement = colElement.querySelector(`#${type}-content-list`);
+
         if (!platformTabs || !selectElement || !contentListElement) return;
 
+        // '내 채널' 컬럼(type === 'myChannels')일 경우에만 분석 버튼을 찾아서 표시합니다.
+        if (type === 'myChannels') {
+            const analyzeButtons = colElement.querySelector('#myChannels-analyze-buttons');
+            if (analyzeButtons) {
+                analyzeButtons.style.display = 'flex';
+            }
+        }
+        
         const selectedPlatform = platformTabs.querySelector('.active').dataset.platform;
         const platformKey = selectedPlatform === 'blog' ? 'blogs' : 'youtubes';
         
@@ -203,8 +216,8 @@ function updateDashboardUI(container) {
                 return `<option value="${id}" ${id === currentSelection ? 'selected' : ''}>${title}</option>`;
             }).join('');
             
-            // [수정] 분리되었던 함수 호출을 통합된 함수 호출로 변경
             renderPaginatedContent(contentListElement, selectElement.value, cachedData.content, type, selectedPlatform);
+            
         } else {
             selectElement.style.display = 'none';
             contentListElement.innerHTML = `<p class="loading-placeholder">연동된 ${selectedPlatform === 'blog' ? '블로그' : '유튜브'} 채널이 없습니다.</p>`;
@@ -337,65 +350,82 @@ function addDashboardEventListeners(container) {
             return;
         }
         
-        if (target.closest('#myChannels-analyze-btn')) {
+ if (target.closest('#myChannels-analyze-btn')) {
             if (!cachedData) return;
-            const selectedChannelId = container.querySelector('#myChannels-select').value;
-            const channelContent = cachedData.content.filter(item => item.sourceId === selectedChannelId && item.videoId);
-            
-            if (channelContent.length > 0) {
-                const ideasContent = container.querySelector('#ai-ideas-content');
-                ideasContent.innerHTML = `<p class="ai-ideas-placeholder">AI가 채널 성과를 분석하는 중... 📈</p>`;
+            const col = target.closest('.dashboard-col');
+            const platform = col.querySelector('.platform-tab.active').dataset.platform;
+            const selectedChannelId = col.querySelector('.channel-selector').value;
 
-                chrome.runtime.sendMessage({ action: 'analyze_my_channel', data: channelContent }, (response) => {
+            // 플랫폼에 따라 액션과 필터링 조건을 동적으로 결정
+            const action = platform === 'blog' ? 'analyze_my_blog' : 'analyze_my_channel';
+            const contentFilter = item => platform === 'blog' ? !item.videoId : !!item.videoId;
+            const alertMessage = platform === 'blog' ? "분석할 블로그 게시물 데이터가 없습니다." : "분석할 유튜브 영상 데이터가 없습니다.";
+            
+            const channelContent = cachedData.content.filter(item => item.sourceId === selectedChannelId && contentFilter(item));
+
+            if (channelContent.length > 0) {
+                ideasContent.innerHTML = `<p class="ai-ideas-placeholder">AI가 ${platform === 'blog' ? '블로그' : '채널'} 성과를 분석하는 중... 📈</p>`;
+
+                chrome.runtime.sendMessage({ action: action, data: channelContent }, (response) => {
                     if (response && response.success) {
-                        const formattedHtml = response.analysis
-                            .replace(/\n/g, '<br>')
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/### (.*?)/g, '<h3>$1</h3>')
-                            .replace(/\* (.*?)(<br>|$)/g, '<li>$1</li>');
-                        
-                        container.querySelector('.ai-ideas-section h2').textContent = '✨ AI 채널 성과 분석';
+                        const formattedHtml = response.analysis.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/### (.*?)/g, '<h3>$1</h3>').replace(/\* (.*?)(<br>|$)/g, '<li>$1</li>');
                         ideasContent.innerHTML = `<ul class="ai-ideas-list">${formattedHtml}</ul>`;
                     } else {
-                        ideasContent.innerHTML = `<p class="ai-ideas-placeholder">성과 분석 중 오류가 발생했습니다.</p>`;
+                        ideasContent.innerHTML = `<p class="ai-ideas-placeholder">성과 분석 중 오류가 발생했습니다: ${response.error || ''}</p>`;
                     }
                 });
             } else {
-                alert("분석할 유튜브 영상 데이터가 없습니다.");
+                alert(alertMessage);
             }
             return;
         }
         
         if (target.closest('#competitor-compare-btn')) {
             if (!cachedData) return;
-            const myChannelId = container.querySelector('#myChannels-select').value;
-            const competitorChannelId = container.querySelector('#competitorChannels-select').value;
+
+            const myCol = container.querySelector('#my-channels-col');
+            const competitorCol = container.querySelector('#competitor-channels-col');
+            const myPlatform = myCol.querySelector('.platform-tab.active').dataset.platform;
+            const competitorPlatform = competitorCol.querySelector('.platform-tab.active').dataset.platform;
+
+            if (myPlatform !== competitorPlatform) {
+                alert("분석을 위해 '내 채널'과 '경쟁 채널'의 플랫폼 탭(블로그/유튜브)을 동일하게 맞춰주세요.");
+                return;
+            }
+
+            const platform = myPlatform;
+            const action = platform === 'blog' ? 'generate_blog_ideas' : 'generate_content_ideas';
+            const contentFilter = item => platform === 'blog' ? !item.videoId : !!item.videoId;
+            const alertMessage = platform === 'blog' ? "분석을 위해 내 채널과 경쟁 채널 모두에 게시물 데이터가 필요합니다." : "분석을 위해 내 채널과 경쟁 채널 모두에 영상 데이터가 필요합니다.";
+
+            const myChannelId = myCol.querySelector('.channel-selector').value;
+            const competitorChannelId = competitorCol.querySelector('.channel-selector').value;
 
             if (!myChannelId || !competitorChannelId) {
                 alert("내 채널과 경쟁 채널을 모두 선택해주세요.");
                 return;
             }
-            const myContent = cachedData.content.filter(item => item.sourceId === myChannelId && item.videoId);
-            const competitorContent = cachedData.content.filter(item => item.sourceId === competitorChannelId && item.videoId);
+
+            const myContent = cachedData.content.filter(item => item.sourceId === myChannelId && contentFilter(item));
+            const competitorContent = cachedData.content.filter(item => item.sourceId === competitorChannelId && contentFilter(item));
 
             if (myContent.length === 0 || competitorContent.length === 0) {
-                alert("분석을 위해 내 채널과 경쟁 채널 모두에 영상 데이터가 필요합니다.");
+                alert(alertMessage);
                 return;
             }
+            
             ideasContent.innerHTML = '<p class="ai-ideas-placeholder">AI가 아이디어를 생성하는 중... 🧠</p>';
-            chrome.runtime.sendMessage({
-                action: 'generate_content_ideas',
-                data: { myContent, competitorContent }
-            }, (response) => {
+            chrome.runtime.sendMessage({ action: action, data: { myContent, competitorContent } }, (response) => {
                 if (response && response.success) {
                     const formattedHtml = response.ideas.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/### (.*?)/g, '<h3>$1</h3>').replace(/\* (.*?)(<br>|$)/g, '<li>$1</li>');
                     ideasContent.innerHTML = `<ul class="ai-ideas-list">${formattedHtml}</ul>`;
                 } else {
-                    ideasContent.innerHTML = '<p class="ai-ideas-placeholder">아이디어 생성 중 오류가 발생했습니다.</p>';
+                    ideasContent.innerHTML = `<p class="ai-ideas-placeholder">아이디어 생성 중 오류가 발생했습니다: ${response.error || ''}</p>`;
                 }
             });
             return;
         }
+
 
         if (target.closest('.refresh-btn')) {
             e.preventDefault();
