@@ -254,69 +254,6 @@ ${text.substring(0, 2000)}
     }
 }
 
-// --- ▼▼▼ [신규] 채널 및 관련 데이터 삭제를 위한 재사용 함수 ▼▼▼ ---
-/**
- * 지정된 URL의 채널과 관련된 모든 데이터를 Firebase에서 삭제합니다.
- * @param {string} urlToDelete - 삭제할 채널의 원본 입력 URL
- * @returns {Promise<boolean>} - 성공 시 true, 실패 시 에러 throw
- */
-async function deleteChannelData(urlToDelete) {
-    const userId = 'default_user';
-    const channelsRef = firebase.database().ref(`channels/${userId}`);
-    const channelsSnap = await channelsRef.once('value');
-    const allChannels = channelsSnap.val();
-
-    if (!allChannels) throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
-
-    let sourceIdToDelete = null;
-    let platformToDelete = null;
-
-    // 모든 채널 유형과 플랫폼을 순회하며 삭제할 채널 찾기
-    for (const type of ['myChannels', 'competitorChannels']) {
-        for (const platform of ['blogs', 'youtubes']) {
-            const channels = allChannels[type]?.[platform] || [];
-            const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
-
-            if (channelIndex > -1) {
-                const channelInfo = channels[channelIndex];
-                sourceIdToDelete = platform === 'blogs' 
-                    ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
-                    : channelInfo.apiUrl;
-                
-                platformToDelete = platform;
-
-                // DB에서 해당 채널 정보 제거 (이 부분은 set으로 덮어쓸 것이므로 여기서는 제거 안함)
-                break;
-            }
-        }
-        if (sourceIdToDelete) break;
-    }
-
-    if (!sourceIdToDelete) {
-        // 이미 UI에서 지워지고 없는 상태일 수 있으므로 오류 대신 경고만 출력
-        console.warn(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다. 이미 처리되었을 수 있습니다.`);
-        return true;
-    }
-
-    // 1. /channel_meta/ 경로에서 메타 정보 삭제
-    await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
-    
-    // 2. /channel_content/ 경로에서 수집된 모든 콘텐츠 삭제
-    const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
-    const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
-    const contentToDelete = contentSnap.val();
-
-    if (contentToDelete) {
-        const updates = {};
-        for (const contentId in contentToDelete) {
-            updates[contentId] = null; // null로 설정하여 삭제
-        }
-        await contentRef.update(updates);
-    }
-    
-    console.log(`'${urlToDelete}' 채널과 관련된 모든 데이터 삭제 완료.`);
-    return true;
-}
 
 // --- 2. 핵심 이벤트 리스너 ---
 
@@ -480,23 +417,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
         })();
         return true;
-    }
-
-    // --- ▼▼▼ [수정] "delete_channel" 핸들러 ▼▼▼ ---
+    } 
     else if (msg.action === "delete_channel") {
+        const urlToDelete = msg.url;
+        const userId = 'default_user';
+
         (async () => {
             try {
-                await deleteChannelData(msg.url);
+                const channelsRef = firebase.database().ref(`channels/${userId}`);
+                const channelsSnap = await channelsRef.once('value');
+                const allChannels = channelsSnap.val();
+
+                if (!allChannels) throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
+                
+                let sourceIdToDelete = null;
+                let platformToDelete = null;
+                let channelWasFound = false;
+
+                // 1. 삭제할 채널 정보를 '먼저' 찾아서 ID와 플랫폼을 확보합니다.
+                for (const type of ['myChannels', 'competitorChannels']) {
+                    for (const platform of ['blogs', 'youtubes']) {
+                        const channels = allChannels[type]?.[platform] || [];
+                        const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
+
+                        if (channelIndex > -1) {
+                            const channelInfo = channels[channelIndex];
+                            
+                            // 삭제에 필요한 정보 저장
+                            sourceIdToDelete = platform === 'blogs' 
+                                ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
+                                : channelInfo.apiUrl;
+                            platformToDelete = platform;
+                            
+                            // channels 객체에서 해당 채널 제거
+                            allChannels[type][platform].splice(channelIndex, 1);
+                            channelWasFound = true;
+                            break;
+                        }
+                    }
+                    if (channelWasFound) break;
+                }
+
+                if (!channelWasFound) {
+                    // UI에서는 보이지만 DB 동기화 문제로 못 찾는 경우를 위해 경고만 출력
+                    console.warn(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다. UI는 삭제되지만 데이터 일부가 남을 수 있습니다.`);
+                    sendResponse({ success: true }); // UI는 삭제되도록 성공 처리
+                    return;
+                }
+                
+                // 2. 모든 DB 삭제 작업을 순차적으로 실행합니다.
+                
+                // 2-1. /channels/ 경로 업데이트
+                await channelsRef.set(allChannels);
+                console.log(`✅ /channels/ 경로에서 '${urlToDelete}' 삭제 완료.`);
+
+                // 2-2. /channel_meta/ 경로에서 메타 정보 삭제
+                await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
+                console.log(`✅ /channel_meta/ 경로에서 '${sourceIdToDelete}' 메타 정보 삭제 완료.`);
+
+                // 2-3. /channel_content/ 경로에서 콘텐츠 삭제
+                const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
+                const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
+                const contentToDelete = contentSnap.val();
+
+                if (contentToDelete) {
+                    const updates = {};
+                    for (const contentId in contentToDelete) {
+                        updates[contentId] = null;
+                    }
+                    await contentRef.update(updates);
+                    console.log(`✅ /channel_content/ 경로에서 관련 콘텐츠 모두 삭제 완료.`);
+                }
+
                 sendResponse({ success: true });
+
             } catch (error) {
                 console.error('채널 삭제 처리 중 오류:', error);
                 sendResponse({ success: false, error: error.message });
             }
         })();
-        return true;
+
+        return true; // 비동기 응답을 위해 true 반환
     }
-    
-  
+
   else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
     Promise.all([
@@ -712,81 +715,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     
     return true;
-  }    // --- ▼▼▼ [추가] 채널 삭제 로직 ▼▼▼ ---
-    else if (msg.action === "delete_channel") {
-        const urlToDelete = msg.url;
-        const userId = 'default_user';
-
-        (async () => {
-            try {
-                const channelsRef = firebase.database().ref(`channels/${userId}`);
-                const channelsSnap = await channelsRef.once('value');
-                const allChannels = channelsSnap.val();
-
-                if (!allChannels) {
-                    throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
-                }
-
-                let sourceIdToDelete = null;
-                let platformToDelete = null; // 'blogs' 또는 'youtubes'
-                let typeToDelete = null; // 'myChannels' 또는 'competitorChannels'
-
-                // 모든 채널 유형과 플랫폼을 순회하며 삭제할 채널 찾기
-                for (const type of ['myChannels', 'competitorChannels']) {
-                    for (const platform of ['blogs', 'youtubes']) {
-                        const channels = allChannels[type]?.[platform] || [];
-                        const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
-
-                        if (channelIndex > -1) {
-                            const channelInfo = channels[channelIndex];
-                            sourceIdToDelete = platform === 'blogs' 
-                                ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
-                                : channelInfo.apiUrl;
-                            
-                            platformToDelete = platform;
-                            typeToDelete = type;
-
-                            // DB에서 해당 채널 정보 제거
-                            allChannels[type][platform].splice(channelIndex, 1);
-                            break;
-                        }
-                    }
-                    if (sourceIdToDelete) break;
-                }
-
-                if (!sourceIdToDelete) {
-                    throw new Error(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다.`);
-                }
-
-                // 1. /channels/ 경로에서 채널 정보 업데이트
-                await channelsRef.set(allChannels);
-
-                // 2. /channel_meta/ 경로에서 메타 정보 삭제
-                await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
-                
-                // 3. /channel_content/ 경로에서 수집된 모든 콘텐츠 삭제
-                const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
-                const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
-                const contentToDelete = contentSnap.val();
-
-                if (contentToDelete) {
-                    const updates = {};
-                    for (const contentId in contentToDelete) {
-                        updates[contentId] = null; // null로 설정하여 삭제
-                    }
-                    await contentRef.update(updates);
-                }
-
-                sendResponse({ success: true });
-
-            } catch (error) {
-                console.error('채널 삭제 처리 중 오류:', error);
-                sendResponse({ success: false, error: error.message });
-            }
-        })();
-
-        return true; // 비동기 응답을 위해 true 반환
-    }
+  } 
 });
 
 

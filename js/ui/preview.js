@@ -37,7 +37,7 @@ export function showRecentScrapPreview(scrapData) {
 // 1. 이미지 부분을 별도의 변수로 분리
 const imageElement = scrapData.image 
   ? // 이미지가 있을 경우: <img> 태그
-    `<img src="${scrapData.image}" style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; object-fit: cover; border: 1px solid #eee;">`
+    `<img src="${scrapData.image}" style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; object-fit: cover; border: 1px solid #eee;" referrerpolicy="no-referrer">`
   : // 이미지가 없을 경우: 아이콘을 담은 <div> 태그
     `<div style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; display: flex; align-items: center; justify-content: center; background-color: #f1f3f5;">
       <span style="font-size: 24px; filter: grayscale(1);">📝</span>

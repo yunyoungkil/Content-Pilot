@@ -124,7 +124,7 @@ function renderDetailView(scrapId, container) {
 
     detailContainer.innerHTML = `
         <div class="scrapbook-detail-card">
-            ${scrap.image ? `<img src="${scrap.image}" class="scrapbook-detail-img" alt="detail image">` : ''}
+            ${scrap.image ? `<img src="${scrap.image}" class="scrapbook-detail-img" alt="detail image" referrerpolicy="no-referrer">` : ''}
             <div class="scrapbook-detail-title">${scrap.text ? scrap.text.substring(0, 50) : '제목 없음'}</div>
             <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
             <p class="scrapbook-detail-desc">${scrap.text || '내용 없음'}</p>

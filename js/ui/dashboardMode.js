@@ -54,9 +54,12 @@ function createContentCard(item, type) {
         if (imagesArray.length > 0) {
             imagesPreviewHtml = `
                 <div class="card-images-preview">
-                    ${imagesArray.slice(0, 4).map(image => `
-                        <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" 
-                             onerror="this.style.display='none'">
+                    ${imagesArray.slice(0, 10).map(image => `
+                       <img src="${image.src}" alt="${image.alt}" class="preview-img" loading="lazy" 
+                             referrerpolicy="no-referrer"
+                             onerror="this.style.display='none'"
+                             
+                             onload="if(this.naturalWidth < 0) { this.style.display='none' }">
                     `).join('')}
                 </div>
             `;
@@ -217,18 +220,14 @@ export function renderDashboard(container) {
                 <div id="my-channels-col" class="dashboard-col">
                     <div class="dashboard-col-header">
                         <h2>🚀 내 주요 콘텐츠</h2>
-                        <div class="loading-indicator" id="myChannels-loading" style="display: none;">
-                            <span>수집 중...</span>
-                        </div>
                         <div id="myChannels-analyze-buttons" class="analyze-buttons-wrapper">
                             <button id="myChannels-analyze-btn" class="analyze-btn">성과 분석</button>
                             <button id="competitor-compare-btn" class="analyze-btn">경쟁 비교 분석</button>
                         </div>
                     </div>
                     <div class="platform-tabs" data-type="myChannels">
-                        <div class="platform-tab" data-platform="blog">블로그</div>
-                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
-
+                        <div class="platform-tab active" data-platform="blog">블로그</div>
+                        <div class="platform-tab" data-platform="youtube">유튜브</div>
                     </div>
                     <select id="myChannels-select" class="channel-selector" style="display: none;"></select>
                     <div id="myChannels-content-list" class="content-list"><p class="loading-placeholder">채널 정보를 불러오는 중...</p></div>
@@ -238,8 +237,8 @@ export function renderDashboard(container) {
                         <h2>⚔️ 경쟁사 주요 콘텐츠</h2>
                     </div>
                     <div class="platform-tabs" data-type="competitorChannels">
-                        <div class="platform-tab" data-platform="blog">블로그</div>
-                        <div class="platform-tab active" data-platform="youtube">유튜브</div>
+                        <div class="platform-tab active" data-platform="blog">블로그</div>
+                        <div class="platform-tab" data-platform="youtube">유튜브</div>
                     </div>
                     <select id="competitorChannels-select" class="channel-selector" style="display: none;"></select>
                     <div id="competitorChannels-content-list" class="content-list"></div>

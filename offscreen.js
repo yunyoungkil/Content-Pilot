@@ -116,11 +116,7 @@ function parseContentAndMetrics(doc, urlObj) {
     const isStaticMap = imageUrl && imageUrl.includes('simg.pstatic.net');
 
     if (imageUrl && !isIrrelevant && !isSticker && !isDthumb && !isStaticMap) {
-        
-        // 네이버 이미지(pstatic.net)일 경우에만 화질 저하 파라미터를 제거
-        if (imageUrl.includes('pstatic.net') && imageUrl.includes('?')) {
-            imageUrl = imageUrl.split('?')[0];
-        }
+
 
         const src = new URL(imageUrl, doc.baseURI).href;
         const alt = img.alt || '';
