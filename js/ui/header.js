@@ -21,8 +21,8 @@ export function renderPanelHeader() {
         <span style="font-size:18px;font-weight:700;color:#222;letter-spacing:0.5px;">Content Pilot</span>
       </div>
       <div style="display:flex;align-items:center;gap:2px;">
-        <button id="cp-panel-fullscreen-exit" style="background:none;border:none;font-size:22px;color:#888;cursor:pointer;padding:2px 4px;border-radius:6px;transition:background 0.15s;line-height:1;">
-          <span class="material-symbols-outlined">fullscreen_exit</span>
+        <button id="cp-panel-fullscreen-exit" class="cp-panel-icon-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M220-160v-280h60v220h220v60H220Zm0-320v-280h280v60H280v220h-60Zm320 320v-60h220v-220h60v280H540Zm220-320v-220H540v-60h280v280h-60Z"/></svg>
         </button>
         <label id="cp-layout-mode-btn" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:2px 4px;border-radius:6px;transition:background 0.15s;line-height:1;">
           <input type="checkbox" id="cp-layout-mode-switch" style="display:none;" ${
@@ -42,8 +42,8 @@ export function renderPanelHeader() {
             isLayoutMode ? "#1976d2" : "#888"
           };user-select:none;">레이아웃</span>
         </label>
-        <button id="cp-panel-close" style="background:none;border:none;font-size:22px;color:#888;cursor:pointer;padding:2px 4px;border-radius:6px;transition:background 0.15s;line-height:1;">
-          <span class="material-symbols-outlined">close</span>
+        <button id="cp-panel-close" class="cp-panel-icon-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
         </button>
       </div>
     </div>
@@ -61,7 +61,7 @@ export function renderPanelHeader() {
                 activeMode === tab.key ? tab.color : "transparent"
               };
               transition:all 0.2s;
-            ">${tab.label}</div>
+            }">${tab.label}</div>
           `
         )
         .join("")}

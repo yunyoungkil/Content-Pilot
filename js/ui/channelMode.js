@@ -64,6 +64,13 @@ export function renderChannelMode(container) {
           </div>
       </div>
       <div class="channel-section">
+          <h2>🔗 고급 데이터 연동 (수익 분석용)</h2>
+          <div id="google-auth-section">
+              <p class="auth-description">Google 계정을 연동하여 애널리틱스(GA4)와 애드센스의 데이터를 기반으로 더 정교한 수익화 분석을 받아보세요.</p>
+              <div id="auth-status-ui"></div>
+          </div>
+      </div>
+      <div class="channel-section">
         <div class="channel-section-header">
           <h2>🚀 내 채널</h2>
           <div>
@@ -90,6 +97,69 @@ export function renderChannelMode(container) {
   `;
 
   const channelContainer = container.querySelector('.channel-container');
+
+  const updateAuthUI = (data) => {
+      const authStatusUI = channelContainer.querySelector('#auth-status-ui');
+      if (data && data.email) {
+          const propertyOptions = (data.gaProperties || []).map(p => `<option value="${p.id}" ${p.id === data.selectedGaPropertyId ? 'selected' : ''}>${p.name} (${p.id})</option>`).join('');
+          
+          authStatusUI.innerHTML = `
+              <div class="auth-status-item">
+                  <strong>연동된 계정:</strong> ${data.email} <button id="google-logout-btn" class="logout-btn">연동 해제</button>
+              </div>
+              <div class="auth-status-item">
+                  <label for="ga-property-select"><strong>분석할 GA4 속성 선택:</strong></label>
+                  <select id="ga-property-select">${propertyOptions}</select>
+              </div>
+              <div class="auth-status-item">
+                  <label><strong>연동된 애드센스 계정 ID:</strong></label>
+                  <input type="text" value="${data.adSenseAccountId || '연동된 계정 없음'}" readonly>
+              </div>
+          `;
+          channelContainer.querySelector('#google-logout-btn')?.addEventListener('click', handleLogout);
+      } else {
+          authStatusUI.innerHTML = `
+              <div id="auth-status"><span class="status-disconnected">●</span> 미연동</div>
+              <button id="google-login-btn" class="google-btn">
+                  <img src="${chrome.runtime.getURL('images/google-logo.png')}" alt="Google logo">
+                  <span>Google 계정으로 로그인</span>
+              </button>
+          `;
+          channelContainer.querySelector('#google-login-btn')?.addEventListener('click', handleLogin);
+      }
+  };
+
+  const handleLogin = () => {
+      chrome.runtime.sendMessage({ action: 'start_google_auth' }, (response) => {
+          if (response && response.success) {
+              alert('Google 계정 연동에 성공했습니다!');
+              updateAuthUI(response.data);
+          } else {
+              alert('Google 계정 연동 실패: ' + (response?.error || '알 수 없는 오류'));
+          }
+      });
+  };
+
+  const handleLogout = () => {
+      if (!confirm('Google 계정 연동을 해제하시겠습니까?')) return;
+      chrome.runtime.sendMessage({ action: 'revoke_google_auth' }, (response) => {
+          if (response && response.success) {
+              alert('연동이 해제되었습니다.');
+              updateAuthUI(null);
+          } else {
+              alert('연동 해제 실패: ' + (response?.error || '알 수 없는 오류'));
+          }
+      });
+  };
+
+  chrome.storage.local.get(['googleUserEmail', 'gaProperties', 'adSenseAccountId', 'selectedGaPropertyId'], (result) => {
+      updateAuthUI({
+          email: result.googleUserEmail,
+          gaProperties: result.gaProperties,
+          adSenseAccountId: result.adSenseAccountId,
+          selectedGaPropertyId: result.selectedGaPropertyId
+      });
+  });
 
   channelContainer.addEventListener('click', (e) => {
     if (e.target.classList.contains('add-channel-btn')) {

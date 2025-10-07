@@ -254,6 +254,37 @@ ${text.substring(0, 2000)}
     }
 }
 
+async function fetchGaProperties(token) {
+    const API_URL = "https://analyticsadmin.googleapis.com/v1beta/accountSummaries";
+    const response = await fetch(API_URL, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error('GA4 속성 목록을 가져오는데 실패했습니다.');
+    
+    const data = await response.json();
+    const properties = [];
+    data.accountSummaries?.forEach(account => {
+        account.propertySummaries?.forEach(prop => {
+            properties.push({
+                id: prop.property.split('/')[1], // "properties/12345"에서 숫자만 추출
+                name: prop.displayName
+            });
+        });
+    });
+    return properties;
+}
+
+// ▼▼▼ [추가] 애드센스 계정 ID를 가져오는 함수 ▼▼▼
+async function fetchAdSenseAccountId(token) {
+    const API_URL = "https://adsense.googleapis.com/v2/accounts";
+    const response = await fetch(API_URL, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) return null; // 애드센스 계정이 없는 경우 오류 대신 null 반환
+    
+    const data = await response.json();
+    return data.accounts?.[0]?.name.split('/')[1] || null; // "accounts/pub-..."에서 ID만 추출
+}
 
 // --- 2. 핵심 이벤트 리스너 ---
 
@@ -285,16 +316,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             });
         })();
         return true;
-    }
-    else if (msg.action === "cp_get_firebase_scraps") {
+    } else if (msg.action === "cp_get_firebase_scraps") {
         firebase.database().ref("scraps").once("value", (snapshot) => {
             const val = snapshot.val() || {};
             const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
             sendResponse({ data: arr });
         });
         return true;
-    }
-    else if (msg.action === "delete_scrap") {
+    } else if (msg.action === "delete_scrap") {
         const scrapIdToDelete = msg.id;
         if (scrapIdToDelete) {
             firebase.database().ref("scraps/" + scrapIdToDelete).remove()
@@ -302,14 +331,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 .catch((error) => sendResponse({ success: false, error: error.message }));
         }
         return true;
-    }
-    else if (msg.action === "clear_blog_content") {
+    } else if (msg.action === "clear_blog_content") {
         firebase.database().ref('channel_content/blogs').remove()
             .then(() => sendResponse({ success: true, message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.' }))
             .catch(error => sendResponse({ success: false, error: error.message }));
-        return true; 
-    }
-    else if (msg.action === "save_channels_and_key") {
+        return true;
+    } else if (msg.action === "save_channels_and_key") {
         const { youtubeApiKey, geminiApiKey, ...newChannelData } = msg.data;
         const userId = 'default_user';
 
@@ -326,6 +353,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     myChannels: { blogs: [], youtubes: [] },
                     competitorChannels: { blogs: [], youtubes: [] }
                 };
+
                 for (const type of ['myChannels', 'competitorChannels']) {
                     if (newChannelData[type]?.blogs) {
                         const blogPromises = newChannelData[type].blogs
@@ -336,6 +364,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                             }));
                         resolvedChannels[type].blogs = (await Promise.all(blogPromises)).filter(c => c.apiUrl);
                     }
+                    
                     if (newChannelData[type]?.youtubes) {
                         const youtubePromises = newChannelData[type].youtubes
                             .filter(url => url.trim().length > 0)
@@ -417,8 +446,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
         })();
         return true;
-    } 
-    else if (msg.action === "delete_channel") {
+    } else if (msg.action === "delete_channel") {
         const urlToDelete = msg.url;
         const userId = 'default_user';
 
@@ -498,9 +526,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
 
         return true; // 비동기 응답을 위해 true 반환
-    }
-
-  else if (msg.action === "get_channels_and_key") {
+    } else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
     Promise.all([
       chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']),
@@ -529,16 +555,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true;
-  }
-    else if (msg.action === "save_channels") {
+    } else if (msg.action === "save_channels") {
         const userId = 'default_user';
         firebase.database().ref(`channels/${userId}`).set(msg.data)
             .then(() => sendResponse({ success: true, message: '채널 정보가 저장되었습니다.' }))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
-    }
-  
-  else if (msg.action === "get_channel_content") {
+    } else if (msg.action === "get_channel_content") {
     const userId = 'default_user';
     Promise.all([
       firebase.database().ref('channel_content').once('value'),
@@ -563,8 +586,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }).catch(error => sendResponse({ success: false, error: error.message }));
     
     return true;
-  }
-    else if (msg.action === "refresh_channel_data") {
+    } else if (msg.action === "refresh_channel_data") {
       const { sourceId, platform } = msg;
       
       const userId = 'default_user';
@@ -612,23 +634,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
       return true;
-    }
-    else if (msg.action === "analyze_my_channel") {
-        const contentData = msg.data;
-        const dataSummary = contentData
+    } else if (msg.action === "analyze_my_channel") {
+        const { channelName, channelContent } = msg.data; // 채널 이름과 데이터를 분리
+        const analysisDate = new Date().toLocaleDateString('ko-KR'); // 'YYYY. M. D.' 형식의 날짜 생성
+
+        const dataSummary = channelContent
             .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
             .slice(0, 20)
             .map(item => `제목: ${item.title}, 조회수: ${item.viewCount || 0}, 좋아요: ${item.likeCount || 0}`)
             .join('\n');
         
         const youtubeAnalysisPrompt = `
+            ## "${channelName}" 유튜브 채널 성과 분석 (${analysisDate})
+
             당신은 전문 콘텐츠 전략가입니다. 아래 제공되는 유튜브 채널의 영상 데이터 목록을 분석해주세요.
+            
             [데이터]
             ${dataSummary}
+
             [분석 요청]
             1. 어떤 주제의 영상들이 가장 높은 조회수와 좋아요를 기록했나요? (상위 3개 주제)
             2. 성공적인 영상들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
             3. 위 분석 결과를 바탕으로, 이 채널이 다음에 만들면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
+
             결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
         `;
 
@@ -638,33 +666,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    }
-
-    else if (msg.action === "generate_content_ideas") {
-        const { myContent, competitorContent } = msg.data;
+    } else if (msg.action === "generate_content_ideas") {
+          const { myContent, competitorContent, myAnalysisSummary } = msg.data;
+        
         const myDataSummary = myContent
             .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-            .slice(0, 10)
-            .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
-            .join('\n');
+            .slice(0, 10).map(item => ` - ${item.title} (조회수: ${item.viewCount})`).join('\n');
 
         const competitorDataSummary = competitorContent
             .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-            .slice(0, 10)
-            .map(item => ` - ${item.title} (조회수: ${item.viewCount})`)
-            .join('\n');
+            .slice(0, 10).map(item => ` - ${item.title} (조회수: ${item.viewCount})`).join('\n');
         
         const youtubeIdeasPrompt = `
-            당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 두 채널의 데이터를 분석하고, 두 채널의 강점을 조합하여 시청자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
-            [내 채널의 인기 영상 목록]
+            당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+
+            [정보 1: 내 채널의 핵심 성공 요인]
+            ${myAnalysisSummary}
+
+            [정보 2: 내 채널의 인기 영상 목록]
             ${myDataSummary}
-            [경쟁 채널의 인기 영상 목록]
+
+            [정보 3: 경쟁 채널의 인기 영상 목록]
             ${competitorDataSummary}
+
             [요청]
-            1. 내 채널의 성공 요인과 경쟁 채널의 인기 비결을 각각 한 문장으로 요약해주세요.
-            2. 두 채널의 강점을 결합하여 만들 수 있는 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
-            3. 각 아이디어는 시청자의 시선을 사로잡을 만한 **매력적인 유튜브 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
-            4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+            나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            각 아이디어는 "### 아이디어 제목" 형식으로 시작하고, 왜 이 아이디어가 전략적으로 유효한지에 대한 설명을 반드시 포함해주세요.
         `;
 
         (async () => {
@@ -673,26 +700,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    }
-    // --- ▼▼▼ [신규 추가] 블로그 성과 분석 핸들러 (B-1) ▼▼▼ ---
-    else if (msg.action === "analyze_my_blog") {
-        const contentData = msg.data;
-        const dataSummary = contentData
+    } else if (msg.action === "analyze_my_blog") {
+        const { channelName, channelContent } = msg.data; // 채널 이름과 데이터를 분리
+        const analysisDate = new Date().toLocaleDateString('ko-KR'); // 날짜 생성
+
+        const topPosts = channelContent
             .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-            .slice(0, 20)
+            .slice(0, 20);
+
+        const dataSummary = topPosts
             .map(item => `제목: ${item.title}, 댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0}, 글자수: ${item.textLength || 0}`)
             .join('\n');
+            
+        const titleList = topPosts.map((item, index) => `${index + 1}. ${item.title}`).join('\n');
 
         const blogAnalysisPrompt = `
-            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 제공되는 블로그의 게시물 데이터 목록을 분석해주세요.
-            [데이터]
+            ## "${channelName}" 블로그 성과 분석 (${analysisDate})
+
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 제공되는 데이터를 분석해주세요.
+
+            [분석 대상 데이터 요약]
             ${dataSummary}
+
             [분석 요청]
-            1. 어떤 주제의 게시물들이 가장 높은 참여도(댓글, 좋아요)를 기록했나요? (상위 3개 주제)
-            2. 성공적인 게시물들의 제목이나 내용에서 나타나는 공통적인 패턴이나 키워드는 무엇인가요?
-            3. 위 분석 결과를 바탕으로, 이 블로그가 다음에 작성하면 성공할 만한 새로운 콘텐츠 아이디어 3가지를 구체적인 제목 예시와 함께 제안해주세요.
-            결과는 한국어로, 친절하고 이해하기 쉬운 보고서 형식으로 작성해주세요.
+            1. (기존 분석 요청 1, 2, 3과 동일)
+
+            [출력 형식]
+            - 모든 분석이 끝난 후, 보고서의 마지막에 다음 형식으로 분석에 사용된 데이터 목록을 반드시 포함해주세요.
+            
+            ### 분석 기반 데이터 (상위 ${topPosts.length}개)
+            ${titleList}
         `;
+
+
 
         (async () => {
             const analysisResult = await callGeminiAPI(blogAnalysisPrompt);
@@ -700,34 +740,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    }
-
-    // --- ▼▼▼ [신규 추가] 블로그 경쟁 비교 및 아이디어 생성 핸들러 (B-2) ▼▼▼ ---
-    else if (msg.action === "generate_blog_ideas") {
-        const { myContent, competitorContent } = msg.data;
+    } else if (msg.action === "generate_blog_ideas") {
+        // 이제 data 객체에 myAnalysisSummary가 포함됩니다.
+        const { myContent, competitorContent, myAnalysisSummary } = msg.data; 
+        
         const myDataSummary = myContent
             .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-            .slice(0, 10)
-            .map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
-            .join('\n');
+            .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
 
         const competitorDataSummary = competitorContent
             .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-            .slice(0, 10)
-            .map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
-            .join('\n');
+            .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
         
         const blogIdeasPrompt = `
-            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 두 블로그의 데이터를 분석하고, 두 채널의 강점을 조합하여 독자들에게 폭발적인 반응을 얻을 새로운 콘텐츠 아이디어 5가지를 제안해주세요.
-            [내 블로그의 인기 포스트 목록]
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+
+            [정보 1: 내 블로그의 핵심 성공 요인]
+            ${myAnalysisSummary}
+
+            [정보 2: 내 블로그의 인기 포스트 목록]
             ${myDataSummary}
-            [경쟁 블로그의 인기 포스트 목록]
+
+            [정보 3: 경쟁 블로그의 인기 포스트 목록]
             ${competitorDataSummary}
+
             [요청]
-            1. 내 블로그의 성공 요인과 경쟁 블로그의 인기 비결을 각각 한 문장으로 요약해주세요.
-            2. 두 블로그의 강점을 결합하여 만들 수 있는 새로운 블로그 포스트 아이디어 5가지를 제안해주세요.
-            3. 각 아이디어는 독자의 시선을 사로잡을 만한 **매력적인 블로그 포스트 제목** 형식으로 제시하고, 왜 이 아이디어가 성공할 것인지에 대한 간단한 설명을 덧붙여주세요.
-            4. 결과는 마크다운 형식으로 보기 좋게 정리해주세요.
+            나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 블로그의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            각 아이디어는 "### 아이디어 제목" 형식으로 시작하고, 왜 이 아이디어가 전략적으로 유효한지에 대한 설명을 반드시 포함해주세요.
         `;
 
         (async () => {
@@ -736,9 +775,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    }    
-
-    else if (msg.action === "analyze_video_comments") {
+    } else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
     (async () => {
         const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
@@ -788,7 +825,157 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     
     return true;
-  } 
+    } else if (msg.action === "add_idea_to_kanban") {
+        const ideaContent = msg.data;
+        if (!ideaContent) {
+            sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
+            return true;
+        }
+
+        const lines = ideaContent.split('\n');
+        const title = lines[0].replace(/###|\*\*|\d+\.\s/g, '').trim();
+        const description = lines.slice(1).join('\n').trim();
+
+        const newCard = {
+            title: title,
+            description: description,
+            tags: ["#AI-추천"],
+            createdAt: Date.now()
+        };
+
+        const newCardRef = firebase.database().ref('kanban/ideas').push();
+        const newCardKey = newCardRef.key; // 1. Firebase가 생성한 고유 키를 가져옵니다.
+
+        newCardRef.set(newCard)
+            .then(() => {
+                console.log("AI 아이디어가 칸반 보드에 추가되었습니다:", title);
+                // 2. 성공 시, 고유 키를 프론트엔드로 반환합니다.
+                sendResponse({ success: true, firebaseKey: newCardKey });
+            })
+            .catch(e => {
+                console.error("칸반 카드 추가 중 오류:", e);
+                sendResponse({ success: false, error: e.message });
+            });
+        
+        return true; // 비동기 응답을 위해 true를 반환해야 합니다.
+    } else if (msg.action === "remove_idea_from_kanban") {
+        const firebaseKey = msg.key;
+        if (!firebaseKey) {
+            sendResponse({ success: false, error: "삭제할 아이디어의 키가 없습니다." });
+            return true;
+        }
+
+        firebase.database().ref(`kanban/ideas/${firebaseKey}`).remove()
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        
+        return true; // 비동기 응답을 위해 true 반환
+    } else if (msg.action === "scrap_entire_analysis") {
+        const analysisContent = msg.data;
+        if (!analysisContent) return true;
+
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const dateTag = `${year}-${month}-${day}`;
+
+        const scrapPayload = {
+            text: analysisContent,
+            html: `<pre>${analysisContent}</pre>`,
+            tag: "AI_ANALYSIS",
+            url: `content-pilot://analysis/${Date.now()}`,
+            // 2. '#AI리포트'를 삭제하고 날짜 태그를 추가합니다.
+            tags: [`#성과분석`, `#${dateTag}`],
+            timestamp: Date.now()
+        };
+        
+        const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
+        const scrapRef = firebase.database().ref("scraps").push();
+        scrapRef.set(cleanedScrapPayload)
+            .then(() => console.log("AI 분석 리포트가 스크랩북에 저장되었습니다."))
+            .catch(err => console.error("AI 리포트 스크랩 중 오류:", err));
+        
+        return true;
+    }     else if (msg.action === "start_google_auth") {
+        (async () => {
+            try {
+                // 1. 토큰 발급 (기존과 동일)
+                const token = await new Promise((resolve, reject) => {
+                    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+                        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                        else resolve(token);
+                    });
+                });
+                if (!token) throw new Error("인증 토큰을 받아오지 못했습니다.");
+
+                // 2. 이메일, GA4 속성, 애드센스 ID를 병렬로 가져오기 (기존과 동일)
+                const [userInfoResponse, gaProperties, adSenseAccountId] = await Promise.all([
+                    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }),
+                    fetchGaProperties(token),
+                    fetchAdSenseAccountId(token)
+                ]);
+                const userInfo = await userInfoResponse.json();
+                if (!userInfo.email) throw new Error("사용자 이메일을 가져오지 못했습니다.");
+
+                // 3. 모든 정보를 chrome.storage에 저장 (기존과 동일)
+                await chrome.storage.local.set({
+                    googleAuthToken: token,
+                    googleUserEmail: userInfo.email,
+                    gaProperties: gaProperties,
+                    adSenseAccountId: adSenseAccountId
+                });
+
+                // ▼▼▼ [수정] UI 업데이트에 필요한 모든 데이터를 함께 보냅니다. ▼▼▼
+                const responseData = {
+                    email: userInfo.email,
+                    gaProperties: gaProperties,
+                    adSenseAccountId: adSenseAccountId
+                };
+                sendResponse({ success: true, data: responseData });
+
+            } catch (error) {
+                console.error("Google 인증 중 오류 발생:", error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true;
+    } else if (msg.action === "revoke_google_auth") {
+        (async () => {
+            try {
+                const { googleAuthToken } = await chrome.storage.local.get('googleAuthToken');
+                if (googleAuthToken) {
+                    // 1. 현재 토큰을 무효화합니다.
+                    await fetch(`https://oauth2.googleapis.com/revoke?token=${googleAuthToken}`);
+                    // 2. Chrome의 인증 캐시에서도 제거합니다.
+                    await new Promise(resolve => chrome.identity.removeCachedAuthToken({ token: googleAuthToken }, resolve));
+                }
+                
+                // 3. storage에 저장된 모든 관련 정보를 삭제합니다.
+                await chrome.storage.local.remove([
+                    'googleAuthToken', 
+                    'googleUserEmail', 
+                    'gaProperties', 
+                    'adSenseAccountId', 
+                    'selectedGaPropertyId'
+                ]);
+
+                sendResponse({ success: true });
+            } catch (error) {
+                console.error("Google 연동 해제 중 오류:", error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true;
+    }
+
+
 });
 
 

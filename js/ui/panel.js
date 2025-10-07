@@ -1,9 +1,10 @@
 // js/ui/panel.js (Shadow DOM 적용)
 
+import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "./dashboardMode.js";
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
-import { renderDashboard } from "./dashboardMode.js";
+
 
 // --- 패널 상태 및 UI 제어 함수 ---
 
@@ -19,14 +20,25 @@ export function createAndShowPanel() {
   let host = document.getElementById("content-pilot-host");
   if (host) {
     host.style.display = "block";
+    // 이미 패널이 존재하면, 대시보드 상태만 복원합니다.
+    const mainArea = host.shadowRoot.querySelector('#cp-main-area');
+    if (window.__cp_active_mode === 'dashboard' && mainArea) {
+        initDashboardMode(mainArea);
+    }
   } else {
-    // 1. Shadow DOM을 호스팅할 최상위 부모(host) 요소를 생성합니다.
+    // --- 패널 최초 생성 로직 ---
     host = document.createElement("div");
     host.id = "content-pilot-host";
     document.body.appendChild(host);
 
-    // 2. host에 Shadow Root를 연결합니다. 'open' 모드는 외부 JS에서 접근 가능하게 합니다.
     const shadowRoot = host.attachShadow({ mode: 'open' });
+
+
+    const googleFontsLink = document.createElement('link');
+    googleFontsLink.rel = 'stylesheet';
+    googleFontsLink.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap';
+    shadowRoot.appendChild(googleFontsLink);
+
 
     // 3. Shadow DOM 내부에 외부 CSS 파일을 링크합니다.
     // 이렇게 하면 외부 페이지의 스타일로부터 완벽하게 격리됩니다.
@@ -72,10 +84,13 @@ export function createAndShowPanel() {
 
     window.__cp_active_mode = 'dashboard'; 
     
-    // 이제 모든 UI 렌더링과 이벤트 리스너는 shadowRoot를 기준으로 동작해야 합니다.
     renderHeaderAndTabs(shadowRoot);
     addEventListenersToPanel(shadowRoot); 
-    renderDashboard(mainArea);
+
+    // ★★★ 중요: 최초 1회만 UI 뼈대를 그리고, 데이터를 로드합니다.
+    renderDashboard(mainArea); 
+    // ★★★ 중요: 최초 1회만 이벤트 리스너를 붙입니다.
+    addDashboardEventListeners(mainArea);
   }
 
   chrome.storage.local.set({ 
@@ -134,6 +149,7 @@ function addEventListenersToPanel(shadowRoot) {
     const mainArea = shadowRoot.querySelector("#cp-main-area");
     const headerArea = shadowRoot.querySelector("#cp-header-area");
 
+
     headerArea.addEventListener('click', (e) => {
         const target = e.target;
         
@@ -147,22 +163,23 @@ function addEventListenersToPanel(shadowRoot) {
             return;
         }
 
-        const tab = target.closest('.cp-mode-tab');
+         const tab = e.target.closest('.cp-mode-tab');
         if (tab) {
             const activeKey = tab.dataset.key;
-            window.__cp_active_mode = activeKey;
-            renderHeaderAndTabs(shadowRoot); // shadowRoot 기준으로 헤더 다시 렌더링
+            if (window.__cp_active_mode === activeKey) return; 
 
+            window.__cp_active_mode = activeKey;
+            renderHeaderAndTabs(shadowRoot);
+
+            // ▼▼▼ [핵심 수정] initDashboardMode를 renderDashboard로 변경합니다. ▼▼▼
             if (activeKey === 'dashboard') {
-                renderDashboard(mainArea);
+                renderDashboard(mainArea); // initDashboardMode -> renderDashboard
             } else if (activeKey === 'scrapbook') {
                 renderScrapbook(mainArea);
             } else if (activeKey === 'channel') {
                 renderChannelMode(mainArea);
-            } else if (activeKey === 'kanban') {
-                mainArea.innerHTML = '<h1 style="text-align:center; margin-top: 50px;">기획 보드 모드는 구현 예정입니다.</h1>';
-            } else if (activeKey === 'draft') {
-                mainArea.innerHTML = '<h1 style="text-align:center; margin-top: 50px;">초안 작성 모드는 구현 예정입니다.</h1>';
+            } else {
+                mainArea.innerHTML = `<h1 style="text-align:center; margin-top: 50px;">${tab.textContent} 모드는 구현 예정입니다.</h1>`;
             }
         }
     });
