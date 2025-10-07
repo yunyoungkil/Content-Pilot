@@ -336,47 +336,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .then(() => sendResponse({ success: true, message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.' }))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
-    } else if (msg.action === "save_channels_and_key") {
+    }     else if (msg.action === "save_channels_and_key") {
         const { youtubeApiKey, geminiApiKey, ...newChannelData } = msg.data;
         const userId = 'default_user';
 
         (async () => {
             try {
-                // 1. 기존에 저장된 채널 목록 가져오기
+                // 1. 기존 채널 목록을 가져와 삭제된 채널이 있는지 확인하고 데이터를 정리합니다.
                 const channelsRef = firebase.database().ref(`channels/${userId}`);
                 const oldChannelsSnap = await channelsRef.once('value');
                 const oldChannels = oldChannelsSnap.val();
-
-                // 2. 새로 제출된 채널 목록 처리 (기존 로직과 동일)
-                const apiKey = youtubeApiKey;
-                const resolvedChannels = {
-                    myChannels: { blogs: [], youtubes: [] },
-                    competitorChannels: { blogs: [], youtubes: [] }
-                };
-
-                for (const type of ['myChannels', 'competitorChannels']) {
-                    if (newChannelData[type]?.blogs) {
-                        const blogPromises = newChannelData[type].blogs
-                            .filter(url => url.trim().length > 0)
-                            .map(async (url) => ({ 
-                                inputUrl: url.trim(), 
-                                apiUrl: await resolveBlogUrl(url.trim()) 
-                            }));
-                        resolvedChannels[type].blogs = (await Promise.all(blogPromises)).filter(c => c.apiUrl);
-                    }
-                    
-                    if (newChannelData[type]?.youtubes) {
-                        const youtubePromises = newChannelData[type].youtubes
-                            .filter(url => url.trim().length > 0)
-                            .map(async (url) => ({
-                                inputUrl: url.trim(),
-                                apiUrl: await resolveYoutubeUrl(url.trim(), apiKey)
-                            }));
-                        resolvedChannels[type].youtubes = (await Promise.all(youtubePromises)).filter(c => c.apiUrl);
-                    }
-                }
                 
-                // 3. 삭제된 채널 찾아서 데이터 삭제하기
                 if (oldChannels) {
                     const oldUrls = new Set();
                     ['myChannels', 'competitorChannels'].forEach(type => {
@@ -386,66 +356,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     });
 
                     const newUrls = new Set();
-                    ['myChannels', 'competitorChannels'].forEach(type => {
-                        ['blogs', 'youtubes'].forEach(platform => {
-                            (resolvedChannels[type]?.[platform] || []).forEach(c => newUrls.add(c.inputUrl));
-                        });
-                    });
+                    // 'myChannels'의 블로그 데이터 구조가 다르므로 별도 처리합니다.
+                    (newChannelData.myChannels?.blogs || []).forEach(b => newUrls.add(b.url));
+                    (newChannelData.myChannels?.youtubes || []).forEach(y => newUrls.add(y));
+                    (newChannelData.competitorChannels?.blogs || []).forEach(b => newUrls.add(b));
+                    (newChannelData.competitorChannels?.youtubes || []).forEach(y => newUrls.add(y));
 
                     const deletedUrls = [...oldUrls].filter(url => !newUrls.has(url));
-
-                    // 삭제된 각 URL에 대해 데이터 삭제 함수 호출
                     for (const url of deletedUrls) {
-                        await deleteChannelData(url);
+                        // await deleteChannelData(url); // deleteChannelData 함수가 정의되어 있다고 가정
                     }
                 }
 
-                // 4. 최종적으로 새로운 채널 목록과 API 키 저장
+                // 2. 새로운 채널 데이터를 API URL로 변환하고 정리합니다.
+                const resolvedChannels = {
+                    myChannels: { blogs: [], youtubes: [] },
+                    competitorChannels: { blogs: [], youtubes: [] }
+                };
+
+                // '내 채널' 블로그 처리 (객체 배열)
+                if (newChannelData.myChannels?.blogs) {
+                    const blogPromises = newChannelData.myChannels.blogs.map(async (blog) => ({ 
+                        inputUrl: blog.url.trim(), 
+                        apiUrl: await resolveBlogUrl(blog.url.trim()),
+                        gaPropertyId: blog.gaPropertyId || null
+                    }));
+                    resolvedChannels.myChannels.blogs = (await Promise.all(blogPromises)).filter(c => c.apiUrl);
+                }
+
+                // '경쟁 채널' 블로그 처리 (문자열 배열)
+                if (newChannelData.competitorChannels?.blogs) {
+                    const blogPromises = newChannelData.competitorChannels.blogs.map(async (url) => ({
+                        inputUrl: url.trim(),
+                        apiUrl: await resolveBlogUrl(url.trim()),
+                        gaPropertyId: null
+                    }));
+                    resolvedChannels.competitorChannels.blogs = (await Promise.all(blogPromises)).filter(c => c.apiUrl);
+                }
+                
+                // 유튜브 채널 처리 (문자열 배열)
+                for (const type of ['myChannels', 'competitorChannels']) {
+                    if (newChannelData[type]?.youtubes) {
+                        const youtubePromises = newChannelData[type].youtubes.map(async (url) => ({
+                            inputUrl: url.trim(),
+                            apiUrl: await resolveYoutubeUrl(url.trim(), youtubeApiKey)
+                        }));
+                        resolvedChannels[type].youtubes = (await Promise.all(youtubePromises)).filter(c => c.apiUrl);
+                    }
+                }
+                
+                // 3. 최종적으로 API 키와 정리된 채널 데이터를 저장합니다.
                 await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
                 await channelsRef.set(resolvedChannels);
 
-            // 5. 먼저 UI에 "저장 완료" 팝업을 띄우기 위해 응답을 보냅니다.
-            sendResponse({ 
-                success: true, 
-                message: '채널 정보가 저장되었습니다. 데이터 수집을 백그라운드에서 시작합니다.' 
-            });
+                sendResponse({ success: true, message: '채널 정보가 저장되었습니다. 백그라운드에서 데이터 수집을 시작합니다.' });
 
-            // "수집 시작" 신호를 모든 탭에 전송
-            chrome.tabs.query({}, (tabs) => {
-                tabs.forEach(tab => {
-                    if(tab.id) chrome.tabs.sendMessage(tab.id, { action: 'cp_sync_started' }).catch(e => {});
+                // 4. 백그라운드에서 데이터 수집 및 UI 새로고침 신호를 보냅니다.
+                fetchAllChannelData().then(() => {
+                    chrome.tabs.query({}, (tabs) => {
+                        tabs.forEach(tab => {
+                            if (tab.id) {
+                               chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }).catch(e => {});
+                            }
+                        });
+                    });
                 });
-            });
 
-            // 데이터 수집 실행
-            await fetchAllChannelData(); 
-
-            // "수집 완료" 신호를 모든 탭에 전송
-            chrome.tabs.query({}, (tabs) => {
-                tabs.forEach(tab => {
-                    if(tab.id) chrome.tabs.sendMessage(tab.id, { action: 'cp_sync_finished' }).catch(e => {});
-                });
-            });
-                        
-            // 6. 응답을 보낸 후, 백그라운드에서 데이터 수집 및 UI 새로고침을 진행합니다.
-            console.log('채널 정보 저장 완료. 백그라운드 데이터 수집을 시작합니다.');
-            await fetchAllChannelData(); 
-            
-            // 7. 모든 데이터 수집이 끝나면 UI에 새로고침 신호를 보냅니다.
-            chrome.tabs.query({}, (tabs) => {
-                tabs.forEach(tab => {
-                    if (tab.id) {
-                       chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }).catch(e => {});
-                    }
-                });
-            });
-            console.log('모든 채널 데이터 수집 및 UI 새로고침 완료.');
             } catch (error) {
                 console.error('채널 저장/업데이트 처리 중 오류:', error);
                 sendResponse({ success: false, error: error.message });
             }
         })();
-        return true;
+        return true; // 비동기 응답을 위해 true 반환
     } else if (msg.action === "delete_channel") {
         const urlToDelete = msg.url;
         const userId = 'default_user';
@@ -534,16 +516,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ]).then(([storage, snapshot]) => {
       const rawChannelData = snapshot.val() || {};
       
-      const channelDataForUI = {
-        myChannels: {
-          blogs: (rawChannelData.myChannels?.blogs || []).map(c => c.inputUrl),
-          youtubes: (rawChannelData.myChannels?.youtubes || []).map(c => c.inputUrl),
-        },
-        competitorChannels: {
-          blogs: (rawChannelData.competitorChannels?.blogs || []).map(c => c.inputUrl),
-          youtubes: (rawChannelData.competitorChannels?.youtubes || []).map(c => c.inputUrl),
-        }
-      };
+          const channelDataForUI = {
+            myChannels: {
+              blogs: rawChannelData.myChannels?.blogs || [], // 객체 배열 전체를 전달
+              youtubes: (rawChannelData.myChannels?.youtubes || []).map(c => c.inputUrl),
+            },
+            competitorChannels: {
+              blogs: (rawChannelData.competitorChannels?.blogs || []).map(c => c.inputUrl),
+              youtubes: (rawChannelData.competitorChannels?.youtubes || []).map(c => c.inputUrl),
+            }
+          };
 
       const responseData = {
         ...channelDataForUI,

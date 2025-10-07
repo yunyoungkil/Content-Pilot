@@ -1484,3 +1484,39 @@
   width: 18px;
   height: 18px;
 }
+
+/* ▼▼▼ [추가] 블로그 입력 필드와 GA4 드롭다운 스타일 ▼▼▼ */
+.blog-input-item .input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blog-input-item .blog-url-input {
+  flex-grow: 1; /* 남는 공간을 모두 차지 */
+}
+
+.blog-input-item .ga-property-select {
+  flex-shrink: 0;
+  width: 40%;
+  padding: 9px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.blog-input-item .ga-property-select:disabled {
+  background-color: #f1f3f5;
+  color: #868e96;
+}
+
+.logout-btn {
+  background: none;
+  border: 1px solid #ddd;
+  color: #555;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 8px;
+}
