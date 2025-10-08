@@ -54,6 +54,77 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
+
+/**
+ * 지정된 URL의 채널과 관련된 모든 데이터를 Firebase에서 삭제하는 통합 함수.
+ * @param {string} urlToDelete - 삭제할 채널의 원본 입력 URL
+ */
+async function deleteChannelData(urlToDelete) {
+    const userId = 'default_user';
+    const channelsRef = firebase.database().ref(`channels/${userId}`);
+    const channelsSnap = await channelsRef.once('value');
+    const allChannels = channelsSnap.val();
+
+    if (!allChannels) throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
+
+    let sourceIdToDelete = null;
+    let platformToDelete = null;
+    let channelFound = false;
+
+    // 1. 삭제할 채널을 찾고, ID/플랫폼 확보 및 로컬 객체에서 제거
+    for (const type of ['myChannels', 'competitorChannels']) {
+        for (const platform of ['blogs', 'youtubes']) {
+            const channels = allChannels[type]?.[platform] || [];
+            const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
+
+            if (channelIndex > -1) {
+                const channelInfo = channels[channelIndex];
+                sourceIdToDelete = platform === 'blogs' 
+                    ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
+                    : channelInfo.apiUrl;
+                platformToDelete = platform;
+                
+                allChannels[type][platform].splice(channelIndex, 1); // 목록에서 제거
+                channelFound = true;
+                break;
+            }
+        }
+        if (channelFound) break;
+    }
+
+    if (!channelFound) {
+        console.warn(`DB에서 '${urlToDelete}' 채널을 찾지 못해 삭제를 건너뜁니다.`);
+        return; // 작업을 중단하고 경고만 남김
+    }
+
+    // 2. 모든 DB 삭제 작업을 병렬로 실행
+    const deletePromises = [];
+    
+    // 2-1. 수정된 채널 목록을 /channels/ 경로에 다시 저장
+    deletePromises.push(channelsRef.set(allChannels));
+    
+    // 2-2. /channel_meta/ 경로에서 메타 정보 삭제
+    deletePromises.push(firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove());
+    
+    // 2-3. /channel_content/ 경로에서 관련 콘텐츠 모두 삭제
+    const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
+    const contentPromise = contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value').then(snapshot => {
+        const contentToDelete = snapshot.val();
+        if (contentToDelete) {
+            const updates = {};
+            for (const contentId in contentToDelete) {
+                updates[contentId] = null; // null로 설정하여 삭제
+            }
+            return contentRef.update(updates);
+        }
+    });
+    deletePromises.push(contentPromise);
+
+    await Promise.all(deletePromises);
+    
+    console.log(`'${urlToDelete}' 채널과 관련된 모든 데이터 삭제 완료.`);
+}
+
 /**
  * 블로그 일반 URL에서 RSS 피드 주소를 추출합니다. (개선된 버전)
  */
@@ -428,87 +499,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
         })();
         return true; // 비동기 응답을 위해 true 반환
-    } else if (msg.action === "delete_channel") {
-        const urlToDelete = msg.url;
-        const userId = 'default_user';
-
+    } 
+    else if (msg.action === "delete_channel") {
         (async () => {
             try {
-                const channelsRef = firebase.database().ref(`channels/${userId}`);
-                const channelsSnap = await channelsRef.once('value');
-                const allChannels = channelsSnap.val();
-
-                if (!allChannels) throw new Error('삭제할 채널 정보를 찾을 수 없습니다.');
-                
-                let sourceIdToDelete = null;
-                let platformToDelete = null;
-                let channelWasFound = false;
-
-                // 1. 삭제할 채널 정보를 '먼저' 찾아서 ID와 플랫폼을 확보합니다.
-                for (const type of ['myChannels', 'competitorChannels']) {
-                    for (const platform of ['blogs', 'youtubes']) {
-                        const channels = allChannels[type]?.[platform] || [];
-                        const channelIndex = channels.findIndex(c => c.inputUrl === urlToDelete);
-
-                        if (channelIndex > -1) {
-                            const channelInfo = channels[channelIndex];
-                            
-                            // 삭제에 필요한 정보 저장
-                            sourceIdToDelete = platform === 'blogs' 
-                                ? btoa(channelInfo.apiUrl).replace(/=/g, '') 
-                                : channelInfo.apiUrl;
-                            platformToDelete = platform;
-                            
-                            // channels 객체에서 해당 채널 제거
-                            allChannels[type][platform].splice(channelIndex, 1);
-                            channelWasFound = true;
-                            break;
-                        }
-                    }
-                    if (channelWasFound) break;
-                }
-
-                if (!channelWasFound) {
-                    // UI에서는 보이지만 DB 동기화 문제로 못 찾는 경우를 위해 경고만 출력
-                    console.warn(`DB에서 '${urlToDelete}' 채널을 찾지 못했습니다. UI는 삭제되지만 데이터 일부가 남을 수 있습니다.`);
-                    sendResponse({ success: true }); // UI는 삭제되도록 성공 처리
-                    return;
-                }
-                
-                // 2. 모든 DB 삭제 작업을 순차적으로 실행합니다.
-                
-                // 2-1. /channels/ 경로 업데이트
-                await channelsRef.set(allChannels);
-                console.log(`✅ /channels/ 경로에서 '${urlToDelete}' 삭제 완료.`);
-
-                // 2-2. /channel_meta/ 경로에서 메타 정보 삭제
-                await firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove();
-                console.log(`✅ /channel_meta/ 경로에서 '${sourceIdToDelete}' 메타 정보 삭제 완료.`);
-
-                // 2-3. /channel_content/ 경로에서 콘텐츠 삭제
-                const contentRef = firebase.database().ref(`channel_content/${platformToDelete}`);
-                const contentSnap = await contentRef.orderByChild('sourceId').equalTo(sourceIdToDelete).once('value');
-                const contentToDelete = contentSnap.val();
-
-                if (contentToDelete) {
-                    const updates = {};
-                    for (const contentId in contentToDelete) {
-                        updates[contentId] = null;
-                    }
-                    await contentRef.update(updates);
-                    console.log(`✅ /channel_content/ 경로에서 관련 콘텐츠 모두 삭제 완료.`);
-                }
-
+                await deleteChannelData(msg.url);
                 sendResponse({ success: true });
-
             } catch (error) {
                 console.error('채널 삭제 처리 중 오류:', error);
                 sendResponse({ success: false, error: error.message });
             }
         })();
-
         return true; // 비동기 응답을 위해 true 반환
-    } else if (msg.action === "get_channels_and_key") {
+    }
+    else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
     Promise.all([
       chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']),
@@ -1012,36 +1016,72 @@ async function fetchAllChannelData() {
 }
 
 // --- ▼▼▼ [하이브리드 방식] 블로그 데이터 수집 함수 수정 ▼▼▼ ---
+// background.js
+
 async function fetchRssFeed(url, channelType) {
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const text = await response.text();
 
-        const channelTitleMatch = text.match(/<channel>[\s\S]*?<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>[\s\S]*?<\/channel>/);
-        const channelTitle = channelTitleMatch ? channelTitleMatch[1] : url;
-        const sourceId = btoa(url).replace(/=/g, '');
-        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: channelTitle, type: 'blog', source: url, fetchedAt: Date.now() });
+        let channelTitle = null;
 
-        const items = text.match(/<item>([\s\S]*?)<\/item>/g) || [];
+        // 1단계: <channel> 태그 안에서 title 찾기 (RSS 2.0 방식)
+        const channelBlockMatch = text.match(/<channel>([\s\S]*?)<\/channel>/);
+        if (channelBlockMatch && channelBlockMatch[1]) {
+            const titleInChannelMatch = channelBlockMatch[1].match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
+            if (titleInChannelMatch && titleInChannelMatch[1]) {
+                channelTitle = titleInChannelMatch[1];
+            }
+        }
+
+        // 2단계: 1단계 실패 시, 첫 게시물(<item> 또는 <entry>) 이전의 <title> 찾기 (Atom 방식)
+        if (!channelTitle) {
+            const firstItemIndex = text.search(/<(item|entry)>/);
+            const textBeforeItems = firstItemIndex > -1 ? text.substring(0, firstItemIndex) : text;
+            const firstTitleMatch = textBeforeItems.match(/<title.*?>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
+            if (firstTitleMatch && firstTitleMatch[1]) {
+                channelTitle = firstTitleMatch[1].trim();
+            }
+        }
+        
+        const finalTitle = channelTitle || url;
+        const sourceId = btoa(url).replace(/=/g, '');
+        firebase.database().ref(`channel_meta/${sourceId}`).set({ title: finalTitle, type: 'blog', source: url, fetchedAt: Date.now() });
+
+        const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
 
         for (const itemText of items.slice(0, 10)) {
-            const linkMatch = itemText.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/);
-            if (!linkMatch) continue;
+            let itemLink = null;
+            const atomLinkMatch = itemText.match(/<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']*)["']/);
+            if (atomLinkMatch && atomLinkMatch[1]) {
+                itemLink = atomLinkMatch[1];
+            } else {
+                const rssLinkMatch = itemText.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/);
+                if (rssLinkMatch && rssLinkMatch[1]) {
+                    itemLink = rssLinkMatch[1];
+                }
+            }
+            if (!itemLink) continue;
             
-            const fullLink = linkMatch[1].replace(/\s/g, ''); // \n 등 모든 공백 제거
-            const linkForId = fullLink.split('?')[0]; // '?' 앞부분만 사용
+            // ▼▼▼ [수정] 게시물 제목과 날짜 추출 로직 변경 ▼▼▼
+            const titleMatch = itemText.match(/<title.*?>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
+            const pubDateMatch = itemText.match(/<(pubDate|published|updated)>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/\1>/);
+            
+            const title = titleMatch ? titleMatch[1] : '제목 없음';
+            const timestamp = new Date(pubDateMatch ? pubDateMatch[2] : Date.now()).getTime();
+            // ▲▲▲ 수정 완료 ▲▲▲
+
+            const fullLink = itemLink.replace(/\s/g, '');
+            const linkForId = fullLink.split('?')[0];
             const contentId = btoa(linkForId).replace(/=/g, '');
             const contentRef = firebase.database().ref(`channel_content/blogs/${contentId}`);
-
+            
             const existingDataSnap = await contentRef.once('value');
 
-            // --- [핵심 개선 로직] ---
             if (existingDataSnap.exists()) {
                 const existingData = existingDataSnap.val();
-                // 1. 기존 데이터가 있으면 '가벼운 업데이트'만 수행
                 if (!existingData.tags && existingData.cleanText) {
-                    console.log(`[태그 추가] '${fullLink}'에 태그가 없어 AI 키워드 추출을 시도합니다.`);
                     try {
                         const tags = await extractKeywords(existingData.cleanText);
                         if (tags) {
@@ -1051,14 +1091,12 @@ async function fetchRssFeed(url, channelType) {
                         console.error(`'${fullLink}' 태그 추가 중 오류:`, e);
                     }
                 }
-                // 
-                console.log(`[하이브리드] '${fullLink}'는 이미 존재하므로, 가벼운 업데이트를 시도합니다.`);
+                
                 try {
                     const postResponse = await fetch(fullLink);
                     if (!postResponse.ok) continue;
                     let postHtml = await postResponse.text();
 
-                    // 네이버 iframe 처리
                     const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
                     if (naverIframeMatch && naverIframeMatch[1]) {
                         const iframeUrl = new URL(naverIframeMatch[1], "https://blog.naver.com").href;
@@ -1067,7 +1105,6 @@ async function fetchRssFeed(url, channelType) {
                     }
                     
                     await getOffscreenDocument();
-                    // offscreen.js로 보내 댓글 수 등 일부 지표만 파싱
                     const parsedData = await new Promise(resolve => {
                         chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: fullLink }, 
                             (response) => resolve(response)
@@ -1075,7 +1112,6 @@ async function fetchRssFeed(url, channelType) {
                     });
 
                     if (parsedData && parsedData.success) {
-                        // 2. 전체를 덮어쓰는 set() 대신, 변경된 부분만 갱신하는 update() 사용
                         contentRef.update({
                             commentCount: parsedData.metrics.commentCount,
                             likeCount: parsedData.metrics.likeCount || null,
@@ -1088,16 +1124,9 @@ async function fetchRssFeed(url, channelType) {
                 }
 
             } else {
-                // 3. 신규 데이터일 경우에만 '무거운 전체 파싱' 수행
-                console.log(`[하이브리드] 새로운 콘텐츠 '${fullLink}'를 파싱합니다.`);
-                const titleMatch = itemText.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
-                const pubDateMatch = itemText.match(/<pubDate>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/pubDate>/);
-                // ... (이하 새로운 콘텐츠를 파싱하고 저장하는 기존 로직은 모두 동일)
-                const title = titleMatch ? titleMatch[1] : '제목 없음';
-                const timestamp = new Date(pubDateMatch ? pubDateMatch[1] : Date.now()).getTime();
-
-                // ... (나머지 전체 파싱 및 저장 로직)
+                
                 const postResponse = await fetch(fullLink);
+                if (!postResponse.ok) continue;
                 let postHtml = await postResponse.text();
                 const naverIframeMatch = postHtml.match(/<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/);
                 if (naverIframeMatch && naverIframeMatch[1]) {
@@ -1107,7 +1136,6 @@ async function fetchRssFeed(url, channelType) {
                 }
                 
                 await getOffscreenDocument();
-
                 const parsedData = await new Promise((resolve) => {
                     chrome.runtime.sendMessage({ action: 'parse_html_in_offscreen', html: postHtml, baseUrl: fullLink }, 
                         (response) => {
@@ -1120,7 +1148,9 @@ async function fetchRssFeed(url, channelType) {
                 if (parsedData && parsedData.success) {
                     const tags = await extractKeywords(parsedData.cleanText);
                     const finalData = {
-                        title, fullLink, pubDate: timestamp,
+                        title: title, // 여기서 수정된 title이 사용됩니다.
+                        fullLink, 
+                        pubDate: timestamp, // 여기서 수정된 timestamp가 사용됩니다.
                         description: parsedData.description,
                         thumbnail: parsedData.thumbnail,
                         cleanText: parsedData.cleanText,
@@ -1132,18 +1162,16 @@ async function fetchRssFeed(url, channelType) {
                     const cleanedFinalData = cleanDataForFirebase(finalData);
                     contentRef.set(cleanedFinalData);
 
-                    // ▼▼▼ 아이템 1개 수집 완료 신호 전송 ▼▼▼
                     chrome.tabs.query({}, (tabs) => {
                         tabs.forEach(tab => {
                             if(tab.id) chrome.tabs.sendMessage(tab.id, { 
                                 action: 'cp_item_updated',
-                                data: cleanedFinalData // 방금 저장한 데이터를 함께 보냄
+                                data: cleanedFinalData
                             }).catch(e => {});
                         });
                     });
                 }
             }
-            // --- [개선 로직 끝] ---
         }
     } catch (error) {
         console.error(`Failed to fetch or parse RSS for ${url}:`, error);

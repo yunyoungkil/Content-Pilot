@@ -199,7 +199,25 @@ export function renderChannelMode(container) {
             }
         }
         if (e.target.classList.contains('remove-channel-btn')) {
-            e.target.closest('.channel-input-item').remove();
+                  const inputItem = e.target.closest('.channel-input-item');
+                    const inputElement = inputItem.querySelector('input');
+                    const urlToDelete = inputElement.value;
+
+                    if (urlToDelete) {
+                        if (confirm(`'${urlToDelete}' 채널과 수집된 모든 데이터를 삭제하시겠습니까?`)) {
+                        chrome.runtime.sendMessage({ action: 'delete_channel', url: urlToDelete }, (response) => {
+                            if (response && response.success) {
+                            console.log('채널이 성공적으로 삭제되었습니다.');
+                            inputItem.remove(); // UI에서 입력창 제거
+                            } else {
+                            alert('채널 삭제 중 오류가 발생했습니다: ' + (response?.error || '알 수 없는 오류'));
+                            }
+                        });
+                        }
+                    } else {
+                        // 입력창에 URL이 없는 경우, 그냥 UI에서만 제거
+                        inputItem.remove();
+                    }
         }
         if (e.target.classList.contains('channel-save-btn')) {
             chrome.storage.local.set({ isKeywordExtractionEnabled: channelContainer.querySelector('#keyword-extraction-toggle').checked });
