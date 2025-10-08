@@ -4,7 +4,7 @@ import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
-
+import { renderKanban } from "./kanbanMode.js";
 
 // --- 패널 상태 및 UI 제어 함수 ---
 
@@ -178,6 +178,8 @@ function addEventListenersToPanel(shadowRoot) {
                 renderScrapbook(mainArea);
             } else if (activeKey === 'channel') {
                 renderChannelMode(mainArea);
+            } else if (activeKey === 'kanban') {
+                renderKanban(mainArea); 
             } else {
                 mainArea.innerHTML = `<h1 style="text-align:center; margin-top: 50px;">${tab.textContent} 모드는 구현 예정입니다.</h1>`;
             }

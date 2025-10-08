@@ -461,40 +461,62 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   padding: 18px 18px 10px 18px;
 }
+/* 칸반 보드 루트 컨테이너 */
+#cp-kanban-board-root {
+  display: flex;
+  gap: 18px;
+  min-width: 700px;
+  height: 100%; /* 부모 요소(main-area)의 높이를 꽉 채움 */
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+/* 칸반 컬럼 스타일 (Flex Column으로 변경) */
 .cp-kanban-col {
   flex: 1;
-  background: #fff;
+  background: #f1f3f5;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
-  padding: 0 10px 10px 10px;
-  display: flex;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  padding: 0;
+  display: flex; /* 자식 요소(제목, 카드 목록)를 세로로 배치하기 위함 */
   flex-direction: column;
-  min-width: 180px;
-  max-width: 220px;
+  min-width: 220px;
+  max-width: 300px;
+  height: 100%; /* 부모 높이를 꽉 채움 */
 }
 .cp-kanban-col-title {
   font-weight: 700;
   font-size: 16px;
-  color: #4285f4;
-  margin: 14px 0 10px 0;
-  text-align: center;
-  letter-spacing: 1px;
+  color: #333;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid #dee2e6;
+  flex-shrink: 0; /* 제목 영역은 줄어들지 않도록 설정 */
 }
+.kanban-col-cards {
+  flex: 1; /* 제목을 제외한 모든 남는 공간을 차지 */
+  overflow-y: auto; /* 내용이 넘칠 경우 세로 스크롤 자동 생성 */
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .cp-kanban-card {
-  background: #f2f3f7;
+  background: #fff;
   border-radius: 6px;
-  margin-bottom: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 15px;
   font-weight: 500;
   color: #333;
-  box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   cursor: grab;
-  border: 2px solid transparent;
-  transition: border 0.2s, box-shadow 0.2s;
+  border: 1px solid #e9ecef;
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: space-between;
+  flex-shrink: 0; /* 카드가 찌그러지지 않도록 설정 */
 }
 .cp-kanban-card.cluster {
   background: #e6f4ea;
@@ -515,6 +537,78 @@
   top: -12px;
   left: 10px;
 }
+
+/* 칸반 카드 액션 버튼 공통 스타일 */
+.kanban-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kanban-action-btn {
+  background: #f1f3f5;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 16px;
+  color: #495057;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.kanban-action-btn:hover {
+  background-color: #e9ecef;
+}
+
+/* 추천 검색어 결과 모달 스타일 */
+.keyword-list {
+  list-style-type: '🔍';
+  padding-left: 20px;
+}
+
+.keyword-list li {
+  margin-bottom: 12px;
+}
+
+.keyword-list a {
+  text-decoration: none;
+  color: #1a73e8;
+  font-weight: 500;
+}
+
+.keyword-list a:hover {
+  text-decoration: underline;
+}
+
+/* 로딩 스피너 스타일 */
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+/* 모달 내의 다시 추천받기 버튼 스타일 */
+#regenerate-keywords-btn {
+    width: auto;
+    height: auto;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
 #cp-draft-wrap {
   display: flex;
   min-width: 700px;

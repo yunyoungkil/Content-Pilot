@@ -3,6 +3,9 @@
 import { setupHighlighter } from './js/core/highlighter.js';
 import { createAndShowPanel, hidePanelForScrap, restorePanelAfterScrap, isPanelVisible } from './js/ui/panel.js';
 import { showRecentScrapPreview, showToast } from './js/ui/preview.js';
+import { updateKanbanUI, showLoadingModal, showKeywordsModal } from './js/ui/kanbanMode.js';
+import { renderDashboard } from './js/ui/dashboardMode.js';
+
 
 // 1. 스크랩 기능은 항상 모든 프레임에서 활성화 준비
 setupHighlighter();
@@ -18,15 +21,31 @@ if (window.self === window.top) {
       createAndShowPanel();
     }
     // ▼▼▼ [추가] 데이터 새로고침 메시지를 수신하여 대시보드를 다시 렌더링합니다. ▼▼▼
-    if (msg.action === 'cp_data_refreshed') {
-        const host = document.getElementById("content-pilot-host");
-        if (isPanelVisible() && host && host.shadowRoot) {
-            const mainArea = host.shadowRoot.querySelector('#cp-main-area');
-            // 현재 활성화된 모드가 'dashboard'일 때만 다시 렌더링합니다.
-            if (mainArea && window.__cp_active_mode === 'dashboard') {
-                console.log('대시보드 데이터 새로고침 신호를 수신하여 UI를 다시 렌더링합니다.');
-                renderDashboard(mainArea);
+    switch (msg.action) {
+       case 'kanban_data_updated':
+            updateKanbanUI(msg.data);
+            break;
+        
+        case 'search_queries_recommended':
+            if (msg.success) {
+                // cardId와 status를 함께 전달
+                showKeywordsModal(msg.data, msg.cardId, msg.status, msg.cardTitle);
+            } else {
+                alert('검색어 추천 실패: ' + msg.error);
+                const host = document.getElementById("content-pilot-host");
+                const modal = host?.shadowRoot.querySelector('.cp-modal-backdrop');
+                if (modal) modal.remove();
             }
+            break;
+        case 'cp_data_refreshed': {
+            const host = document.getElementById("content-pilot-host");
+            if (isPanelVisible() && host?.shadowRoot) {
+                const mainArea = host.shadowRoot.querySelector('#cp-main-area');
+                if (mainArea && window.__cp_active_mode === 'dashboard') {
+                    renderDashboard(mainArea);
+                }
+            }
+            break;
         }
     }
     // ▲▲▲ 추가 완료 ▲▲▲

@@ -1,5 +1,8 @@
 // background.js (수정 완료된 최종 버전)
 
+let creating; // Offscreen Document 생성 플래그
+let isKanbanListenerActive = false;
+
 /**
  * 객체 내의 모든 undefined 값을 재귀적으로 null로 변환하는 함수.
  * Firebase에 저장하기 전 데이터를 정제하는 데 사용됩니다.
@@ -20,8 +23,6 @@ function cleanDataForFirebase(data) {
     }
     return cleanedObj;
 }
-
-let creating; // Offscreen Document 생성 플래그
 
 async function getOffscreenDocument() {
     if (await chrome.offscreen.hasDocument()) return;
@@ -357,6 +358,55 @@ async function fetchAdSenseAccountId(token) {
     return data.accounts?.[0]?.name.split('/')[1] || null; // "accounts/pub-..."에서 ID만 추출
 }
 
+
+async function generateAndSendKeywords(data, sender) {
+    const { cardId, status, title, description } = data;
+    const keywordsRef = firebase.database().ref(`kanban/${status}/${cardId}/recommendedKeywords`);
+
+    const searchQueryPrompt = `
+        당신은 특정 주제에 대한 자료 조사를 시작하는 전문 콘텐츠 기획자입니다.
+        아래 아이디어를 바탕으로, 구체적인 통계, 사례, 근거, 반론 등을 찾기 위한 가장 효과적인 구글 검색어 5개를 추천해주세요.
+        검색어는 각기 다른 관점에서 주제에 접근해야 하며, 사용자가 즉시 검색에 활용할 수 있도록 자연스러운 질문 형태나 핵심 키워드 조합으로 구성해주세요.
+        
+        [아이디어]
+        - 제목: ${title}
+        - 설명: ${description || '없음'}
+
+        [응답 형식]
+        - 다른 설명이나 마크다운 없이, 순수한 JavaScript 배열 형식으로만 응답해주세요.
+        - 예: ["콘텐츠 마케팅 성공 KPI 측정 사례", "블로그 방문자 체류 시간 늘리는 방법", "2024년 SEO 트렌드 통계", "디지털 콘텐츠 유료화 실패 원인"]
+    `;
+
+    try {
+        const resultText = await callGeminiAPI(searchQueryPrompt);
+        // Gemini API 응답에서 배열 부분만 정확히 파싱
+        const keywords = JSON.parse(resultText.match(/\[.*\]/s)[0]); 
+        
+        // Firebase에 새로운 키워드를 덮어쓰기
+        await keywordsRef.set(keywords);
+
+        // UI에 새로운 키워드 전송
+        if (sender.tab?.id) {
+            chrome.tabs.sendMessage(sender.tab.id, { 
+                action: 'search_queries_recommended', 
+                success: true, 
+                data: keywords, 
+                cardId, // 모달 재현을 위해 cardId, status, title 전달
+                status,
+                cardTitle: title 
+            });
+        }
+    } catch (error) {
+        console.error("AI 검색어 추천 생성 중 오류:", error);
+        if (sender.tab?.id) {
+            chrome.tabs.sendMessage(sender.tab.id, { 
+                action: 'search_queries_recommended', 
+                success: false, 
+                error: error.message 
+            });
+        }
+    }
+}
 // --- 2. 핵심 이벤트 리스너 ---
 
 chrome.action.onClicked.addListener((tab) => {
@@ -961,9 +1011,101 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    if (msg.action === "get_kanban_data") {
+        // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
+        firebase.database().ref('kanban').once('value', snapshot => {
+            if (sender.tab?.id) {
+                chrome.tabs.sendMessage(sender.tab.id, {
+                    action: 'kanban_data_updated',
+                    data: snapshot.val() || {}
+                }).catch(e => {}); // 오류는 무시
+            }
+        });
 
+        // 2. 실시간 리스너가 아직 등록되지 않았다면, 한 번만 등록합니다.
+        if (!isKanbanListenerActive) {
+            firebase.database().ref('kanban').on('value', snapshot => {
+                const allCards = snapshot.val() || {};
+                
+                // 모든 탭에 데이터 변경 사항을 브로드캐스트합니다.
+                chrome.tabs.query({}, (tabs) => {
+                    tabs.forEach(tab => {
+                        if (tab.id) {
+                           chrome.tabs.sendMessage(tab.id, { 
+                               action: 'kanban_data_updated', 
+                               data: allCards 
+                           }).catch(e => {});
+                        }
+                    });
+                });
+            });
+            isKanbanListenerActive = true;
+            console.log("Firebase 칸반 데이터 실시간 리스너를 활성화했습니다.");
+        }
+        return true; // 비동기 응답을 위해 true 반환
+    }
+    
+    else if (msg.action === "link_published_url") {
+        const { cardId, url, status } = msg.data;
+        if (!cardId || !url || !status) {
+            sendResponse({ success: false, error: "필요한 정보가 부족합니다." });
+            return true;
+        }
+
+        const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+        cardRef.update({
+            publishedUrl: url,
+            performanceTracked: true
+        })
+        .then(() => {
+            console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
+            sendResponse({ success: true });
+            updateSinglePerformanceMetric({
+                id: cardId,
+                path: `kanban/${status}/${cardId}`,
+                url: url
+            });
+        })
+        .catch(error => sendResponse({ success: false, error: error.message }));
+        
+        return true;
+    }
+    else if (msg.action === "request_search_keywords") {
+        const { cardId, status, title } = msg.data;
+
+        (async () => {
+            const keywordsRef = firebase.database().ref(`kanban/${status}/${cardId}/recommendedKeywords`);
+            const snapshot = await keywordsRef.once('value');
+            const keywords = snapshot.val();
+
+            if (keywords) {
+                // 기존 키워드가 있으면 바로 전송
+                if (sender.tab?.id) {
+                    chrome.tabs.sendMessage(sender.tab.id, { 
+                        action: 'search_queries_recommended', 
+                        success: true, 
+                        data: keywords, 
+                        cardId,
+                        status,
+                        cardTitle: title
+                    });
+                }
+            } else { 
+                // 기존 키워드가 없으면 새로 생성
+                await generateAndSendKeywords(msg.data, sender);
+            }
+        })();
+        return true;
+    }
+    // ▼▼▼ [신규 추가] 'regenerate_search_keywords' 액션 처리 로직 ▼▼▼
+    else if (msg.action === "regenerate_search_keywords") {
+        (async () => {
+            // 기존 데이터 확인 없이 바로 새로운 키워드 생성 함수 호출
+            await generateAndSendKeywords(msg.data, sender);
+        })();
+        return true;
+    }
 });
-
 
 // --- 3. 주기적 데이터 수집 로직 ---
 
@@ -971,6 +1113,7 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log("Content Pilot 설치됨. 알람을 설정합니다.");
     chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
     chrome.alarms.create('fetch-channels', { delayInMinutes: 1, periodInMinutes: 240 });
+    chrome.alarms.create('update-performance-metrics', { delayInMinutes: 5, periodInMinutes: 360 });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -986,6 +1129,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'fetch-channels') {
         console.log("알람 발생: 모든 채널 데이터를 수집합니다...");
         fetchAllChannelData();
+    }    else if (alarm.name === 'update-performance-metrics') {
+        console.log("알람 발생: 발행된 콘텐츠의 성과 지표를 업데이트합니다...");
+        updateAllPerformanceMetrics();
     }
 });
 
@@ -1266,7 +1412,6 @@ async function fetchYoutubeChannel(channelId, channelType) {
     }
 }
 
-
 async function callGeminiAPI(prompt) {
     try {
         const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
@@ -1300,5 +1445,145 @@ async function callGeminiAPI(prompt) {
 
     } catch (error) {
         return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
+    }
+}
+
+// ▼▼▼ [추가] 성과 지표 수집을 위한 함수들 ▼▼▼
+
+/**
+ * 발행된 모든 콘텐츠의 성과 지표를 업데이트합니다.
+ */
+async function updateAllPerformanceMetrics() {
+    const kanbanRef = firebase.database().ref('kanban');
+    const snapshot = await kanbanRef.once('value');
+    const allCards = snapshot.val() || {};
+
+    const promises = [];
+    for (const status in allCards) {
+        for (const cardId in allCards[status]) {
+            const card = allCards[status][cardId];
+            if (card.performanceTracked && card.publishedUrl) {
+                promises.push(updateSinglePerformanceMetric({
+                    id: cardId,
+                    path: `kanban/${status}/${cardId}`,
+                    url: card.publishedUrl
+                }));
+            }
+        }
+    }
+    await Promise.all(promises);
+    console.log("모든 콘텐츠의 성과 지표 업데이트 완료.");
+}
+
+/**
+ * 단일 콘텐츠의 GA 및 AdSense 데이터를 가져와 Firebase에 업데이트합니다.
+ * @param {object} contentInfo - { id, path, url }
+ */
+async function updateSinglePerformanceMetric(contentInfo) {
+    try {
+        // 저장된 Google 인증 정보 및 채널 연동 시 설정한 ID들을 가져옵니다.
+        const { googleAuthToken, myChannels } = await new Promise(resolve => 
+            chrome.storage.local.get(['googleAuthToken', 'channels'], result => {
+                resolve({ 
+                    googleAuthToken: result.googleAuthToken,
+                    myChannels: result.channels?.myChannels || { blogs: [] }
+                });
+            })
+        );
+        const { adSenseAccountId } = await chrome.storage.local.get('adSenseAccountId');
+        
+        if (!googleAuthToken) {
+            console.warn("Google 계정이 연동되지 않아 성과 지표를 수집할 수 없습니다.");
+            return;
+        }
+
+        // 블로그 URL을 기반으로 해당 블로그에 설정된 GA Property ID를 찾습니다.
+        const blogInfo = myChannels.blogs.find(b => contentInfo.url.includes(new URL(b.inputUrl).hostname));
+        const gaPropertyId = blogInfo?.gaPropertyId;
+
+        if (!gaPropertyId || !adSenseAccountId) {
+            console.warn(`성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId}, AdSense: ${adSenseAccountId})`);
+            return;
+        }
+        
+        const [analyticsData, adsenseData] = await Promise.all([
+            getAnalyticsData(googleAuthToken, gaPropertyId, contentInfo.url),
+            getAdsenseData(googleAuthToken, adSenseAccountId, contentInfo.url)
+        ]);
+
+        const performanceData = { ...analyticsData, ...adsenseData, lastUpdatedAt: Date.now() };
+
+        // Firebase에 'performance' 자식 노드로 데이터 업데이트
+        await firebase.database().ref(contentInfo.path).child('performance').update(performanceData);
+        console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료.`);
+
+    } catch (error) {
+        console.error(`성과 지표 업데이트 중 오류 발생 (${contentInfo.url}):`, error);
+    }
+}
+
+/**
+ * [G-14] Google Analytics Data API를 호출하여 지표를 가져옵니다. (구현 필요)
+ */
+async function getAnalyticsData(token, propertyId, url) {
+ const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
+    const pagePath = new URL(url).pathname;
+
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+                dateRanges: [{ "startDate": "28daysAgo", "endDate": "today" }],
+                dimensions: [{ "name": "pagePath" }],
+                metrics: [{ "name": "screenPageViews" }, { "name": "averageSessionDuration" }],
+                dimensionFilter: {
+                    filter: {
+                        fieldName: "pagePath",
+                        stringFilter: { "matchType": "EXACT", "value": pagePath }
+                    }
+                }
+            })
+        });
+        const data = await response.json();
+        const row = data.rows?.[0];
+        return {
+            pageviews: parseInt(row?.metricValues?.[0]?.value || '0', 10),
+            avgSessionDuration: parseFloat(row?.metricValues?.[1]?.value || '0.0')
+        };
+    } catch (error) {
+        console.error("GA 데이터 요청 실패:", error);
+        return { pageviews: 0, avgSessionDuration: 0 };
+    }
+}
+
+/**
+ * [G-14] AdSense Management API를 호출하여 지표를 가져옵니다. (구현 필요)
+ */
+async function getAdsenseData(token, accountId, url) {
+   // AdSense API는 'accounts/{accountId}' 형식을 요구합니다.
+    const parentAccount = `accounts/${accountId}`;
+    const API_URL = `https://adsense.googleapis.com/v2/${parentAccount}/reports:generate`;
+    
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+                dateRange: 'LAST_30_DAYS',
+                metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS_RPM'],
+                dimensions: ['URL_CHANNEL_NAME'],
+                filters: [`URL_CHANNEL_NAME=="${url}"`]
+            })
+        });
+        const data = await response.json();
+        const row = data.rows?.[0]?.cells;
+        return {
+            estimatedEarnings: parseFloat(row?.[1]?.value || '0.0'),
+            pageRPM: parseFloat(row?.[2]?.value || '0.0')
+        };
+    } catch (error) {
+        console.error("AdSense 데이터 요청 실패:", error);
+        return { estimatedEarnings: 0, pageRPM: 0 };
     }
 }
