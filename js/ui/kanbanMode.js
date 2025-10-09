@@ -104,26 +104,36 @@ export function renderKanban(container) {
 }
 
 /**
- * 칸반 카드 DOM 요소를 생성하는 함수
+ * 칸반 카드 DOM 요소를 생성하는 함수 (디자인 개선 최종 버전)
  */
 function createKanbanCard(id, data, status) {
   const card = document.createElement('div');
   card.className = 'cp-kanban-card';
   card.dataset.id = id;
   card.dataset.status = status;
-  // ▼▼▼ [추가] 카드 데이터를 data 속성으로 저장하여 나중에 쉽게 접근 ▼▼▼
   card.dataset.title = data.title || '';
   card.dataset.description = data.description || '';
 
+  // "AI 추천" 아이디어일 경우 'cluster' 클래스 추가
   const isAiIdea = data.tags && data.tags.includes('#AI-추천');
   if (isAiIdea) {
-      card.classList.add('cluster');
+    card.classList.add('cluster');
   }
 
-  // ▼▼▼ [수정] 'AI 검색어 추천' 버튼 추가 ▼▼▼
-  let actionButtons = `
-    <button class="kanban-action-btn recommend-search-btn" title="AI 검색어 추천">🔍</button>
-  `;
+  // 상단 태그 영역 HTML 생성
+  let topTagsHtml = '';
+  if (isAiIdea) {
+    topTagsHtml += '<span class="kanban-card-tag ai-tag">AI 추천</span>';
+  }
+  
+  // 검색 키워드 태그 생성
+  const hasKeywords = data.recommendedKeywords && Array.isArray(data.recommendedKeywords) && data.recommendedKeywords.length > 0;
+  if (hasKeywords) {
+    topTagsHtml += '<span class="kanban-card-tag keyword-tag">🔍 키워드</span>';
+  }
+
+  // 하단 액션 버튼 영역 HTML 생성
+  let actionButtons = `<button class="kanban-action-btn recommend-search-btn" title="AI 검색어 추천">🔍</button>`;
   if (status === 'done' && !data.publishedUrl) {
     actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
   } else if (data.publishedUrl) {
@@ -131,13 +141,21 @@ function createKanbanCard(id, data, status) {
     const earnings = performance ? `$${(performance.estimatedEarnings || 0).toFixed(2)}` : '대기중';
     actionButtons += `<a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>`;
   }
-  
+
+  // 최종 HTML 구조 조합
   card.innerHTML = `
-    <span>${data.title}</span>
-    <div class="kanban-card-actions">${actionButtons}</div>
+    <div class="kanban-card-body">
+      <div class="card-top-tags">${topTagsHtml}</div>
+      <span class="kanban-card-title">${data.title || '제목 없음'}</span>
+    </div>
+    <div class="kanban-card-footer">
+      <div class="kanban-card-actions">${actionButtons}</div>
+    </div>
   `;
+
   return card;
 }
+
 
 /**
  * 칸반 보드 내 클릭 이벤트를 처리하는 함수
