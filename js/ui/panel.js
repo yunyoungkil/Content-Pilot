@@ -1,16 +1,16 @@
-// js/ui/panel.js (Shadow DOM 적용)
+// js/ui/panel.js (워크스페이스 연동 로직 최종 적용)
 
 import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "./dashboardMode.js";
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
 import { renderKanban } from "./kanbanMode.js";
+import { renderWorkspace } from "./workspaceMode.js"; // 워크스페이스 모듈 import
 
 // --- 패널 상태 및 UI 제어 함수 ---
 
 // 패널이 현재 보이는지 확인하는 함수
 export function isPanelVisible() {
-    // 이제 Shadow DOM을 호스팅하는 'host' 요소의 존재 여부로 확인합니다.
     const host = document.getElementById("content-pilot-host");
     return host && host.style.display !== 'none';
 }
@@ -20,7 +20,6 @@ export function createAndShowPanel() {
   let host = document.getElementById("content-pilot-host");
   if (host) {
     host.style.display = "block";
-    // 이미 패널이 존재하면, 대시보드 상태만 복원합니다.
     const mainArea = host.shadowRoot.querySelector('#cp-main-area');
     if (window.__cp_active_mode === 'dashboard' && mainArea) {
         initDashboardMode(mainArea);
@@ -33,28 +32,29 @@ export function createAndShowPanel() {
 
     const shadowRoot = host.attachShadow({ mode: 'open' });
 
-
     const googleFontsLink = document.createElement('link');
     googleFontsLink.rel = 'stylesheet';
     googleFontsLink.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap';
     shadowRoot.appendChild(googleFontsLink);
 
-
-    // 3. Shadow DOM 내부에 외부 CSS 파일을 링크합니다.
-    // 이렇게 하면 외부 페이지의 스타일로부터 완벽하게 격리됩니다.
+    // 1. 기본 스타일(style.css) 링크
     const styleLink = document.createElement('link');
     styleLink.rel = 'stylesheet';
     styleLink.href = chrome.runtime.getURL('css/style.css');
     shadowRoot.appendChild(styleLink);
 
-    // 4. 기존 panel 로직을 Shadow DOM 내부에 생성합니다.
+    // 2. 워크스페이스 스타일(workspace.css) 링크 추가
+    const workspaceStyleLink = document.createElement('link');
+    workspaceStyleLink.rel = 'stylesheet';
+    workspaceStyleLink.href = chrome.runtime.getURL('css/workspace.css');
+    shadowRoot.appendChild(workspaceStyleLink);
+
     const panel = document.createElement("div");
     panel.id = "content-pilot-panel";
     panel.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background-color: rgba(0, 0, 0, 0.4); z-index: 2147483647;
       display: flex; align-items: center; justify-content: center;
-      /* CSS 초기화: 외부 폰트 스타일 상속 방지 */
       font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
       font-size: 16px;
       line-height: 1.5;
@@ -78,8 +78,6 @@ export function createAndShowPanel() {
     panelContent.appendChild(headerArea);
     panelContent.appendChild(mainArea);
     panel.appendChild(panelContent);
-
-    // 5. 생성된 panel을 document가 아닌 shadowRoot에 추가합니다.
     shadowRoot.appendChild(panel);
 
     window.__cp_active_mode = 'dashboard'; 
@@ -87,9 +85,7 @@ export function createAndShowPanel() {
     renderHeaderAndTabs(shadowRoot);
     addEventListenersToPanel(shadowRoot); 
 
-    // ★★★ 중요: 최초 1회만 UI 뼈대를 그리고, 데이터를 로드합니다.
     renderDashboard(mainArea); 
-    // ★★★ 중요: 최초 1회만 이벤트 리스너를 붙입니다.
     addDashboardEventListeners(mainArea);
   }
 
@@ -102,7 +98,7 @@ export function createAndShowPanel() {
 // 패널을 닫는 함수
 export function closePanel() {
   const host = document.getElementById("content-pilot-host");
-  if (host) host.style.display = "none"; // 호스트를 숨깁니다.
+  if (host) host.style.display = "none";
   chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
 }
 
@@ -136,7 +132,7 @@ export function restorePanelAfterScrap(wasVisible) {
 
 // --- UI 렌더링 및 이벤트 연결 함수 ---
 
-// 헤더와 탭 영역만 다시 렌더링하는 함수 (기준이 shadowRoot로 변경)
+// 헤더와 탭(또는 네비게이션) 영역만 다시 렌더링하는 함수
 function renderHeaderAndTabs(shadowRoot) {
     const headerArea = shadowRoot.querySelector("#cp-header-area");
     if (headerArea) {
@@ -144,15 +140,42 @@ function renderHeaderAndTabs(shadowRoot) {
     }
 }
 
-// 이벤트 리스너 등록 함수 (기준이 shadowRoot로 변경)
+// 패널의 모든 클릭 이벤트를 처리하는 함수 (워크스페이스 연동 로직 포함)
 function addEventListenersToPanel(shadowRoot) {
     const mainArea = shadowRoot.querySelector("#cp-main-area");
-    const headerArea = shadowRoot.querySelector("#cp-header-area");
+    const panelContent = shadowRoot.querySelector("#cp-panel-content-wrapper");
 
-
-    headerArea.addEventListener('click', (e) => {
+    // 이벤트 위임을 사용하여 패널 전체의 클릭 이벤트를 효율적으로 관리합니다.
+    panelContent.addEventListener('click', (e) => {
         const target = e.target;
         
+        // --- 워크스페이스 네비게이션 로직 ---
+
+        // 1. 칸반 보드의 '아이디어' 카드 클릭 시 워크스페이스로 진입
+        const ideaCard = target.closest('.cp-kanban-card[data-status="ideas"]');
+        if (ideaCard) {
+            window.__cp_active_mode = 'workspace';
+            const ideaData = {
+                id: ideaCard.dataset.id,
+                title: ideaCard.dataset.title,
+                description: ideaCard.dataset.description,
+            };
+            
+            renderHeaderAndTabs(shadowRoot); // '뒤로가기' 헤더로 변경
+            renderWorkspace(mainArea, ideaData); // 워크스페이스 UI 렌더링
+            return;
+        }
+
+        // 2. 워크스페이스에서 '뒤로가기' 버튼 클릭 시 칸반 보드로 복귀
+        if (target.closest('#cp-back-to-dashboard')) {
+            window.__cp_active_mode = 'kanban'; // 기획 보드 모드로 상태 변경
+            renderHeaderAndTabs(shadowRoot); // 탭 헤더로 변경
+            renderKanban(mainArea); // 칸반 보드 UI 렌더링
+            return;
+        }
+
+        // --- 기존 헤더 버튼 및 탭 클릭 로직 ---
+
         if (target.closest("#cp-panel-close")) {
             closePanel();
             return;
@@ -163,7 +186,7 @@ function addEventListenersToPanel(shadowRoot) {
             return;
         }
 
-         const tab = e.target.closest('.cp-mode-tab');
+        const tab = target.closest('.cp-mode-tab');
         if (tab) {
             const activeKey = tab.dataset.key;
             if (window.__cp_active_mode === activeKey) return; 
@@ -171,15 +194,14 @@ function addEventListenersToPanel(shadowRoot) {
             window.__cp_active_mode = activeKey;
             renderHeaderAndTabs(shadowRoot);
 
-            // ▼▼▼ [핵심 수정] initDashboardMode를 renderDashboard로 변경합니다. ▼▼▼
             if (activeKey === 'dashboard') {
-                renderDashboard(mainArea); // initDashboardMode -> renderDashboard
+                renderDashboard(mainArea);
             } else if (activeKey === 'scrapbook') {
                 renderScrapbook(mainArea);
+            } else if (activeKey === 'kanban') {
+                renderKanban(mainArea);
             } else if (activeKey === 'channel') {
                 renderChannelMode(mainArea);
-            } else if (activeKey === 'kanban') {
-                renderKanban(mainArea); 
             } else {
                 mainArea.innerHTML = `<h1 style="text-align:center; margin-top: 50px;">${tab.textContent} 모드는 구현 예정입니다.</h1>`;
             }
@@ -187,7 +209,7 @@ function addEventListenersToPanel(shadowRoot) {
     });
 }
 
-// 좌하단 카드 버튼 표시 함수 (이 함수는 Shadow DOM과 무관하므로 수정 없음)
+// 좌하단 카드 버튼 표시 함수
 function showCardFloatingButton() {
   if (document.getElementById("cp-dock-container")) return;
 
@@ -208,7 +230,7 @@ function showCardFloatingButton() {
     transition: all 0.2s ease-in-out; z-index: 2;
   `;
   const iconUrl = chrome.runtime.getURL("images/icon-48.png");
-cardBtn.innerHTML = `<img src="${iconUrl}" alt="Content Pilot" style="width: 32px; height: 32px; pointer-events: none; opacity: 0.65;">`;
+  cardBtn.innerHTML = `<img src="${iconUrl}" alt="Content Pilot" style="width: 32px; height: 32px; pointer-events: none; opacity: 0.65;">`;
   const iconImg = cardBtn.querySelector('img');
 
   cardBtn.onmouseover = () => {

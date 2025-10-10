@@ -1,0 +1,263 @@
+/* --- 워크스페이스 UI 스타일 --- */
+
+/* 1. 전체 레이아웃 */
+.workspace-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  gap: 20px;
+  padding: 24px;
+  box-sizing: border-box;
+  background-color: #f7f8fa;
+}
+
+.workspace-column {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-column h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 4px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+#ai-briefing-panel { flex: 0 0 280px; }
+#main-editor-panel { flex: 1 1 0; }
+#resource-library-panel { flex: 0 0 320px; }
+
+/* 2. AI 브리핑 패널 (좌측) */
+.ai-briefing-content h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #555;
+  margin: 16px 0 8px 0;
+}
+.outline-list {
+  padding-left: 20px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #444;
+}
+#generate-draft-btn {
+  width: 100%;
+  background-color: #34A853;
+  color: white;
+  border: none;
+  padding: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 20px;
+}
+.interactive-tag:hover {
+  background-color: #4285F4;
+  color: #fff;
+}
+
+/* 3. 초안 작성 및 연결된 자료 패널 (중앙) */
+#main-editor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#main-editor-panel .main-editor-textarea {
+  flex-grow: 3;
+  min-height: 200px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 14px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+#main-editor-panel #linked-scraps-section {
+  flex-grow: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+}
+.linked-scraps-list {
+  flex-grow: 1; 
+  overflow-y: auto; 
+  background-color: #f1f3f5;
+  border: 2px dashed #ccc;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+.linked-scraps-list.drag-over {
+  border-color: #4285F4;
+  background-color: #e8f0fe;
+}
+
+/* 4. 자료 보관함 패널 (우측) */
+#resource-library-panel {
+  overflow: hidden;
+}
+#resource-library-panel h2 {
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+#resource-library-panel .all-scraps-list {
+    height: calc(100% - 50px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 8px;
+}
+
+/* 5. 공통 컴포넌트 (스크랩 카드 등) */
+.scrap-list p { /* 로딩, 빈 상태 메시지 */
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+  margin-top: 40px;
+}
+.scrap-card-item {
+  position: relative;
+}
+.unlink-scrap-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #e0e0e0;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  font-weight: bold;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.scrap-card-item:hover .unlink-scrap-btn {
+  opacity: 1;
+}
+
+/* ===== '연결된 자료' 카드 UI 최적화 ===== */
+
+/* 연결된 자료 목록 내부의 카드 아이템 */
+.linked-scraps-list .scrap-card-item {
+  margin: 0;
+}
+
+/* 연결된 자료 영역의 스크랩 카드 스타일 재정의 */
+.linked-scraps-list .scrap-card {
+  padding: 8px 12px 8px 30px; /* 내부 여백 축소 */
+  gap: 8px;
+  min-height: auto; /* 최소 높이 제거 */
+  background-color: #f8f9fa; /* 배경색 변경 */
+  border: 1px solid #e9ecef;
+}
+
+.linked-scraps-list .scrap-card:hover {
+  background-color: #fff;
+  border-color: #d2e3fc;
+}
+
+/* 이미지 숨기기 */
+.linked-scraps-list .scrap-card-img-wrap {
+  display: none;
+}
+
+/* 정보 영역 스타일 조정 */
+.linked-scraps-list .scrap-card-info {
+  gap: 0;
+}
+
+/* 제목 폰트 크기 조정 */
+.linked-scraps-list .scrap-card-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* 출처(snippet)와 태그 숨기기 */
+.linked-scraps-list .scrap-card-snippet,
+.linked-scraps-list .card-tags {
+  display: none;
+}
+
+/* 연결 해제 버튼 위치 및 스타일 조정 */
+.linked-scraps-list .unlink-scrap-btn {
+  /* 기존 .scrap-card-delete-btn 스타일을 그대로 사용하되 위치만 조정 */
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+  opacity: 0.5; /* 기본적으로 보이도록 설정 */
+}
+
+.linked-scraps-list .scrap-card-item:hover .unlink-scrap-btn {
+  opacity: 1;
+  background-color: #e9ecef;
+}
+
+/* ===== '연결된 자료' 마우스오버 툴팁 스타일 ===== */
+
+/* 툴팁의 부모가 될 카드 아이템에 position: relative 추가 */
+.linked-scraps-list .scrap-card-item {
+  position: relative;
+}
+
+/* 툴팁 기본 스타일 */
+.scrap-tooltip {
+  position: fixed; /* 이제 viewport 기준이므로 overflow에 영향을 받지 않음 */
+  width: 280px;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333;
+  z-index: 2147483647; /* 가장 위에 보이도록 z-index 최대화 */
+  pointer-events: none; /* 툴팁이 마우스 이벤트를 방해하지 않도록 */
+  
+  /* 나타나고 사라지는 애니메이션 */
+  opacity: 0;
+  transform: translateX(10px);
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+  visibility: hidden; /* 보이지 않을 때는 완전히 숨김 */
+}
+
+/* 툴팁이 활성화될 때 적용될 스타일 (JS로 제어) */
+.scrap-tooltip.visible {
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+}
+
+/* 마우스를 올렸을 때 툴팁이 보이도록 처리 */
+.linked-scraps-list .scrap-card-item:hover .scrap-tooltip {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* 툴팁 내부 텍스트 스타일 */
+.scrap-tooltip p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}

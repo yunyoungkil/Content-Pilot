@@ -418,6 +418,7 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // 스크랩 및 자료 관리
     if (msg.action === "scrap_element" && msg.data) {
         (async () => {
             const tags = await extractKeywords(msg.data.text);
@@ -437,14 +438,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             });
         })();
         return true;
-    } else if (msg.action === "cp_get_firebase_scraps") {
+    } 
+    
+    else if (msg.action === "cp_get_firebase_scraps") {
         firebase.database().ref("scraps").once("value", (snapshot) => {
             const val = snapshot.val() || {};
             const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
             sendResponse({ data: arr });
         });
         return true;
-    } else if (msg.action === "delete_scrap") {
+    } 
+
+    else if (msg.action === "delete_scrap") {
         const scrapIdToDelete = msg.id;
         if (scrapIdToDelete) {
             firebase.database().ref("scraps/" + scrapIdToDelete).remove()
@@ -452,12 +457,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 .catch((error) => sendResponse({ success: false, error: error.message }));
         }
         return true;
-    } else if (msg.action === "clear_blog_content") {
-        firebase.database().ref('channel_content/blogs').remove()
-            .then(() => sendResponse({ success: true, message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.' }))
-            .catch(error => sendResponse({ success: false, error: error.message }));
+    } 
+
+    else if (msg.action === "get_all_scraps") {
+        firebase.database().ref("scraps").once("value", (snapshot) => {
+            const val = snapshot.val() || {};
+            const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+
+            sendResponse({ success: true, scraps: arr.sort((a, b) => b.timestamp - a.timestamp) });
+        });
+        return true; 
+    }
+
+    else if (msg.action === "scrap_entire_analysis") {
+        const analysisContent = msg.data;
+        if (!analysisContent) return true;
+
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const dateTag = `${year}-${month}-${day}`;
+
+        const scrapPayload = {
+            text: analysisContent,
+            html: `<pre>${analysisContent}</pre>`,
+            tag: "AI_ANALYSIS",
+            url: `content-pilot://analysis/${Date.now()}`,
+            // 2. '#AI리포트'를 삭제하고 날짜 태그를 추가합니다.
+            tags: [`#성과분석`, `#${dateTag}`],
+            timestamp: Date.now()
+        };
+        
+        const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
+        const scrapRef = firebase.database().ref("scraps").push();
+        scrapRef.set(cleanedScrapPayload)
+            .then(() => console.log("AI 분석 리포트가 스크랩북에 저장되었습니다."))
+            .catch(err => console.error("AI 리포트 스크랩 중 오류:", err));
+        
         return true;
-    }     else if (msg.action === "save_channels_and_key") {
+    } 
+
+    // 채널 및 설정
+    else if (msg.action === "save_channels_and_key") {
         const { youtubeApiKey, geminiApiKey, ...newChannelData } = msg.data;
         const userId = 'default_user';
 
@@ -549,19 +591,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
         })();
         return true; // 비동기 응답을 위해 true 반환
-    } 
-    else if (msg.action === "delete_channel") {
-        (async () => {
-            try {
-                await deleteChannelData(msg.url);
-                sendResponse({ success: true });
-            } catch (error) {
-                console.error('채널 삭제 처리 중 오류:', error);
-                sendResponse({ success: false, error: error.message });
-            }
-        })();
-        return true; // 비동기 응답을 위해 true 반환
-    }
+    }  
+    
     else if (msg.action === "get_channels_and_key") {
       const userId = 'default_user';
     Promise.all([
@@ -591,13 +622,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true;
-    } else if (msg.action === "save_channels") {
-        const userId = 'default_user';
-        firebase.database().ref(`channels/${userId}`).set(msg.data)
-            .then(() => sendResponse({ success: true, message: '채널 정보가 저장되었습니다.' }))
-            .catch(error => sendResponse({ success: false, error: error.message }));
-        return true;
-    } else if (msg.action === "get_channel_content") {
+    } 
+
+    else if (msg.action === "delete_channel") {
+        (async () => {
+            try {
+                await deleteChannelData(msg.url);
+                sendResponse({ success: true });
+            } catch (error) {
+                console.error('채널 삭제 처리 중 오류:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true; // 비동기 응답을 위해 true 반환
+    }
+    
+    else if (msg.action === "get_channel_content") {
     const userId = 'default_user';
     Promise.all([
       firebase.database().ref('channel_content').once('value'),
@@ -622,7 +662,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }).catch(error => sendResponse({ success: false, error: error.message }));
     
     return true;
-    } else if (msg.action === "refresh_channel_data") {
+    } 
+
+    else if (msg.action === "refresh_channel_data") {
       const { sourceId, platform } = msg;
       
       const userId = 'default_user';
@@ -670,7 +712,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
       return true;
-    } else if (msg.action === "analyze_my_channel") {
+    } 
+    
+    else if (msg.action === "clear_blog_content") {
+        firebase.database().ref('channel_content/blogs').remove()
+            .then(() => sendResponse({ success: true, message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.' }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    }     
+
+    // AI 분석 및 아이디어
+    else if (msg.action === "analyze_my_channel") {
         const { channelName, channelContent } = msg.data; // 채널 이름과 데이터를 분리
         const analysisDate = new Date().toLocaleDateString('ko-KR'); // 'YYYY. M. D.' 형식의 날짜 생성
 
@@ -702,7 +754,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    } else if (msg.action === "generate_content_ideas") {
+    } 
+
+    else if (msg.action === "generate_content_ideas") {
           const { myContent, competitorContent, myAnalysisSummary } = msg.data;
         
         const myDataSummary = myContent
@@ -736,7 +790,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    } else if (msg.action === "analyze_my_blog") {
+    } 
+
+    else if (msg.action === "analyze_my_blog") {
         const { channelName, channelContent } = msg.data; // 채널 이름과 데이터를 분리
         const analysisDate = new Date().toLocaleDateString('ko-KR'); // 날짜 생성
 
@@ -776,7 +832,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    } else if (msg.action === "generate_blog_ideas") {
+    } 
+    
+    else if (msg.action === "generate_blog_ideas") {
         // 이제 data 객체에 myAnalysisSummary가 포함됩니다.
         const { myContent, competitorContent, myAnalysisSummary } = msg.data; 
         
@@ -811,7 +869,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         
         return true;
-    } else if (msg.action === "analyze_video_comments") {
+    } 
+
+    else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
     (async () => {
         const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
@@ -861,83 +921,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     
     return true;
-    } else if (msg.action === "add_idea_to_kanban") {
-        const ideaContent = msg.data;
-        if (!ideaContent) {
-            sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
-            return true;
-        }
+    } 
 
-        const lines = ideaContent.split('\n');
-        const title = lines[0].replace(/###|\*\*|\d+\.\s/g, '').trim();
-        const description = lines.slice(1).join('\n').trim();
-
-        const newCard = {
-            title: title,
-            description: description,
-            tags: ["#AI-추천"],
-            createdAt: Date.now()
-        };
-
-        const newCardRef = firebase.database().ref('kanban/ideas').push();
-        const newCardKey = newCardRef.key; // 1. Firebase가 생성한 고유 키를 가져옵니다.
-
-        newCardRef.set(newCard)
-            .then(() => {
-                console.log("AI 아이디어가 칸반 보드에 추가되었습니다:", title);
-                // 2. 성공 시, 고유 키를 프론트엔드로 반환합니다.
-                sendResponse({ success: true, firebaseKey: newCardKey });
-            })
-            .catch(e => {
-                console.error("칸반 카드 추가 중 오류:", e);
-                sendResponse({ success: false, error: e.message });
-            });
-        
-        return true; // 비동기 응답을 위해 true를 반환해야 합니다.
-    } else if (msg.action === "remove_idea_from_kanban") {
-        const firebaseKey = msg.key;
-        if (!firebaseKey) {
-            sendResponse({ success: false, error: "삭제할 아이디어의 키가 없습니다." });
-            return true;
-        }
-
-        firebase.database().ref(`kanban/ideas/${firebaseKey}`).remove()
-            .then(() => {
-                sendResponse({ success: true });
-            })
-            .catch(error => {
-                sendResponse({ success: false, error: error.message });
-            });
-        
-        return true; // 비동기 응답을 위해 true 반환
-    } else if (msg.action === "scrap_entire_analysis") {
-        const analysisContent = msg.data;
-        if (!analysisContent) return true;
-
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, '0');
-        const day = String(today.getDate()).padStart(2, '0');
-        const dateTag = `${year}-${month}-${day}`;
-
-        const scrapPayload = {
-            text: analysisContent,
-            html: `<pre>${analysisContent}</pre>`,
-            tag: "AI_ANALYSIS",
-            url: `content-pilot://analysis/${Date.now()}`,
-            // 2. '#AI리포트'를 삭제하고 날짜 태그를 추가합니다.
-            tags: [`#성과분석`, `#${dateTag}`],
-            timestamp: Date.now()
-        };
-        
-        const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
-        const scrapRef = firebase.database().ref("scraps").push();
-        scrapRef.set(cleanedScrapPayload)
-            .then(() => console.log("AI 분석 리포트가 스크랩북에 저장되었습니다."))
-            .catch(err => console.error("AI 리포트 스크랩 중 오류:", err));
-        
-        return true;
-    }     else if (msg.action === "start_google_auth") {
+    // Google 계정 연동
+    else if (msg.action === "start_google_auth") {
         (async () => {
             try {
                 // 1. 토큰 발급 (기존과 동일)
@@ -982,7 +969,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
         })();
         return true;
-    } else if (msg.action === "revoke_google_auth") {
+    } 
+
+    else if (msg.action === "revoke_google_auth") {
         (async () => {
             try {
                 const { googleAuthToken } = await chrome.storage.local.get('googleAuthToken');
@@ -1011,6 +1000,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // 칸반 보드 및 워크스페이스
     if (msg.action === "get_kanban_data") {
         // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
         firebase.database().ref('kanban').once('value', snapshot => {
@@ -1044,7 +1034,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return true; // 비동기 응답을 위해 true 반환
     }
-    
+
+    else if (msg.action === "move_kanban_card") {
+        const { cardId, originalStatus, newStatus } = msg.data;
+        const originalRef = firebase.database().ref(`kanban/${originalStatus}/${cardId}`);
+        originalRef.once('value', snapshot => {
+            const cardData = snapshot.val();
+            if (cardData) {
+                const newRef = firebase.database().ref(`kanban/${newStatus}/${cardId}`);
+                originalRef.remove()
+                    .then(() => newRef.set(cardData))
+                    .then(() => sendResponse({ success: true }))
+                    .catch(error => sendResponse({ success: false, error: error.message }));
+            } else {
+                sendResponse({ success: false, error: "이동할 카드를 찾을 수 없습니다." });
+            }
+        });
+        return true;
+    }
+
     else if (msg.action === "link_published_url") {
         const { cardId, url, status } = msg.data;
         if (!cardId || !url || !status) {
@@ -1070,6 +1078,127 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         
         return true;
     }
+
+    else if (msg.action === "add_idea_to_kanban") {
+        const ideaContent = msg.data;
+        if (!ideaContent) {
+            sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
+            return true;
+        }
+
+        const lines = ideaContent.split('\n');
+        const title = lines[0].replace(/###|\*\*|\d+\.\s/g, '').trim();
+        const description = lines.slice(1).join('\n').trim();
+
+        const newCard = {
+            title: title,
+            description: description,
+            tags: ["#AI-추천"],
+            createdAt: Date.now()
+        };
+
+        const newCardRef = firebase.database().ref('kanban/ideas').push();
+        const newCardKey = newCardRef.key; // 1. Firebase가 생성한 고유 키를 가져옵니다.
+
+        newCardRef.set(newCard)
+            .then(() => {
+                console.log("AI 아이디어가 칸반 보드에 추가되었습니다:", title);
+                // 2. 성공 시, 고유 키를 프론트엔드로 반환합니다.
+                sendResponse({ success: true, firebaseKey: newCardKey });
+            })
+            .catch(e => {
+                console.error("칸반 카드 추가 중 오류:", e);
+                sendResponse({ success: false, error: e.message });
+            });
+        
+        return true; // 비동기 응답을 위해 true를 반환해야 합니다.
+    } 
+
+    else if (msg.action === "remove_idea_from_kanban") {
+        const firebaseKey = msg.key;
+        if (!firebaseKey) {
+            sendResponse({ success: false, error: "삭제할 아이디어의 키가 없습니다." });
+            return true;
+        }
+
+        firebase.database().ref(`kanban/ideas/${firebaseKey}`).remove()
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        
+        return true; // 비동기 응답을 위해 true 반환
+    } 
+
+    else if (msg.action === "link_scrap_to_idea") {
+        const { ideaId, scrapId, status } = msg.data;
+        if (!ideaId || !scrapId || !status) {
+            sendResponse({ success: false, error: "아이디어, 스크랩 ID 또는 상태가 없습니다." });
+            return true;
+        }
+        const scrapLinkRef = firebase.database().ref(`kanban/${status}/${ideaId}/linkedScraps/${scrapId}`);
+        scrapLinkRef.set(true)
+            .then(() => sendResponse({ success: true }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    }
+
+    else if (msg.action === "unlink_scrap_from_idea") {
+        const { ideaId, scrapId } = msg.data;
+        if (!ideaId || !scrapId) {
+            sendResponse({ success: false, error: "ID가 유효하지 않습니다." });
+            return true;
+        }
+
+
+        const scrapLinkRef = firebase.database().ref(`kanban/ideas/${ideaId}/linkedScraps/${scrapId}`);
+        scrapLinkRef.remove()
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        
+        return true; 
+    }
+
+    else if (msg.action === "generate_draft_from_idea") {
+        const ideaData = msg.data;
+        (async () => {
+            const prompt = `
+                당신은 전문 콘텐츠 에디터입니다. 다음 주제와 핵심 키워드를 바탕으로 독자의 흥미를 끌 수 있는 블로그 포스트의 초안을 작성해주세요.
+
+                ## 주제: ${ideaData.title}
+
+                ## 핵심 설명:
+                ${ideaData.description || '주제에 대한 상세 설명'}
+
+                ## 주요 키워드:
+                - AI 글쓰기
+                - 콘텐츠 전략
+                - SEO
+
+                [작성 규칙]
+                1. 서론, 본론(2~3개 소주제), 결론의 구조를 갖춰주세요.
+                2. 각 문단은 자연스럽게 연결되어야 합니다.
+                3. 독자가 이해하기 쉬운 친절한 어조로 작성해주세요.
+            `;
+
+            // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
+            const draft = await callGeminiAPI(prompt); 
+            if (draft && !draft.startsWith("오류:")) {
+                sendResponse({ success: true, draft: draft });
+            } else {
+                sendResponse({ success: false, error: draft });
+            }
+        })();
+        
+        return true; // 비동기 응답을 위해 true를 반환합니다.
+    }
+
     else if (msg.action === "request_search_keywords") {
         const { cardId, status, title } = msg.data;
 
@@ -1097,15 +1226,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })();
         return true;
     }
-    // ▼▼▼ [신규 추가] 'regenerate_search_keywords' 액션 처리 로직 ▼▼▼
+
     else if (msg.action === "regenerate_search_keywords") {
         (async () => {
-            // 기존 데이터 확인 없이 바로 새로운 키워드 생성 함수 호출
+
             await generateAndSendKeywords(msg.data, sender);
         })();
         return true;
     }
+
+    else if (msg.action === "link_published_url") {
+        const { cardId, url, status } = msg.data;
+        if (!cardId || !url || !status) {
+            sendResponse({ success: false, error: "필요한 정보가 부족합니다." });
+            return true;
+        }
+
+        const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+        cardRef.update({
+            publishedUrl: url,
+            performanceTracked: true
+        })
+        .then(() => {
+            console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
+            sendResponse({ success: true });
+            updateSinglePerformanceMetric({
+                id: cardId,
+                path: `kanban/${status}/${cardId}`,
+                url: url
+            });
+        })
+        .catch(error => sendResponse({ success: false, error: error.message }));
+        
+        return true;
+    }
+
 });
+
 
 // --- 3. 주기적 데이터 수집 로직 ---
 

@@ -55,7 +55,8 @@
         "lib/firebase-app-compat.js",
         "lib/firebase-database-compat.js",
         "offscreen.html",
-        "css/style.css"
+        "css/style.css",
+        "css/workspace.css"
       ],
       "matches": ["<all_urls>"]
     }
