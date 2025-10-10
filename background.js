@@ -835,41 +835,68 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } 
     
     else if (msg.action === "generate_blog_ideas") {
-        // 이제 data 객체에 myAnalysisSummary가 포함됩니다.
-        const { myContent, competitorContent, myAnalysisSummary } = msg.data; 
-        
-        const myDataSummary = myContent
-            .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-            .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
+      const { myContent, competitorContent, myAnalysisSummary } = msg.data; 
+    
+    const myDataSummary = myContent
+        .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+        .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
 
-        const competitorDataSummary = competitorContent
-            .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-            .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
-        
-        const blogIdeasPrompt = `
-            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+    const competitorDataSummary = competitorContent
+        .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+        .slice(0, 10).map(item => ` - ${item.title} (댓글: ${item.commentCount || 0})`).join('\n');
+    
+    
+    const blogIdeasPrompt = `
+        당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
 
-            [정보 1: 내 블로그의 핵심 성공 요인]
-            ${myAnalysisSummary}
+        [정보 1: 내 블로그의 핵심 성공 요인]
+        ${myAnalysisSummary}
 
-            [정보 2: 내 블로그의 인기 포스트 목록]
-            ${myDataSummary}
+        [정보 2: 내 블로그의 인기 포스트 목록]
+        ${myDataSummary}
 
-            [정보 3: 경쟁 블로그의 인기 포스트 목록]
-            ${competitorDataSummary}
+        [정보 3: 경쟁 블로그의 인기 포스트 목록]
+        ${competitorDataSummary}
 
-            [요청]
-            나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 블로그의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
-            각 아이디어는 "### 아이디어 제목" 형식으로 시작하고, 왜 이 아이디어가 전략적으로 유효한지에 대한 설명을 반드시 포함해주세요.
-        `;
+        [요청]
+        나의 강점(정보 1)과 경쟁자의 인기 요소(정보 3)를 결합하여 새로운 아이디어 5가지를 제안해주세요.
 
-        (async () => {
-            const ideasResult = await callGeminiAPI(blogIdeasPrompt); 
-            sendResponse({ success: true, ideas: ideasResult });
-        })();
-        
-        return true;
-    } 
+        [응답 형식]
+        - 다른 설명 없이, 반드시 아래와 같은 JSON 배열 형식으로만 응답해주세요.
+        - 'keywords'는 주제를 대표하는 4~5개의 핵심 단어입니다.
+        - 'recommendedSearches'는 구체적인 정보 탐색을 위한 3~4개의 검색어 질문입니다.
+        - 'outline'은 서론, 본론, 결론을 포함하는 3~5개 항목의 배열입니다.
+
+        [
+            {
+                "title": "AI 글쓰기 도구, 당신의 블로그를 어떻게 바꿀까?",
+                "description": "ChatGPT와 같은 AI 도구를 블로그 콘텐츠 제작에 활용하는 구체적인 방법과 SEO에 미치는 영향을 분석합니다.",
+                "keywords": ["AI 글쓰기", "콘텐츠 자동화", "SEO", "블로그 전략", "ChatGPT"],
+                "recommendedSearches": [
+                "AI 글쓰기 도구 비교 2024", 
+                "블로그 글 AI로 작성 시 저품질 위험",
+                "AI 글쓰기 도구 사용법",
+                "AI 콘텐츠 SEO 최적화 방법"
+                ],
+                "outline": [
+                "1. 서론: AI, 콘텐츠 마케팅의 새로운 패러다임",
+                "2. 본론 1: 주요 AI 글쓰기 도구 심층 비교 (ChatGPT vs Claude)",
+                "3. 본론 2: 성공적인 AI 활용 콘텐츠 제작 사례 분석",
+                "4. 본론 3: AI 사용 시 주의해야 할 저작권 및 윤리 문제",
+                "5. 결론: AI를 활용한 지속 가능한 콘텐츠 전략 수립하기"
+                ]
+        }
+        ]
+    `;
+
+    (async () => {
+
+    const ideasResult = await callGeminiAPI(blogIdeasPrompt); 
+    sendResponse({ success: true, ideas: ideasResult });
+    })();
+    
+    return true;
+} 
 
     else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
@@ -1080,39 +1107,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     else if (msg.action === "add_idea_to_kanban") {
-        const ideaContent = msg.data;
-        if (!ideaContent) {
-            sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
-            return true;
-        }
+    const ideaObjectString = msg.data;
 
-        const lines = ideaContent.split('\n');
-        const title = lines[0].replace(/###|\*\*|\d+\.\s/g, '').trim();
-        const description = lines.slice(1).join('\n').trim();
+    if (!ideaObjectString) {
+        sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
+        return true;
+    }
+
+    try {
+
+        const ideaData = JSON.parse(ideaObjectString);
 
         const newCard = {
-            title: title,
-            description: description,
-            tags: ["#AI-추천"],
+            title: ideaData.title || '제목 없음',
+            description: ideaData.description || '',
+            tags: ["#AI-추천", ...(ideaData.keywords || [])], 
+            recommendedKeywords: ideaData.recommendedSearches || [],
+            outline: ideaData.outline || [], 
             createdAt: Date.now()
         };
 
         const newCardRef = firebase.database().ref('kanban/ideas').push();
-        const newCardKey = newCardRef.key; // 1. Firebase가 생성한 고유 키를 가져옵니다.
+        const newCardKey = newCardRef.key;
 
         newCardRef.set(newCard)
             .then(() => {
-                console.log("AI 아이디어가 칸반 보드에 추가되었습니다:", title);
-                // 2. 성공 시, 고유 키를 프론트엔드로 반환합니다.
                 sendResponse({ success: true, firebaseKey: newCardKey });
             })
             .catch(e => {
-                console.error("칸반 카드 추가 중 오류:", e);
                 sendResponse({ success: false, error: e.message });
             });
-        
-        return true; // 비동기 응답을 위해 true를 반환해야 합니다.
-    } 
+
+    } catch (e) {
+        // 여기서 파싱 에러가 발생하면, 프론트엔드에서 데이터가 잘못 전달된 것입니다.
+        console.error("add_idea_to_kanban 파싱 오류:", e, "전달받은 문자열:", ideaObjectString);
+        sendResponse({ success: false, error: "아이디어 데이터 파싱에 실패했습니다." });
+    }
+    
+    return true;
+}
 
     else if (msg.action === "remove_idea_from_kanban") {
         const firebaseKey = msg.key;

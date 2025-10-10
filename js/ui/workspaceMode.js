@@ -5,6 +5,14 @@ import { shortenLink } from "../utils.js";
 export function renderWorkspace(container, ideaData) {
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps) ? ideaData.linkedScraps : (ideaData.linkedScraps ? Object.keys(ideaData.linkedScraps) : []);
   
+  const outlineHtml = (ideaData.outline && ideaData.outline.length > 0)
+    ? ideaData.outline.map(item => `<li>${item}</li>`).join('')
+    : '<li>추천 목차가 없습니다.</li>';
+
+  const searchesHtml = (ideaData.recommendedKeywords && ideaData.recommendedKeywords.length > 0)
+    ? ideaData.recommendedKeywords.map(item => `<li><a href="https://www.google.com/search?q=${encodeURIComponent(item)}" target="_blank">${item}</a></li>`).join('')
+    : '<li>추천 검색어가 없습니다.</li>';
+
   container.innerHTML = `
     <div class="workspace-container">
       <div id="ai-briefing-panel" class="workspace-column">
@@ -16,11 +24,13 @@ export function renderWorkspace(container, ideaData) {
           </div>
           <h4>추천 목차</h4>
           <ul class="outline-list">
-            <li>1. 서론: AI 글쓰기, 왜 필요한가?</li>
-            <li>2. 본론 1: AI 도구별 장단점 비교</li>
-            <li>3. 본론 2: 실제 활용 사례 분석</li>
-            <li>4. 결론: 나에게 맞는 AI 글쓰기 전략</li>
+            ${outlineHtml}
           </ul>
+
+          <h4>추천 검색어</h4>
+            <ul class="keyword-list">
+                ${searchesHtml}
+            </ul>
           <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
         </div>
       </div>

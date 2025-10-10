@@ -12,7 +12,7 @@ let viewState = {
 let activeTagFilter = null;
 const getCacheKey = () => `analysisCache_${location.href}`;
 
-// ... (initDashboardMode, renderAnalysisResult, createContentCard, renderPaginatedContent, updateDashboardUI, renderDashboard 함수는 이전과 동일합니다) ...
+
 function initDashboardMode(container) {
     const CACHE_KEY = getCacheKey();
     chrome.storage.local.get(CACHE_KEY, (result) => {
@@ -63,37 +63,56 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
         container.innerHTML = `<p class="ai-ideas-placeholder">분석 결과에서 제안할 아이디어를 찾지 못했습니다.</p>`;
         return;
     }
+
     const rawHtml = marked.parse(analysisText);
     container.innerHTML = `<div class="ai-ideas-list">${rawHtml}</div>`;
-    if (!isMyChannelAnalysis) {
-        const ideaHeadings = container.querySelectorAll('h3');
-        let ideaIndex = 0;
-        ideaHeadings.forEach(heading => {
-            const ideaContainer = document.createElement('div');
-            ideaContainer.className = 'ai-idea-card';
-            ideaContainer.dataset.ideaIndex = ideaIndex++;
-            let sibling = heading.nextSibling;
-            const contentElements = [heading];
-            while (sibling && sibling.tagName !== 'H3') {
-                contentElements.push(sibling);
-                sibling = sibling.nextSibling;
-            }
-            const ideaContentText = `### ${heading.textContent}\n` + contentElements.slice(1).map(el => el.textContent).join('\n').trim();
-            ideaContainer.dataset.ideaContent = ideaContentText;
-            const contentWrapper = document.createElement('div');
-            contentWrapper.className = 'idea-content';
-            contentElements.forEach(el => contentWrapper.appendChild(el.cloneNode(true)));
-            const button = document.createElement('button');
-            button.className = 'add-to-kanban-btn';
-            button.textContent = '📌 기획 보드에 추가';
-            ideaContainer.appendChild(contentWrapper);
-            ideaContainer.appendChild(button);
-            const parent = heading.parentNode;
-            parent.insertBefore(ideaContainer, heading);
-            contentElements.forEach(el => el.remove());
-        });
+    if (isMyChannelAnalysis) {
+        // 내 채널 분석은 기존 방식 유지
+        const rawHtml = marked.parse(analysisText);
+        container.innerHTML = `<div class="ai-ideas-list">${rawHtml}</div>`;
+        return;
+    }
+
+
+    try {
+
+        const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) throw new Error("AI 응답에서 유효한 배열 형식을 찾지 못했습니다.");
+        
+        const ideas = JSON.parse(jsonMatch[0]);
+
+
+        if (!Array.isArray(ideas) || ideas.length === 0) {
+            container.innerHTML = `<p class="ai-ideas-placeholder">분석 결과에서 제안할 아이디어를 찾지 못했습니다.</p>`;
+            return;
+        }
+
+        const ideasHtml = ideas.map((idea, index) => {
+
+            const ideaString = JSON.stringify(idea);
+            const escapedIdeaString = ideaString.replace(/'/g, "&#39;");
+
+            return `
+                <div class="ai-idea-card" 
+                     data-idea-index="${index}" 
+                     data-idea-object='${escapedIdeaString}'>
+                    <div class="idea-content">
+                        <h3>${idea.title}</h3>
+                        <p>${idea.description}</p>
+                    </div>
+                    <button class="add-to-kanban-btn">📌 기획 보드에 추가</button>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `<div class="ai-ideas-list">${ideasHtml}</div>`;
+
+    } catch (e) {
+        console.error("AI 아이디어 파싱 오류:", e, "원본 텍스트:", analysisText);
+        container.innerHTML = `<p class="ai-ideas-placeholder">AI가 제안한 아이디어 형식이 올바르지 않습니다.</p>`;
     }
 }
+
 function createContentCard(item, type) {
     if (!item || !item.title) return '';
     const isVideo = !!item.videoId;
@@ -494,14 +513,15 @@ function addDashboardEventListeners(container) {
         }
 
         if (target.closest('.add-to-kanban-btn')) {
-            const ideaCard = target.closest('.ai-idea-card');
-            const ideaContent = ideaCard.dataset.ideaContent;
-            const ideaIndex = ideaCard.dataset.ideaIndex;
-            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: ideaContent }, (response) => {
-                if (response && response.success) {
-                    const ideaTitle = ideaContent.split('\n')[0].replace(/###|\*\*|\d+\.\s/g, '').trim();
-                    const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };
+                const ideaCard = target.closest('.ai-idea-card');
+                const ideaObjectString = ideaCard.dataset.ideaObject;
+                const ideaIndex = ideaCard.dataset.ideaIndex;
 
+                chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: ideaObjectString }, (response) => {
+                    if (response && response.success) {
+                    const ideaTitle = JSON.parse(ideaObjectString).title;
+                    const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };
+                        
                     chrome.storage.local.get(CACHE_KEY, (result) => {
                         let cache = result[CACHE_KEY] || { addedIdeas: [] };
                         if (!cache.addedIdeas) cache.addedIdeas = [];

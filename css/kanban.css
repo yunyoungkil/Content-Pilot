@@ -1,0 +1,227 @@
+/* --- 칸반 보드 UI 스타일 --- */
+.kanban-board-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kanban-controls-header {
+  padding: 18px 18px 0 18px;
+  flex-shrink: 0;
+}
+
+.kanban-sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kanban-sort-label {
+  font-size: 14px;
+  color: #5f6368;
+  font-weight: 500;
+}
+
+.kanban-sort-btn {
+  background: #fff;
+  color: #3C4043;
+  border: 1px solid #dadce0;
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.kanban-sort-btn:hover {
+  background-color: #f1f3f5;
+}
+
+.kanban-sort-btn.active {
+  background-color: #e8f0fe;
+  color: #1967d2;
+  border-color: #d2e3fc;
+  font-weight: 600;
+}
+
+/* 칸반 보드 루트 컨테이너 */
+#cp-kanban-board-root {
+  display: flex;
+  gap: 18px;
+  min-width: 700px;
+  height: 100%; /* 부모 요소(main-area)의 높이를 꽉 채움 */
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+/* 칸반 컬럼 스타일 */
+.cp-kanban-col {
+  flex: 1;
+  background: #f1f3f5;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: 300px;
+  height: 100%;
+}
+
+.cp-kanban-col-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: #333;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid #dee2e6;
+  flex-shrink: 0;
+}
+
+.kanban-col-cards {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 칸반 카드 기본 레이아웃 */
+.cp-kanban-card {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  position: relative; /* ::before 뱃지 위치 기준 */
+}
+
+.cp-kanban-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.kanban-card-body {
+  padding: 12px 14px;
+}
+
+.kanban-card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #3C4043;
+  line-height: 1.5;
+}
+
+/* 카드 상단 태그 */
+.card-top-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 20px;
+}
+
+.kanban-card-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* AI 추천 태그 */
+.ai-tag {
+  background-color: #e6f4ea;
+  color: #1e8e3e;
+}
+
+/* 검색 키워드 태그 */
+.keyword-tag {
+  background-color: #e8f0fe;
+  color: #1967d2;
+}
+
+/* 일반 키워드 태그 */
+.default-tag {
+  background-color: #f1f3f5;
+  color: #5f6368;
+}
+
+/* AI 추천 카드 클러스터 스타일 */
+.cp-kanban-card.cluster {
+  border-left: 4px solid #34A853;
+}
+
+
+/* 카드 하단 푸터 */
+.kanban-card-footer {
+  border-top: 1px solid #f1f3f5;
+  padding: 6px 12px; /* 패딩 조정 */
+  display: flex;
+  justify-content: space-between; /* 양쪽 정렬 */
+  align-items: center;
+  min-height: 28px; /* 최소 높이 확보 */
+}
+
+.kanban-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.linked-scraps-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5f6368;
+}
+
+
+.kanban-card-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.kanban-action-btn {
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  color: #5f6368;
+  transition: background-color 0.2s;
+}
+
+.kanban-action-btn:hover {
+  background-color: #e9ecef;
+}
+
+/* 성과 추적, 수익 링크 스타일 */
+.track-performance-btn, .performance-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1967d2;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.track-performance-btn:hover, .performance-link:hover {
+  background-color: #e8f0fe;
+}
+
+.outline-tag {
+  background-color: #fef7e0;
+  color: #b06000;
+}

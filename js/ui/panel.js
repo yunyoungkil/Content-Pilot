@@ -4,18 +4,16 @@ import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "
 import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
-import { renderKanban } from "./kanbanMode.js";
-import { renderWorkspace } from "./workspaceMode.js"; // 워크스페이스 모듈 import
+import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js"; 
+import { renderWorkspace } from "./workspaceMode.js"; 
 
-// --- 패널 상태 및 UI 제어 함수 ---
 
-// 패널이 현재 보이는지 확인하는 함수
 export function isPanelVisible() {
     const host = document.getElementById("content-pilot-host");
     return host && host.style.display !== 'none';
 }
 
-// 메인 패널을 생성하고 화면에 표시하는 함수
+
 export function createAndShowPanel() {
   let host = document.getElementById("content-pilot-host");
   if (host) {
@@ -48,6 +46,12 @@ export function createAndShowPanel() {
     workspaceStyleLink.rel = 'stylesheet';
     workspaceStyleLink.href = chrome.runtime.getURL('css/workspace.css');
     shadowRoot.appendChild(workspaceStyleLink);
+
+    // 3. 칸반 보드 스타일(kanban.css) 링크 추가
+    const kanbanStyleLink = document.createElement('link');
+    kanbanStyleLink.rel = 'stylesheet';
+    kanbanStyleLink.href = chrome.runtime.getURL('css/kanban.css');
+    shadowRoot.appendChild(kanbanStyleLink);
 
     const panel = document.createElement("div");
     panel.id = "content-pilot-panel";
@@ -95,14 +99,14 @@ export function createAndShowPanel() {
   });
 }
 
-// 패널을 닫는 함수
+
 export function closePanel() {
   const host = document.getElementById("content-pilot-host");
   if (host) host.style.display = "none";
   chrome.storage.local.set({ isScrapingActive: false, highlightToggleState: false });
 }
 
-// 패널을 최소화하는 함수
+
 export function minimizePanelToCard() {
   const host = document.getElementById("content-pilot-host");
   if (host) host.style.display = "none";
@@ -110,7 +114,7 @@ export function minimizePanelToCard() {
   chrome.storage.local.set({ isScrapingActive: true, highlightToggleState: false });
 }
 
-// 스크랩을 위해 패널을 잠시 숨기는 함수
+
 export function hidePanelForScrap() {
   const host = document.getElementById("content-pilot-host");
   if (host && host.style.display !== 'none') {
@@ -120,7 +124,7 @@ export function hidePanelForScrap() {
   return false;
 }
 
-// 스크랩 후 패널을 원래 상태로 복원하는 함수
+
 export function restorePanelAfterScrap(wasVisible) {
   if (wasVisible) {
     const host = document.getElementById("content-pilot-host");
@@ -130,9 +134,7 @@ export function restorePanelAfterScrap(wasVisible) {
   }
 }
 
-// --- UI 렌더링 및 이벤트 연결 함수 ---
 
-// 헤더와 탭(또는 네비게이션) 영역만 다시 렌더링하는 함수
 function renderHeaderAndTabs(shadowRoot) {
     const headerArea = shadowRoot.querySelector("#cp-header-area");
     if (headerArea) {
@@ -140,7 +142,7 @@ function renderHeaderAndTabs(shadowRoot) {
     }
 }
 
-// 패널의 모든 클릭 이벤트를 처리하는 함수 (워크스페이스 연동 로직 포함)
+
 function addEventListenersToPanel(shadowRoot) {
     const mainArea = shadowRoot.querySelector("#cp-main-area");
     const panelContent = shadowRoot.querySelector("#cp-panel-content-wrapper");
@@ -148,29 +150,12 @@ function addEventListenersToPanel(shadowRoot) {
     // 이벤트 위임을 사용하여 패널 전체의 클릭 이벤트를 효율적으로 관리합니다.
     panelContent.addEventListener('click', (e) => {
         const target = e.target;
-        
-        // --- 워크스페이스 네비게이션 로직 ---
 
-        // 1. 칸반 보드의 '아이디어' 카드 클릭 시 워크스페이스로 진입
-        const ideaCard = target.closest('.cp-kanban-card[data-status="ideas"]');
-        if (ideaCard) {
-            window.__cp_active_mode = 'workspace';
-            const ideaData = {
-                id: ideaCard.dataset.id,
-                title: ideaCard.dataset.title,
-                description: ideaCard.dataset.description,
-            };
-            
-            renderHeaderAndTabs(shadowRoot); // '뒤로가기' 헤더로 변경
-            renderWorkspace(mainArea, ideaData); // 워크스페이스 UI 렌더링
-            return;
-        }
-
-        // 2. 워크스페이스에서 '뒤로가기' 버튼 클릭 시 칸반 보드로 복귀
         if (target.closest('#cp-back-to-dashboard')) {
-            window.__cp_active_mode = 'kanban'; // 기획 보드 모드로 상태 변경
-            renderHeaderAndTabs(shadowRoot); // 탭 헤더로 변경
-            renderKanban(mainArea); // 칸반 보드 UI 렌더링
+            window.__cp_active_mode = 'kanban'; 
+            renderHeaderAndTabs(shadowRoot); 
+            renderKanban(mainArea); 
+            addKanbanEventListeners(mainArea);
             return;
         }
 
@@ -200,6 +185,7 @@ function addEventListenersToPanel(shadowRoot) {
                 renderScrapbook(mainArea);
             } else if (activeKey === 'kanban') {
                 renderKanban(mainArea);
+                addKanbanEventListeners(mainArea); 
             } else if (activeKey === 'channel') {
                 renderChannelMode(mainArea);
             } else {
