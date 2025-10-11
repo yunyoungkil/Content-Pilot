@@ -901,7 +901,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     
     return true;
-} 
+    } 
 
     else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;
@@ -1152,7 +1152,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     
     return true;
-}
+    }
 
     else if (msg.action === "remove_idea_from_kanban") {
         const firebaseKey = msg.key;
@@ -1206,27 +1206,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     else if (msg.action === "generate_draft_from_idea") {
-        const ideaData = msg.data;
-        (async () => {
-            const prompt = `
-                당신은 전문 콘텐츠 에디터입니다. 다음 주제와 핵심 키워드를 바탕으로 독자의 흥미를 끌 수 있는 블로그 포스트의 초안을 작성해주세요.
+    const ideaData = msg.data;
+    (async () => {
+        // 1. 모든 키워드를 수집하고 중복을 제거합니다.
+        const allKeywords = new Set([
+            ...(ideaData.tags || []).filter(t => t !== '#AI-추천'),
+            ...(ideaData.longTailKeywords || [])
+        ]);
+        const keywordsText = Array.from(allKeywords).join('\n- ');
 
-                ## 주제: ${ideaData.title}
+        // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
+        const linkedScrapsText = (ideaData.linkedScrapsContent || [])
+            .map((scrap, index) => `[참고 자료 ${index + 1}]\n${scrap.text}\n`)
+            .join('\n');
 
-                ## 핵심 설명:
-                ${ideaData.description || '주제에 대한 상세 설명'}
+        // 3. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
+        const prompt = `
+            당신은 특정 주제에 대한 전문 작가입니다. 아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
-                ## 주요 키워드:
-                - AI 글쓰기
-                - 콘텐츠 전략
-                - SEO
+            ### 1. 최종 주제
+            - ${ideaData.title}
 
-                [작성 규칙]
-                1. 서론, 본론(2~3개 소주제), 결론의 구조를 갖춰주세요.
-                2. 각 문단은 자연스럽게 연결되어야 합니다.
-                3. 독자가 이해하기 쉬운 친절한 어조로 작성해주세요.
-            `;
+            ### 2. 핵심 요약
+            - ${ideaData.description || '주제에 대한 상세 설명'}
 
+            ### 3. 현재까지 작성된 초안 (이 내용을 바탕으로 발전시켜주세요)
+            ${ideaData.currentDraft || '(비어 있음)'}
+
+            ### 4. 글의 구조 (이 목차를 반드시 따라주세요)
+            ${(ideaData.outline || []).join('\n')}
+
+            ### 5. 반드시 포함할 키워드 (중복 제거된 최종 목록)
+            - ${keywordsText}
+
+            ### 6. 핵심 참고 자료 (이 내용들을 근거로 본문을 작성해주세요)
+            ${linkedScrapsText || '참고 자료 없음'}
+
+            [작성 규칙]
+            1. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
+            2. '글의 최종 목표 구조'를 반드시 지켜주세요.
+            3. '핵심 참고 자료'의 내용을 단순 요약하지 말고, 자연스럽게 인용하거나 재해석하여 본문을 풍부하게 만들어주세요.
+        `;
             // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
             const draft = await callGeminiAPI(prompt); 
             if (draft && !draft.startsWith("오류:")) {
@@ -1297,6 +1317,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             });
         })
         .catch(error => sendResponse({ success: false, error: error.message }));
+        
+        return true;
+    }
+
+    else if (msg.action === "save_draft_content") {
+
+        const { ideaId, status, draft } = msg.data;
+        if (!ideaId || !status) {
+            sendResponse({ success: false, error: "Idea ID or status is missing." });
+            return true;
+        }
+
+        const draftRef = firebase.database().ref(`kanban/${status}/${ideaId}/draftContent`);
+        draftRef.set(draft)
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
         
         return true;
     }

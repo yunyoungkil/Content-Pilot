@@ -48,6 +48,13 @@
   color: #555;
   margin: 16px 0 8px 0;
 }
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap; /* 태그들이 다음 줄로 넘어가도록 설정 */
+  gap: 6px; /* 태그 사이의 간격 */
+}
+
 .outline-list {
   padding-left: 20px;
   margin: 0;
@@ -172,7 +179,7 @@
 .linked-scraps-list .scrap-card {
   padding: 8px 12px 8px 30px; /* 내부 여백 축소 */
   gap: 8px;
-  min-height: auto; /* 최소 높이 제거 */
+  min-height: 0; /* 최소 높이 제거 */
   background-color: #f8f9fa; /* 배경색 변경 */
   border: 1px solid #e9ecef;
 }

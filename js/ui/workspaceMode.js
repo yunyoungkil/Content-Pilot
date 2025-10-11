@@ -134,12 +134,71 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     const keywordList = workspaceEl.querySelector('.keyword-list');
     const generateDraftBtn = workspaceEl.querySelector('#generate-draft-btn');
 
+
+    editorTextarea.addEventListener('blur', () => {
+        const currentDraft = editorTextarea.value;
+        
+        // 데이터베이스에 저장된 초안과 내용이 다를 경우에만 저장 요청
+        if (currentDraft !== (ideaData.draftContent || '')) {
+            console.log("Saving draft...");
+            const saveData = {
+                ideaId: ideaData.id,
+                status: ideaData.status,
+                draft: currentDraft
+            };
+            chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
+                if (saveResponse && saveResponse.success) {
+                    // 저장 성공 시, ideaData 객체도 업데이트하여 일관성 유지
+                    ideaData.draftContent = currentDraft; 
+                    console.log("Draft saved successfully on blur.");
+                } else {
+                    console.error("Failed to save draft on blur:", saveResponse.error);
+                }
+            });
+        }
+    });
+
+    
     generateDraftBtn.addEventListener('click', () => {
         generateDraftBtn.textContent = 'AI가 초안을 작성하는 중...';
         generateDraftBtn.disabled = true;
-        chrome.runtime.sendMessage({ action: 'generate_draft_from_idea', data: ideaData }, (response) => {
+
+        // 1. '연결된 자료' 목록에서 스크랩 텍스트를 모두 수집합니다.
+        const linkedScrapsContent = Array.from(
+            linkedScrapsList.querySelectorAll('.scrap-card-item')
+        ).map(cardItem => {
+            return {
+                text: cardItem.dataset.text || '',
+                // 필요하다면 출처(URL)도 함께 보낼 수 있습니다.
+                url: cardItem.querySelector('.scrap-card-snippet')?.textContent || '' 
+            };
+        });
+
+        // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
+        const payload = {
+            ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
+            currentDraft: editorTextarea.value, // 현재 에디터에 작성된 내용
+            linkedScrapsContent: linkedScrapsContent // 연결된 자료의 텍스트 목록
+        };
+
+        // 3. 통합된 데이터를 background.js로 전송합니다.
+        chrome.runtime.sendMessage({ action: 'generate_draft_from_idea', data: payload }, (response) => {
             if (response && response.success) {
                 editorTextarea.value = response.draft;
+                const saveData = {
+                    ideaId: ideaData.id,
+                    status: ideaData.status,
+                    draft: response.draft
+                };
+                chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
+                    if (!saveResponse || !saveResponse.success) {
+                        console.error("Failed to save draft:", saveResponse.error);
+                        // (선택) 저장 실패 시 사용자에게 알림을 줄 수 있습니다.
+                    } else {
+                        console.log("Draft saved successfully.");
+                    }
+                });
+
             } else {
                 alert('초안 생성에 실패했습니다: ' + (response.error || '알 수 없는 오류'));
             }
@@ -240,22 +299,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     resourceLibrary.addEventListener('dragstart', (e) => {
         const cardItem = e.target.closest('.scrap-card-item');
         if (cardItem) {
-            const card = cardItem.querySelector('.scrap-card');
-            const imageEl = card.querySelector('.scrap-card-img-wrap img');
-            const snippetEl = card.querySelector('.scrap-card-snippet');
-            
-            const scrapData = {
-                id: cardItem.dataset.scrapId,
-                text: cardItem.dataset.text,
-                image: imageEl ? imageEl.src : null,
-                url: snippetEl ? snippetEl.textContent : '', 
-                tags: Array.from(card.querySelectorAll('.card-tags .tag')).map(t => t.textContent.replace('#', ''))
-            };
-            
-            e.dataTransfer.setData('application/json', JSON.stringify(scrapData));
-            e.dataTransfer.effectAllowed = 'copyLink';
-            cardItem.style.opacity = '0.5';
-        }
+        const card = cardItem.querySelector('.scrap-card');
+        const imageEl = card.querySelector('.scrap-card-img-wrap img');
+        const snippetEl = card.querySelector('.scrap-card-snippet');
+        
+        // 드래그 시 필요한 모든 스크랩 데이터를 객체로 만듭니다.
+        const scrapData = {
+            id: cardItem.dataset.scrapId,
+            text: cardItem.dataset.text, // 에디터에 삽입될 텍스트
+            image: imageEl ? imageEl.src : null,
+            url: snippetEl ? snippetEl.textContent : '', 
+            tags: Array.from(card.querySelectorAll('.card-tags .tag')).map(t => t.textContent.replace('#', ''))
+        };
+        
+        // 데이터를 JSON 문자열 형태로 dataTransfer 객체에 저장합니다.
+        e.dataTransfer.setData('application/json', JSON.stringify(scrapData));
+        e.dataTransfer.effectAllowed = 'copyLink';
+        cardItem.style.opacity = '0.5';
+    }
     });
 
     resourceLibrary.addEventListener('dragend', (e) => {
@@ -293,7 +354,17 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         if (!scrapData) return;
 
         if (e.target === editorTextarea) {
-            // ... (에디터에 드롭하는 로직은 변경 없습니다) ...
+            // 1. 드롭 대상이 에디터일 경우, drag-over 스타일을 제거합니다.
+            editorTextarea.classList.remove('drag-over');
+
+            // 2. 스크랩의 텍스트 내용을 가져옵니다.
+            const textToInsert = scrapData.text || '';
+
+            // 3. 에디터의 기존 내용에 새로운 텍스트를 추가합니다. (줄 바꿈 추가)
+            editorTextarea.value += `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`;
+
+            // 4. 스크롤을 맨 아래로 이동하여 삽입된 내용을 확인시킵니다.
+            editorTextarea.scrollTop = editorTextarea.scrollHeight;
         }
         else if (linkedScrapsList.contains(e.target)) {
             linkedScrapsList.classList.remove('drag-over');
