@@ -35,6 +35,13 @@
 #resource-library-panel { flex: 0 0 320px; }
 
 /* 2. AI 브리핑 패널 (좌측) */
+
+.ai-briefing-content {
+  overflow-y: auto; /* 내용이 넘칠 경우 세로 스크롤 자동 생성 */
+  flex: 1; /* 남은 공간을 모두 차지하도록 하여 스크롤 영역 확보 */
+  min-height: 0; /* flex 자식 요소의 높이 축소를 위해 필요 */
+}
+
 .ai-briefing-content h4 {
   font-size: 15px;
   font-weight: 600;

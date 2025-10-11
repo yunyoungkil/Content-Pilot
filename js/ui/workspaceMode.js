@@ -9,6 +9,11 @@ export function renderWorkspace(container, ideaData) {
     ? ideaData.outline.map(item => `<li>${item}</li>`).join('')
     : '<li>추천 목차가 없습니다.</li>';
 
+  const longTailKeywordsHtml = (ideaData.longTailKeywords && ideaData.longTailKeywords.length > 0)
+    ? ideaData.longTailKeywords.map(k => `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`).join('')
+    : '<span>제안된 롱테일 키워드가 없습니다.</span>';
+
+
   const searchesHtml = (ideaData.recommendedKeywords && ideaData.recommendedKeywords.length > 0)
     ? ideaData.recommendedKeywords.map(item => `<li><a href="https://www.google.com/search?q=${encodeURIComponent(item)}" target="_blank">${item}</a></li>`).join('')
     : '<li>추천 검색어가 없습니다.</li>';
@@ -20,17 +25,24 @@ export function renderWorkspace(container, ideaData) {
         <div class="ai-briefing-content">
           <h4>주요 키워드</h4>
           <div class="keyword-list">
-            ${(ideaData.tags || ['AI 글쓰기', '콘텐츠 전략', 'SEO']).map(k => `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`).join('')}
+            ${(ideaData.tags || []).filter(t => t !== '#AI-추천').map(k => `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`).join('')}
           </div>
+
+          <h4>롱테일 키워드</h4>
+          <div class="keyword-list">
+            ${longTailKeywordsHtml}
+          </div>
+
           <h4>추천 목차</h4>
           <ul class="outline-list">
             ${outlineHtml}
           </ul>
-
+          
           <h4>추천 검색어</h4>
-            <ul class="keyword-list">
-                ${searchesHtml}
-            </ul>
+          <ul class="keyword-list">
+            ${searchesHtml}
+          </ul>
+
           <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
         </div>
       </div>
@@ -226,7 +238,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
 
     resourceLibrary.addEventListener('dragstart', (e) => {
-const cardItem = e.target.closest('.scrap-card-item');
+        const cardItem = e.target.closest('.scrap-card-item');
         if (cardItem) {
             const card = cardItem.querySelector('.scrap-card');
             const imageEl = card.querySelector('.scrap-card-img-wrap img');

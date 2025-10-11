@@ -135,6 +135,13 @@ function createKanbanCard(id, data, status) {
       }).join('');
   }
   
+    if (data.longTailKeywords && Array.isArray(data.longTailKeywords) && data.longTailKeywords.length > 0) {
+      topTagsHtml += data.longTailKeywords.map(keyword => {
+          // 롱테일 키워드는 보통 길기 때문에 '#' 없이 그대로 표시합니다.
+          return `<span class="kanban-card-tag long-tail-tag">${keyword}</span>`;
+      }).join('');
+  }
+  
   const hasOutline = data.outline && data.outline.length > 0;
   if (hasOutline) {
       topTagsHtml += `<span class="kanban-card-tag outline-tag">📄 목차</span>`;

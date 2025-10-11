@@ -864,6 +864,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         [응답 형식]
         - 다른 설명 없이, 반드시 아래와 같은 JSON 배열 형식으로만 응답해주세요.
         - 'keywords'는 주제를 대표하는 4~5개의 핵심 단어입니다.
+        - 'longTailKeywords'는 사용자의 구체적인 검색 의도가 담긴 3단어 이상의 구문입니다.
         - 'recommendedSearches'는 구체적인 정보 탐색을 위한 3~4개의 검색어 질문입니다.
         - 'outline'은 서론, 본론, 결론을 포함하는 3~5개 항목의 배열입니다.
 
@@ -872,6 +873,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 "title": "AI 글쓰기 도구, 당신의 블로그를 어떻게 바꿀까?",
                 "description": "ChatGPT와 같은 AI 도구를 블로그 콘텐츠 제작에 활용하는 구체적인 방법과 SEO에 미치는 영향을 분석합니다.",
                 "keywords": ["AI 글쓰기", "콘텐츠 자동화", "SEO", "블로그 전략", "ChatGPT"],
+                "longTailKeywords": ["초보자를 위한 AI 글쓰기 가이드",
+                    "블로그 방문자 늘리는 AI 활용법",
+                    "AI 콘텐츠 SEO 최적화 전략"
+                    ],
                 "recommendedSearches": [
                 "AI 글쓰기 도구 비교 2024", 
                 "블로그 글 AI로 작성 시 저품질 위험",
@@ -1124,6 +1129,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             tags: ["#AI-추천", ...(ideaData.keywords || [])], 
             recommendedKeywords: ideaData.recommendedSearches || [],
             outline: ideaData.outline || [], 
+            createdAt: Date.now(),
+            longTailKeywords: ideaData.longTailKeywords || [], 
             createdAt: Date.now()
         };
 

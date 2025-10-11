@@ -432,16 +432,25 @@ function addDashboardEventListeners(container) {
             ideasContent.innerHTML = `<p class="ai-ideas-placeholder">${message}</p>`;
 
             if (isMyChannel) {
-                // ▼▼▼ [수정] 분석 시작 시, '최근 추가된 아이디어' UI와 캐시를 초기화합니다. ▼▼▼
-                chrome.storage.local.set({ [CACHE_KEY]: {} }, () => {
-                    const recentlyAddedPanel = container.querySelector('#recently-added-panel');
-                    const recentlyAddedList = container.querySelector('#recently-added-list');
-                    if (recentlyAddedPanel && recentlyAddedList) {
-                        recentlyAddedPanel.style.display = 'none';
-                        recentlyAddedList.innerHTML = `<li class="recent-add-placeholder">아이디어를 기획 보드에 추가하면 여기에 표시됩니다.</li>`;
-                    }
+                chrome.storage.local.get(CACHE_KEY, (result) => {
+                    let cache = result[CACHE_KEY] || {};
+                    // 2. 'addedIdeas'를 제외한 분석 관련 캐시만 삭제합니다.
+                    delete cache.myAnalysisResult;
+                    delete cache.myAnalysisSummary;
+                    delete cache.competitorAnalysisResult;
+                    delete cache.isAnalysisScrapped;
+                    
+                    // 3. 수정된 캐시를 다시 저장합니다.
+                    chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
+                        // UI 초기화 로직은 그대로 유지합니다.
+                        const recentlyAddedPanel = container.querySelector('#recently-added-panel');
+                        const recentlyAddedList = container.querySelector('#recently-added-list');
+                        if (recentlyAddedPanel && recentlyAddedList) {
+                            recentlyAddedPanel.style.display = 'none';
+                            recentlyAddedList.innerHTML = `<li class="recent-add-placeholder">아이디어를 기획 보드에 추가하면 여기에 표시됩니다.</li>`;
+                        }
+                    });
                 });
-                // ▲▲▲ 수정 완료 ▲▲▲
             }
 
             chrome.runtime.sendMessage({ action, data: content }, (response) => {
@@ -513,45 +522,47 @@ function addDashboardEventListeners(container) {
         }
 
         if (target.closest('.add-to-kanban-btn')) {
-                const ideaCard = target.closest('.ai-idea-card');
-                const ideaObjectString = ideaCard.dataset.ideaObject;
-                const ideaIndex = ideaCard.dataset.ideaIndex;
+            const ideaCard = target.closest('.ai-idea-card');
+            const ideaObjectString = ideaCard.dataset.ideaObject;
+            const ideaIndex = ideaCard.dataset.ideaIndex;
 
-                chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: ideaObjectString }, (response) => {
-                    if (response && response.success) {
+            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: ideaObjectString }, (response) => {
+                if (response && response.success) {
                     const ideaTitle = JSON.parse(ideaObjectString).title;
                     const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };
-                        
-                    chrome.storage.local.get(CACHE_KEY, (result) => {
-                        let cache = result[CACHE_KEY] || { addedIdeas: [] };
-                        if (!cache.addedIdeas) cache.addedIdeas = [];
-                        cache.addedIdeas.push(newIdea);
-                        chrome.storage.local.set({ [CACHE_KEY]: cache });
-                    });
-                    
-                    const recentlyAddedPanel = container.querySelector('#recently-added-panel');
-                    const recentlyAddedList = container.querySelector('#recently-added-list');
-                    const placeholder = recentlyAddedList.querySelector('.recent-add-placeholder');
-                    recentlyAddedPanel.style.display = 'block';
-                    if (placeholder) placeholder.remove();
-                    const newItem = document.createElement('li');
-                    newItem.dataset.firebaseKey = response.firebaseKey;
-                    newItem.dataset.ideaIndex = ideaIndex;
-                    newItem.innerHTML = `<span>${ideaTitle}</span><button class="undo-add-btn">실행 취소</button>`;
-                    recentlyAddedList.prepend(newItem);
-                    if (recentlyAddedList.children.length > 7) recentlyAddedList.lastChild.remove();
-                    target.disabled = true;
-                    target.textContent = '✅ 추가됨';
 
+                    // ▼▼▼ 수정된 상태 관리 로직 ▼▼▼
+                    // 1. 항상 storage에서 최신 데이터를 가져옵니다.
                     chrome.storage.local.get(CACHE_KEY, (result) => {
-                        const cache = result[CACHE_KEY] || {};
-                        if (!cache.isAnalysisScrapped) {
-                            if (cache.myAnalysisResult) {
-                               chrome.runtime.sendMessage({ action: 'scrap_entire_analysis', data: cache.myAnalysisResult });
-                            }
-                            cache.isAnalysisScrapped = true;
-                            chrome.storage.local.set({ [CACHE_KEY]: cache });
+                        let cache = result[CACHE_KEY] || {};
+                        let ideas = cache.addedIdeas || [];
+
+                        // 2. 중복을 확인하고 아이디어를 추가합니다.
+                        if (!ideas.some(idea => idea.ideaIndex === ideaIndex)) {
+                            ideas.push(newIdea);
                         }
+                        cache.addedIdeas = ideas;
+
+                        // 3. storage에 데이터를 저장하고, 저장이 완료된 후 UI를 업데이트합니다.
+                        chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
+                            // UI 업데이트 로직
+                            target.disabled = true;
+                            target.textContent = '✅ 추가됨';
+
+                            const recentlyAddedPanel = container.querySelector('#recently-added-panel');
+                            const recentlyAddedList = container.querySelector('#recently-added-list');
+                            if (recentlyAddedPanel && recentlyAddedList) {
+                                recentlyAddedPanel.style.display = 'block';
+                                const placeholder = recentlyAddedList.querySelector('.recent-add-placeholder');
+                                if (placeholder) placeholder.remove();
+
+                                const newItem = document.createElement('li');
+                                newItem.dataset.firebaseKey = response.firebaseKey;
+                                newItem.dataset.ideaIndex = ideaIndex;
+                                newItem.innerHTML = `<span>${ideaTitle}</span><button class="undo-add-btn">실행 취소</button>`;
+                                recentlyAddedList.prepend(newItem);
+                            }
+                        });
                     });
                 } else {
                     alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
@@ -564,26 +575,37 @@ function addDashboardEventListeners(container) {
             const listItem = target.closest('li');
             const firebaseKey = listItem.dataset.firebaseKey;
             const ideaIndex = listItem.dataset.ideaIndex;
+
             chrome.runtime.sendMessage({ action: 'remove_idea_from_kanban', key: firebaseKey }, (response) => {
                 if (response && response.success) {
-                    listItem.remove();
+                    // ▼▼▼ 수정된 상태 관리 로직 ▼▼▼
                     chrome.storage.local.get(CACHE_KEY, (result) => {
-                        let cache = result[CACHE_KEY] || { addedIdeas: [] };
-                        cache.addedIdeas = cache.addedIdeas.filter(idea => idea.ideaIndex !== ideaIndex);
-                        chrome.storage.local.set({ [CACHE_KEY]: cache });
+                        let cache = result[CACHE_KEY] || {};
+                        let ideas = cache.addedIdeas || [];
+                        
+                        // 아이디어를 배열에서 제거
+                        cache.addedIdeas = ideas.filter(idea => idea.ideaIndex !== ideaIndex);
+
+                        // 데이터를 저장하고, 저장이 완료된 후 UI를 업데이트합니다.
+                        chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
+                            // UI 업데이트 로직
+                            listItem.remove();
+                            
+                            const originalCard = container.querySelector(`.ai-idea-card[data-idea-index="${ideaIndex}"]`);
+                            if (originalCard) {
+                                const button = originalCard.querySelector('.add-to-kanban-btn');
+                                if (button) {
+                                    button.disabled = false;
+                                    button.textContent = '📌 기획 보드에 추가';
+                                }
+                            }
+                            
+                            const recentlyAddedList = container.querySelector('#recently-added-list');
+                            if (recentlyAddedList.children.length === 0) {
+                                recentlyAddedList.innerHTML = `<li class="recent-add-placeholder">아이디어를 기획 보드에 추가하면 여기에 표시됩니다.</li>`;
+                            }
+                        });
                     });
-                    const originalCard = container.querySelector(`.ai-idea-card[data-idea-index="${ideaIndex}"]`);
-                    if (originalCard) {
-                        const button = originalCard.querySelector('.add-to-kanban-btn');
-                        if (button) {
-                            button.disabled = false;
-                            button.textContent = '📌 기획 보드에 추가';
-                        }
-                    }
-                    const recentlyAddedList = container.querySelector('#recently-added-list');
-                    if (recentlyAddedList.children.length === 0) {
-                        recentlyAddedList.innerHTML = `<li class="recent-add-placeholder">아이디어를 기획 보드에 추가하면 여기에 표시됩니다.</li>`;
-                    }
                 } else {
                     alert('아이디어 삭제 실패: ' + (response?.error || '알 수 없는 오류'));
                 }
