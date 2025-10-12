@@ -85,6 +85,38 @@
   flex-direction: column;
   gap: 16px;
 }
+
+.editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.editor-header h2 {
+  margin: 0;
+}
+
+.editor-btn {
+  background-color: #e8f0fe;
+  color: #1967d2;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Toast UI Editor가 들어갈 컨테이너 */
+#toast-editor {
+  flex-grow: 1; /* 남은 공간을 모두 차지 */
+  background-color: #fff;
+  border-radius: 8px;
+  overflow: hidden; /* 내부 UI가 삐져나오지 않도록 */
+}
+
 #main-editor-panel .main-editor-textarea {
   flex-grow: 3;
   min-height: 200px;

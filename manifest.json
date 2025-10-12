@@ -54,6 +54,8 @@
         "images/*.png",
         "lib/firebase-app-compat.js",
         "lib/firebase-database-compat.js",
+        "lib/toast-ui/toastui-editor-all.min.js",
+        "lib/toast-ui/toastui-editor.min.css",
         "offscreen.html",
         "css/style.css",
         "css/workspace.css",

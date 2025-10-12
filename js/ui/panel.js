@@ -53,6 +53,17 @@ export function createAndShowPanel() {
     kanbanStyleLink.href = chrome.runtime.getURL('css/kanban.css');
     shadowRoot.appendChild(kanbanStyleLink);
 
+    // 4. Toast UI Editor CSS 링크 수정
+    const tuiEditorStyleLink = document.createElement('link');
+    tuiEditorStyleLink.rel = 'stylesheet';
+    tuiEditorStyleLink.href = chrome.runtime.getURL('lib/toast-ui/toastui-editor.min.css');
+    shadowRoot.appendChild(tuiEditorStyleLink);
+
+    // 5. Toast UI Editor 자바스크립트 라이브러리 수정
+    const tuiEditorScript = document.createElement('script');
+    tuiEditorScript.src = chrome.runtime.getURL('lib/toast-ui/toastui-editor-all.min.js');
+    document.head.appendChild(tuiEditorScript);
+
     const panel = document.createElement("div");
     panel.id = "content-pilot-panel";
     panel.style.cssText = `
