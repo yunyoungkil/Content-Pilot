@@ -1323,22 +1323,54 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     else if (msg.action === "save_draft_content") {
 
-        const { ideaId, status, draft } = msg.data;
-        if (!ideaId || !status) {
-            sendResponse({ success: false, error: "Idea ID or status is missing." });
-            return true;
-        }
+    const { ideaId, status, draftId, draftTitle, draft } = msg.data;
 
-        const draftRef = firebase.database().ref(`kanban/${status}/${ideaId}/draftContent`);
-        draftRef.set(draft)
-            .then(() => {
-                sendResponse({ success: true });
-            })
-            .catch(error => {
-                sendResponse({ success: false, error: error.message });
-            });
-        
+    if (!ideaId || !status) {
+        sendResponse({ success: false, error: "Idea ID or status is missing." });
         return true;
+    }
+
+
+    const newDraftId = draftId || firebase.database().ref().push().key;
+    const draftRef = firebase.database().ref(`kanban/${status}/${ideaId}/drafts/${newDraftId}`);
+    
+    const newDraftData = {
+        title: draftTitle || `초안 ${new Date().toLocaleString('ko-KR')}`,
+        content: draft,
+        createdAt: Date.now()
+    };
+
+
+    draftRef.set(newDraftData)
+        .then(() => {
+
+            if (status === 'ideas') {
+                const originalRef = firebase.database().ref(`kanban/ideas/${ideaId}`);
+                originalRef.once('value', snapshot => {
+                    const cardData = snapshot.val();
+                    if (cardData) {
+                        const newRef = firebase.database().ref(`kanban/in-progress/${ideaId}`);
+
+                        originalRef.remove()
+                            .then(() => newRef.set(cardData))
+                            .then(() => sendResponse({ success: true, moved: true })) 
+                            .catch(error => sendResponse({ success: false, error: error.message }));
+                    } else {
+
+                        sendResponse({ success: true, moved: false });
+                    }
+                });
+            } else {
+
+                sendResponse({ success: true, moved: false });
+            }
+ 
+        })
+        .catch(error => {
+            sendResponse({ success: false, error: error.message });
+        });
+    
+    return true;
     }
 
 });

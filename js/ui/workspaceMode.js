@@ -49,7 +49,7 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="main-editor-panel" class="workspace-column">
         <h2>✍️ 초안 작성</h2>
-        <textarea class="main-editor-textarea" placeholder="이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...">${ideaData.draftContent || ''}</textarea>
+        <textarea class="main-editor-textarea">${ideaData.draftContent || ''}</textarea>
         <div id="linked-scraps-section">
           <h4>🔗 연결된 자료</h4>
           <div class="scrap-list linked-scraps-list" data-idea-id="${ideaData.id}">
@@ -144,6 +144,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
             const saveData = {
                 ideaId: ideaData.id,
                 status: ideaData.status,
+                draftId: ideaData.draftId,
                 draft: currentDraft
             };
             chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {

@@ -63,7 +63,6 @@ function addRealtimeUpdateListener() {
     });
 }
 
-
 /**
  * 전체 칸반 UI를 데이터에 따라 다시 그리는 함수
  */
@@ -109,6 +108,7 @@ function renderCardsInColumn(columnEl, status, cards) {
 }
 
 function createKanbanCard(id, data, status) {
+
   const card = document.createElement('div');
   card.className = 'cp-kanban-card';
   card.dataset.id = id;
@@ -116,8 +116,8 @@ function createKanbanCard(id, data, status) {
   card.dataset.title = data.title || '';
   card.dataset.description = data.description || '';
   card.draggable = true;
-
   card.title = data.description || '';
+
 
   // 1. AI 추천 아이디어인 경우 cluster 클래스를 추가하여 왼쪽 테두리를 표시합니다.
   const isAiIdea = data.tags && data.tags.includes('#AI-추천');
@@ -125,6 +125,17 @@ function createKanbanCard(id, data, status) {
     card.classList.add('cluster');
   }
 
+  let metaInfoHtml = ''; 
+  const linkedScrapsCount = data.linkedScraps ? Object.keys(data.linkedScraps).length : 0;
+  if (linkedScrapsCount > 0) {
+    metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
+  }
+  
+  // drafts 객체 또는 draftContent가 있으면 초안 개수 뱃지를 추가합니다.
+  const draftsCount = data.drafts ? Object.keys(data.drafts).length : (data.draftContent ? 1 : 0);
+  if (draftsCount > 0) {
+      metaInfoHtml += `<span class="kanban-card-meta drafts-count">📄 ${draftsCount}개</span>`;
+  }
 
   let topTagsHtml = '';
   if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
@@ -135,7 +146,7 @@ function createKanbanCard(id, data, status) {
       }).join('');
   }
   
-    if (data.longTailKeywords && Array.isArray(data.longTailKeywords) && data.longTailKeywords.length > 0) {
+  if (data.longTailKeywords && Array.isArray(data.longTailKeywords) && data.longTailKeywords.length > 0) {
       topTagsHtml += data.longTailKeywords.map(keyword => {
           // 롱테일 키워드는 보통 길기 때문에 '#' 없이 그대로 표시합니다.
           return `<span class="kanban-card-tag long-tail-tag">${keyword}</span>`;
@@ -147,16 +158,11 @@ function createKanbanCard(id, data, status) {
       topTagsHtml += `<span class="kanban-card-tag outline-tag">📄 목차</span>`;
   }
 
-  const linkedScrapsCount = data.linkedScraps ? Object.keys(data.linkedScraps).length : 0;
-  let metaInfoHtml = '';
-  if (linkedScrapsCount > 0) {
-    metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
-  }
-
   let actionButtons = ``;
   if (status === 'done' && !data.publishedUrl) {
     actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
-  } else if  (data.publishedUrl) {
+  } 
+  else if  (data.publishedUrl) {
     const performance = data.performance;
     const earnings = performance ? `$${(performance.estimatedEarnings || 0).toFixed(2)}` : '대기중';
     actionButtons += `<a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>`;
@@ -213,18 +219,30 @@ function addKanbanEventListeners(container) {
                     data: { cardId: card.dataset.id, url: url, status: card.dataset.status }
                 });
             }
-        } else {
+        } 
+        
+        else {
             const cardId = card.dataset.id;
             const status = card.dataset.status;
             const cardData = allKanbanData[status]?.[cardId];
-            if (cardData) {
+            if (!cardData) return;
 
-                window.__cp_active_mode = 'workspace';
-                
-                const shadowRoot = container.getRootNode();
-                renderHeaderAndTabs(shadowRoot);
+            // ▼▼▼ 이 부분을 수정합니다 ▼▼▼
 
-                renderWorkspace(kanbanContainer, { ...cardData, id: cardId, status: status });
+            // 1. 워크스페이스 진입 전에 모드 변경 및 헤더 업데이트를 먼저 수행합니다.
+            window.__cp_active_mode = 'workspace';
+            const shadowRoot = container.getRootNode(); // shadowRoot 가져오기
+            renderHeaderAndTabs(shadowRoot);
+
+            const hasDrafts = (cardData.drafts && Object.keys(cardData.drafts).length > 0) || cardData.draftContent;
+
+
+            if (hasDrafts) {
+                // 초안이 있으면 (어떤 형식이든) 팝업을 띄웁니다.
+                showDraftSelectionPopup(cardData, cardId, status); 
+            } else {
+                // 초안이 없으면 바로 워크스페이스로 진입합니다.
+                renderWorkspace(kanbanContainer, { ...cardData, id: cardId, status: status, draftId: null, draftContent: '' });
             }
         }
     });
@@ -267,12 +285,82 @@ function addKanbanEventListeners(container) {
     });
 }
 
+/**
+ * 초안 선택 팝업(모달)을 생성하고 표시하는 함수
+ * @param {object} ideaData - drafts 객체를 포함하는 아이디어 카드 데이터
+ * @param {string} ideaId - 아이디어 카드의 고유 ID
+ * @param {string} status - 아이디어 카드의 현재 상태(컬럼)
+ */
+function showDraftSelectionPopup(ideaData, ideaId, status) {
+    // 기존에 열려있는 모달이 있다면 제거
+    const existingModal = kanbanContainer.querySelector('.cp-modal-backdrop');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.className = 'cp-modal-backdrop';
+
+    const drafts = ideaData.drafts || {};
+    if (!ideaData.drafts && ideaData.draftContent) {
+        drafts['legacy-draft'] = {
+            title: '기존 초안',
+            content: ideaData.draftContent,
+            createdAt: ideaData.createdAt // 카드의 생성 시간을 사용
+        };
+    }
+    const draftItemsHtml = Object.entries(drafts).map(([draftId, draftData]) => {
+        const date = new Date(draftData.createdAt).toLocaleDateString('ko-KR');
+        return `
+            <li class="draft-select-item" data-draft-id="${draftId}">
+                <span class="draft-title">${draftData.title || '제목 없는 초안'}</span>
+                <span class="draft-date">${date}</span>
+            </li>
+        `;
+    }).join('');
+
+    modal.innerHTML = `
+        <div class="cp-modal-content draft-select-modal">
+            <button class="cp-modal-close">×</button>
+            <h3>'${ideaData.title}' 초안 목록</h3>
+            <ul class="draft-select-list">${draftItemsHtml}</ul>
+            <button class="new-draft-btn">+ 새 초안 작성하기</button>
+        </div>
+    `;
+
+    kanbanContainer.appendChild(modal);
+
+    modal.addEventListener('click', (e) => {
+        const target = e.target;
+
+        if (target.classList.contains('cp-modal-close') || target === modal) {
+            modal.remove();
+            return;
+        }
+
+        const draftItem = target.closest('.draft-select-item');
+        if (draftItem) {
+            const draftId = draftItem.dataset.draftId;
+            const draftContent = drafts[draftId]?.content || '';
+            
+            // 선택한 초안으로 워크스페이스 진입
+            renderWorkspace(kanbanContainer, { ...ideaData, id: ideaId, status: status, draftId, draftContent });
+            modal.remove();
+        }
+
+        if (target.classList.contains('new-draft-btn')) {
+            // 새 초안으로 워크스페이스 진입
+            renderWorkspace(kanbanContainer, { ...ideaData, id: ideaId, status: status, draftId: null, draftContent: '' });
+            modal.remove();
+        }
+    });
+}
+
 function renderHeaderAndTabs(shadowRoot) {
     const headerArea = shadowRoot.querySelector("#cp-header-area");
     if (headerArea) {
         headerArea.innerHTML = renderPanelHeader();
     }
 }
+
 
 
 
