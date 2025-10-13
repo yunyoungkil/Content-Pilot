@@ -1,0 +1,67 @@
+## 🚀 Content Pilot 프로젝트 구조 분석
+
+Content Pilot는 최신 Chrome 확장 프로그램 아키텍처(Manifest V3)를 기반으로, 기능별로 잘 모듈화된 구조를 가지고 있습니다. 크게 **백그라운드 로직**, **콘텐츠 스크립트(UI 및 상호작용)**, 그리고 **빌드 시스템**으로 나눌 수 있습니다.
+
+### 🏛️ 핵심 아키텍처
+
+```
+Content-Pilot/
+├── 📄 manifest.json             # 확장 프로그램의 설계도
+├── 📄 background.js             # 중앙 관제탑 (Firebase 연동, API 호출, 데이터 관리)
+├── 📄 content.js                # 웹페이지에 삽입되는 현장 요원 (UI 렌더링 및 사용자 상호작용)
+├── 📄 offscreen.js              # DOM 분석 전문가 (background.js의 도우미)
+├── 📁 js/                       # UI 및 핵심 기능 모듈
+│   ├── 📁 core/                # 핵심 로직 (highlighter.js, scrapbook.js)
+│   └── 📁 ui/                 # UI 컴포넌트 (panel.js, dashboardMode.js, kanbanMode.js 등)
+├── 📁 dist/
+│   └── 📜 bundle.js            # Webpack으로 빌드된 최종 결과물
+└── 📄 webpack.config.js          # Webpack 설정 파일
+```
+
+-----
+
+### 📜 주요 파일 및 역할
+
+#### 1\. **`manifest.json` : 확장 프로그램의 설계도**
+
+확장 프로그램의 모든 기본 정보를 정의하는 가장 중요한 파일입니다.
+
+  * **핵심 스크립트 지정**: `background.js`를 서비스 워커로, `dist/bundle.js`를 콘텐츠 스크립트로 지정하여 각각의 역할을 부여합니다.
+  * **권한 요청**: `storage`, `scripting`, `alarms` 등 기능에 필요한 브라우저 권한과 `offscreen`, `identity` 같은 고급 API 사용 권한을 명시합니다.
+  * **웹 접근 가능 리소스**: 웹페이지에서 직접 접근해야 하는 이미지나 CSS 파일 등을 정의합니다.
+
+#### 2\. **`background.js` : 중앙 관제탑 (서비스 워커)**
+
+확장 프로그램의 두뇌 역할을 하며, 눈에 보이지 않는 모든 핵심 로직을 처리합니다.
+
+  * **데이터 통신**: Firebase Realtime Database와의 모든 통신(데이터 읽기, 쓰기, 실시간 동기화)을 담당합니다.
+  * **외부 API 연동**: YouTube Data API, Google AI Gemini API 등을 호출하여 데이터를 수집하고 AI 분석을 실행합니다.
+  * **이벤트 관리**: `chrome.runtime.onMessage`를 통해 `content.js`나 다른 스크립트로부터 오는 요청을 받아 처리하고, `chrome.alarms`를 사용해 주기적인 데이터 수집 작업을 예약합니다.
+  * **Offscreen Document 호출**: DOM 분석이 필요할 때 `offscreen.js`를 호출하여 작업을 위임합니다.
+
+#### 3\. **`content.js` & `dist/bundle.js` : 현장 요원**
+
+실제 웹페이지에 삽입되어 사용자 인터페이스(UI)와 상호작용을 담당합니다.
+
+  * **모듈 로더**: `import` 구문을 통해 `js/` 폴더에 있는 여러 UI 및 핵심 로직 모듈들을 가져와 실행하는 시작점(Entry Point) 역할을 합니다.
+  * **UI 렌더링**: `js/ui/panel.js`의 `createAndShowPanel` 같은 함수를 호출하여 실제 화면에 UI를 그립니다.
+  * **사용자 이벤트 처리**: `js/core/highlighter.js`를 초기화하여 사용자의 마우스 오버, 클릭, Alt 키 입력 등 스크랩과 관련된 모든 상호작용을 직접 처리합니다.
+  * **빌드 결과물**: `webpack.config.js` 설정에 따라 `content.js`와 `js/` 폴더의 모든 모듈은 `dist/bundle.js`라는 하나의 파일로 합쳐지며, 이 파일이 `manifest.json`에 의해 웹페이지에 최종적으로 주입됩니다.
+
+#### 4\. **`js/` 폴더 : 기능별 모듈**
+
+기능별로 파일을 분리하여 코드의 재사용성과 유지보수성을 높인 핵심 폴더입니다.
+
+  * **`js/ui/`**: `dashboardMode.js`, `kanbanMode.js`, `scrapbookMode.js` 등 각 탭(모드)에 해당하는 UI를 생성하고 제어하는 코드들이 모여 있습니다. `panel.js`가 이 모듈들을 가져와 상황에 맞게 화면을 전환합니다.
+  * **`js/core/`**: `highlighter.js`처럼 UI와 직접적인 관련은 없지만, 스크랩 기능의 핵심 로직을 담당하는 파일들이 위치합니다.
+
+-----
+
+### 🔄 데이터 흐름 및 상호작용
+
+1.  **사용자 상호작용 (`content.js`)**: 사용자가 웹페이지에서 스크랩을 하거나 패널을 조작합니다.
+2.  **요청 (`chrome.runtime.sendMessage`)**: `content.js`는 데이터 저장, AI 분석 등 복잡한 작업이 필요할 때 `background.js`에 메시지를 보냅니다.
+3.  **백그라운드 처리 (`background.js`)**: `background.js`는 요청을 받아 Firebase에 데이터를 저장하거나 외부 API를 호출하여 결과를 가져옵니다.
+4.  **결과 전송 및 UI 업데이트**: `background.js`는 처리 결과를 다시 `content.js`로 보내고, `content.js`는 이 데이터를 받아 UI(대시보드, 스크랩북 등)를 최신 상태로 업데이트합니다.
+
+이처럼 각 파일이 명확한 역할을 가지고 유기적으로 상호작용하는 효율적인 구조로 설계되어 있습니다.
