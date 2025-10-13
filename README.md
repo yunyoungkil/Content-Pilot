@@ -53,6 +53,19 @@
     ```bash
     npx webpack
     ```
+
+5.  **프로젝트 자동 빌드 (Build)**
+    package.json
+    ```bash
+    "scripts": {
+        "build": "webpack --mode=production",
+        "watch": "webpack --mode=development --watch"
+    }
+  ```
+    ```bash
+    npm run watch
+    ```
+
     (이후 `chrome://extensions`에서 '압축 해제된 확장 프로그램을 로드'로 폴더를 선택하여 로드합니다.)
 
 ## 🔄 확장 프로그램 업데이트 방법
