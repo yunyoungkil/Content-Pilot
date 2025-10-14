@@ -1,5 +1,7 @@
-// js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
+import { marked } from 'marked';
+import showdown from 'showdown';
+// ... 기존 import 구문
 import Quill from 'quill';
 import 'quill/dist/quill.snow.css'; // Webpack 설정 필요
 import { shortenLink } from "../utils.js";
@@ -114,10 +116,11 @@ export function renderWorkspace(container, ideaData) {
       placeholder: '이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...'
     });
     
-    // 기존 콘텐츠 로드
-    if (ideaData.draftContent) {
-      quill.setText(ideaData.draftContent);
-    }
+        // ★ A/C-2: DB에 저장된 마크다운 초안을 HTML로 변환하여 Quill에 로드
+        if (ideaData.draftContent) {
+            const htmlContent = marked.parse(ideaData.draftContent);
+            quill.clipboard.dangerouslyPasteHTML(0, htmlContent);
+        }
     
     // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
     editorEl.quillInstance = quill;
@@ -174,20 +177,25 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
             
             clearTimeout(saveTimeout); // 이전 저장 타이머 취소
             saveTimeout = setTimeout(() => {
-                const currentDraft = quill.getText(); // Quill에서 텍스트 가져오기
-                
+                // A/C-2: showdown 변환기 인스턴스 생성
+                const converter = new showdown.Converter();
+                // A/C-3: Quill 편집기의 현재 내용을 HTML 문자열로 가져옴
+                const htmlContent = quill.root.innerHTML;
+                // A/C-4: HTML을 마크다운으로 변환
+                const markdownDraft = converter.makeMarkdown(htmlContent);
+
                 // 데이터베이스에 저장된 초안과 내용이 다를 경우에만 저장 요청
-                if (currentDraft.trim() !== (ideaData.draftContent || '').trim()) {
+                if (markdownDraft.trim() !== (ideaData.draftContent || '').trim()) {
                     console.log("Saving draft...");
                     const saveData = {
                         ideaId: ideaData.id,
                         status: ideaData.status,
-                        draft: currentDraft.trim()
+                        draft: markdownDraft.trim() // 마크다운으로 변환된 텍스트를 저장
                     };
                     chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
                         if (saveResponse && saveResponse.success) {
                             // 저장 성공 시, ideaData 객체도 업데이트하여 일관성 유지
-                            ideaData.draftContent = currentDraft.trim(); 
+                            ideaData.draftContent = markdownDraft.trim(); 
                             console.log("Draft saved successfully.");
                         } else {
                             console.error("Failed to save draft:", saveResponse?.error);
@@ -215,20 +223,25 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         });
 
         // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
+        const converter = new showdown.Converter();
+        const currentHtml = quill ? quill.root.innerHTML : '';
+        const currentMarkdown = converter.makeMarkdown(currentHtml);
         const payload = {
             ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
-            currentDraft: quill ? quill.getText() : '', // A/C-2: 현재 에디터에 작성된 내용
+            currentDraft: currentMarkdown, // ★ 마크다운 형식으로 전달
             linkedScrapsContent: linkedScrapsContent // 연결된 자료의 텍스트 목록
         };
 
         // 3. 통합된 데이터를 background.js로 전송합니다.
         chrome.runtime.sendMessage({ action: 'generate_draft_from_idea', data: payload }, (response) => {
             if (response && response.success) {
-                // A/C-3: Quill 편집기에 생성된 초안 텍스트 삽입
+                // ★ AI가 생성한 마크다운 초안을 HTML로 변환하여 Quill에 덮어쓰기
+                const markdownDraft = response.draft;
+                const htmlDraft = marked.parse(markdownDraft);
                 if (quill) {
-                    quill.setText(response.draft);
+                    quill.clipboard.dangerouslyPasteHTML(0, htmlDraft);
                 }
-                
+
                 // A/C-4: save_draft_content 메시지 전송
                 const saveData = {
                     ideaId: ideaData.id,
