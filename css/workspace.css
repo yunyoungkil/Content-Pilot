@@ -15,7 +15,7 @@
   background-color: #fff;
   border-radius: 8px;
   padding: 20px 24px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -30,9 +30,15 @@
   border-bottom: 1px solid #f0f0f0;
 }
 
-#ai-briefing-panel { flex: 0 0 280px; }
-#main-editor-panel { flex: 1 1 0; }
-#resource-library-panel { flex: 0 0 320px; }
+#ai-briefing-panel {
+  flex: 0 0 280px;
+}
+#main-editor-panel {
+  flex: 1 1 0;
+}
+#resource-library-panel {
+  flex: 0 0 320px;
+}
 
 /* 2. AI 브리핑 패널 (좌측) */
 
@@ -64,7 +70,7 @@
 }
 #generate-draft-btn {
   width: 100%;
-  background-color: #34A853;
+  background-color: #34a853;
   color: white;
   border: none;
   padding: 10px;
@@ -75,7 +81,7 @@
   margin-top: 20px;
 }
 .interactive-tag:hover {
-  background-color: #4285F4;
+  background-color: #4285f4;
   color: #fff;
 }
 
@@ -84,11 +90,13 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex-grow: 1;
+  min-height: 0;
 }
 
 /* 기존 .main-editor-textarea 클래스를 #quill-editor-container가 대체 */
 #quill-editor-container {
-  flex-grow: 3;
+  flex-grow: 1;
   min-height: 200px;
   width: 100%;
   box-sizing: border-box;
@@ -116,15 +124,10 @@
   border-bottom: 1px solid #e0e0e0 !important;
   background: #fdfdfd;
 }
-#main-editor-panel #linked-scraps-section {
-  flex-grow: 2;
-  display: flex;
-  flex-direction: column;
-  min-height: 150px;
-}
+
 .linked-scraps-list {
-  flex-grow: 1; 
-  overflow-y: auto; 
+  flex-grow: 1;
+  overflow-y: auto;
   background-color: #f1f3f5;
   border: 2px dashed #ccc;
   border-radius: 6px;
@@ -135,30 +138,39 @@
   transition: border-color 0.2s, background-color 0.2s;
 }
 .linked-scraps-list.drag-over {
-  border-color: #4285F4;
+  border-color: #4285f4;
   background-color: #e8f0fe;
 }
 
 /* 4. 자료 보관함 패널 (우측) */
 #resource-library-panel {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 #resource-library-panel h2 {
-    margin-bottom: 16px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #eee;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
 }
 #resource-library-panel .all-scraps-list {
-    height: calc(100% - 50px);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-right: 8px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 8px;
 }
 
 /* 5. 공통 컴포넌트 (스크랩 카드 등) */
-.scrap-list p { /* 로딩, 빈 상태 메시지 */
+.scrap-list p {
+  /* 로딩, 빈 상태 메시지 */
   text-align: center;
   color: #888;
   font-size: 14px;
@@ -196,11 +208,47 @@
 
 /* 연결된 자료 영역의 스크랩 카드 스타일 재정의 */
 .linked-scraps-list .scrap-card {
-  padding: 8px 12px 8px 30px; /* 내부 여백 축소 */
+  padding: 4px 12px 4px 8px;
   gap: 8px;
-  min-height: 0; /* 최소 높이 제거 */
-  background-color: #f8f9fa; /* 배경색 변경 */
+  min-height: 0;
+  background-color: #f8f9fa;
   border: 1px solid #e9ecef;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 16px;
+  box-shadow: none;
+  height: 32px;
+  max-width: 100%;
+  cursor: pointer;
+}
+/* 태그형 카드 스타일 */
+.linked-tag-card {
+  padding: 0 10px 0 0;
+  gap: 8px;
+  background: #eaf3ff;
+  border: none;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 28px;
+  height: 28px;
+  box-shadow: none;
+  cursor: pointer;
+}
+.linked-tag-card .scrap-card-icon {
+  font-size: 16px;
+  margin-right: 4px;
+}
+.linked-tag-card .scrap-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  color: #2a3a4a;
 }
 
 .linked-scraps-list .scrap-card:hover {
@@ -258,14 +306,14 @@
   background-color: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 14px;
   font-size: 14px;
   line-height: 1.6;
   color: #333;
   z-index: 2147483647; /* 가장 위에 보이도록 z-index 최대화 */
   pointer-events: none; /* 툴팁이 마우스 이벤트를 방해하지 않도록 */
-  
+
   /* 나타나고 사라지는 애니메이션 */
   opacity: 0;
   transform: translateX(10px);
