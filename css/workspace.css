@@ -85,17 +85,36 @@
   flex-direction: column;
   gap: 16px;
 }
-#main-editor-panel .main-editor-textarea {
+
+/* 기존 .main-editor-textarea 클래스를 #quill-editor-container가 대체 */
+#quill-editor-container {
   flex-grow: 3;
   min-height: 200px;
   width: 100%;
   box-sizing: border-box;
-  resize: vertical;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
-  padding: 14px;
+  padding: 0;
+  /* Quill이 내부에서 flex 레이아웃을 갖도록 함 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* 스크롤바가 내부에 생기도록 */
+}
+
+/* 실제 편집 영역 */
+#quill-editor-container .ql-container {
+  flex-grow: 1;
   font-size: 15px;
   line-height: 1.7;
+  overflow-y: auto;
+  border: none !important;
+}
+
+/* 툴바 */
+#quill-editor-container .ql-toolbar {
+  border: none !important;
+  border-bottom: 1px solid #e0e0e0 !important;
+  background: #fdfdfd;
 }
 #main-editor-panel #linked-scraps-section {
   flex-grow: 2;

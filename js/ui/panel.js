@@ -53,6 +53,12 @@ export function createAndShowPanel() {
     kanbanStyleLink.href = chrome.runtime.getURL('css/kanban.css');
     shadowRoot.appendChild(kanbanStyleLink);
 
+    // 4. Quill 에디터 스타일(quill.snow.css) 링크 추가
+    const quillStyleLink = document.createElement('link');
+    quillStyleLink.rel = 'stylesheet';
+    quillStyleLink.href = chrome.runtime.getURL('css/quill.snow.css');
+    shadowRoot.appendChild(quillStyleLink);
+
     const panel = document.createElement("div");
     panel.id = "content-pilot-panel";
     panel.style.cssText = `

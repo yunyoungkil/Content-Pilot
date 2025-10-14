@@ -57,7 +57,8 @@
         "offscreen.html",
         "css/style.css",
         "css/workspace.css",
-        "css/kanban.css"
+        "css/kanban.css",
+        "css/quill.snow.css"
       ],
       "matches": ["<all_urls>"]
     }

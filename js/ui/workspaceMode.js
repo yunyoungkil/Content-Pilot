@@ -1,5 +1,7 @@
 // js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
+import Quill from 'quill';
+import 'quill/dist/quill.snow.css'; // Webpack 설정 필요
 import { shortenLink } from "../utils.js";
 
 export function renderWorkspace(container, ideaData) {
@@ -49,7 +51,7 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="main-editor-panel" class="workspace-column">
         <h2>✍️ 초안 작성</h2>
-        <textarea class="main-editor-textarea" placeholder="이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...">${ideaData.draftContent || ''}</textarea>
+        <div id="quill-editor-container" class="main-editor-textarea"></div>
         <div id="linked-scraps-section">
           <h4>🔗 연결된 자료</h4>
           <div class="scrap-list linked-scraps-list" data-idea-id="${ideaData.id}">
@@ -93,6 +95,34 @@ export function renderWorkspace(container, ideaData) {
     }
   });
 
+  // Quill 에디터 인스턴스 생성
+  const editorEl = container.querySelector('#quill-editor-container');
+  if (editorEl && !editorEl.quillInstance) { // 중복 초기화 방지
+    const quill = new Quill(editorEl, {
+      theme: 'snow',
+      modules: {
+        toolbar: [
+          [{ 'header': [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline', 'strike'],
+          ['blockquote', 'code-block'],
+          [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+          [{ 'indent': '-1'}, { 'indent': '+1' }],
+          ['link', 'image'],
+          ['clean']
+        ]
+      },
+      placeholder: '이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...'
+    });
+    
+    // 기존 콘텐츠 로드
+    if (ideaData.draftContent) {
+      quill.setText(ideaData.draftContent);
+    }
+    
+    // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
+    editorEl.quillInstance = quill;
+  }
+
 addWorkspaceEventListeners(container.querySelector('.workspace-container'), ideaData);
 }
 
@@ -128,35 +158,45 @@ function createScrapCard(scrap, isLinked) {
 
 
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
-    const editorTextarea = workspaceEl.querySelector('.main-editor-textarea');
+    const editorEl = workspaceEl.querySelector('#quill-editor-container');
+    const quill = editorEl ? editorEl.quillInstance : null;
     const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
     const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
     const keywordList = workspaceEl.querySelector('.keyword-list');
     const generateDraftBtn = workspaceEl.querySelector('#generate-draft-btn');
 
+    // Quill 에디터의 text-change 이벤트로 자동 저장 구현
+    if (quill) {
+        let saveTimeout; // 디바운싱을 위한 타이머
 
-    editorTextarea.addEventListener('blur', () => {
-        const currentDraft = editorTextarea.value;
-        
-        // 데이터베이스에 저장된 초안과 내용이 다를 경우에만 저장 요청
-        if (currentDraft !== (ideaData.draftContent || '')) {
-            console.log("Saving draft...");
-            const saveData = {
-                ideaId: ideaData.id,
-                status: ideaData.status,
-                draft: currentDraft
-            };
-            chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
-                if (saveResponse && saveResponse.success) {
-                    // 저장 성공 시, ideaData 객체도 업데이트하여 일관성 유지
-                    ideaData.draftContent = currentDraft; 
-                    console.log("Draft saved successfully on blur.");
-                } else {
-                    console.error("Failed to save draft on blur:", saveResponse.error);
+        quill.on('text-change', (delta, oldDelta, source) => {
+            if (source !== 'user') return; // 사용자에 의한 변경일 때만 저장
+            
+            clearTimeout(saveTimeout); // 이전 저장 타이머 취소
+            saveTimeout = setTimeout(() => {
+                const currentDraft = quill.getText(); // Quill에서 텍스트 가져오기
+                
+                // 데이터베이스에 저장된 초안과 내용이 다를 경우에만 저장 요청
+                if (currentDraft.trim() !== (ideaData.draftContent || '').trim()) {
+                    console.log("Saving draft...");
+                    const saveData = {
+                        ideaId: ideaData.id,
+                        status: ideaData.status,
+                        draft: currentDraft.trim()
+                    };
+                    chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
+                        if (saveResponse && saveResponse.success) {
+                            // 저장 성공 시, ideaData 객체도 업데이트하여 일관성 유지
+                            ideaData.draftContent = currentDraft.trim(); 
+                            console.log("Draft saved successfully.");
+                        } else {
+                            console.error("Failed to save draft:", saveResponse?.error);
+                        }
+                    });
                 }
-            });
-        }
-    });
+            }, 1000); // 1초 디바운싱
+        });
+    }
 
     
     generateDraftBtn.addEventListener('click', () => {
@@ -177,14 +217,19 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
         const payload = {
             ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
-            currentDraft: editorTextarea.value, // 현재 에디터에 작성된 내용
+            currentDraft: quill ? quill.getText() : '', // A/C-2: 현재 에디터에 작성된 내용
             linkedScrapsContent: linkedScrapsContent // 연결된 자료의 텍스트 목록
         };
 
         // 3. 통합된 데이터를 background.js로 전송합니다.
         chrome.runtime.sendMessage({ action: 'generate_draft_from_idea', data: payload }, (response) => {
             if (response && response.success) {
-                editorTextarea.value = response.draft;
+                // A/C-3: Quill 편집기에 생성된 초안 텍스트 삽입
+                if (quill) {
+                    quill.setText(response.draft);
+                }
+                
+                // A/C-4: save_draft_content 메시지 전송
                 const saveData = {
                     ideaId: ideaData.id,
                     status: ideaData.status,
@@ -192,7 +237,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
                 };
                 chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
                     if (!saveResponse || !saveResponse.success) {
-                        console.error("Failed to save draft:", saveResponse.error);
+                        console.error("Failed to save draft:", saveResponse?.error);
                         // (선택) 저장 실패 시 사용자에게 알림을 줄 수 있습니다.
                     } else {
                         console.log("Draft saved successfully.");
@@ -200,19 +245,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
                 });
 
             } else {
-                alert('초안 생성에 실패했습니다: ' + (response.error || '알 수 없는 오류'));
+                alert('초안 생성에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
             }
             generateDraftBtn.textContent = '📄 AI로 초안 생성하기';
             generateDraftBtn.disabled = false;
         });
     });
 
+    // A/C-1: 키워드 클릭 시 Quill 에디터에 마크다운 소제목 삽입
     keywordList.addEventListener('click', (e) => {
         if (e.target.classList.contains('interactive-tag')) {
             const keyword = e.target.textContent;
-            editorTextarea.value += `\n\n## ${keyword}\n\n`;
-            editorTextarea.scrollTop = editorTextarea.scrollHeight;
-            editorTextarea.focus();
+            if (quill) {
+                // A/C-2: Quill API를 사용하여 편집기 끝에 텍스트 삽입
+                const len = quill.getLength(); // 현재 텍스트 길이
+                quill.insertText(len, `\n\n## ${keyword}\n\n`, 'user'); // 끝에 텍스트 삽입
+                quill.setSelection(quill.getLength()); // 커서를 맨 뒤로 이동
+                quill.focus();
+            }
         }
     });
 
@@ -326,20 +376,27 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         }
     });
 
+    // 드래그 오버 이벤트: Quill 에디터 영역 전체를 드롭 대상으로 인식
     workspaceEl.addEventListener('dragover', (e) => {
         const dropTarget = e.target;
-        if (dropTarget === editorTextarea || linkedScrapsList.contains(dropTarget)) {
+        if (editorEl && (editorEl.contains(dropTarget) || linkedScrapsList.contains(dropTarget))) {
             e.preventDefault();
-            const targetElement = (dropTarget === editorTextarea) ? editorTextarea : linkedScrapsList;
+            const targetElement = editorEl.contains(dropTarget) ? editorEl : linkedScrapsList;
             targetElement.classList.add('drag-over');
-            e.dataTransfer.dropEffect = (targetElement === editorTextarea) ? 'copy' : 'link';
+            e.dataTransfer.dropEffect = editorEl.contains(dropTarget) ? 'copy' : 'link';
         }
     });
     
+    // 드래그 리브 이벤트
     workspaceEl.addEventListener('dragleave', (e) => {
         const target = e.target;
-        if (target === editorTextarea || linkedScrapsList.contains(target)) {
-            target.classList.remove('drag-over');
+        if (editorEl && (editorEl.contains(target) || linkedScrapsList.contains(target))) {
+            if (editorEl.contains(target)) {
+                editorEl.classList.remove('drag-over');
+            }
+            if (linkedScrapsList.contains(target)) {
+                linkedScrapsList.classList.remove('drag-over');
+            }
         }
     });
 
@@ -353,18 +410,21 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
 
         if (!scrapData) return;
 
-        if (e.target === editorTextarea) {
+        // A/C-2: Quill 편집기 영역 전체를 드롭 대상으로 인식
+        if (editorEl && editorEl.contains(e.target)) {
             // 1. 드롭 대상이 에디터일 경우, drag-over 스타일을 제거합니다.
-            editorTextarea.classList.remove('drag-over');
+            editorEl.classList.remove('drag-over');
 
             // 2. 스크랩의 텍스트 내용을 가져옵니다.
             const textToInsert = scrapData.text || '';
 
-            // 3. 에디터의 기존 내용에 새로운 텍스트를 추가합니다. (줄 바꿈 추가)
-            editorTextarea.value += `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`;
-
-            // 4. 스크롤을 맨 아래로 이동하여 삽입된 내용을 확인시킵니다.
-            editorTextarea.scrollTop = editorTextarea.scrollHeight;
+            // A/C-3: Quill API를 사용하여 편집기 끝에 인용문 형식으로 텍스트 삽입
+            if (quill) {
+                const len = quill.getLength();
+                quill.insertText(len, `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`, 'user');
+                quill.setSelection(quill.getLength()); // 커서를 맨 뒤로 이동
+                quill.focus();
+            }
         }
         else if (linkedScrapsList.contains(e.target)) {
             linkedScrapsList.classList.remove('drag-over');
