@@ -6,6 +6,22 @@ import "quill/dist/quill.snow.css"; // Webpack 설정 필요
 import { shortenLink } from "../utils.js";
 
 export function renderWorkspace(container, ideaData) {
+  // 자료 보관함 목록 갱신 함수 (재사용)
+  function refreshAllScrapsList(scrapsData) {
+    const allScrapsContainer = container.querySelector(".all-scraps-list");
+    if (!scrapsData || scrapsData.length === 0) {
+      allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
+      return;
+    }
+    // 최신순 정렬
+    const sortedScraps = scrapsData
+      .slice()
+      .sort((a, b) => b.timestamp - a.timestamp);
+    const allScrapsHtml = sortedScraps
+      .map((s) => createScrapCard(s, false))
+      .join("");
+    allScrapsContainer.innerHTML = allScrapsHtml;
+  }
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps)
     ? ideaData.linkedScraps
     : ideaData.linkedScraps
@@ -126,32 +142,20 @@ export function renderWorkspace(container, ideaData) {
 
   chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
     if (response && response.success) {
-      const allScrapsContainer = container.querySelector(".all-scraps-list");
+      const allScrapsData = response.scraps;
       const linkedScrapsContainer = container.querySelector(
         ".linked-scraps-list"
       );
-
-      if (response.scraps.length > 0) {
-        const allScrapsData = response.scraps;
-
-        const linkedScrapsHtml = allScrapsData
-          .filter((s) => ideaData.linkedScraps.includes(s.id))
-          .map((s) => createScrapCard(s, true))
-          .join("");
-
-        const allScrapsHtml = allScrapsData
-          .map((s) => createScrapCard(s, false))
-          .join("");
-
-        linkedScrapsContainer.innerHTML =
-          linkedScrapsHtml ||
-          "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
-        allScrapsContainer.innerHTML = allScrapsHtml;
-      } else {
-        linkedScrapsContainer.innerHTML =
-          "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
-        allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
-      }
+      // 연결된 자료 목록은 기존 방식 유지
+      const linkedScrapsHtml = allScrapsData
+        .filter((s) => ideaData.linkedScraps.includes(s.id))
+        .map((s) => createScrapCard(s, true))
+        .join("");
+      linkedScrapsContainer.innerHTML =
+        linkedScrapsHtml ||
+        "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+      // 자료 보관함 목록은 함수로 분리하여 갱신
+      refreshAllScrapsList(allScrapsData);
     }
   });
 
@@ -348,6 +352,31 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         generateDraftBtn.disabled = false;
       }
     );
+  });
+
+  // 실시간 스크랩 업데이트 수신 및 UI 갱신
+  const allScrapsContainer = workspaceEl.querySelector(".all-scraps-list");
+
+  function refreshAllScrapsList(scrapsData) {
+    if (!scrapsData || scrapsData.length === 0) {
+      allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
+      return;
+    }
+    // 최신순 정렬
+    const sortedScraps = scrapsData
+      .slice()
+      .sort((a, b) => b.timestamp - a.timestamp);
+    const allScrapsHtml = sortedScraps
+      .map((s) => createScrapCard(s, false))
+      .join("");
+    allScrapsContainer.innerHTML = allScrapsHtml;
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "scraps_updated") {
+      const updatedScraps = message.data || [];
+      refreshAllScrapsList(updatedScraps);
+    }
   });
 
   // A/C-1: 키워드 클릭 시 Quill 에디터에 마크다운 소제목 삽입
