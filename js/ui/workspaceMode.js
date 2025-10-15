@@ -247,13 +247,97 @@ export function renderWorkspace(container, ideaData) {
       });
 
       // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
+
       editorEl.quillInstance = quill;
 
-      // 툴바 버튼 포커스 관리 설정
-      setupToolbarFocusHandling(quill, editorEl);
+      // 툴바 버튼 포커스 관리 설정 (툴바가 렌더링될 때까지 대기)
+      function waitForToolbarAndSetup(quill, editorEl, maxTries = 20) {
+        let tries = 0;
+        maxTries = 100; // 툴바 렌더링 지연 대응 (10초까지 대기)
+        let setupDone = false;
+
+        // MutationObserver로 .ql-toolbar 추가 감지
+        // 여러 위치에서 .ql-toolbar 추가 감지 (editorEl, shadowRoot, parentNode, document)
+        const observeTargets = [
+          editorEl,
+          editorEl.shadowRoot,
+          editorEl.parentNode,
+          document,
+        ];
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+              if (
+                node.nodeType === 1 &&
+                node.classList &&
+                node.classList.contains("ql-toolbar") &&
+                !setupDone
+              ) {
+                setupDone = true;
+                observer.disconnect();
+                console.log(
+                  "✅ [Debug] Toolbar detected by MutationObserver (multi-location), applying setupToolbarFocusHandling..."
+                );
+                setupToolbarFocusHandling(quill, editorEl);
+                console.log(
+                  "✅ [Debug] setupToolbarFocusHandling applied (MutationObserver)"
+                );
+                return;
+              }
+            }
+          }
+        });
+        for (const target of observeTargets) {
+          if (target)
+            observer.observe(target, { childList: true, subtree: true });
+        }
+
+        // 기존 polling도 병행 (혹시 observer가 놓치는 경우 대비)
+        function trySetup() {
+          // 다양한 위치에서 .ql-toolbar 탐색
+          let toolbar = null;
+          const locations = [
+            editorEl,
+            editorEl.shadowRoot,
+            editorEl.parentNode,
+            document,
+          ];
+          for (const loc of locations) {
+            if (!loc) continue;
+            const found = loc.querySelector?.(".ql-toolbar");
+            if (found) {
+              toolbar = found;
+              break;
+            }
+          }
+          if (toolbar && !setupDone) {
+            setupDone = true;
+            observer.disconnect();
+            console.log(
+              "✅ [Debug] Toolbar found (multi-location), applying setupToolbarFocusHandling..."
+            );
+            setupToolbarFocusHandling(quill, editorEl);
+            console.log(
+              "✅ [Debug] setupToolbarFocusHandling applied (polling)"
+            );
+          } else if (tries < maxTries && !setupDone) {
+            tries++;
+            setTimeout(trySetup, 100);
+          } else if (!setupDone) {
+            observer.disconnect();
+            console.error(
+              "❌ [Debug] Toolbar not found after waiting (multi-location)"
+            );
+          }
+        }
+        trySetup();
+      }
+      console.log("🔧 [Workspace] Calling waitForToolbarAndSetup...");
+      waitForToolbarAndSetup(quill, editorEl);
 
       // 에디터 초기화 완료 표시
       editorEl.classList.add("quill-initialized");
+      console.log("✅ [Workspace] Quill editor initialized successfully");
     } catch (error) {
       console.error("Quill 에디터 초기화 중 오류 발생:", error);
     }
@@ -511,74 +595,90 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   tooltip.className = "scrap-tooltip";
   workspaceEl.appendChild(tooltip);
 
-  linkedScrapsList.addEventListener("mouseover", (e) => {
-    const cardItem = e.target.closest(".scrap-card-item");
-    if (cardItem) {
-      // 마우스가 다른 카드로 이동했을 때 이전 타이머 취소
+  linkedScrapsList.addEventListener(
+    "mouseover",
+    (e) => {
+      const cardItem = e.target.closest(".scrap-card-item");
+      if (cardItem) {
+        // 마우스가 다른 카드로 이동했을 때 이전 타이머 취소
+        clearTimeout(tooltipTimeout);
+
+        // 0.2초 지연 후 툴팁 표시
+        tooltipTimeout = setTimeout(() => {
+          const textContent = cardItem.dataset.text;
+          if (textContent) {
+            // 툴팁 내용 업데이트
+            tooltip.innerHTML = `<p>${textContent}</p>`;
+
+            // 툴팁 위치 계산
+            const cardRect = cardItem.getBoundingClientRect();
+            tooltip.style.left = `${cardRect.right + 12}px`;
+            tooltip.style.top = `${cardRect.top}px`;
+
+            // 툴팁 보이기
+            tooltip.classList.add("visible");
+            activeTooltip = cardItem; // 현재 툴팁이 활성화된 카드 저장
+          }
+        }, 200);
+      }
+    },
+    { passive: true }
+  );
+
+  linkedScrapsList.addEventListener(
+    "mouseout",
+    (e) => {
+      // 마우스가 목록 영역을 벗어나면 타이머 취소 및 툴팁 숨기기
       clearTimeout(tooltipTimeout);
 
-      // 0.2초 지연 후 툴팁 표시
-      tooltipTimeout = setTimeout(() => {
-        const textContent = cardItem.dataset.text;
-        if (textContent) {
-          // 툴팁 내용 업데이트
-          tooltip.innerHTML = `<p>${textContent}</p>`;
+      // 마우스가 실제로 다른 요소로 이동했는지 확인 (카드 내부 요소 이동 시 툴팁이 깜빡이는 현상 방지)
+      if (!linkedScrapsList.contains(e.relatedTarget)) {
+        tooltip.classList.remove("visible");
+        activeTooltip = null;
+      }
+    },
+    { passive: true }
+  );
 
-          // 툴팁 위치 계산
-          const cardRect = cardItem.getBoundingClientRect();
-          tooltip.style.left = `${cardRect.right + 12}px`;
-          tooltip.style.top = `${cardRect.top}px`;
+  resourceLibrary.addEventListener(
+    "dragstart",
+    (e) => {
+      const cardItem = e.target.closest(".scrap-card-item");
+      if (cardItem) {
+        const card = cardItem.querySelector(".scrap-card");
+        const imageEl = card.querySelector(".scrap-card-img-wrap img");
+        const snippetEl = card.querySelector(".scrap-card-snippet");
 
-          // 툴팁 보이기
-          tooltip.classList.add("visible");
-          activeTooltip = cardItem; // 현재 툴팁이 활성화된 카드 저장
-        }
-      }, 200);
-    }
-  });
+        // 드래그 시 필요한 모든 스크랩 데이터를 객체로 만듭니다.
+        const scrapData = {
+          id: cardItem.dataset.scrapId,
+          text: cardItem.dataset.text, // 에디터에 삽입될 텍스트
+          image: imageEl ? imageEl.src : null,
+          url: snippetEl ? snippetEl.textContent : "",
+          tags: Array.from(card.querySelectorAll(".card-tags .tag")).map((t) =>
+            t.textContent.replace("#", "")
+          ),
+        };
 
-  linkedScrapsList.addEventListener("mouseout", (e) => {
-    // 마우스가 목록 영역을 벗어나면 타이머 취소 및 툴팁 숨기기
-    clearTimeout(tooltipTimeout);
+        // 데이터를 JSON 문자열 형태로 dataTransfer 객체에 저장합니다.
+        e.dataTransfer.setData("application/json", JSON.stringify(scrapData));
+        e.dataTransfer.effectAllowed = "copyLink";
+        cardItem.style.opacity = "0.5";
+      }
+    },
+    { passive: true }
+  );
 
-    // 마우스가 실제로 다른 요소로 이동했는지 확인 (카드 내부 요소 이동 시 툴팁이 깜빡이는 현상 방지)
-    if (!linkedScrapsList.contains(e.relatedTarget)) {
-      tooltip.classList.remove("visible");
-      activeTooltip = null;
-    }
-  });
-
-  resourceLibrary.addEventListener("dragstart", (e) => {
-    const cardItem = e.target.closest(".scrap-card-item");
-    if (cardItem) {
-      const card = cardItem.querySelector(".scrap-card");
-      const imageEl = card.querySelector(".scrap-card-img-wrap img");
-      const snippetEl = card.querySelector(".scrap-card-snippet");
-
-      // 드래그 시 필요한 모든 스크랩 데이터를 객체로 만듭니다.
-      const scrapData = {
-        id: cardItem.dataset.scrapId,
-        text: cardItem.dataset.text, // 에디터에 삽입될 텍스트
-        image: imageEl ? imageEl.src : null,
-        url: snippetEl ? snippetEl.textContent : "",
-        tags: Array.from(card.querySelectorAll(".card-tags .tag")).map((t) =>
-          t.textContent.replace("#", "")
-        ),
-      };
-
-      // 데이터를 JSON 문자열 형태로 dataTransfer 객체에 저장합니다.
-      e.dataTransfer.setData("application/json", JSON.stringify(scrapData));
-      e.dataTransfer.effectAllowed = "copyLink";
-      cardItem.style.opacity = "0.5";
-    }
-  });
-
-  resourceLibrary.addEventListener("dragend", (e) => {
-    const cardItem = e.target.closest(".scrap-card-item");
-    if (cardItem) {
-      cardItem.style.opacity = "1";
-    }
-  });
+  resourceLibrary.addEventListener(
+    "dragend",
+    (e) => {
+      const cardItem = e.target.closest(".scrap-card-item");
+      if (cardItem) {
+        cardItem.style.opacity = "1";
+      }
+    },
+    { passive: true }
+  );
 
   // 드래그 오버 이벤트: Quill 에디터 영역 전체를 드롭 대상으로 인식
   workspaceEl.addEventListener("dragover", (e) => {
@@ -684,118 +784,270 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
  * Quill 에디터의 툴바 버튼 포커스 관리 설정
  * 서식 적용 시 포커스가 에디터에서 벗어나거나 커서가 이동하는 문제를 해결
  */
+
+// Shadow DOM 및 포커스 복원 대응 최적화 버전 (디버깅 코드 포함)
 function setupToolbarFocusHandling(quill, editorEl) {
-  const toolbar = editorEl.querySelector(".ql-toolbar");
-  if (!toolbar) return;
+  console.log("🔍 [Debug] setupToolbarFocusHandling called", {
+    quill: !!quill,
+    editorEl: !!editorEl,
+    editorElClass: editorEl?.className,
+  });
+
+  // 다양한 위치에서 .ql-toolbar 탐색
+  let toolbar = null;
+  const locations = [
+    editorEl,
+    editorEl.shadowRoot,
+    editorEl.parentNode,
+    document,
+  ];
+  for (const loc of locations) {
+    if (!loc) continue;
+    const found = loc.querySelector?.(".ql-toolbar");
+    if (found) {
+      toolbar = found;
+      break;
+    }
+  }
+
+  console.log("🔍 [Debug] Toolbar search result (multi-location):", {
+    toolbar: !!toolbar,
+    toolbarClass: toolbar?.className,
+    editorElChildren: editorEl?.children?.length,
+    foundLocation: toolbar ? toolbar.parentNode : null,
+  });
+
+  if (!toolbar) {
+    console.error(
+      "❌ [Debug] Toolbar not found in any location! Aborting setup."
+    );
+    return;
+  }
+
+  console.log("✅ [Debug] Toolbar found, continuing setup...");
+
+  // 디버깅 로그 헬퍼
+  const DEBUG = true;
+  const log = (label, data) => {
+    if (DEBUG) {
+      console.log(`[Quill Focus Debug] ${label}:`, data);
+    }
+  };
 
   // 현재 선택 영역을 저장할 변수
   let savedRange = null;
+  let eventCounter = 0;
 
-  // 툴바 버튼 클릭 전에 선택 영역 저장
-  toolbar.addEventListener("mousedown", (e) => {
-    const button = e.target.closest("button");
-    if (button && !button.classList.contains("ql-picker-label")) {
-      // 현재 선택 영역 저장
+  console.log("🔍 [Debug] Starting setInterval for focus monitoring...");
+
+  // 포커스 상태 모니터링
+  const monitorInterval = setInterval(() => {
+    const hasFocus = quill.hasFocus();
+    const selection = quill.getSelection();
+    const activeElement = document.activeElement;
+
+    log("Focus Monitor", {
+      hasFocus,
+      selection,
+      activeElementTag: activeElement?.tagName,
+      activeElementClass: activeElement?.className,
+      savedRange,
+    });
+  }, 2000);
+
+  console.log("✅ [Debug] setInterval created:", monitorInterval);
+
+  // 1. 툴바 mousedown 이벤트에서 포커스 유지 처리
+  toolbar.addEventListener(
+    "mousedown",
+    (e) => {
+      eventCounter++;
+      const eventId = eventCounter;
+
+      // 현재 선택 영역 저장 (모든 경우에 저장)
       savedRange = quill.getSelection(true);
 
-      // mousedown의 기본 동작(포커스 이동)을 방지
-      e.preventDefault();
-    }
-  });
-
-  // 캡처 단계에서 클릭 직전에 선택 영역 복원 (Quill의 핸들러보다 먼저 실행)
-  toolbar.addEventListener(
-    "click",
-    (e) => {
       const button = e.target.closest("button");
+      const pickerLabel = e.target.closest(".ql-picker-label");
       const pickerItem = e.target.closest(".ql-picker-item");
-      if ((button || pickerItem) && savedRange) {
-        try {
-          quill.setSelection(savedRange.index, savedRange.length, "api");
-        } catch (_) {
-          // ignore
+
+      log(`[${eventId}] Toolbar mousedown`, {
+        target: e.target.tagName,
+        isButton: !!button,
+        isPickerLabel: !!pickerLabel,
+        isPickerItem: !!pickerItem,
+        savedRange,
+      });
+
+      // 드롭다운 picker label인 경우: 기본 동작 허용 (드롭다운 열기)
+      if (pickerLabel && !pickerItem) {
+        log(`[${eventId}] Picker label - allowing default behavior`, {});
+        e.preventDefault(); // 포커스 잃기만 방지
+        return;
+      }
+
+      // 일반 버튼이나 picker item인 경우: 포커스 해제 방지
+      if (button || pickerItem) {
+        e.preventDefault();
+
+        if (!savedRange) {
+          log(`[${eventId}] No selection, aborting.`, {});
+          return;
         }
       }
     },
-    true
+    { capture: true, passive: false }
   );
 
-  // 툴바 버튼 클릭 시 처리
+  // 2. click 이벤트에서 포커스 복원 (간소화된 버전)
   toolbar.addEventListener("click", (e) => {
+    eventCounter++;
+    const eventId = eventCounter;
+
     const button = e.target.closest("button");
-    if (button && !button.classList.contains("ql-picker-label")) {
-      // 클릭 이벤트는 정상적으로 처리되도록 함
+    const pickerItem = e.target.closest(".ql-picker-item");
+
+    if (button || pickerItem) {
+      log(`[${eventId}] Toolbar click`, {
+        target: e.target.tagName,
+        savedRange,
+      });
+
+      // Quill이 포맷을 적용한 후 포커스와 선택 영역 복원
       setTimeout(() => {
-        // Quill의 format 처리가 끝난 후 포커스만 복원
-        quill.focus();
-        // 사용 후 저장된 선택 영역 정리
+        try {
+          quill.focus();
+          quill.root.focus();
+
+          if (savedRange) {
+            quill.setSelection(savedRange.index, savedRange.length, "silent");
+          }
+
+          log(`[${eventId}] Focus restored`, {
+            hasFocus: quill.hasFocus(),
+            selection: quill.getSelection(),
+          });
+        } catch (err) {
+          log(`[${eventId}] Focus restoration ERROR`, { error: err.message });
+          quill.focus();
+        }
         savedRange = null;
       }, 0);
     }
   });
 
-  // 드롭다운(picker) 처리
-  const pickers = toolbar.querySelectorAll(".ql-picker");
-  pickers.forEach((picker) => {
-    // 드롭다운이 열릴 때 선택 영역 저장
-    picker.addEventListener("mousedown", (e) => {
-      if (e.target.classList.contains("ql-picker-label")) {
-        savedRange = quill.getSelection(true);
-      }
+  // 3. 드롭다운 메뉴 항목 클릭 시 추가 처리
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (
+          node.nodeType === 1 &&
+          node.classList &&
+          node.classList.contains("ql-picker-options")
+        ) {
+          eventCounter++;
+          const eventId = eventCounter;
+
+          // 드롭다운 메뉴가 열릴 때 선택 영역 저장
+          savedRange = quill.getSelection(true);
+
+          log(`[${eventId}] Dropdown opened`, {
+            savedRange,
+            hasFocus: quill.hasFocus(),
+          });
+
+          // 드롭다운 항목 클릭 시 포커스 복원
+          node.addEventListener("click", () => {
+            eventCounter++;
+            const clickEventId = eventCounter;
+
+            log(`[${clickEventId}] Dropdown item clicked`, {
+              savedRange,
+            });
+
+            setTimeout(() => {
+              quill.focus();
+              if (savedRange) {
+                try {
+                  quill.setSelection(
+                    savedRange.index,
+                    savedRange.length,
+                    "silent"
+                  );
+
+                  log(`[${clickEventId}] Dropdown focus restored`, {
+                    hasFocus: quill.hasFocus(),
+                    selection: quill.getSelection(),
+                  });
+                } catch (err) {
+                  log(`[${clickEventId}] Dropdown focus ERROR`, {
+                    error: err.message,
+                  });
+                  quill.focus();
+                }
+              }
+              savedRange = null;
+            }, 50);
+          });
+        }
+      });
     });
   });
 
-  // 드롭다운 메뉴 항목 선택 시 처리
-  toolbar.addEventListener("click", (e) => {
-    const pickerItem = e.target.closest(".ql-picker-item");
-    if (pickerItem) {
-      // 드롭다운 항목 선택 후 포커스 복원
-      setTimeout(() => {
-        quill.focus();
-        // 선택 영역이 있었다면 복원
-        savedRange = null;
-      }, 10);
+  observer.observe(toolbar, { childList: true, subtree: true });
+
+  // 4. 에디터 변경 시 포커스 유지 확인
+  quill.on("text-change", (delta, oldDelta, source) => {
+    log("Text change", {
+      source,
+      hasFocus: quill.hasFocus(),
+      selection: quill.getSelection(),
+      deltaOps: delta.ops.length,
+    });
+
+    if (source === "api" && !quill.hasFocus()) {
+      // API를 통한 변경 후 포커스가 없으면 복원
+      log("Text change - focus lost, restoring", {
+        source,
+      });
+      setTimeout(() => quill.focus(), 0);
     }
   });
 
-  // 키보드 단축키는 기본 동작을 우선하되, 선택 영역 유지
-  quill.keyboard.addBinding(
-    {
-      key: "B",
-      ctrlKey: true,
-    },
-    function (range, context) {
-      const format = this.quill.getFormat(range);
-      this.quill.format("bold", !format.bold);
-      // 선택 영역 유지
-      this.quill.setSelection(range.index, range.length);
-      return false;
-    }
-  );
+  // 5. Selection 변경 추적
+  quill.on("selection-change", (range, oldRange, source) => {
+    log("Selection change", {
+      range,
+      oldRange,
+      source,
+      hasFocus: quill.hasFocus(),
+    });
+  });
 
-  quill.keyboard.addBinding(
-    {
-      key: "I",
-      ctrlKey: true,
-    },
-    function (range, context) {
-      const format = this.quill.getFormat(range);
-      this.quill.format("italic", !format.italic);
-      this.quill.setSelection(range.index, range.length);
-      return false;
-    }
-  );
+  // 6. 초기 포커스 설정
+  setTimeout(() => {
+    quill.focus();
+    log("Initial focus set", {
+      hasFocus: quill.hasFocus(),
+      selection: quill.getSelection(),
+    });
+  }, 150);
 
-  quill.keyboard.addBinding(
-    {
-      key: "U",
-      ctrlKey: true,
-    },
-    function (range, context) {
-      const format = this.quill.getFormat(range);
-      this.quill.format("underline", !format.underline);
-      this.quill.setSelection(range.index, range.length);
-      return false;
-    }
-  );
+  log("Setup complete", {
+    toolbar: !!toolbar,
+    quill: !!quill,
+    editorEl: !!editorEl,
+  });
+
+  // Quill root에 tabindex="0"과 contenteditable="true" 강제 추가 및 focus 이벤트 디버깅
+  if (quill && quill.root) {
+    quill.root.setAttribute("tabindex", "0");
+    quill.root.setAttribute("contenteditable", "true");
+    quill.root.addEventListener("focus", () => {
+      console.log("[Quill Focus Debug] root focus event!", {
+        activeElement: document.activeElement,
+        root: quill.root,
+      });
+    });
+  }
 }
