@@ -198,15 +198,47 @@
   }
 }
 
-/* 접근성 개선 */
+/* 접근성 및 포커스 관리 개선 */
 #quill-editor-container .ql-toolbar button:focus {
   outline: 2px solid #06c;
   outline-offset: 2px;
+  background-color: rgba(6, 108, 204, 0.1);
+}
+
+#quill-editor-container .ql-toolbar button:focus-visible {
+  outline: 2px solid #06c;
+  outline-offset: 2px;
+  background-color: rgba(6, 108, 204, 0.1);
 }
 
 #quill-editor-container .ql-editor:focus {
   outline: 2px solid #06c;
   outline-offset: -2px;
+  background-color: #fff;
+}
+
+/* 툴바 버튼 호버 시 포커스 표시 개선 */
+#quill-editor-container .ql-toolbar button:hover {
+  background-color: rgba(6, 108, 204, 0.05);
+  transition: background-color 0.2s ease;
+}
+
+/* 활성 상태 툴바 버튼 스타일 개선 */
+#quill-editor-container .ql-toolbar button.ql-active {
+  background-color: rgba(6, 108, 204, 0.15);
+  color: #06c;
+}
+
+/* 드롭다운 메뉴 포커스 개선 */
+#quill-editor-container .ql-picker:focus .ql-picker-label,
+#quill-editor-container .ql-picker.ql-expanded .ql-picker-label {
+  outline: 2px solid #06c;
+  outline-offset: 1px;
+}
+
+/* 에디터가 포커스를 받을 때 부드러운 전환 */
+#quill-editor-container .ql-editor {
+  transition: outline 0.2s ease;
 }
 
 /* 로딩 상태 스타일 */
@@ -236,7 +268,7 @@
   flex-grow: 1;
   overflow-y: auto;
   background-color: #f1f3f5;
-  border: 2px dashed #ccc;
+  border: 1px dashed #ccc;
   border-radius: 6px;
   padding: 12px;
   display: flex;

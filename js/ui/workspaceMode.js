@@ -184,7 +184,7 @@ export function renderWorkspace(container, ideaData) {
             ["clean"],
           ],
           handlers: {
-            // 커스텀 핸들러 추가 가능
+            // Quill의 기본 핸들러 사용 (포커스 관리는 setupToolbarFocusHandling에서 처리)
           },
         },
         clipboard: {
@@ -206,7 +206,6 @@ export function renderWorkspace(container, ideaData) {
         "blockquote",
         "code-block",
         "list",
-        "bullet",
         "indent",
         "align",
         "direction",
@@ -218,7 +217,7 @@ export function renderWorkspace(container, ideaData) {
         "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
       readOnly: false,
       bounds: editorEl,
-      scrollingContainer: editorEl,
+      // scrollingContainer 옵션 제거: 기본 컨테이너 사용으로 커서 튐 현상 방지
     });
 
     // 에디터 초기화 완료 후 콘텐츠 로드
@@ -249,6 +248,9 @@ export function renderWorkspace(container, ideaData) {
 
       // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
       editorEl.quillInstance = quill;
+
+      // 툴바 버튼 포커스 관리 설정
+      setupToolbarFocusHandling(quill, editorEl);
 
       // 에디터 초기화 완료 표시
       editorEl.classList.add("quill-initialized");
@@ -674,4 +676,124 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       });
     }
   });
+}
+
+/**
+ * Quill 에디터의 툴바 버튼 포커스 관리 설정
+ * 서식 적용 시 포커스가 에디터에서 벗어나거나 커서가 이동하는 문제를 해결
+ */
+function setupToolbarFocusHandling(quill, editorEl) {
+  const toolbar = editorEl.querySelector(".ql-toolbar");
+  if (!toolbar) return;
+
+  // 현재 선택 영역을 저장할 변수
+  let savedRange = null;
+
+  // 툴바 버튼 클릭 전에 선택 영역 저장
+  toolbar.addEventListener("mousedown", (e) => {
+    const button = e.target.closest("button");
+    if (button && !button.classList.contains("ql-picker-label")) {
+      // 현재 선택 영역 저장
+      savedRange = quill.getSelection(true);
+
+      // mousedown의 기본 동작(포커스 이동)을 방지
+      e.preventDefault();
+    }
+  });
+
+  // 캡처 단계에서 클릭 직전에 선택 영역 복원 (Quill의 핸들러보다 먼저 실행)
+  toolbar.addEventListener(
+    "click",
+    (e) => {
+      const button = e.target.closest("button");
+      const pickerItem = e.target.closest(".ql-picker-item");
+      if ((button || pickerItem) && savedRange) {
+        try {
+          quill.setSelection(savedRange.index, savedRange.length, "api");
+        } catch (_) {
+          // ignore
+        }
+      }
+    },
+    true
+  );
+
+  // 툴바 버튼 클릭 시 처리
+  toolbar.addEventListener("click", (e) => {
+    const button = e.target.closest("button");
+    if (button && !button.classList.contains("ql-picker-label")) {
+      // 클릭 이벤트는 정상적으로 처리되도록 함
+      setTimeout(() => {
+        // Quill의 format 처리가 끝난 후 포커스만 복원
+        quill.focus();
+        // 사용 후 저장된 선택 영역 정리
+        savedRange = null;
+      }, 0);
+    }
+  });
+
+  // 드롭다운(picker) 처리
+  const pickers = toolbar.querySelectorAll(".ql-picker");
+  pickers.forEach((picker) => {
+    // 드롭다운이 열릴 때 선택 영역 저장
+    picker.addEventListener("mousedown", (e) => {
+      if (e.target.classList.contains("ql-picker-label")) {
+        savedRange = quill.getSelection(true);
+      }
+    });
+  });
+
+  // 드롭다운 메뉴 항목 선택 시 처리
+  toolbar.addEventListener("click", (e) => {
+    const pickerItem = e.target.closest(".ql-picker-item");
+    if (pickerItem) {
+      // 드롭다운 항목 선택 후 포커스 복원
+      setTimeout(() => {
+        quill.focus();
+        // 선택 영역이 있었다면 복원
+        savedRange = null;
+      }, 10);
+    }
+  });
+
+  // 키보드 단축키는 기본 동작을 우선하되, 선택 영역 유지
+  quill.keyboard.addBinding(
+    {
+      key: "B",
+      ctrlKey: true,
+    },
+    function (range, context) {
+      const format = this.quill.getFormat(range);
+      this.quill.format("bold", !format.bold);
+      // 선택 영역 유지
+      this.quill.setSelection(range.index, range.length);
+      return false;
+    }
+  );
+
+  quill.keyboard.addBinding(
+    {
+      key: "I",
+      ctrlKey: true,
+    },
+    function (range, context) {
+      const format = this.quill.getFormat(range);
+      this.quill.format("italic", !format.italic);
+      this.quill.setSelection(range.index, range.length);
+      return false;
+    }
+  );
+
+  quill.keyboard.addBinding(
+    {
+      key: "U",
+      ctrlKey: true,
+    },
+    function (range, context) {
+      const format = this.quill.getFormat(range);
+      this.quill.format("underline", !format.underline);
+      this.quill.setSelection(range.index, range.length);
+      return false;
+    }
+  );
 }
