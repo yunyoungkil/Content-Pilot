@@ -120,7 +120,9 @@ export function renderWorkspace(container, ideaData) {
                     return tabsHtml;
                   })()}
                 </div>
-                <div id="quill-editor-container" class="main-editor-textarea"></div>
+                <div id="quill-editor-container" class="quill-snow-wrapper">
+                  <!-- Quill 에디터가 이곳에 초기화됩니다 -->
+                </div>
             </div>
 
             <div id="resource-library-panel" class="workspace-column">
@@ -132,7 +134,7 @@ export function renderWorkspace(container, ideaData) {
                         <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
                     </div>
                 </div>
-                <h2>📖 모든 스크랩</h2>
+                <h4>📖 모든 스크랩</h4>
                 <div class="scrap-list all-scraps-list">
                         <p class="loading-scraps">스크랩 목록을 불러오는 중...</p>
                 </div>
@@ -166,28 +168,93 @@ export function renderWorkspace(container, ideaData) {
     const quill = new Quill(editorEl, {
       theme: "snow",
       modules: {
-        toolbar: [
-          [{ header: [1, 2, 3, false] }],
-          ["bold", "italic", "underline", "strike"],
-          ["blockquote", "code-block"],
-          [{ list: "ordered" }, { list: "bullet" }],
-          [{ indent: "-1" }, { indent: "+1" }],
-          ["link", "image"],
-          ["clean"],
-        ],
+        toolbar: {
+          container: [
+            [{ header: [1, 2, 3, 4, 5, 6, false] }],
+            [{ font: [] }, { size: ["small", false, "large", "huge"] }],
+            ["bold", "italic", "underline", "strike"],
+            [{ color: [] }, { background: [] }],
+            [{ script: "sub" }, { script: "super" }],
+            ["blockquote", "code-block"],
+            [{ list: "ordered" }, { list: "bullet" }, { list: "check" }],
+            [{ indent: "-1" }, { indent: "+1" }],
+            [{ direction: "rtl" }],
+            [{ align: [] }],
+            ["link", "image", "video"],
+            ["clean"],
+          ],
+          handlers: {
+            // 커스텀 핸들러 추가 가능
+          },
+        },
+        clipboard: {
+          // 클립보드 최적화
+          matchVisual: false,
+        },
       },
+      formats: [
+        "header",
+        "font",
+        "size",
+        "bold",
+        "italic",
+        "underline",
+        "strike",
+        "color",
+        "background",
+        "script",
+        "blockquote",
+        "code-block",
+        "list",
+        "bullet",
+        "indent",
+        "align",
+        "direction",
+        "link",
+        "image",
+        "video",
+      ],
       placeholder:
         "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
+      readOnly: false,
+      bounds: editorEl,
+      scrollingContainer: editorEl,
     });
 
-    // ★ A/C-2: DB에 저장된 마크다운 초안을 HTML로 변환하여 Quill에 로드
-    if (ideaData.draftContent) {
-      const htmlContent = marked.parse(ideaData.draftContent);
-      quill.clipboard.dangerouslyPasteHTML(0, htmlContent);
-    }
+    // 에디터 초기화 완료 후 콘텐츠 로드
+    try {
+      // ★ A/C-2: DB에 저장된 마크다운 초안을 HTML로 변환하여 Quill에 로드
+      if (ideaData.draftContent) {
+        const htmlContent = marked.parse(ideaData.draftContent);
+        quill.clipboard.dangerouslyPasteHTML(0, htmlContent);
+      }
 
-    // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
-    editorEl.quillInstance = quill;
+      // 에디터 변경 이벤트 리스너 추가 (자동 저장 등을 위해)
+      quill.on("text-change", (delta, oldDelta, source) => {
+        if (source === "user") {
+          // 사용자가 편집할 때만 처리
+          const content = quill.root.innerHTML;
+          // 자동 저장 로직을 여기에 추가할 수 있음
+          console.log("Content changed:", content);
+        }
+      });
+
+      // 선택 영역 변경 이벤트 (툴바 업데이트 등을 위해)
+      quill.on("selection-change", (range, oldRange, source) => {
+        if (range) {
+          // 선택 영역이 있을 때의 처리
+          console.log("Selection changed:", range);
+        }
+      });
+
+      // Quill 인스턴스를 DOM 엘리먼트에 저장 (나중에 참조할 수 있도록)
+      editorEl.quillInstance = quill;
+
+      // 에디터 초기화 완료 표시
+      editorEl.classList.add("quill-initialized");
+    } catch (error) {
+      console.error("Quill 에디터 초기화 중 오류 발생:", error);
+    }
   }
 
   addWorkspaceEventListeners(
