@@ -275,7 +275,9 @@ function createScrapCard(scrap, isLinked) {
           .join("")}</div>`
       : "";
   const actionButton = isLinked
-    ? `<button class=\"scrap-card-delete-btn unlink-scrap-btn\" title=\"연결 해제\">\n         <svg xmlns=\"http://www.w3.org/2000/svg\" height=\"18\" viewBox=\"http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>\n       </button>`
+    ? `<button class="scrap-card-delete-btn unlink-scrap-btn" title="연결 해제">
+         <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
+       </button>`
     : "";
   if (isLinked) {
     // 태그형 카드: 아이콘 + 한 줄 제목만 표시
