@@ -108,6 +108,28 @@ const result = await chrome.runtime.sendMessage({
 });
 ```
 
+### 5. iframe 기반 에디터 패턴
+워크스페이스의 Quill 에디터는 포커스 문제 해결을 위해 독립된 iframe 환경에서 실행됩니다:
+
+```javascript
+// editor.html - iframe 내 독립 실행 환경
+<iframe id="quill-editor-iframe" src="${chrome.runtime.getURL('editor.html')}">
+
+// editor.js - iframe 에디터 제어
+window.addEventListener('message', function(event) {
+  const { action, data } = event.data;
+  switch (action) {
+    case 'set-content': quillEditor.root.innerHTML = data.html; break;
+    case 'apply-format': quillEditor.formatText(range.index, range.length, data.format, data.value); break;
+  }
+});
+
+// workspaceMode.js - 부모 창에서 iframe 통신
+function sendCommand(action, data = {}) {
+  editorIframe.contentWindow.postMessage({ action, data }, '*');
+}
+```
+
 ## 상태 관리 및 데이터 흐름
 
 ### 전역 상태 (`js/state.js`)
@@ -152,6 +174,12 @@ function switchMode(mode, container) {
 1. `background.js`의 Firebase 관련 함수들에 새 데이터 구조 추가
 2. `cleanDataForFirebase()` 함수에서 새 필드 처리 로직 확인
 3. 관련 UI 컴포넌트에서 새 데이터 렌더링 로직 구현
+
+### iframe 기반 에디터 확장
+1. `editor.html`에서 새로운 에디터 기능 구현
+2. `editor.js`에서 postMessage 액션 추가 및 처리 로직 구현
+3. 부모 창에서 `sendCommand()` 함수를 통한 에디터 제어
+4. `manifest.json`의 `web_accessible_resources`에 새 파일 등록 필수
 
 ---
 

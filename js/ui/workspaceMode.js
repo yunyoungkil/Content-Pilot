@@ -49,7 +49,8 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="main-editor-panel" class="workspace-column">
         <h2>✍️ 초안 작성</h2>
-        <textarea class="main-editor-textarea" placeholder="이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...">${ideaData.draftContent || ''}</textarea>
+        <div id="quill-toolbar-container" class="quill-toolbar-wrapper"></div>
+        <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL('editor.html')}" frameborder="0"></iframe>
         <div id="linked-scraps-section">
           <h4>🔗 연결된 자료</h4>
           <div class="scrap-list linked-scraps-list" data-idea-id="${ideaData.id}">
@@ -128,35 +129,182 @@ function createScrapCard(scrap, isLinked) {
 
 
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
-    const editorTextarea = workspaceEl.querySelector('.main-editor-textarea');
+    const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+    const toolbarContainer = workspaceEl.querySelector('#quill-toolbar-container');
     const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
     const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
     const keywordList = workspaceEl.querySelector('.keyword-list');
     const generateDraftBtn = workspaceEl.querySelector('#generate-draft-btn');
+    
+    let editorReady = false;
+    let toolbarQuill = null;
+    let currentEditorContent = '';
 
-
-    editorTextarea.addEventListener('blur', () => {
-        const currentDraft = editorTextarea.value;
+    // 툴바 생성을 위한 숨겨진 Quill 인스턴스 생성
+    function createToolbar() {
+        if (typeof Quill === 'undefined') {
+            console.error('Quill is not loaded yet');
+            return;
+        }
         
-        // 데이터베이스에 저장된 초안과 내용이 다를 경우에만 저장 요청
-        if (currentDraft !== (ideaData.draftContent || '')) {
+        const hiddenContainer = document.createElement('div');
+        hiddenContainer.style.display = 'none';
+        document.body.appendChild(hiddenContainer);
+        
+        // 툴바만을 위한 Quill 인스턴스
+        toolbarQuill = new Quill(hiddenContainer, {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    ['blockquote', 'code-block'],
+                    ['link', 'image'],
+                    ['clean']
+                ]
+            }
+        });
+        
+        // 툴바만 추출하여 실제 표시
+        const toolbar = hiddenContainer.querySelector('.ql-toolbar');
+        toolbarContainer.appendChild(toolbar.cloneNode(true));
+        
+        // 툴바 버튼 이벤트 처리
+        setupToolbarEvents();
+        
+        // 숨겨진 컨테이너 제거
+        document.body.removeChild(hiddenContainer);
+    }
+
+    // 툴바 버튼 이벤트 설정
+    function setupToolbarEvents() {
+        const toolbar = toolbarContainer.querySelector('.ql-toolbar');
+        
+        // 각 버튼에 이벤트 리스너 추가
+        toolbar.addEventListener('click', (e) => {
+            if (!editorReady) return;
+            
+            const button = e.target.closest('button');
+            if (!button) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // 버튼 타입에 따른 명령 전송
+            const className = button.className;
+            
+            if (className.includes('ql-bold')) {
+                sendFormatCommand('bold', true);
+            } else if (className.includes('ql-italic')) {
+                sendFormatCommand('italic', true);
+            } else if (className.includes('ql-underline')) {
+                sendFormatCommand('underline', true);
+            } else if (className.includes('ql-strike')) {
+                sendFormatCommand('strike', true);
+            } else if (className.includes('ql-header')) {
+                const headerValue = button.value || false;
+                sendCommand('apply-heading', { level: headerValue });
+            } else if (className.includes('ql-list')) {
+                const listType = button.value;
+                sendCommand('apply-list', { type: listType });
+            } else if (className.includes('ql-blockquote')) {
+                sendFormatCommand('blockquote', true);
+            } else if (className.includes('ql-code-block')) {
+                sendFormatCommand('code-block', true);
+            } else if (className.includes('ql-clean')) {
+                sendCommand('clear-formatting');
+            }
+        });
+    }
+
+    // 서식 명령 전송
+    function sendFormatCommand(format, value) {
+        sendCommand('apply-format', { format, value });
+    }
+
+    // iframe으로 명령 전송
+    function sendCommand(action, data = {}) {
+        if (editorReady && editorIframe.contentWindow) {
+            editorIframe.contentWindow.postMessage({ action, data }, '*');
+        }
+    }
+
+    // iframe으로부터 메시지 수신
+    window.addEventListener('message', (event) => {
+        if (event.source !== editorIframe.contentWindow) return;
+        
+        const { action, data } = event.data;
+        
+        switch (action) {
+            case 'editor-ready':
+                editorReady = true;
+                console.log('Editor is ready');
+                
+                // 초기 콘텐츠 설정
+                if (ideaData.draftContent) {
+                    sendCommand('set-content', { html: ideaData.draftContent });
+                }
+                break;
+                
+            case 'content-changed':
+                currentEditorContent = data.html;
+                // 자동 저장 (디바운스 적용)
+                clearTimeout(window._autoSaveTimeout);
+                window._autoSaveTimeout = setTimeout(() => {
+                    saveCurrentDraft();
+                }, 1000);
+                break;
+                
+            case 'selection-changed':
+                // 선택 영역 변경 시 툴바 상태 업데이트 가능
+                break;
+                
+            case 'editor-error':
+                console.error('Editor error:', data.error);
+                break;
+        }
+    });
+
+    // 현재 초안 저장
+    function saveCurrentDraft() {
+        if (currentEditorContent !== (ideaData.draftContent || '')) {
             console.log("Saving draft...");
             const saveData = {
                 ideaId: ideaData.id,
                 status: ideaData.status,
-                draft: currentDraft
+                draft: currentEditorContent
             };
             chrome.runtime.sendMessage({ action: 'save_draft_content', data: saveData }, (saveResponse) => {
                 if (saveResponse && saveResponse.success) {
-                    // 저장 성공 시, ideaData 객체도 업데이트하여 일관성 유지
-                    ideaData.draftContent = currentDraft; 
-                    console.log("Draft saved successfully on blur.");
+                    ideaData.draftContent = currentEditorContent;
+                    console.log("Draft saved successfully.");
                 } else {
-                    console.error("Failed to save draft on blur:", saveResponse.error);
+                    console.error("Failed to save draft:", saveResponse.error);
                 }
             });
         }
-    });
+    }
+
+    // 툴바 생성 (Quill.js 로드 후)
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = chrome.runtime.getURL('lib/quill.snow.css');
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('lib/quill.js');
+    script.onload = () => {
+        if (typeof Quill !== 'undefined') {
+            createToolbar();
+        } else {
+            console.error('Quill is not loaded after script.onload');
+        }
+    };
+    script.onerror = (e) => {
+        console.error('Failed to load Quill.js:', e);
+    };
+    document.head.appendChild(script);
 
     
     generateDraftBtn.addEventListener('click', () => {
@@ -177,14 +325,17 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
         const payload = {
             ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
-            currentDraft: editorTextarea.value, // 현재 에디터에 작성된 내용
+            currentDraft: currentEditorContent, // 현재 에디터에 작성된 내용
             linkedScrapsContent: linkedScrapsContent // 연결된 자료의 텍스트 목록
         };
 
         // 3. 통합된 데이터를 background.js로 전송합니다.
         chrome.runtime.sendMessage({ action: 'generate_draft_from_idea', data: payload }, (response) => {
             if (response && response.success) {
-                editorTextarea.value = response.draft;
+                // iframe 에디터에 생성된 초안 설정
+                sendCommand('set-content', { html: response.draft });
+                currentEditorContent = response.draft;
+                
                 const saveData = {
                     ideaId: ideaData.id,
                     status: ideaData.status,
@@ -196,6 +347,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
                         // (선택) 저장 실패 시 사용자에게 알림을 줄 수 있습니다.
                     } else {
                         console.log("Draft saved successfully.");
+                        ideaData.draftContent = response.draft;
                     }
                 });
 
@@ -210,9 +362,10 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     keywordList.addEventListener('click', (e) => {
         if (e.target.classList.contains('interactive-tag')) {
             const keyword = e.target.textContent;
-            editorTextarea.value += `\n\n## ${keyword}\n\n`;
-            editorTextarea.scrollTop = editorTextarea.scrollHeight;
-            editorTextarea.focus();
+            // iframe 에디터에 키워드 삽입
+            sendCommand('insert-text', { text: `\n\n## ${keyword}\n\n` });
+            // 에디터 포커스
+            sendCommand('focus');
         }
     });
 

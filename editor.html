@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Content Pilot Editor</title>
+    <!-- Quill Snow Theme CSS (로컬) -->
+    <link href="lib/quill.snow.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: white;
+        }
+        
+        #editor-container {
+            height: calc(100vh - 32px);
+            min-height: 400px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .ql-container {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .ql-editor {
+            padding: 16px;
+            color: #333;
+        }
+        
+        .ql-editor.ql-blank::before {
+            color: #aaa;
+            font-style: normal;
+        }
+        
+        /* Quill 툴바는 숨김 (부모 창에서 별도 관리) */
+        .ql-toolbar {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor-container"></div>
+    
+    <!-- Quill JS Library (로컬) -->
+    <script src="lib/quill.js"></script>
+    <script src="editor.js"></script>
+</body>
+</html>

@@ -57,7 +57,11 @@
         "offscreen.html",
         "css/style.css",
         "css/workspace.css",
-        "css/kanban.css"
+        "css/kanban.css",
+        "editor.html",
+        "editor.js",
+        "lib/quill.js",
+        "lib/quill.snow.css"
       ],
       "matches": ["<all_urls>"]
     }
