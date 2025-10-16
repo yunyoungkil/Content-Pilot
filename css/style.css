@@ -1,5 +1,5 @@
 /* 스크랩 후보 하이라이트 효과 */
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
 
 /* 패널 헤더 아이콘 버튼 스타일 */
 .cp-panel-icon-btn {
@@ -127,7 +127,7 @@
   border-radius: 8px;
   box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
   border: 2px solid transparent;
-  padding: 10px 12px 10px 40px;
+  padding: 10px 12px 10px;
   gap: 12px;
   cursor: pointer;
   transition: border 0.2s, box-shadow 0.2s, background 0.2s;
@@ -254,9 +254,9 @@
   font-size: 22px;
   font-weight: 700;
   color: #4285f4;
-  margin-bottom: 8px;   /* 제목과 아래 내용 사이 간격 확보 */
+  margin-bottom: 8px; /* 제목과 아래 내용 사이 간격 확보 */
   text-align: center;
-  line-height: 1.5;     /* <-- 줄 간격을 글자 크기의 1.5배로 설정 */
+  line-height: 1.5; /* <-- 줄 간격을 글자 크기의 1.5배로 설정 */
 }
 .scrapbook-detail-meta {
   font-size: 13px;
@@ -453,8 +453,9 @@
 
 /* 추천 검색어 결과 모달 스타일 */
 .keyword-list {
-  list-style-type: '🔍';
-  padding-left: 20px;
+  list-style-type: none;
+  padding-left: 0;
+  display: block;
 }
 
 .keyword-list li {
@@ -465,6 +466,7 @@
   text-decoration: none;
   color: #1a73e8;
   font-weight: 500;
+  font-size: 13px;
 }
 
 .keyword-list a:hover {
@@ -483,18 +485,22 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* 모달 내의 다시 추천받기 버튼 스타일 */
 #regenerate-keywords-btn {
-    width: auto;
-    height: auto;
-    border-radius: 6px;
-    padding: 8px 14px;
-    font-size: 13px;
-    font-weight: 600;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 #cp-draft-wrap {
@@ -577,12 +583,12 @@
 
 /* 에러 메시지 스타일 */
 .tag-placeholder.error {
-  color: #D93025; /* 구글의 에러 색상 */
+  color: #d93025; /* 구글의 에러 색상 */
   font-weight: 600;
 }
 .tag {
   background-color: #e8f0fe;
-  color: #4285F4;
+  color: #4285f4;
   font-size: 11px;
   font-weight: 500;
   padding: 3px 8px;
@@ -665,7 +671,7 @@
   border-radius: 8px;
   border: 1px solid #e9ecef;
 }
-.channel-selector { 
+.channel-selector {
   width: 100%;
   padding: 8px 12px;
   font-size: 14px;
@@ -717,7 +723,7 @@
   position: absolute;
   bottom: 10px;
   right: 10px;
-  background: #34A853;
+  background: #34a853;
   color: white;
   border: none;
   padding: 4px 10px;
@@ -735,19 +741,20 @@
   height: 80px;
   flex-shrink: 0;
 }
-.card-thumbnail img, .card-thumbnail .no-image { 
-  width: 100%; 
-  height: 100%; 
-  object-fit: cover; 
-  border-radius: 4px; 
-  background: #f0f0f0; 
+.card-thumbnail img,
+.card-thumbnail .no-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #f0f0f0;
 }
-.no-image { 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  font-size: 24px; 
-  color: #ccc; 
+.no-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: #ccc;
 }
 
 .card-info {
@@ -757,8 +764,8 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between; /* 내부 요소들을 위아래로 정렬 */
-  }
-.card-title { 
+}
+.card-title {
   font-weight: 600;
   font-size: 15px;
   line-height: 1.4;
@@ -840,7 +847,7 @@
   border-radius: 8px;
   padding: 20px 24px;
   margin-top: 10px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 .top5-controls {
   display: flex;
@@ -854,9 +861,6 @@
   align-items: center;
   gap: 8px;
 }
-
-
-
 
 /* --- Channel Mode Styles --- */
 .channel-container {
@@ -890,8 +894,8 @@
 }
 .add-channel-btn {
   background: #e8f0fe;
-  color: #4285F4;
-  border: 1px solid #4285F4;
+  color: #4285f4;
+  border: 1px solid #4285f4;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 5px;
@@ -952,7 +956,7 @@
   padding: 12px;
   font-size: 16px;
   font-weight: 600;
-  background-color: #34A853;
+  background-color: #34a853;
   color: white;
   border: none;
   border-radius: 6px;
@@ -998,8 +1002,8 @@
 }
 .card-metric-item {
   display: inline-flex; /* 아이콘과 텍스트를 한 줄에 정렬 */
-  align-items: center;  /* 세로 중앙 정렬 */
-  gap: 4px;             /* 아이콘과 텍스트 사이 간격 */
+  align-items: center; /* 세로 중앙 정렬 */
+  gap: 4px; /* 아이콘과 텍스트 사이 간격 */
   font-size: 11px;
   color: #555;
   white-space: nowrap;
@@ -1025,10 +1029,10 @@
 }
 
 .ai-section-wrapper {
-    grid-column: 1 / 3;
-    display: flex;
-    flex-direction: column; /* 아이템을 세로로 배치 */
-    gap: 20px; /* 패널 간의 간격 */
+  grid-column: 1 / 3;
+  display: flex;
+  flex-direction: column; /* 아이템을 세로로 배치 */
+  gap: 20px; /* 패널 간의 간격 */
 }
 
 .ai-ideas-section {
@@ -1082,7 +1086,7 @@
   background: #fff;
   border-radius: 8px;
   padding: 20px 24px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
   min-width: 280px;
 }
 
@@ -1123,119 +1127,127 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .ai-ideas-list {
-    font-size: 15px;
-    line-height: 1.7;
-    color: #333;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #333;
 }
 
-.ai-ideas-list h1, .ai-ideas-list h2 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #111;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 8px;
-    margin-top: 1.5em;
-    margin-bottom: 1em;
+.ai-ideas-list h1,
+.ai-ideas-list h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+  margin-top: 1.5em;
+  margin-bottom: 1em;
 }
 
 .ai-ideas-list h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: #1a73e8;
-    margin-top: 0;
-    margin-bottom: 0.5em;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a73e8;
+  margin-top: 0;
+  margin-bottom: 0.5em;
 }
 
-.ai-ideas-list ul, .ai-ideas-list ol {
-    padding-left: 20px;
-    margin-bottom: 1em;
+.ai-ideas-list ul,
+.ai-ideas-list ol {
+  padding-left: 20px;
+  margin-bottom: 1em;
 }
 
 .ai-ideas-list li {
-    margin-bottom: 0.5em;
+  margin-bottom: 0.5em;
 }
 
 .ai-ideas-list strong {
-    color: #111;
+  color: #111;
 }
 
 .ai-ideas-list p {
-    margin-bottom: 1em;
+  margin-bottom: 1em;
 }
 
 /* 아이디어 카드 버튼 위치 조정 */
 .ai-idea-card {
-    position: relative;
-    padding-right: 130px; /* 버튼 공간 확보 */
-    margin-bottom: 1.5em;
-    padding-bottom: 1em;
-    border-bottom: 1px dashed #ddd;
+  position: relative;
+  padding-right: 130px; /* 버튼 공간 확보 */
+  margin-bottom: 1.5em;
+  padding-bottom: 1em;
+  border-bottom: 1px dashed #ddd;
 }
 
 .ai-idea-card:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-    padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 .ai-idea-card .add-to-kanban-btn {
-    position: absolute;
-    top: 0;
-    right: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 #recently-added-list li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px; /* 제목과 버튼 사이 간격 */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px; /* 제목과 버튼 사이 간격 */
 }
 
 /* 제목을 담고 있는 span 태그 스타일 */
 #recently-added-list li > span {
-    flex: 1; /* 남는 공간을 모두 차지하도록 설정 */
-    min-width: 0; /* flex 아이템이 줄어들 수 있도록 설정 */
-    white-space: nowrap; /* 줄바꿈 방지 */
-    overflow: hidden; /* 넘치는 텍스트 숨기기 */
-    text-overflow: ellipsis; /* 넘치는 텍스트를 ...으로 표시 */
+  flex: 1; /* 남는 공간을 모두 차지하도록 설정 */
+  min-width: 0; /* flex 아이템이 줄어들 수 있도록 설정 */
+  white-space: nowrap; /* 줄바꿈 방지 */
+  overflow: hidden; /* 넘치는 텍스트 숨기기 */
+  text-overflow: ellipsis; /* 넘치는 텍스트를 ...으로 표시 */
 }
 
 .undo-add-btn {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 12px;
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 4px;
-    flex-shrink: 0; /* 버튼 크기가 줄어들지 않도록 설정 */
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0; /* 버튼 크기가 줄어들지 않도록 설정 */
 }
 
 .undo-add-btn:hover {
-    background: #f1f3f5;
-    color: #333;
+  background: #f1f3f5;
+  color: #333;
 }
 
 /* 1. AI 섹션 전체를 Flexbox 컨테이너로 만듭니다. */
 .ai-section-wrapper {
-    display: flex;
-    flex-direction: column; /* 아이템을 세로로 배치 */
+  display: flex;
+  flex-direction: column; /* 아이템을 세로로 배치 */
 }
 
 /* 2. 각 패널의 기본 순서를 지정합니다. */
 #my-analysis-section {
-    order: 1; /* 성과 분석 패널이 첫 번째 (상단) */
+  order: 1; /* 성과 분석 패널이 첫 번째 (상단) */
 }
 #competitor-analysis-section {
-    order: 2; /* 경쟁 분석 패널이 두 번째 (중간) */
+  order: 2; /* 경쟁 분석 패널이 두 번째 (중간) */
 }
 #recently-added-panel {
-    order: 3; /* 최근 추가 아이디어 패널이 세 번째 (하단) */
+  order: 3; /* 최근 추가 아이디어 패널이 세 번째 (하단) */
 }
 
 /* ▼▼▼ [추가] Marked.js 테이블 스타일 ▼▼▼ */
@@ -1247,7 +1259,7 @@
   text-align: left;
   overflow: hidden;
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .ai-ideas-list th,
@@ -1282,7 +1294,7 @@
 }
 
 .card-tags .tag:hover {
-  background-color: #4285F4;
+  background-color: #4285f4;
   color: #fff;
 }
 
@@ -1453,13 +1465,13 @@
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.2s, box-shadow 0.2s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .google-btn:hover {
   background-color: #f8f9fa;
   border-color: #c6cace;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .google-btn img {

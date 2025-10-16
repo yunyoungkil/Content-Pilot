@@ -15,6 +15,17 @@ export function renderWorkspace(container, ideaData) {
       ? ideaData.outline.map((item) => `<li>${item}</li>`).join("")
       : "<li>추천 목차가 없습니다.</li>";
 
+  const KeywordsTagsHtml =
+    ideaData.tags && ideaData.tags.length > 0
+      ? ideaData.tags
+          .filter((t) => t !== "#AI-추천")
+          .map(
+            (k) =>
+              `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`
+          )
+          .join("")
+      : "<span>제안된 주요 키워드가 없습니다.</span>";
+
   const longTailKeywordsHtml =
     ideaData.longTailKeywords && ideaData.longTailKeywords.length > 0
       ? ideaData.longTailKeywords
@@ -42,48 +53,32 @@ export function renderWorkspace(container, ideaData) {
       <div id="ai-briefing-panel" class="workspace-column">
         <h2>✨ AI 브리핑</h2>
         <div class="ai-briefing-content">
-          <h4>주요 키워드</h4>
-          <div class="keyword-list">
-            ${(ideaData.tags || [])
-              .filter((t) => t !== "#AI-추천")
-              .map(
-                (k) =>
-                  `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`
-              )
-              .join("")}
-          </div>
-
-          <h4>롱테일 키워드</h4>
-          <div class="keyword-list">
-            ${longTailKeywordsHtml}
-          </div>
-
           <h4>추천 목차</h4>
           <ul class="outline-list">
             ${outlineHtml}
           </ul>
-          
           <h4>추천 검색어</h4>
-          <ul class="keyword-list">
+          <ul>
             ${searchesHtml}
           </ul>
-
           <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
         </div>
       </div>
 
       <div id="main-editor-panel" class="workspace-column">
-        <h2>✍️ 초안 작성</h2>
-
         <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
           "editor.html"
         )}" frameborder="0"></iframe>
- 
+        <div class="editor-keyword-section">
+          <div class="keyword-list">
+            ${KeywordsTagsHtml} ${longTailKeywordsHtml}
+          </div>
+        </div>
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
         <div id="linked-scraps-section">
-          <h4>🔗 연결된 자료</h4>
+          <h2>🔗 연결된 자료</h2>
         <div class="scrap-list linked-scraps-list" data-idea-id="${
           ideaData.id
         }">
@@ -181,100 +176,16 @@ function createScrapCard(scrap, isLinked) {
 
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
-  const toolbarContainer = workspaceEl.querySelector(
-    "#quill-toolbar-container"
-  );
   const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
   const linkedScrapsList = workspaceEl.querySelector(".linked-scraps-list");
-  const keywordList = workspaceEl.querySelector(".keyword-list");
+  // 주요 키워드, 롱테일 키워드 각각의 DOM을 분리해서 이벤트 적용
+  const keywordSection = workspaceEl.querySelector(".editor-keyword-section");
+  const mainKeywordList = keywordSection?.children[0]; // 주요 키워드
+  const longTailKeywordList = keywordSection?.children[1]; // 롱테일 키워드
   const generateDraftBtn = workspaceEl.querySelector("#generate-draft-btn");
 
   let editorReady = false;
-  let toolbarQuill = null;
   let currentEditorContent = "";
-
-  // 툴바 생성을 위한 숨겨진 Quill 인스턴스 생성
-  function createToolbar() {
-    if (typeof Quill === "undefined") {
-      console.error("Quill is not loaded yet");
-      return;
-    }
-
-    const hiddenContainer = document.createElement("div");
-    hiddenContainer.style.display = "none";
-    document.body.appendChild(hiddenContainer);
-
-    // 툴바만을 위한 Quill 인스턴스
-    toolbarQuill = new Quill(hiddenContainer, {
-      theme: "snow",
-      modules: {
-        toolbar: [
-          [{ header: [1, 2, 3, false] }],
-          ["bold", "italic", "underline", "strike"],
-          [{ list: "ordered" }, { list: "bullet" }],
-          ["blockquote", "code-block"],
-          ["link", "image"],
-          ["clean"],
-        ],
-      },
-    });
-
-    // 툴바만 추출하여 실제 표시
-    const toolbar = hiddenContainer.querySelector(".ql-toolbar");
-    toolbarContainer.appendChild(toolbar.cloneNode(true));
-
-    // 툴바 버튼 이벤트 처리
-    setupToolbarEvents();
-
-    // 숨겨진 컨테이너 제거
-    document.body.removeChild(hiddenContainer);
-  }
-
-  // 툴바 버튼 이벤트 설정
-  function setupToolbarEvents() {
-    const toolbar = toolbarContainer.querySelector(".ql-toolbar");
-
-    // 각 버튼에 이벤트 리스너 추가
-    toolbar.addEventListener("click", (e) => {
-      if (!editorReady) return;
-
-      const button = e.target.closest("button");
-      if (!button) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      // 버튼 타입에 따른 명령 전송
-      const className = button.className;
-
-      if (className.includes("ql-bold")) {
-        sendFormatCommand("bold", true);
-      } else if (className.includes("ql-italic")) {
-        sendFormatCommand("italic", true);
-      } else if (className.includes("ql-underline")) {
-        sendFormatCommand("underline", true);
-      } else if (className.includes("ql-strike")) {
-        sendFormatCommand("strike", true);
-      } else if (className.includes("ql-header")) {
-        const headerValue = button.value || false;
-        sendCommand("apply-heading", { level: headerValue });
-      } else if (className.includes("ql-list")) {
-        const listType = button.value;
-        sendCommand("apply-list", { type: listType });
-      } else if (className.includes("ql-blockquote")) {
-        sendFormatCommand("blockquote", true);
-      } else if (className.includes("ql-code-block")) {
-        sendFormatCommand("code-block", true);
-      } else if (className.includes("ql-clean")) {
-        sendCommand("clear-formatting");
-      }
-    });
-  }
-
-  // 서식 명령 전송
-  function sendFormatCommand(format, value) {
-    sendCommand("apply-format", { format, value });
-  }
 
   // iframe으로 명령 전송
   function sendCommand(action, data = {}) {
@@ -349,26 +260,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     }
   }
 
-  // 툴바 생성 (Quill.js 로드 후)
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = chrome.runtime.getURL("lib/quill.snow.css");
-  document.head.appendChild(link);
-
-  const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("lib/quill.js");
-  script.onload = () => {
-    if (typeof Quill !== "undefined") {
-      createToolbar();
-    } else {
-      console.error("Quill is not loaded after script.onload");
-    }
-  };
-  script.onerror = (e) => {
-    console.error("Failed to load Quill.js:", e);
-  };
-  document.head.appendChild(script);
-
   generateDraftBtn.addEventListener("click", () => {
     generateDraftBtn.textContent = "AI가 초안을 작성하는 중...";
     generateDraftBtn.disabled = true;
@@ -435,15 +326,27 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     );
   });
 
-  keywordList.addEventListener("click", (e) => {
-    if (e.target.classList.contains("interactive-tag")) {
-      const keyword = e.target.textContent;
-      // iframe 에디터에 키워드 삽입
-      sendCommand("insert-text", { text: `\n\n## ${keyword}\n\n` });
-      // 에디터 포커스
-      sendCommand("focus");
-    }
-  });
+  // 주요 키워드 클릭 시 에디터에 삽입
+  if (mainKeywordList) {
+    mainKeywordList.addEventListener("click", (e) => {
+      if (e.target.classList.contains("interactive-tag")) {
+        const keyword = e.target.textContent;
+        sendCommand("insert-text", { text: `\n\n## ${keyword}\n\n` });
+        sendCommand("focus");
+      }
+    });
+  }
+
+  // 롱테일 키워드 클릭 시 에디터에 삽입
+  if (longTailKeywordList) {
+    longTailKeywordList.addEventListener("click", (e) => {
+      if (e.target.classList.contains("interactive-tag")) {
+        const keyword = e.target.textContent;
+        sendCommand("insert-text", { text: ` ${keyword} ` });
+        sendCommand("focus");
+      }
+    });
+  }
 
   linkedScrapsList.addEventListener("click", (e) => {
     const unlinkBtn = e.target.closest(".unlink-scrap-btn");
