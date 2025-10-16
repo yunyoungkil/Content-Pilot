@@ -169,6 +169,38 @@ window.addEventListener("message", function (event) {
       }
       break;
 
+    case "scroll-to-text":
+      // 특정 텍스트 위치로 스크롤 이동 (텍스트가 에디터 상단에 오도록)
+      if (data.text) {
+        const editorContent = quillEditor.getText();
+        const textIndex = editorContent.indexOf(data.text);
+
+        if (textIndex !== -1) {
+          // 텍스트를 찾았으면 해당 위치로 커서 이동
+          quillEditor.setSelection(textIndex, data.text.length);
+
+          // 약간의 지연 후 스크롤 (DOM 업데이트 대기)
+          setTimeout(() => {
+            const editorRoot = quillEditor.root;
+            const selection = window.getSelection();
+
+            if (selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              const rect = range.getBoundingClientRect();
+              const editorRect = editorRoot.getBoundingClientRect();
+
+              // 해당 텍스트가 에디터 상단(+20px 여백)에 위치하도록 스크롤
+              const targetScrollTop =
+                editorRoot.scrollTop + (rect.top - editorRect.top) - 20;
+              editorRoot.scrollTop = targetScrollTop;
+            }
+          }, 50);
+        } else {
+          console.log("Text not found in editor:", data.text);
+        }
+      }
+      break;
+
     default:
       console.log("Unknown action:", action);
   }

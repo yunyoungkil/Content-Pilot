@@ -183,6 +183,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const mainKeywordList = keywordSection?.children[0]; // 주요 키워드
   const longTailKeywordList = keywordSection?.children[1]; // 롱테일 키워드
   const generateDraftBtn = workspaceEl.querySelector("#generate-draft-btn");
+  const outlineList = workspaceEl.querySelector(".outline-list");
 
   let editorReady = false;
   let currentEditorContent = "";
@@ -325,6 +326,17 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       }
     );
   });
+
+  // 추천 목차 클릭 시 에디터 내 해당 위치로 스크롤 이동
+  if (outlineList) {
+    outlineList.addEventListener("click", (e) => {
+      if (e.target.tagName === "LI") {
+        const outlineText = e.target.textContent.trim();
+        // iframe 에디터에 스크롤 명령 전송
+        sendCommand("scroll-to-text", { text: outlineText });
+      }
+    });
+  }
 
   // 주요 키워드 클릭 시 에디터에 삽입
   if (mainKeywordList) {
