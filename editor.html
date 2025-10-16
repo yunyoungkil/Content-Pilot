@@ -1,53 +1,74 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Content Pilot Editor</title>
     <!-- Quill Snow Theme CSS (로컬) -->
-    <link href="lib/quill.snow.css" rel="stylesheet">
+    <link href="lib/quill.snow.css" rel="stylesheet" />
     <style>
-        body {
-            margin: 0;
-            padding: 16px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: white;
-        }
-        
-        #editor-container {
-            height: calc(100vh - 32px);
-            min-height: 400px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-        }
-        
-        .ql-container {
-            font-size: 14px;
-            line-height: 1.6;
-        }
-        
-        .ql-editor {
-            padding: 16px;
-            color: #333;
-        }
-        
-        .ql-editor.ql-blank::before {
-            color: #aaa;
-            font-style: normal;
-        }
-        
-        /* Quill 툴바는 숨김 (부모 창에서 별도 관리) */
-        .ql-toolbar {
-            display: none !important;
-        }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden; /* 바깥(iframe 문서) 스크롤 제거 */
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+          sans-serif;
+        background: white;
+      }
+
+      #editor-container {
+        height: 100%;
+        min-height: 0;
+        max-height: 100%;
+        box-sizing: border-box;
+        border: none;
+        border-radius: 0;
+        background: white;
+        overflow: hidden;
+        max-width: 100vw;
+      }
+
+      .ql-container {
+        font-size: 14px;
+        line-height: 1.6;
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        max-width: 100vw;
+        max-height: 100%;
+        overflow: hidden;
+      }
+
+      .ql-editor {
+        padding: 16px;
+        color: #333;
+        box-sizing: border-box;
+        width: 100%;
+        height: 80%;
+        max-width: 100vw;
+        max-height: 90%;
+        overflow-y: auto; /* 텍스트 입력 창에만 세로 스크롤 */
+        overflow-x: hidden; /* 가로 스크롤 방지 */
+        -webkit-overflow-scrolling: touch; /* 모바일 부드러운 스크롤 */
+        overflow-wrap: break-word; /* 긴 단어 줄바꿈 */
+        border: 1px solid #ccc;
+      }
+
+      .ql-editor.ql-blank::before {
+        color: #aaa;
+        font-style: normal;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div id="editor-container"></div>
-    
+
     <!-- Quill JS Library (로컬) -->
     <script src="lib/quill.js"></script>
     <script src="editor.js"></script>
-</body>
+  </body>
 </html>

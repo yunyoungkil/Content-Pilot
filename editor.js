@@ -6,9 +6,23 @@ let quillEditor = null;
 function initializeEditor() {
     quillEditor = new Quill('#editor-container', {
         theme: 'snow',
-        modules: {
-            toolbar: false  // 툴바는 부모 창에서 관리
-        },
+          modules: {
+    toolbar: [
+      [{ header: [1, 2, false] }],
+      ['bold', 'italic', 'underline', 'strike'],
+      ['blockquote', 'code-block'],
+      [{ list: 'ordered' }, { list: 'bullet' }],
+      [{ script: 'sub' }, { script: 'super' }],
+      [{ indent: '-1' }, { indent: '+1' }],
+      [{ direction: 'rtl' }],
+      [{ size: ['small', false, 'large', 'huge'] }],
+      [{ color: [] }, { background: [] }],
+      [{ font: [] }],
+      [{ align: [] }],
+      ['link', 'image', 'video'],
+      ['clean']
+    ]
+  },
         placeholder: '이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...'
     });
 

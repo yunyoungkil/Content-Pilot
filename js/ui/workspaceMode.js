@@ -49,17 +49,18 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="main-editor-panel" class="workspace-column">
         <h2>✍️ 초안 작성</h2>
-        <div id="quill-toolbar-container" class="quill-toolbar-wrapper"></div>
+
         <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL('editor.html')}" frameborder="0"></iframe>
-        <div id="linked-scraps-section">
-          <h4>🔗 연결된 자료</h4>
-          <div class="scrap-list linked-scraps-list" data-idea-id="${ideaData.id}">
-            <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
-          </div>
-        </div>
+ 
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
+        <div id="linked-scraps-section">
+          <h4>🔗 연결된 자료</h4>
+        <div class="scrap-list linked-scraps-list" data-idea-id="${ideaData.id}">
+            <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
+          </div>
+        </div>
         <h2>📖 모든 스크랩</h2>
         <div class="scrap-list all-scraps-list">
             <p class="loading-scraps">스크랩 목록을 불러오는 중...</p>
