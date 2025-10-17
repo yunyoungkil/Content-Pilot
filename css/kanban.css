@@ -1,3 +1,17 @@
+/* 초안 상태 강조 (K-1) */
+.draft-status-count {
+  background: #e8f0fe;
+  color: #1967d2;
+  font-weight: 700;
+  font-size: 13px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  box-shadow: 0 1px 4px rgba(25,103,210,0.08);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  display: inline-block;
+}
 /* --- 칸반 보드 UI 스타일 --- */
 .kanban-board-container {
   display: flex;

@@ -152,6 +152,10 @@ function createKanbanCard(id, data, status) {
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }
+    // K-1: draftContent가 있으면 초안 완료 표시
+    if (data.draftContent) {
+      metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
+    }
 
   let actionButtons = ``;
   if (status === 'done' && !data.publishedUrl) {
@@ -253,17 +257,26 @@ function addKanbanEventListeners(container) {
     });
 
     root.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const targetColumn = e.target.closest('.cp-kanban-col');
-        const newStatus = targetColumn?.dataset.status;
-        const { cardId, originalStatus } = currentlyDragging;
-
-        if (newStatus && cardId && originalStatus && newStatus !== originalStatus) {
-            chrome.runtime.sendMessage({
-                action: 'move_kanban_card',
-                data: { cardId, originalStatus, newStatus }
-            });
-        }
+    e.preventDefault();
+    const targetColumn = e.target.closest('.cp-kanban-col');
+    const newStatus = targetColumn?.dataset.status;
+    const { cardId, originalStatus } = currentlyDragging;
+    // K-2: 이동 제한 로직
+    if (newStatus && cardId && originalStatus && newStatus !== originalStatus) {
+      // 카드 데이터 가져오기
+      const cardData = allKanbanData[originalStatus]?.[cardId];
+      if (cardData?.draftContent && newStatus === 'ideas') {
+        // showToast 안내
+        import('../utils.js').then(({ showToast }) => {
+          showToast("⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다.");
+        });
+        return;
+      }
+      chrome.runtime.sendMessage({
+        action: 'move_kanban_card',
+        data: { cardId, originalStatus, newStatus }
+      });
+    }
     });
 }
 
