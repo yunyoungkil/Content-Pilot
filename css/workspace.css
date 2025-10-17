@@ -118,6 +118,11 @@
 }
 #main-editor-panel {
   flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0; /* ✨ W-11: 높이 전달 체인의 필수 요소 */
+  overflow: hidden;
 }
 #resource-library-panel {
   flex: 0 0 240px;
@@ -153,16 +158,20 @@
   color: #444;
 }
 #generate-draft-btn {
-  width: 100%;
-  background-color: #34a853;
-  color: white;
-  border: none;
-  padding: 10px;
-  font-size: 15px;
+  background: #e6f4ea;
+  color: #34a853;
+  border: 1px solid #34a853;
+  padding: 6px 12px;
+  border-radius: 4px;
   font-weight: 600;
-  border-radius: 6px;
+  font-size: 15px;
   cursor: pointer;
-  margin-top: 20px;
+  transition: background 0.2s;
+}
+#generate-draft-btn:hover {
+  background: #c8e6c9;
+  color: #1b5e20;
+  border-color: #1b5e20;
 }
 .interactive-tag:hover {
   background-color: #4285f4;
@@ -182,7 +191,7 @@
 #quill-editor-iframe {
   flex: 1 1 auto; /* 남은 공간을 유연하게 차지 */
   height: 0; /* flex 컨테이너에서 높이 계산 보정 */
-  min-height: 0; /* 컨텐츠에 의해 최소 높이 강제 방지 */
+  min-height: 0; /* ✨ W-11: 아이프레임 자체가 넘치지 않도록 제한 */
   width: 100%;
   display: block;
   border: none;
@@ -369,4 +378,114 @@
   word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
+}
+
+/* --- 초안 작업 영역 스타일 --- */
+#draft-actions-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+#draft-actions-header button {
+  padding: 6px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 4px;
+  border-width: 1px;
+  border-style: solid;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  outline: none;
+  box-shadow: 0 1px 4px rgba(25, 103, 210, 0.04);
+  min-width: 120px;
+}
+#generate-draft-btn {
+  background: #e6f4ea;
+  color: #34a853;
+  border-color: #34a853;
+}
+#generate-draft-btn:hover {
+  background: #c8e6c9;
+  color: #1b5e20;
+  border-color: #1b5e20;
+}
+#delete-draft-in-workspace {
+  background: #fbe9e7;
+  color: #d93025;
+  border-color: #d93025;
+}
+#delete-draft-in-workspace:hover {
+  background: #ffd6cf;
+  color: #b71c1c;
+  border-color: #b71c1c;
+}
+
+/* W-12.R: AI 액션 버튼 통합 스타일 */
+
+/* 1. AI 초안 생성 버튼 (Primary / Filled) */
+.draft-primary-btn {
+  background-color: #34a853;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.draft-primary-btn:hover {
+  background-color: #1e8e3e;
+}
+
+/* 2. 초안 삭제 버튼 (Destructive / Outlined) */
+.draft-delete-btn {
+  background: none;
+  color: #d93025;
+  border: 1px solid #d93025;
+  padding: 7px 15px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.draft-delete-btn:hover {
+  background-color: #fce8e6;
+}
+
+/* 키워드와 롱테일 키워드 태그 스타일 */
+.editor-keyword-section .tag {
+  display: inline-block;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 10px;
+  margin-right: 4px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.editor-keyword-section .tag {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+.editor-keyword-section .tag.long-tail-keyword {
+  background: #fff7e6;
+  color: #b06000;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+.editor-keyword-section .tag:hover {
+  background: #4285f4;
+  color: #fff;
+}
+.editor-keyword-section .tag.long-tail-keyword:hover {
+  background: #ffe0b2;
+  color: #b06000;
 }

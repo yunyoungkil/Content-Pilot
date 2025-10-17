@@ -31,7 +31,7 @@ export function renderWorkspace(container, ideaData) {
       ? ideaData.longTailKeywords
           .map(
             (k) =>
-              `<span class="tag interactive-tag" title="클릭하여 본문에 추가">${k}</span>`
+              `<span class="tag long-tail-keyword interactive-tag" title="클릭하여 본문에 추가">${k}</span>`
           )
           .join("")
       : "<span>제안된 롱테일 키워드가 없습니다.</span>";
@@ -48,10 +48,35 @@ export function renderWorkspace(container, ideaData) {
           .join("")
       : "<li>추천 검색어가 없습니다.</li>";
 
+  const hasDraft = !!ideaData.draftContent;
+  const draftActionsHtml = `
+    <div id="draft-actions-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0;">
+      <button id="generate-draft-btn">
+        📄 AI로 초안 생성하기
+      </button>
+      ${
+        hasDraft
+          ? `<button id="delete-draft-in-workspace" class="draft-delete-btn"
+                  title="작성된 초안 내용을 완전히 삭제하고 아이디어 상태로 초기화합니다.">
+             ❌ 초안 삭제
+           </button>`
+          : ""
+      }
+    </div>`;
+
+  const editorKeywordSectionHtml = `
+    <div class="editor-keyword-section">
+      <div class="keyword-list">
+        ${KeywordsTagsHtml} ${longTailKeywordsHtml}
+      </div>
+    </div>
+  `;
+
   container.innerHTML = `
     <div class="workspace-container">
       <div id="ai-briefing-panel" class="workspace-column">
         <h2>✨ AI 브리핑</h2>
+        ${editorKeywordSectionHtml}
         <div class="ai-briefing-content">
           <h4>추천 목차</h4>
           <ul class="outline-list">
@@ -61,19 +86,14 @@ export function renderWorkspace(container, ideaData) {
           <ul>
             ${searchesHtml}
           </ul>
-          <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
         </div>
       </div>
 
       <div id="main-editor-panel" class="workspace-column">
+        ${draftActionsHtml}
         <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
           "editor.html"
         )}" frameborder="0"></iframe>
-        <div class="editor-keyword-section">
-          <div class="keyword-list">
-            ${KeywordsTagsHtml} ${longTailKeywordsHtml}
-          </div>
-        </div>
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
@@ -184,6 +204,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const longTailKeywordList = keywordSection?.children[1]; // 롱테일 키워드
   const generateDraftBtn = workspaceEl.querySelector("#generate-draft-btn");
   const outlineList = workspaceEl.querySelector(".outline-list");
+  const deleteDraftBtn = workspaceEl.querySelector(
+    "#delete-draft-in-workspace"
+  );
 
   let editorReady = false;
   let currentEditorContent = "";
@@ -564,4 +587,45 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       });
     }
   });
+
+  if (deleteDraftBtn) {
+    deleteDraftBtn.addEventListener("click", () => {
+      if (
+        confirm(
+          "경고: 현재 작성 중인 초안 내용이 완전히 삭제됩니다. 진행하시겠습니까?"
+        )
+      ) {
+        chrome.runtime.sendMessage(
+          {
+            action: "delete_draft_content",
+            data: { cardId: ideaData.id },
+          },
+          (response) => {
+            if (response?.success) {
+              ideaData.draftContent = null;
+              window.parent.postMessage(
+                {
+                  action: "cp_show_toast",
+                  message: "✅ 초안이 삭제되었습니다. 기획 보드로 돌아갑니다.",
+                },
+                "*"
+              );
+              window.parent.postMessage(
+                { action: "close-workspace-and-refresh" },
+                "*"
+              );
+            } else {
+              window.parent.postMessage(
+                {
+                  action: "cp_show_toast",
+                  message: "❌ 초안 삭제 중 오류가 발생했습니다.",
+                },
+                "*"
+              );
+            }
+          }
+        );
+      }
+    });
+  }
 }

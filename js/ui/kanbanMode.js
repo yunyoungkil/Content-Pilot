@@ -181,11 +181,7 @@ function createKanbanCard(id, data, status) {
   }
 
   let actionButtons = ``;
-  const hasDraft = !!data.draftContent;
-  // K-3: 초안 삭제 버튼 추가
-  if (hasDraft) {
-    actionButtons += `<span class="delete-draft-btn" data-card-id="${id}" title="작성된 초안을 삭제하고 아이디어를 초기화합니다.">❌ 초안 삭제</span>`;
-  }
+  // K-3: 초안 삭제 버튼 제거됨
   if (status === "done" && !data.publishedUrl) {
     actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
   } else if (data.publishedUrl) {
@@ -209,39 +205,7 @@ function createKanbanCard(id, data, status) {
 }
 
 function addKanbanEventListeners(container) {
-  // K-3: 초안 삭제 버튼 클릭 이벤트 리스너
-  container.addEventListener("click", (e) => {
-    if (e.target.classList.contains("delete-draft-btn")) {
-      const cardId = e.target.dataset.cardId;
-      if (
-        confirm(
-          "정말로 작성된 초안을 삭제하고 이 아이디어의 기획 상태를 초기화하시겠습니까?"
-        )
-      ) {
-        chrome.runtime.sendMessage(
-          {
-            action: "delete_draft_content",
-            data: { cardId: cardId },
-          },
-          (response) => {
-            if (response?.success) {
-              import("../utils.js").then(({ showToast }) => {
-                showToast(
-                  "✅ 초안 내용이 삭제되었습니다. 카드를 '아이디어'로 되돌릴 수 있습니다."
-                );
-              });
-              // UI 새로고침 (전체 데이터를 다시 로드하여 상태 업데이트)
-              updateKanbanUI(allKanbanData);
-            } else {
-              import("../utils.js").then(({ showToast }) => {
-                showToast("❌ 초안 삭제 중 오류가 발생했습니다.");
-              });
-            }
-          }
-        );
-      }
-    }
-  });
+  // K-3: 초안 삭제 버튼 클릭 이벤트 리스너 완전 제거
   const sortControls = container.querySelector(".kanban-sort-controls");
   if (sortControls) {
     sortControls.addEventListener("click", (e) => {
@@ -331,17 +295,23 @@ function addKanbanEventListeners(container) {
     const newStatus = targetColumn?.dataset.status;
     const { cardId, originalStatus } = currentlyDragging;
     if (newStatus && cardId && originalStatus && newStatus !== originalStatus) {
-      // K-5: 초안이 존재할 때만 이동 제한
       const cardData = allKanbanData[originalStatus]?.[cardId];
       const hasDraft = !!cardData?.draftContent;
-      if (hasDraft && newStatus === "ideas") {
-        import("../utils.js").then(({ showToast }) => {
-          showToast(
-            "⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다. (초안 삭제 후 복귀 가능)"
-          );
-        });
+      // K-7: 아이디어 컬럼에서 초안 없는 카드 이동 제한
+      if (originalStatus === "ideas" && !hasDraft) {
+        showToast(
+          "⚠️ 기획을 시작하려면 카드를 클릭하여 워크스페이스에서 초안을 생성하거나, 자료를 연결해야 합니다."
+        );
         return;
       }
+      // 기존 K-5: 초안이 존재하는 상태에서 'ideas' 컬럼으로 복귀 시 제한
+      if (hasDraft && newStatus === "ideas") {
+        showToast(
+          "⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다. (초안 삭제 후 복귀 가능)"
+        );
+        return;
+      }
+      // 모든 제한을 통과하면 이동 허용
       chrome.runtime.sendMessage({
         action: "move_kanban_card",
         data: { cardId, originalStatus, newStatus },

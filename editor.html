@@ -14,7 +14,7 @@
       }
       body {
         margin: 0;
-        padding: 0; /* W-3.2: body의 패딩 제거 */
+        padding: 0; /* W-11: body 패딩 제거 */
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
           sans-serif;
         background: white;
@@ -33,40 +33,40 @@
       }
 
       .ql-container {
+        height: 100%; /* 아이프레임 전체 높이 사용 */
+        overflow: hidden; /* 중복 스크롤을 막기 위해 컨테이너 레벨에서 오버플로우 차단 */
+        border: none;
         font-size: 14px;
         line-height: 1.6;
         box-sizing: border-box;
         width: 100%;
-        height: 100%;
         max-width: 100vw;
         max-height: 100%;
-        overflow: hidden;
-        /* W-3.1: Flexbox 적용 */
-        display: flex;
-        flex-direction: column; 
+        display: block;
       }
 
-      /* W-3.3: 툴바 높이 고정 및 경계선 추가 */
+      /* W-11: 툴바 높이 고정 */
       .ql-toolbar {
-        flex-shrink: 0;
-        border: none !important;
-        border-bottom: 1px solid #ccc;
+        height: 90px; /* 툴바의 실제 높이(2줄)에 맞춰 조정 (테스트 후 정확한 픽셀 값 사용 권장) */
+        border: 1px solid #ccc;
+        box-sizing: border-box;
         padding: 8px !important;
+        margin: 0;
+        border-bottom: none;
       }
-      
+
       .ql-editor {
-        /* W-3.2: 높이 백분율 삭제 및 Flex 설정 */
-        flex: 1; 
-        min-height: 0;
-        
-        padding: 16px;
-        color: #333;
         box-sizing: border-box;
         width: 100%;
-        overflow-y: auto; /* 텍스트 입력 창에만 세로 스크롤 */
-        overflow-x: hidden; /* 가로 스크롤 방지 */
+        height: calc(100% - 92px); /* calc()로 높이 계산 */
+        min-height: 0; /* W-11: Flexbox 오버플로우 방지 */
+        padding: 16px;
+        color: #333;
+        border: 1px solid #ccc;
+        border-top: none;
+        overflow-y: auto; /* 편집기 내부 스크롤만 허용 */
+        overflow-x: hidden;
         overflow-wrap: break-word;
-        border: none; /* Quill Snow 테마에서 기본으로 주는 border를 제거 */
       }
 
       .ql-editor.ql-blank::before {

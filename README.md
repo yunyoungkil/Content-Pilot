@@ -34,53 +34,62 @@
 
 ### 설치 순서
 
-1.  **프로젝트 복제 (Clone)**
-    ```bash
-    git clone [깃허브 저장소 URL]
-    ```
+1. **프로젝트 복제 (Clone)**
 
-2.  **프로젝트 폴더로 이동**
-    ```bash
-    cd content-pilot
-    ```
+   ```bash
+   git clone [깃허브 저장소 URL]
+   ```
 
-3.  **의존성 패키지 설치 (Install Dependencies)**
-    ```bash
-    npm install
-    ```
+2. **프로젝트 폴더로 이동**
 
-4.  **프로젝트 빌드 (Build)**
-    ```bash
-    npx webpack
-    ```
+   ```bash
+   cd content-pilot
+   ```
 
-5.  **프로젝트 자동 빌드 (Build)**
-    package.json
-    ```bash
-    "scripts": {
-        "build": "webpack --mode=production",
-        "watch": "webpack --mode=development --watch"
-    }
-  ```
-    ```bash
-    npm run watch
-    ```
+3. **의존성 패키지 설치 (Install Dependencies)**
 
-    (이후 `chrome://extensions`에서 '압축 해제된 확장 프로그램을 로드'로 폴더를 선택하여 로드합니다.)
+   ```bash
+   npm install
+   ```
+
+4. **프로젝트 빌드 (Build)**
+
+   ```bash
+   npx webpack
+   ```
+
+5. **프로젝트 자동 빌드 (Build)**
+
+   package.json
+
+   ```json
+   "scripts": {
+       "build": "webpack --mode=production",
+       "watch": "webpack --mode=development --watch"
+   }
+   ```
+
+   ```bash
+   npm run watch
+   ```
+
+   (이후 `chrome://extensions`에서 '압축 해제된 확장 프로그램을 로드'로 폴더를 선택하여 로드합니다.)
 
 ## 🔄 확장 프로그램 업데이트 방법
 
 소스 코드(`*.js`, `manifest.json` 등)를 수정한 후에는, 변경사항을 개발 중인 확장 프로그램에 적용하기 위해 다음 단계를 따라야 합니다.
 
-1.  **프로젝트 빌드 (Re-build)**
-    터미널에서 `npx webpack` 명령어를 다시 실행하여 변경된 소스 코드를 `dist/bundle.js` 파일에 반영합니다.
+1. **프로젝트 빌드 (Re-build)**
 
-    ```bash
-    npx webpack
-    ```
+   터미널에서 `npx webpack` 명령어를 다시 실행하여 변경된 소스 코드를 `dist/bundle.js` 파일에 반영합니다.
 
-2.  **확장 프로그램 새로고침 (Reload)**
-    `chrome://extensions` 페이지로 이동하여 Content Pilot 확장 프로그램 카드에 있는 **새로고침(↻) 아이콘**을 클릭합니다.
+   ```bash
+   npx webpack
+   ```
+
+2. **확장 프로그램 새로고침 (Reload)**
+
+   `chrome://extensions` 페이지로 이동하여 Content Pilot 확장 프로그램 카드에 있는 **새로고침(↻) 아이콘**을 클릭합니다.
 
 ---
 
@@ -88,7 +97,7 @@
 
 ### 프로젝트 구조도
 
-````
+```bash
 
 Content-Pilot/
 ├── 📄 manifest.json
@@ -112,7 +121,7 @@ Content-Pilot/
 ├── 📁 images/
 │   └── 📜 icon-48.png
 └── 📁 lib/
-└── 📜 firebase-\*.js
+└── 📜 firebase-*.js
 
 ```
 
@@ -135,15 +144,16 @@ Content-Pilot/
 #### 디렉토리
 
 - **`/js`**: 애플리케이션의 핵심 JavaScript 소스 코드들이 모여있는 곳입니다. `content.js`가 이 폴더의 모듈들을 가져와 사용합니다.
-    - **`/js/core`**: 스크랩 하이라이터와 같이 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
-    - **`/js/ui`**: 메인 패널, 대시보드, 스크랩북 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
+
+  - **`/js/core`**: 스크랩 하이라이터와 같이 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
+  - **`/js/ui`**: 메인 패널, 대시보드, 스크랩북 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
 
 - **`/css`**: UI 스타일을 정의하는 CSS 파일(`style.css`)이 위치합니다.
 
 - **`/dist`**: Webpack이 소스 코드들을 하나로 합쳐서 만들어낸 **빌드 결과물**이 저장되는 폴더입니다.
-    - `bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
+
+  - `bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
 
 - **`/images`**: 확장 프로그램 아이콘 등 이미지 파일들을 보관합니다.
 
 - **`/lib`**: Firebase SDK처럼 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
-```

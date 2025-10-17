@@ -1,27 +1,39 @@
 // editor.js - iframe 내에서 동작하는 Quill 에디터 제어 스크립트
-
 let quillEditor = null;
 
-// Quill 에디터 초기화 (툴바 없음)
+// W-13: Undo/Redo 아이콘을 단순한 화살표 모양으로 명시적으로 등록합니다.
+const Icons = Quill.import("ui/icons");
+Icons["undo"] =
+  '<svg viewbox="0 0 18 18"><polyline class="ql-stroke" points="11 4 7 9 11 14"></polyline></svg>';
+Icons["redo"] =
+  '<svg viewbox="0 0 18 18"><polyline class="ql-stroke" points="7 4 11 9 7 14"></polyline></svg>';
+
 function initializeEditor() {
   quillEditor = new Quill("#editor-container", {
     theme: "snow",
     modules: {
-      toolbar: [
-        [{ header: [1, 2, false] }],
-        ["bold", "italic", "underline", "strike"],
-        ["blockquote", "code-block"],
-        [{ list: "ordered" }, { list: "bullet" }],
-        [{ script: "sub" }, { script: "super" }],
-        [{ indent: "-1" }, { indent: "+1" }],
-        [{ direction: "rtl" }],
-        [{ size: ["small", false, "large", "huge"] }],
-        [{ color: [] }, { background: [] }],
-        [{ font: [] }],
-        [{ align: [] }],
-        ["link", "image", "video"],
-        ["clean"],
-      ],
+      toolbar: {
+        container: [
+          [{ header: [1, 2, 3, 4, false] }],
+          ["bold", "italic", "underline", "strike"],
+          ["blockquote", "code-block"],
+          [{ list: "ordered" }, { list: "bullet" }],
+          [{ script: "sub" }, { script: "super" }],
+          [{ indent: "-1" }, { indent: "+1" }],
+          [{ direction: "rtl" }],
+          [{ size: ["small", false, "large", "huge"] }],
+          [{ color: [] }, { background: [] }],
+          [{ font: [] }],
+          [{ align: [] }],
+          ["link", "image", "video"],
+          ["clean"],
+          ["undo", "redo"],
+        ],
+        handlers: {
+          undo: () => quillEditor.history.undo(),
+          redo: () => quillEditor.history.redo(),
+        },
+      },
     },
     placeholder:
       "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
@@ -30,16 +42,14 @@ function initializeEditor() {
   // 텍스트 변경 이벤트 리스너
   quillEditor.on("text-change", function (delta, oldDelta, source) {
     if (source === "user") {
-      // 부모 창에 콘텐츠 변경 알림
       const content = quillEditor.getContents();
       const html = quillEditor.root.innerHTML;
-
       window.parent.postMessage(
         {
           action: "content-changed",
           data: {
-            content: content,
-            html: html,
+            content,
+            html,
             text: quillEditor.getText(),
           },
         },
@@ -48,36 +58,28 @@ function initializeEditor() {
     }
   });
 
-  // 선택 영역 변경 이벤트
   quillEditor.on("selection-change", function (range, oldRange, source) {
     window.parent.postMessage(
       {
         action: "selection-changed",
         data: {
-          range: range,
+          range,
           hasSelection: range && range.length > 0,
         },
       },
       "*"
     );
   });
-
-  console.log("Quill Editor initialized in iframe");
 }
 
-// 부모 창으로부터 메시지 수신 처리
 window.addEventListener("message", function (event) {
   if (!quillEditor) return;
-
   const { action, data } = event.data;
-
   switch (action) {
     case "set-content":
-      // 초기 콘텐츠 설정 (HTML/Delta/Text 지원)
       if (data.delta) {
         quillEditor.setContents(data.delta);
       } else if (data.html) {
-        // Quill 권장 방식으로 HTML 붙여넣기
         quillEditor.setContents([]);
         quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
         quillEditor.setSelection(quillEditor.getLength(), 0);
@@ -85,9 +87,7 @@ window.addEventListener("message", function (event) {
         quillEditor.setText(data.text);
       }
       break;
-
     case "apply-format":
-      // 서식 적용 (굵게, 기울임꼴 등)
       const range = quillEditor.getSelection();
       if (range && range.length > 0) {
         quillEditor.formatText(
@@ -98,20 +98,82 @@ window.addEventListener("message", function (event) {
         );
       }
       break;
-
     case "insert-text":
-      // 텍스트 삽입 (키워드 등)
       const currentRange = quillEditor.getSelection() || {
         index: quillEditor.getLength(),
         length: 0,
       };
       quillEditor.insertText(currentRange.index, data.text);
-      // 삽입 후 커서를 텍스트 끝으로 이동
       quillEditor.setSelection(currentRange.index + data.text.length);
       break;
-
+    case "insert-image":
+      const imageRange = quillEditor.getSelection() || {
+        index: quillEditor.getLength(),
+        length: 0,
+      };
+      if (data.url) {
+        quillEditor.insertEmbed(imageRange.index, "image", data.url);
+        quillEditor.setSelection(imageRange.index + 1);
+      }
+      break;
+    case "focus":
+      quillEditor.focus();
+      break;
+    case "blur":
+      quillEditor.blur();
+      break;
+    case "apply-heading":
+      const headingRange = quillEditor.getSelection();
+      if (headingRange && headingRange.length > 0) {
+        quillEditor.formatText(
+          headingRange.index,
+          headingRange.length,
+          "header",
+          data.level
+        );
+      }
+      break;
+    case "apply-list":
+      const listRange = quillEditor.getSelection();
+      if (listRange) {
+        quillEditor.formatLine(
+          listRange.index,
+          listRange.length,
+          "list",
+          data.type
+        );
+      }
+      break;
+    case "clear-formatting":
+      const clearRange = quillEditor.getSelection();
+      if (clearRange && clearRange.length > 0) {
+        quillEditor.removeFormat(clearRange.index, clearRange.length);
+      }
+      break;
+    case "scroll-to-text":
+      if (data.text) {
+        const editorContent = quillEditor.getText();
+        const textIndex = editorContent.indexOf(data.text);
+        if (textIndex !== -1) {
+          quillEditor.setSelection(textIndex, data.text.length);
+          setTimeout(() => {
+            const editorRoot = quillEditor.root;
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              const rect = range.getBoundingClientRect();
+              const editorRect = editorRoot.getBoundingClientRect();
+              const targetScrollTop =
+                editorRoot.scrollTop + (rect.top - editorRect.top) - 20;
+              editorRoot.scrollTop = targetScrollTop;
+            }
+          }, 50);
+        } else {
+          console.log("Text not found in editor:", data.text);
+        }
+      }
+      break;
     case "get-content":
-      // 콘텐츠 요청에 대한 응답
       window.parent.postMessage(
         {
           action: "content-response",
@@ -124,109 +186,64 @@ window.addEventListener("message", function (event) {
         "*"
       );
       break;
-
-    case "focus":
-      // 포커스 설정
-      quillEditor.focus();
-      break;
-
-    case "blur":
-      // 포커스 해제
-      quillEditor.blur();
-      break;
-
-    case "apply-heading":
-      // 제목 서식 적용
-      const headingRange = quillEditor.getSelection();
-      if (headingRange && headingRange.length > 0) {
-        quillEditor.formatText(
-          headingRange.index,
-          headingRange.length,
-          "header",
-          data.level
-        );
-      }
-      break;
-
-    case "apply-list":
-      // 목록 서식 적용
-      const listRange = quillEditor.getSelection();
-      if (listRange) {
-        quillEditor.formatLine(
-          listRange.index,
-          listRange.length,
-          "list",
-          data.type
-        );
-      }
-      break;
-
-    case "clear-formatting":
-      // 서식 제거
-      const clearRange = quillEditor.getSelection();
-      if (clearRange && clearRange.length > 0) {
-        quillEditor.removeFormat(clearRange.index, clearRange.length);
-      }
-      break;
-
-    case "scroll-to-text":
-      // 특정 텍스트 위치로 스크롤 이동 (텍스트가 에디터 상단에 오도록)
-      if (data.text) {
-        const editorContent = quillEditor.getText();
-        const textIndex = editorContent.indexOf(data.text);
-
-        if (textIndex !== -1) {
-          // 텍스트를 찾았으면 해당 위치로 커서 이동
-          quillEditor.setSelection(textIndex, data.text.length);
-
-          // 약간의 지연 후 스크롤 (DOM 업데이트 대기)
-          setTimeout(() => {
-            const editorRoot = quillEditor.root;
-            const selection = window.getSelection();
-
-            if (selection.rangeCount > 0) {
-              const range = selection.getRangeAt(0);
-              const rect = range.getBoundingClientRect();
-              const editorRect = editorRoot.getBoundingClientRect();
-
-              // 해당 텍스트가 에디터 상단(+20px 여백)에 위치하도록 스크롤
-              const targetScrollTop =
-                editorRoot.scrollTop + (rect.top - editorRect.top) - 20;
-              editorRoot.scrollTop = targetScrollTop;
-            }
-          }, 50);
-        } else {
-          console.log("Text not found in editor:", data.text);
-        }
-      }
-      break;
-
     default:
       console.log("Unknown action:", action);
   }
 });
 
-// DOM이 로드되면 에디터 초기화
 document.addEventListener("DOMContentLoaded", function () {
   initializeEditor();
-
-  // 부모 창에 에디터 준비 완료 알림
-  window.parent.postMessage(
-    {
-      action: "editor-ready",
-    },
-    "*"
-  );
+  const TOOLBAR_TITLES_KO = {
+    bold: "굵게 (Ctrl+B)",
+    italic: "기울임꼴 (Ctrl+I)",
+    underline: "밑줄 (Ctrl+U)",
+    strike: "취소선",
+    blockquote: "인용구",
+    "code-block": "코드 블록",
+    list: "목록",
+    ordered: "순서 목록",
+    bullet: "글머리 기호",
+    sub: "아래 첨자",
+    super: "위 첨자",
+    indent: "들여쓰기/내어쓰기",
+    direction: "텍스트 방향",
+    size: "글꼴 크기",
+    color: "글꼴 색상",
+    background: "배경 색상",
+    font: "글꼴",
+    align: "정렬",
+    link: "링크 삽입 (Ctrl+K)",
+    image: "이미지 삽입",
+    video: "비디오 삽입",
+    clean: "서식 지우기",
+    undo: "실행 취소 (Ctrl+Z)",
+    redo: "다시 실행 (Ctrl+Y)",
+  };
+  const toolbarContainer = quillEditor.container.querySelector(".ql-toolbar");
+  if (toolbarContainer) {
+    toolbarContainer
+      .querySelectorAll("button, span.ql-picker")
+      .forEach((element) => {
+        const className = Array.from(element.classList).find((cls) =>
+          cls.startsWith("ql-")
+        );
+        if (className) {
+          const formatName = className.substring(3);
+          const title = TOOLBAR_TITLES_KO[formatName];
+          if (title) {
+            element.setAttribute("title", title);
+            element.setAttribute("aria-label", title);
+          }
+        }
+      });
+  }
+  window.parent.postMessage({ action: "editor-ready" }, "*");
 });
 
-// 전역 에러 핸들링
 window.addEventListener("error", function (event) {
   console.error("Editor iframe error:", event.error);
   window.parent.postMessage(
-    {
-      action: "editor-error",
-      error: event.error.message,
-    },
+    { action: "editor-error", error: event.error.message },
     "*"
   );
 });
