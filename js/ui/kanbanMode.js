@@ -158,6 +158,11 @@ function createKanbanCard(id, data, status) {
     }
 
   let actionButtons = ``;
+  const hasDraft = !!data.draftContent;
+  // K-3: 초안 삭제 버튼 추가
+  if (hasDraft) {
+    actionButtons += `<button class="kanban-action-btn delete-draft-btn" data-card-id="${id}" title="작성된 초안을 삭제하고 아이디어를 초기화합니다.">❌ 초안 삭제</button>`;
+  }
   if (status === 'done' && !data.publishedUrl) {
     actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
   } else if  (data.publishedUrl) {
@@ -165,7 +170,6 @@ function createKanbanCard(id, data, status) {
     const earnings = performance ? `$${(performance.estimatedEarnings || 0).toFixed(2)}` : '대기중';
     actionButtons += `<a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>`;
   }
-
   card.innerHTML = `
     <div class="kanban-card-body">
       <div class="card-top-tags">${topTagsHtml}</div>
@@ -180,6 +184,30 @@ function createKanbanCard(id, data, status) {
 }
 
 function addKanbanEventListeners(container) {
+  // K-3: 초안 삭제 버튼 클릭 이벤트 리스너
+  container.addEventListener('click', (e) => {
+    if (e.target.classList.contains('delete-draft-btn')) {
+      const cardId = e.target.dataset.cardId;
+      if (confirm("정말로 작성된 초안을 삭제하고 이 아이디어의 기획 상태를 초기화하시겠습니까?")) {
+        chrome.runtime.sendMessage({
+          action: 'delete_draft_content',
+          data: { cardId: cardId }
+        }, (response) => {
+          if (response?.success) {
+            import('../utils.js').then(({ showToast }) => {
+              showToast("✅ 초안 내용이 삭제되었습니다. 카드를 '아이디어'로 되돌릴 수 있습니다.");
+            });
+            // UI 새로고침 (전체 데이터를 다시 로드하여 상태 업데이트)
+            updateKanbanUI(allKanbanData);
+          } else {
+            import('../utils.js').then(({ showToast }) => {
+              showToast("❌ 초안 삭제 중 오류가 발생했습니다.");
+            });
+          }
+        });
+      }
+    }
+  });
     const sortControls = container.querySelector('.kanban-sort-controls');
     if (sortControls) {
         sortControls.addEventListener('click', (e) => {
@@ -261,14 +289,13 @@ function addKanbanEventListeners(container) {
     const targetColumn = e.target.closest('.cp-kanban-col');
     const newStatus = targetColumn?.dataset.status;
     const { cardId, originalStatus } = currentlyDragging;
-    // K-2: 이동 제한 로직
     if (newStatus && cardId && originalStatus && newStatus !== originalStatus) {
-      // 카드 데이터 가져오기
+      // K-5: 초안이 존재할 때만 이동 제한
       const cardData = allKanbanData[originalStatus]?.[cardId];
-      if (cardData?.draftContent && newStatus === 'ideas') {
-        // showToast 안내
+      const hasDraft = !!cardData?.draftContent;
+      if (hasDraft && newStatus === 'ideas') {
         import('../utils.js').then(({ showToast }) => {
-          showToast("⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다.");
+          showToast("⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다. (초안 삭제 후 복귀 가능)");
         });
         return;
       }

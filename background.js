@@ -418,6 +418,40 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // K-4: 초안 삭제 핸들러
+    if (msg.action === "delete_draft_content") {
+        const cardId = msg.data.cardId;
+        (async () => {
+            if (!cardId) {
+                sendResponse({ success: false, message: "Card ID is missing." });
+                return;
+            }
+            try {
+                // 아이디어가 어느 status에 있는지 찾기
+                const kanbanRef = firebase.database().ref('kanban');
+                const snapshot = await kanbanRef.once('value');
+                const allCards = snapshot.val() || {};
+                let foundStatus = null;
+                for (const status in allCards) {
+                    if (allCards[status][cardId]) {
+                        foundStatus = status;
+                        break;
+                    }
+                }
+                if (!foundStatus) {
+                    sendResponse({ success: false, message: "Card not found." });
+                    return;
+                }
+                // draftContent를 null로 업데이트
+                await firebase.database().ref(`kanban/${foundStatus}/${cardId}/draftContent`).set(null);
+                sendResponse({ success: true });
+            } catch (error) {
+                console.error("Error deleting draft content:", error);
+                sendResponse({ success: false, message: error.message });
+            }
+        })();
+        return true;
+    }
     // 스크랩 및 자료 관리
     if (msg.action === "scrap_element" && msg.data) {
         (async () => {

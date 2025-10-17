@@ -198,26 +198,44 @@
 
 .kanban-card-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
+  align-items: center;
 }
 
 .kanban-action-btn {
   background: transparent;
   border: none;
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   color: #5f6368;
-  transition: background-color 0.2s;
+  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+  outline: none;
+  position: relative;
+  margin: 0 2px;
+  touch-action: manipulation;
 }
 
 .kanban-action-btn:hover {
-  background-color: #e9ecef;
+  background: #e8f0fe;
+  color: #1967d2;
+  box-shadow: 0 2px 8px rgba(25,103,210,0.08);
+}
+
+.kanban-action-btn:focus-visible {
+  background: #e8f0fe;
+  color: #1967d2;
+  box-shadow: 0 2px 8px rgba(25,103,210,0.13);
+}
+
+.kanban-action-btn:active {
+  background: #d2e3fc;
+  color: #174ea6;
 }
 
 /* 성과 추적, 수익 링크 스타일 */
