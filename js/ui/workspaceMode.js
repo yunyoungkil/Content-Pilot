@@ -253,8 +253,27 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           if (saveResponse && saveResponse.success) {
             ideaData.draftContent = currentEditorContent;
             console.log("Draft saved successfully.");
+
+            // ✨ K-6: 상태 자동 이동 후 클라이언트 메모리 업데이트 및 알림
+            if (saveResponse.moved) {
+              ideaData.status = saveResponse.newStatus; // 'ideas' -> 'in-progress'
+              console.log(
+                `Card moved to ${ideaData.status}, client status updated.`
+              );
+              window.parent.postMessage(
+                {
+                  action: "cp_show_toast",
+                  message: `✅ 초안 저장 및 '${ideaData.status}'로 자동 이동되었습니다.`,
+                },
+                "*"
+              );
+            }
           } else {
             console.error("Failed to save draft:", saveResponse.error);
+            window.parent.postMessage(
+              { action: "cp_show_toast", message: "❌ 초안 저장 실패" },
+              "*"
+            );
           }
         }
       );
@@ -478,22 +497,16 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
 
   workspaceEl.addEventListener("dragover", (e) => {
     const dropTarget = e.target;
-    if (
-      dropTarget === editorTextarea ||
-      linkedScrapsList.contains(dropTarget)
-    ) {
+    if (linkedScrapsList.contains(dropTarget)) {
       e.preventDefault();
-      const targetElement =
-        dropTarget === editorTextarea ? editorTextarea : linkedScrapsList;
-      targetElement.classList.add("drag-over");
-      e.dataTransfer.dropEffect =
-        targetElement === editorTextarea ? "copy" : "link";
+      linkedScrapsList.classList.add("drag-over");
+      e.dataTransfer.dropEffect = "link";
     }
   });
 
   workspaceEl.addEventListener("dragleave", (e) => {
     const target = e.target;
-    if (target === editorTextarea || linkedScrapsList.contains(target)) {
+    if (linkedScrapsList.contains(target)) {
       target.classList.remove("drag-over");
     }
   });
@@ -510,18 +523,14 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
 
     if (!scrapData) return;
 
-    if (e.target === editorTextarea) {
-      // 1. 드롭 대상이 에디터일 경우, drag-over 스타일을 제거합니다.
-      editorTextarea.classList.remove("drag-over");
-
-      // 2. 스크랩의 텍스트 내용을 가져옵니다.
+    // 에디터에 드롭: Quill iframe에 메시지로 텍스트 삽입
+    if (e.target.closest("#main-editor-panel")) {
+      // Quill 에디터에 텍스트 삽입 (스크랩 인용)
       const textToInsert = scrapData.text || "";
-
-      // 3. 에디터의 기존 내용에 새로운 텍스트를 추가합니다. (줄 바꿈 추가)
-      editorTextarea.value += `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`;
-
-      // 4. 스크롤을 맨 아래로 이동하여 삽입된 내용을 확인시킵니다.
-      editorTextarea.scrollTop = editorTextarea.scrollHeight;
+      sendCommand("insert-text", {
+        text: `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`,
+      });
+      sendCommand("focus");
     } else if (linkedScrapsList.contains(e.target)) {
       linkedScrapsList.classList.remove("drag-over");
 

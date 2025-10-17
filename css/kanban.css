@@ -1,5 +1,7 @@
-/* 초안 상태 강조 (K-1) */
-.draft-status-count {
+/* draft-status-count, delete-draft-btn, linked-scraps-count을 동일 스타일로 통합 */
+.draft-status-count,
+.delete-draft-btn,
+.linked-scraps-count {
   background: #e8f0fe;
   color: #1967d2;
   font-weight: 700;
@@ -7,11 +9,21 @@
   border-radius: 6px;
   padding: 2px 8px;
   margin-left: 6px;
-  box-shadow: 0 1px 4px rgba(25,103,210,0.08);
+  box-shadow: 0 1px 4px rgba(25, 103, 210, 0.08);
   letter-spacing: 0.02em;
   vertical-align: middle;
   display: inline-block;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
 }
+.draft-status-count:hover,
+.delete-draft-btn:hover,
+.linked-scraps-count:hover {
+  background: #d2e3fc;
+  color: #174ea6;
+}
+
 /* --- 칸반 보드 UI 스타일 --- */
 .kanban-board-container {
   display: flex;
@@ -40,7 +52,7 @@
 
 .kanban-sort-btn {
   background: #fff;
-  color: #3C4043;
+  color: #3c4043;
   border: 1px solid #dadce0;
   border-radius: 16px;
   padding: 4px 12px;
@@ -65,24 +77,26 @@
 #cp-kanban-board-root {
   display: flex;
   gap: 18px;
-  min-width: 700px;
-  height: 100%; /* 부모 요소(main-area)의 높이를 꽉 채움 */
+  width: 100%;
+  min-width: 0;
+  height: 100%;
   padding: 18px;
   box-sizing: border-box;
 }
 
 /* 칸반 컬럼 스타일 */
 .cp-kanban-col {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
   background: #f1f3f5;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   padding: 0;
   display: flex;
   flex-direction: column;
-  min-width: 220px;
-  max-width: 300px;
-  height: 100%;
+  gap: 12px;
 }
 
 .cp-kanban-col-title {
@@ -109,7 +123,7 @@
   background: #fff;
   border-radius: 8px;
   border: 1px solid #e9ecef;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   transition: box-shadow 0.2s, border-color 0.2s;
@@ -117,7 +131,7 @@
 }
 
 .cp-kanban-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .kanban-card-body {
@@ -127,16 +141,19 @@
 .kanban-card-title {
   font-size: 15px;
   font-weight: 500;
-  color: #3C4043;
+  color: #3c4043;
   line-height: 1.5;
+  margin-bottom: 8px;
 }
 
 /* 카드 상단 태그 */
 .card-top-tags {
   display: flex;
+  flex-direction: column;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-top: 8px;
+  margin-bottom: 0px;
   min-height: 20px;
 }
 
@@ -147,6 +164,11 @@
   border-radius: 4px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.kanban-card-tag.long-tail-tag {
+  background-color: #fff7e6;
+  color: #b06000;
 }
 
 /* AI 추천 태그 */
@@ -166,12 +188,6 @@
   background-color: #f1f3f5;
   color: #5f6368;
 }
-
-/* AI 추천 카드 클러스터 스타일 */
-.cp-kanban-card.cluster {
-  border-left: 4px solid #34A853;
-}
-
 
 /* 카드 하단 푸터 */
 .kanban-card-footer {
@@ -194,7 +210,6 @@
   font-weight: 500;
   color: #5f6368;
 }
-
 
 .kanban-card-actions {
   display: flex;
@@ -224,13 +239,13 @@
 .kanban-action-btn:hover {
   background: #e8f0fe;
   color: #1967d2;
-  box-shadow: 0 2px 8px rgba(25,103,210,0.08);
+  box-shadow: 0 2px 8px rgba(25, 103, 210, 0.08);
 }
 
 .kanban-action-btn:focus-visible {
   background: #e8f0fe;
   color: #1967d2;
-  box-shadow: 0 2px 8px rgba(25,103,210,0.13);
+  box-shadow: 0 2px 8px rgba(25, 103, 210, 0.13);
 }
 
 .kanban-action-btn:active {
@@ -239,7 +254,8 @@
 }
 
 /* 성과 추적, 수익 링크 스타일 */
-.track-performance-btn, .performance-link {
+.track-performance-btn,
+.performance-link {
   font-size: 12px;
   font-weight: 500;
   color: #1967d2;
@@ -249,11 +265,13 @@
   transition: background-color 0.2s;
 }
 
-.track-performance-btn:hover, .performance-link:hover {
+.track-performance-btn:hover,
+.performance-link:hover {
   background-color: #e8f0fe;
 }
 
+/* outline-tag 색상 변경 */
 .outline-tag {
-  background-color: #fef7e0;
-  color: #b06000;
+  background-color: #e0f7fa;
+  color: #00796b;
 }
