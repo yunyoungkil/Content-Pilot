@@ -1374,15 +1374,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
   } else if (msg.action === "unlink_scrap_from_idea") {
-    const { ideaId, scrapId } = msg.data;
-    if (!ideaId || !scrapId) {
-      sendResponse({ success: false, error: "ID가 유효하지 않습니다." });
+    const { ideaId, scrapId, status } = msg.data;
+    if (!ideaId || !scrapId || !status) {
+      sendResponse({ success: false, error: "ID 또는 상태가 유효하지 않습니다." });
       return true;
     }
 
     const scrapLinkRef = firebase
       .database()
-      .ref(`kanban/ideas/${ideaId}/linkedScraps/${scrapId}`);
+      .ref(`kanban/${status}/${ideaId}/linkedScraps/${scrapId}`);
     scrapLinkRef
       .remove()
       .then(() => {

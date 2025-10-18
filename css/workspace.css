@@ -1,3 +1,76 @@
+/* --- 워크스페이스 UI 스타일 --- */
+
+/* 3. 초안 작성 및 연결된 자료 패널 (중앙) */
+
+
+.linked-scraps-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  background-color: #f1f3f5;
+  border: 1.5px solid #e9ecef; /* 에디터와 동일한 실선, 색상 */
+  border-radius: 0 0 6px 6px; /* 아래쪽만 둥글게, 에디터와 연결된 느낌 */
+  padding: 12px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+/* 태그형 연결된 스크랩 스타일 정의 */
+.linked-scrap-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #c6dafc;
+  border-radius: 12px;
+  padding: 4px 10px 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.linked-scrap-tag:hover {
+  background: #d2e3fc;
+  border-color: #a3c3f9;
+}
+
+.linked-scrap-tag .tag-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 연결 해제 버튼 (X) 스타일 조정 */
+.linked-scraps-list .unlink-scrap-btn {
+  position: static;
+  transform: none;
+  background: none;
+  color: #1a73e8;
+  border: none;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  /* 중복 선언 제거: 아래쪽 선언부만 남김 */
+  font-weight: bold;
+  font-size: 14px;
+  opacity: 0.8;
+  transition: color 0.2s;
+  padding: 0;
+  /* 중복 선언 제거: 아래쪽 선언부만 남김 */
+}
+
+.linked-scraps-list .unlink-scrap-btn:hover {
+  color: #d93025;
+  background: none;
+}
 /* --- 스크랩 카드 및 관련 요소 스타일 (style.css에서 이동) --- */
 .scrap-card {
   display: flex;
@@ -121,7 +194,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-height: 0; /* ✨ W-11: 높이 전달 체인의 필수 요소 */
+  min-height: 0;
   overflow: hidden;
 }
 #resource-library-panel {
@@ -189,34 +262,26 @@
 
 /* Quill 에디터 iframe 스타일 */
 #quill-editor-iframe {
-  flex: 1 1 auto; /* 남은 공간을 유연하게 차지 */
-  height: 0; /* flex 컨테이너에서 높이 계산 보정 */
-  min-height: 0; /* ✨ W-11: 아이프레임 자체가 넘치지 않도록 제한 */
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 0;
   width: 100%;
   display: block;
-  border: none;
-  border-radius: 0 0 6px 6px;
+  border: 1.5px solid #e9ecef; /* 연결된 자료와 동일한 실선, 색상 */
+  border-bottom: none; /* 아래쪽은 연결된 자료 패널이 이어짐 */
+  border-radius: 6px 6px 0 0; /* 위쪽만 둥글게 */
   background: white;
-  overflow: hidden; /* iframe 자체 스크롤 제거 */
+  overflow: hidden;
 }
 
 #main-editor-panel #linked-scraps-section {
-  flex-grow: 2;
+  flex-shrink: 0;
+  min-height: 48px;
+  max-height: 60px;
   display: flex;
-  flex-direction: column;
-  min-height: 150px;
-}
-.linked-scraps-list {
-  flex-grow: 1;
-  overflow-y: auto;
-  background-color: #f1f3f5;
-  border: 1px dashed #ccc;
-  border-radius: 6px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: border-color 0.2s, background-color 0.2s;
+  flex-direction: row;
+  align-items: flex-end;
+  margin-top: 0;
 }
 .linked-scraps-list.drag-over {
   border-color: #4285f4;
@@ -233,7 +298,7 @@
   border-bottom: 1px solid #eee;
 }
 #resource-library-panel .all-scraps-list {
-  height: calc(100% - 50px);
+  height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

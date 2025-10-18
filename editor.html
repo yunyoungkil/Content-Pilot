@@ -45,14 +45,19 @@
         display: block;
       }
 
-      /* W-11: 툴바 높이 고정 */
+      /* W-11: 툴바 높이 자동 조정 */
       .ql-toolbar {
-        height: 90px; /* 툴바의 실제 높이(2줄)에 맞춰 조정 (테스트 후 정확한 픽셀 값 사용 권장) */
+        min-height: 40px;
+        height: auto;
+        max-height: none;
         border: 1px solid #ccc;
         box-sizing: border-box;
         padding: 8px !important;
         margin: 0;
         border-bottom: none;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
       }
 
       .ql-editor {

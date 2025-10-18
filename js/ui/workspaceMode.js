@@ -89,22 +89,23 @@ export function renderWorkspace(container, ideaData) {
         </div>
       </div>
 
-      <div id="main-editor-panel" class="workspace-column">
+      <div id="main-editor-panel" class="workspace-column" style="display: flex; flex-direction: column; min-height: 0;">
         ${draftActionsHtml}
-        <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
-          "editor.html"
-        )}" frameborder="0"></iframe>
+        <div style="flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;">
+          <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
+            "editor.html"
+          )}" frameborder="0" style="flex: 1 1 0; min-height: 0; width: 100%; display: block; border: none; border-radius: 0 0 6px 6px; background: white; overflow: hidden;"></iframe>
+          <div id="linked-scraps-section" style="flex-shrink: 0;">
+            <div class="scrap-list linked-scraps-list" data-idea-id="${
+              ideaData.id
+            }">
+              <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
-        <div id="linked-scraps-section">
-          <h2>🔗 연결된 자료</h2>
-        <div class="scrap-list linked-scraps-list" data-idea-id="${
-          ideaData.id
-        }">
-            <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
-          </div>
-        </div>
         <h2>📖 모든 스크랩</h2>
         <div class="scrap-list all-scraps-list">
             <p class="loading-scraps">스크랩 목록을 불러오는 중...</p>
@@ -153,40 +154,39 @@ export function renderWorkspace(container, ideaData) {
 function createScrapCard(scrap, isLinked) {
   const textContent = scrap.text || "(내용 없음)";
   const cleanedTitle = textContent.replace(/\s+/g, " ").trim();
+  const displayTitle = cleanedTitle.substring(0, 10);
+  const unlinkButtonHtml = `<button class=\"unlink-scrap-btn\" title=\"연결 해제\">×</button>`;
 
+  // 연결된 자료일 경우 태그형 UI 반환
+  if (isLinked) {
+    return `
+      <div class=\"scrap-card-item linked-scrap-item\" data-scrap-id=\"${scrap.id}\" data-text=\"${textContent.replace(/\"/g, '&quot;')}\" draggable=\"true\">
+        <div class=\"linked-scrap-tag\">
+          <span class=\"tag-text\">${displayTitle}...</span>
+          ${unlinkButtonHtml}
+        </div>
+      </div>
+    `;
+  }
+  // ...기존 카드형 UI 반환 로직 유지
   const tagsHtml =
     scrap.tags && Array.isArray(scrap.tags) && scrap.tags.length > 0
-      ? `<div class="card-tags">${scrap.tags
-          .map((tag) => `<span class="tag">#${tag}</span>`)
+      ? `<div class=\"card-tags\">${scrap.tags
+          .map((tag) => `<span class=\"tag\">#${tag}</span>`)
           .join("")}</div>`
       : "";
-
-  const actionButton = isLinked
-    ? `<button class="scrap-card-delete-btn unlink-scrap-btn" title="연결 해제">
-         <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
-       </button>`
-    : "";
-
+  const actionButton =
+    `<button class=\"scrap-card-delete-btn unlink-scrap-btn\" title=\"연결 해제\">
+         <svg xmlns=\"http://www.w3.org/2000/svg\" height=\"18\" viewBox=\"0 -960 960 960\" width=\"18\"><path d=\"m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z\"/></svg>
+       </button>`;
   return `
-    <div class="scrap-card-item" draggable="true" data-scrap-id="${
-      scrap.id
-    }" data-text="${textContent.replace(/"/g, "&quot;")}">
-        <div class="scrap-card">
+    <div class=\"scrap-card-item\" draggable=\"true\" data-scrap-id=\"${scrap.id}\" data-text=\"${textContent.replace(/\"/g, '&quot;')}\">
+        <div class=\"scrap-card\">
             ${actionButton}
-            ${
-              scrap.image
-                ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image" referrerpolicy="no-referrer"></div>`
-                : ""
-            }
-            <div class="scrap-card-info">
-                <div class="scrap-card-title">${cleanedTitle.substring(
-                  0,
-                  20
-                )}...</div>
-                <div class="scrap-card-snippet">${shortenLink(
-                  scrap.url,
-                  25
-                )}</div>
+            ${scrap.image ? `<div class=\"scrap-card-img-wrap\"><img src=\"${scrap.image}\" alt=\"scrap image\" referrerpolicy=\"no-referrer\"></div>` : ""}
+            <div class=\"scrap-card-info\">
+                <div class=\"scrap-card-title\">${cleanedTitle.substring(0, 20)}...</div>
+                <div class=\"scrap-card-snippet\">${shortenLink(scrap.url, 25)}</div>
                 ${tagsHtml}
             </div>
         </div>
@@ -546,15 +546,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
 
     if (!scrapData) return;
 
-    // 에디터에 드롭: Quill iframe에 메시지로 텍스트 삽입
-    if (e.target.closest("#main-editor-panel")) {
-      // Quill 에디터에 텍스트 삽입 (스크랩 인용)
-      const textToInsert = scrapData.text || "";
-      sendCommand("insert-text", {
-        text: `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`,
-      });
-      sendCommand("focus");
-    } else if (linkedScrapsList.contains(e.target)) {
+    // 1. 연결된 자료 영역에 드롭 우선 처리
+    if (linkedScrapsList.contains(e.target)) {
       linkedScrapsList.classList.remove("drag-over");
 
       if (linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`)) {
@@ -585,6 +578,17 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           );
         }
       });
+      return;
+    }
+
+    // 2. 에디터 영역에 드롭
+    if (e.target.closest("#main-editor-panel")) {
+      // Quill 에디터에 텍스트 삽입 (스크랩 인용)
+      const textToInsert = scrapData.text || "";
+      sendCommand("insert-text", {
+        text: `\n\n--- (스크랩 인용) ---\n${textToInsert}\n------------------\n\n`,
+      });
+      sendCommand("focus");
     }
   });
 

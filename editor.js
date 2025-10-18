@@ -70,6 +70,48 @@ function initializeEditor() {
       "*"
     );
   });
+  // 툴바 높이에 따라 에디터 높이 자동 조정
+  function adjustEditorHeight() {
+    const toolbar = document.querySelector('.ql-toolbar');
+    const editor = document.querySelector('.ql-editor');
+    const root = document.body;
+    let linkedSectionHeight = 0;
+    let linkedSectionGap = 0;
+    let linkedListExtra = 0;
+    try {
+      const linkedSection = window.parent.document.querySelector('#linked-scraps-section');
+      const linkedList = window.parent.document.querySelector('.linked-scraps-list');
+      if (linkedSection) {
+        linkedSectionHeight = linkedSection.offsetHeight;
+        const style = window.parent.getComputedStyle(linkedSection);
+        linkedSectionGap =
+          (parseInt(style.marginBottom) || 0) +
+          (parseInt(style.paddingBottom) || 0);
+      }
+      if (linkedList) {
+        const listStyle = window.parent.getComputedStyle(linkedList);
+        linkedListExtra =
+          (parseInt(listStyle.paddingTop) || 0) +
+          (parseInt(listStyle.paddingBottom) || 0) +
+          (parseInt(listStyle.marginTop) || 0) +
+          (parseInt(listStyle.marginBottom) || 0) +
+          (parseInt(listStyle.borderTopWidth) || 0) +
+          (parseInt(listStyle.borderBottomWidth) || 0);
+      }
+    } catch (e) {}
+    if (toolbar && editor && root) {
+      const toolbarHeight = toolbar.offsetHeight;
+      const toolbarBorder = parseInt(getComputedStyle(toolbar).borderBottomWidth) || 0;
+      const editorBorder = parseInt(getComputedStyle(editor).borderTopWidth) || 0;
+      const totalOffset = toolbarHeight + toolbarBorder + editorBorder + linkedSectionHeight + linkedSectionGap + linkedListExtra;
+  editor.style.height = (root.offsetHeight - totalOffset - 3) + 'px'; // -3px 상수값 적용
+    }
+  }
+
+  window.addEventListener('resize', adjustEditorHeight);
+  setTimeout(adjustEditorHeight, 100); // 초기 렌더링 후 1회 호출
+
+  // 툴바 내용 변경(툴 추가/삭제) 후에도 필요시 호출
 }
 
 window.addEventListener("message", function (event) {
