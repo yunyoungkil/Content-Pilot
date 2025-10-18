@@ -155,15 +155,12 @@ function createScrapCard(scrap, isLinked) {
   const textContent = scrap.text || "(내용 없음)";
   const cleanedTitle = textContent.replace(/\s+/g, " ").trim();
   const displayTitle = cleanedTitle.substring(0, 10);
-  const unlinkButtonHtml = `<button class=\"unlink-scrap-btn\" title=\"연결 해제\">×</button>`;
-
-  // 연결된 자료일 경우 태그형 UI 반환
+  // 연결된 자료일 경우 태그형 UI 반환 (unlink 버튼 제거, 드래그만)
   if (isLinked) {
     return `
       <div class=\"scrap-card-item linked-scrap-item\" data-scrap-id=\"${scrap.id}\" data-text=\"${textContent.replace(/\"/g, '&quot;')}\" draggable=\"true\">
         <div class=\"linked-scrap-tag\">
           <span class=\"tag-text\">${displayTitle}...</span>
-          ${unlinkButtonHtml}
         </div>
       </div>
     `;
@@ -402,13 +399,29 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
   }
 
-  linkedScrapsList.addEventListener("click", (e) => {
-    const unlinkBtn = e.target.closest(".unlink-scrap-btn");
-    if (unlinkBtn) {
-      e.stopPropagation();
-      const cardItem = unlinkBtn.closest(".scrap-card-item");
-      const scrapId = cardItem.dataset.scrapId;
+  // 드래그앤드랍 삭제: 스크랩을 리스트 바깥에 드롭하면 연결 해제
+  linkedScrapsList.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.scrap-card-item');
+    if (card) {
+      e.dataTransfer.setData('text/plain', card.dataset.scrapId);
+      card.classList.add('dragging');
+    }
+  });
 
+  linkedScrapsList.addEventListener('dragend', (e) => {
+    const card = e.target.closest('.scrap-card-item');
+    if (card) card.classList.remove('dragging');
+  });
+
+  // document 전체에 drop/dragover 이벤트 등록 (환경 호환성 개선)
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const scrapId = e.dataTransfer.getData('text/plain');
+    // 리스트 바깥에서 drop된 경우만 삭제
+    if (scrapId && !e.target.closest('.linked-scraps-list')) {
+      const cardItem = linkedScrapsList.querySelector(`[data-scrap-id="${scrapId}"]`);
+      if (!cardItem) return;
       const message = {
         action: "unlink_scrap_from_idea",
         data: {
