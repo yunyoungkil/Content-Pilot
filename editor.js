@@ -72,15 +72,19 @@ function initializeEditor() {
   });
   // 툴바 높이에 따라 에디터 높이 자동 조정
   function adjustEditorHeight() {
-    const toolbar = document.querySelector('.ql-toolbar');
-    const editor = document.querySelector('.ql-editor');
+    const toolbar = document.querySelector(".ql-toolbar");
+    const editor = document.querySelector(".ql-editor");
     const root = document.body;
     let linkedSectionHeight = 0;
     let linkedSectionGap = 0;
     let linkedListExtra = 0;
     try {
-      const linkedSection = window.parent.document.querySelector('#linked-scraps-section');
-      const linkedList = window.parent.document.querySelector('.linked-scraps-list');
+      const linkedSection = window.parent.document.querySelector(
+        "#linked-scraps-section"
+      );
+      const linkedList = window.parent.document.querySelector(
+        ".linked-scraps-list"
+      );
       if (linkedSection) {
         linkedSectionHeight = linkedSection.offsetHeight;
         const style = window.parent.getComputedStyle(linkedSection);
@@ -101,17 +105,30 @@ function initializeEditor() {
     } catch (e) {}
     if (toolbar && editor && root) {
       const toolbarHeight = toolbar.offsetHeight;
-      const toolbarBorder = parseInt(getComputedStyle(toolbar).borderBottomWidth) || 0;
-      const editorBorder = parseInt(getComputedStyle(editor).borderTopWidth) || 0;
-      const totalOffset = toolbarHeight + toolbarBorder + editorBorder + linkedSectionHeight + linkedSectionGap + linkedListExtra;
-  editor.style.height = (root.offsetHeight - totalOffset - 3) + 'px'; // -3px 상수값 적용
+      const toolbarBorder =
+        parseInt(getComputedStyle(toolbar).borderBottomWidth) || 0;
+      const editorBorder =
+        parseInt(getComputedStyle(editor).borderTopWidth) || 0;
+      const totalOffset =
+        toolbarHeight +
+        toolbarBorder +
+        editorBorder +
+        linkedSectionHeight +
+        linkedSectionGap +
+        linkedListExtra;
+      editor.style.height = root.offsetHeight - totalOffset - 3 + "px"; // -3px 상수값 적용
     }
   }
 
-  window.addEventListener('resize', adjustEditorHeight);
+  window.addEventListener("resize", adjustEditorHeight);
   setTimeout(adjustEditorHeight, 100); // 초기 렌더링 후 1회 호출
 
-  // 툴바 내용 변경(툴 추가/삭제) 후에도 필요시 호출
+  // 연결된 자료 변경 등 외부에서 요청 시 높이 재조정
+  window.addEventListener("message", function (event) {
+    if (event.data && event.data.action === "adjust-editor-height") {
+      adjustEditorHeight();
+    }
+  });
 }
 
 window.addEventListener("message", function (event) {

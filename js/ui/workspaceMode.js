@@ -1,3 +1,49 @@
+// 이미지 갤러리 렌더링 및 에디터 삽입 이벤트
+function updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
+  const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
+  if (!imageGalleryGrid) return;
+  const imageUrls = renderImageGallery(linkedScrapsData);
+  if (imageUrls.length === 0) {
+    imageGalleryGrid.innerHTML =
+      "<p>이미지 자료가 없습니다.<br>스크랩 객체에 image/allImages 필드가 포함되어 있는지 확인하세요.</p>";
+    return;
+  }
+  imageGalleryGrid.innerHTML = imageUrls
+    .map(
+      (url) => `
+      <div class="gallery-thumb-wrap">
+        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
+      </div>
+    `
+    )
+    .join("");
+  imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
+    img.addEventListener("click", () => {
+      sendCommand("insert-image", { url: img.src });
+      sendCommand("focus");
+    });
+  });
+}
+
+// 이미지 데이터 집계 함수: 연결된 스크랩에서 image/allImages 필드 파싱, 중복 제거
+function renderImageGallery(linkedScrapsData) {
+  const imageSet = new Set();
+  linkedScrapsData.forEach((scrap) => {
+    if (scrap.image) imageSet.add(scrap.image);
+    if (Array.isArray(scrap.allImages)) {
+      scrap.allImages.forEach((url) => imageSet.add(url));
+    }
+  });
+  let result = Array.from(imageSet);
+  // 테스트: 이미지가 하나도 없으면 예시 이미지 추가
+  if (result.length === 0) {
+    result = [
+      "https://dummyimage.com/240x160/4285f4/fff.png&text=No+Image",
+      "https://dummyimage.com/240x160/1a73e8/fff.png&text=Sample+Image",
+    ];
+  }
+  return result;
+}
 // js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
 import { shortenLink } from "../utils.js";
@@ -106,9 +152,19 @@ export function renderWorkspace(container, ideaData) {
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
-        <h2>📖 모든 스크랩</h2>
-        <div class="scrap-list all-scraps-list">
+        <div class="resource-tabs">
+          <button class="resource-tab-btn" data-tab="all-scraps" style="font-weight:bold;">📖 모든 스크랩</button>
+          <button class="resource-tab-btn" data-tab="image-gallery">🖼️ 이미지 갤러리</button>
+        </div>
+  <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
+          <div class="scrap-list all-scraps-list">
             <p class="loading-scraps">스크랩 목록을 불러오는 중...</p>
+          </div>
+        </div>
+        <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
+          <div class="image-gallery-grid">
+            <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
+          </div>
         </div>
       </div>
     </div>
@@ -137,10 +193,28 @@ export function renderWorkspace(container, ideaData) {
           linkedScrapsHtml ||
           "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
         allScrapsContainer.innerHTML = allScrapsHtml;
+
+        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
+        const editorIframe = container.querySelector("#quill-editor-iframe");
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage(
+            { action: "adjust-editor-height" },
+            "*"
+          );
+        }
       } else {
         linkedScrapsContainer.innerHTML =
           "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
         allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
+
+        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
+        const editorIframe = container.querySelector("#quill-editor-iframe");
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage(
+            { action: "adjust-editor-height" },
+            "*"
+          );
+        }
       }
     }
   });
@@ -158,9 +232,14 @@ function createScrapCard(scrap, isLinked) {
   // 연결된 자료일 경우 태그형 UI 반환 (unlink 버튼 제거, 드래그만)
   if (isLinked) {
     return `
-      <div class=\"scrap-card-item linked-scrap-item\" data-scrap-id=\"${scrap.id}\" data-text=\"${textContent.replace(/\"/g, '&quot;')}\" draggable=\"true\">
-        <div class=\"linked-scrap-tag\">
-          <span class=\"tag-text\">${displayTitle}...</span>
+      <div class="scrap-card-item linked-scrap-item" data-scrap-id="${
+        scrap.id
+      }" data-text="${textContent.replace(
+      /"/g,
+      "&quot;"
+    )}" draggable="true" style="margin:0;">
+        <div class="linked-scrap-tag">
+          <span class="tag-text">${displayTitle}...</span>
         </div>
       </div>
     `;
@@ -172,18 +251,29 @@ function createScrapCard(scrap, isLinked) {
           .map((tag) => `<span class=\"tag\">#${tag}</span>`)
           .join("")}</div>`
       : "";
-  const actionButton =
-    `<button class=\"scrap-card-delete-btn unlink-scrap-btn\" title=\"연결 해제\">
+  const actionButton = `<button class=\"scrap-card-delete-btn unlink-scrap-btn\" title=\"연결 해제\">
          <svg xmlns=\"http://www.w3.org/2000/svg\" height=\"18\" viewBox=\"0 -960 960 960\" width=\"18\"><path d=\"m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z\"/></svg>
        </button>`;
   return `
-    <div class=\"scrap-card-item\" draggable=\"true\" data-scrap-id=\"${scrap.id}\" data-text=\"${textContent.replace(/\"/g, '&quot;')}\">
+    <div class=\"scrap-card-item\" draggable=\"true\" data-scrap-id=\"${
+      scrap.id
+    }\" data-text=\"${textContent.replace(/\"/g, "&quot;")}\">
         <div class=\"scrap-card\">
             ${actionButton}
-            ${scrap.image ? `<div class=\"scrap-card-img-wrap\"><img src=\"${scrap.image}\" alt=\"scrap image\" referrerpolicy=\"no-referrer\"></div>` : ""}
+            ${
+              scrap.image
+                ? `<div class=\"scrap-card-img-wrap\"><img src=\"${scrap.image}\" alt=\"scrap image\" referrerpolicy=\"no-referrer\"></div>`
+                : ""
+            }
             <div class=\"scrap-card-info\">
-                <div class=\"scrap-card-title\">${cleanedTitle.substring(0, 20)}...</div>
-                <div class=\"scrap-card-snippet\">${shortenLink(scrap.url, 25)}</div>
+                <div class=\"scrap-card-title\">${cleanedTitle.substring(
+                  0,
+                  20
+                )}...</div>
+                <div class=\"scrap-card-snippet\">${shortenLink(
+                  scrap.url,
+                  25
+                )}</div>
                 ${tagsHtml}
             </div>
         </div>
@@ -194,6 +284,32 @@ function createScrapCard(scrap, isLinked) {
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
   const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
+  const tabBtns = resourceLibrary.querySelectorAll(".resource-tab-btn");
+  const allScrapsArea = resourceLibrary.querySelector(".all-scraps-area");
+  const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
+
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabBtns.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (btn.dataset.tab === "all-scraps") {
+        allScrapsArea.style.display = "block";
+        imageGalleryArea.style.display = "none";
+      } else {
+        allScrapsArea.style.display = "none";
+        imageGalleryArea.style.display = "block";
+        // 연결된 스크랩 데이터로 이미지 갤러리 갱신
+        chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
+          if (response && response.success) {
+            const linkedScrapsData = response.scraps.filter((s) =>
+              ideaData.linkedScraps.includes(s.id)
+            );
+            updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand);
+          }
+        });
+      }
+    });
+  });
   const linkedScrapsList = workspaceEl.querySelector(".linked-scraps-list");
   // 주요 키워드, 롱테일 키워드 각각의 DOM을 분리해서 이벤트 적용
   const keywordSection = workspaceEl.querySelector(".editor-keyword-section");
@@ -400,27 +516,29 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   }
 
   // 드래그앤드랍 삭제: 스크랩을 리스트 바깥에 드롭하면 연결 해제
-  linkedScrapsList.addEventListener('dragstart', (e) => {
-    const card = e.target.closest('.scrap-card-item');
+  linkedScrapsList.addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".scrap-card-item");
     if (card) {
-      e.dataTransfer.setData('text/plain', card.dataset.scrapId);
-      card.classList.add('dragging');
+      e.dataTransfer.setData("text/plain", card.dataset.scrapId);
+      card.classList.add("dragging");
     }
   });
 
-  linkedScrapsList.addEventListener('dragend', (e) => {
-    const card = e.target.closest('.scrap-card-item');
-    if (card) card.classList.remove('dragging');
+  linkedScrapsList.addEventListener("dragend", (e) => {
+    const card = e.target.closest(".scrap-card-item");
+    if (card) card.classList.remove("dragging");
   });
 
   // document 전체에 drop/dragover 이벤트 등록 (환경 호환성 개선)
-  document.addEventListener('dragover', (e) => e.preventDefault());
-  document.addEventListener('drop', (e) => {
+  document.addEventListener("dragover", (e) => e.preventDefault());
+  document.addEventListener("drop", (e) => {
     e.preventDefault();
-    const scrapId = e.dataTransfer.getData('text/plain');
+    const scrapId = e.dataTransfer.getData("text/plain");
     // 리스트 바깥에서 drop된 경우만 삭제
-    if (scrapId && !e.target.closest('.linked-scraps-list')) {
-      const cardItem = linkedScrapsList.querySelector(`[data-scrap-id="${scrapId}"]`);
+    if (scrapId && !e.target.closest(".linked-scraps-list")) {
+      const cardItem = linkedScrapsList.querySelector(
+        `[data-scrap-id="${scrapId}"]`
+      );
       if (!cardItem) return;
       const message = {
         action: "unlink_scrap_from_idea",
