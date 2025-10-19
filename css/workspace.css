@@ -1,3 +1,32 @@
+.editor-image-controls {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  gap: 8px;
+}
+.editor-image-controls button {
+  font-size: 13px;
+  padding: 2px 8px;
+  border: none;
+  background: #f5f5f5;
+  border-radius: 4px;
+  cursor: pointer;
+}
+/* Quill 에디터 내부 이미지 오버레이 위치 보정 */
+.ql-editor {
+  position: relative;
+  overflow: visible;
+}
+.ql-editor img {
+  display: block;
+}
+.editor-image-controls {
+  position: absolute;
+  z-index: 10001;
+}
 /* W-17: 이미지 편집 툴팁 오버레이 */
 .editor-image-controls {
   position: absolute;

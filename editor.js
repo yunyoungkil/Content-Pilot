@@ -1,29 +1,144 @@
 // W-17: 이미지 편집 툴팁 오버레이 생성/제거 및 액션 메시지
+let __cp_currentImageForControls = null; // 현재 오버레이가 붙은 이미지 참조
+let __cp_controlsScrollRoot = null; // 스크롤 이벤트를 구독하는 루트(.ql-editor)
+
 function removeImageControls() {
   const doc = document;
   const controls = doc.querySelector(".editor-image-controls");
   if (controls) controls.parentNode.removeChild(controls);
+  __cp_currentImageForControls = null;
+  if (__cp_controlsScrollRoot) {
+    try {
+      __cp_controlsScrollRoot.removeEventListener(
+        "scroll",
+        updateImageControlsPosition
+      );
+    } catch (e) {}
+    __cp_controlsScrollRoot = null;
+  }
+}
+
+function updateImageControlsPosition() {
+  const doc = document;
+  const controls = doc.querySelector(".editor-image-controls");
+  const img = __cp_currentImageForControls;
+  if (!controls || !img || !img.isConnected) return;
+  const container =
+    doc.querySelector(".ql-container") ||
+    img.closest(".ql-container") ||
+    doc.body;
+  const imgRect = img.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  // 이미지 중앙 상단 30px 위에 배치
+  const top = imgRect.top - containerRect.top - 30;
+  const left = imgRect.left - containerRect.left + imgRect.width / 2;
+  controls.style.top = top + "px";
+  controls.style.left = left + "px";
 }
 
 function showImageControls(img) {
   removeImageControls();
   const doc = document;
+  // 태그형 스몰 버튼 스타일을 문서에 1회 주입
+  if (!doc.getElementById("cp-image-controls-style")) {
+    const style = doc.createElement("style");
+    style.id = "cp-image-controls-style";
+    style.textContent = `
+      .editor-image-controls{ 
+        padding: 6px 8px; 
+        background: rgba(255,255,255,0.96);
+        border: 1px solid #E5EAF0; 
+        border-radius: 10px; 
+        box-shadow: 0 6px 16px rgba(16,24,40,0.12); 
+        backdrop-filter: saturate(160%) blur(8px);
+        pointer-events: auto;
+      }
+      .editor-image-controls .tag-btn{ 
+        display: inline-flex; 
+        align-items: center; 
+        gap: 6px; 
+        height: 24px; 
+        padding: 2px 10px; 
+        font-size: 12px; 
+        line-height: 1.2; 
+        color: #111827; 
+        background: #F9FAFB; 
+        border: 1px solid #E5EAF0; 
+        border-radius: 999px; 
+        cursor: pointer; 
+        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; 
+        box-shadow: 0 1px 2px rgba(16,24,40,0.06);
+      }
+      .editor-image-controls .tag-btn:hover{ 
+        background: #F3F4F6; 
+        border-color: #CBD5E1; 
+      }
+      .editor-image-controls .tag-btn:active{ 
+        background: #E5E7EB; 
+        box-shadow: 0 0 0 2px rgba(45,140,240,0.15) inset; 
+      }
+      .editor-image-controls .tag-btn + .tag-btn{ margin-left: 6px; }
+    `;
+    doc.head.appendChild(style);
+  }
   const controls = doc.createElement("div");
   controls.className = "editor-image-controls";
   controls.innerHTML = `
-    <button type="button" class="ai-edit-btn">🧠 AI 이미지 수정</button>
-    <button type="button" class="tui-edit-btn">🎨 TUI 편집기 열기</button>
+    <span style="display:flex;align-items:center;gap:8px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;">
+        <circle cx="12" cy="12" r="12" fill="#2D8CF0"/>
+        <text x="12" y="16" text-anchor="middle" fill="#fff" font-size="12" font-family="Arial" font-weight="bold">CP</text>
+      </svg>
+      <button type="button" class="tag-btn ai-edit-btn">🧠 AI 이미지 수정</button>
+      <button type="button" class="tag-btn tui-edit-btn">🎨 TUI 편집기 열기</button>
+    </span>
   `;
-  // 위치 계산: 이미지 상단 중앙 (스크롤/레이아웃 대응)
+  // 위치 계산: .ql-container 기준으로 오버레이를 붙이고, 이미지 위치는 getBoundingClientRect()로 계산
+  const container =
+    doc.querySelector(".ql-container") ||
+    img.closest(".ql-container") ||
+    doc.body;
   const imgRect = img.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
   console.log("이미지 클릭됨", img);
   console.log("오버레이 위치 계산:", imgRect);
-  controls.style.position = "fixed";
-  controls.style.top = imgRect.top - 30 + "px";
-  controls.style.left = imgRect.left + imgRect.width / 2 + "px";
+  controls.style.position = "absolute";
+  controls.style.top = imgRect.top - containerRect.top - 30 + "px";
+  controls.style.left =
+    imgRect.left - containerRect.left + imgRect.width / 2 + "px";
   controls.style.transform = "translateX(-50%)";
   controls.style.zIndex = 10001;
-  document.body.appendChild(controls);
+  // 컨테이너가 position 기준이 되도록 보정
+  try {
+    const cs = window.getComputedStyle(container);
+    if (cs && cs.position === "static") {
+      container.style.position = "relative";
+    }
+  } catch (e) {}
+  container.appendChild(controls);
+  console.log("[Content Pilot] editor-image-controls 추가 위치:", container);
+  console.log("[Content Pilot] 오버레이 innerHTML:", controls.innerHTML);
+  __cp_currentImageForControls = img;
+  // 안전을 위해 최초 추가 직후 한 번 더 위치 재계산
+  updateImageControlsPosition();
+  // 에디터 내부 스크롤에 반응하여 위치 업데이트
+  __cp_controlsScrollRoot =
+    (window.quillEditor && window.quillEditor.root) ||
+    doc.querySelector(".ql-editor");
+  if (__cp_controlsScrollRoot) {
+    try {
+      __cp_controlsScrollRoot.addEventListener(
+        "scroll",
+        updateImageControlsPosition,
+        { passive: true }
+      );
+    } catch (e) {
+      __cp_controlsScrollRoot.addEventListener(
+        "scroll",
+        updateImageControlsPosition
+      );
+    }
+  }
 
   controls.querySelector(".ai-edit-btn").onclick = function (e) {
     e.stopPropagation();
@@ -116,6 +231,10 @@ function initializeEditor() {
         },
         "*"
       );
+      // 텍스트 변경 시 오버레이가 화면에서 벗어나지 않도록 위치 재계산
+      try {
+        updateImageControlsPosition();
+      } catch (e) {}
       // 디바운스 후 cp_save_draft 메시지
       clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => {
@@ -193,6 +312,12 @@ function initializeEditor() {
   }
 
   window.addEventListener("resize", adjustEditorHeight);
+  // 창 크기 변경 시 오버레이 위치도 재계산
+  window.addEventListener("resize", function () {
+    try {
+      updateImageControlsPosition();
+    } catch (e) {}
+  });
   setTimeout(adjustEditorHeight, 100); // 초기 렌더링 후 1회 호출
 
   // 연결된 자료 변경 등 외부에서 요청 시 높이 재조정
@@ -334,6 +459,13 @@ function initializeEditor() {
 
 document.addEventListener("DOMContentLoaded", function () {
   initializeEditor();
+  // 툴바를 항상 맨 앞으로 오게 z-index 2000 적용
+  if (!document.getElementById("cp-toolbar-zfix")) {
+    const style = document.createElement("style");
+    style.id = "cp-toolbar-zfix";
+    style.textContent = `.ql-toolbar { position: relative !important; z-index: 2147483647 !important; }`;
+    document.head.appendChild(style);
+  }
   const TOOLBAR_TITLES_KO = {
     bold: "굵게 (Ctrl+B)",
     italic: "기울임꼴 (Ctrl+I)",
