@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TUI Image Editor Iframe</title>
+    <link rel="stylesheet" href="css/workspace.css" />
+    <link rel="stylesheet" href="lib/tui-image-editor.min.css" />
+    <link rel="stylesheet" href="lib/tui-color-picker.min.css" />
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      #mount {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="mount"></div>
+    <script src="lib/fabric.min.js"></script>
+    <script src="lib/tui-code-snippet.js"></script>
+    <script src="lib/tui-color-picker.min.js"></script>
+    <script src="lib/tui-image-editor.min.js"></script>
+    <script src="tui-editor.js"></script>
+  </body>
+</html>

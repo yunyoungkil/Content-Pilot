@@ -1,13 +1,14 @@
-/* W-21: TUI Editor Modal */
+/* W-21: TUI Editor Modal Z-Index 계층 구조 */
 .cp-tui-modal-wrap {
   position: fixed;
   inset: 0;
-  z-index: 2147483646;
+  z-index: 10000; /* 최상위 컨테이너 */
 }
 .cp-modal-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
+  z-index: 1; /* 모달 내부 상대적 레이어 */
 }
 .cp-modal {
   position: absolute;
@@ -22,6 +23,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  z-index: 2; /* 백드롭(1) 위에 위치 */
 }
 .cp-modal-header {
   flex: 0 0 auto;
@@ -46,6 +48,8 @@
 .cp-modal-body {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+  z-index: 3; /* 모달 헤더/푸터 위에 위치 */
 }
 .cp-tui-editor-mount {
   width: 100%;

@@ -65,7 +65,9 @@
         "lib/fabric.min.js",
         "lib/tui-color-picker.min.js",
         "lib/tui-color-picker.min.css",
-        "lib/tui-code-snippet.min.js"
+        "lib/tui-code-snippet.js",
+        "tui-editor.html",
+        "tui-editor.js"
       ],
       "matches": ["<all_urls>"]
     }

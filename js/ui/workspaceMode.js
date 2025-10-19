@@ -425,6 +425,10 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       </div>`;
 
     workspaceEl.appendChild(modalWrap);
+    // W-21.2: 모달 내부 클릭 이벤트 전파 차단
+    modalWrap.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
 
     const btnClose = modalWrap.querySelector(".cp-modal-close");
     const btnCancel = modalWrap.querySelector(".cp-btn-secondary");
@@ -442,110 +446,56 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       document.removeEventListener("keydown", onKeydown);
     };
     btnClose.onclick = btnCancel.onclick = cleanup;
-    backdrop.onclick = cleanup;
+    backdrop.onclick = function (e) {
+      console.log("[CP] 백드롭 클릭됨, 모달 닫기 시도");
+      cleanup();
+    };
     document.addEventListener("keydown", onKeydown);
 
-    // 라이브러리 존재 여부 확인 및 필요 시 로드
-    const proceed = async () => {
-      window.parent.postMessage(
-        { action: "cp_show_toast", message: "⏳ TUI Editor 로드 중..." },
+    // iframe 기반 TUI Image Editor 모달 구현
+    const iframe = document.createElement("iframe");
+    iframe.src = chrome.runtime.getURL("tui-editor.html");
+    iframe.style.width = "100%";
+    iframe.style.height = "600px";
+    iframe.style.border = "none";
+    iframe.style.background = "#fff";
+    iframe.style.position = "relative";
+    iframe.style.zIndex = "9999"; // 백드롭(9998)보다 앞에 위치
+    mountEl.appendChild(iframe);
+
+    // iframe 로드 후 이미지 URL 전달
+    iframe.onload = () => {
+      iframe.contentWindow.postMessage(
+        { action: "open-tui-editor", imageUrl },
         "*"
       );
-      const ready = await ensureTuiEditorLoaded();
-      if (!ready) {
+    };
+
+    // 저장 버튼 클릭 시 iframe에 편집 결과 요청
+    btnSave.onclick = () => {
+      iframe.contentWindow.postMessage({ action: "get-edited-image" }, "*");
+    };
+
+    // 부모 창에서 결과 수신 후 Quill에 반영
+    window.addEventListener("message", function onResult(event) {
+      if (
+        event.data &&
+        event.data.action === "tui-editor-result" &&
+        event.data.dataUrl
+      ) {
+        sendCommand("insert-image", { url: event.data.dataUrl });
+        sendCommand("focus");
         window.parent.postMessage(
           {
             action: "cp_show_toast",
-            message:
-              "ℹ️ TUI Image Editor 라이브러리가 로드되지 않았습니다. 프로젝트에 라이브러리를 포함하거나 window.CP_ENABLE_TUI_CDN = true 설정 후 다시 시도하세요.",
+            message: "✅ 편집된 이미지가 삽입되었습니다.",
           },
           "*"
         );
         cleanup();
-        return;
+        window.removeEventListener("message", onResult);
       }
-      window.parent.postMessage(
-        { action: "cp_show_toast", message: "✅ TUI Editor 로드 완료" },
-        "*"
-      );
-
-      // 인스턴스 생성
-      let editorInstance = null;
-      try {
-        editorInstance = new window.tui.ImageEditor(mountEl, {
-          includeUI: {
-            loadImage: { path: imageUrl, name: "image" },
-            menu: [
-              "crop",
-              "flip",
-              "rotate",
-              "draw",
-              "shape",
-              "icon",
-              "text",
-              "mask",
-              "filter",
-            ],
-            uiSize: { width: "100%", height: "100%" },
-            theme: {},
-          },
-          cssMaxWidth: 1200,
-          cssMaxHeight: 800,
-          selectionStyle: {
-            cornerSize: 16,
-            rotatingPointOffset: 48,
-          },
-        });
-      } catch (err) {
-        console.error("TUI Editor init error:", err);
-        window.parent.postMessage(
-          { action: "cp_show_toast", message: "❌ TUI Editor 초기화 실패" },
-          "*"
-        );
-        cleanup();
-        return;
-      }
-
-      btnSave.onclick = async () => {
-        try {
-          // 편집 결과를 dataURL로 추출
-          const dataUrl = editorInstance.toDataURL();
-          if (dataUrl) {
-            sendCommand("insert-image", { url: dataUrl });
-            sendCommand("focus");
-            window.parent.postMessage(
-              {
-                action: "cp_show_toast",
-                message: "✅ 편집된 이미지가 삽입되었습니다.",
-              },
-              "*"
-            );
-          } else {
-            window.parent.postMessage(
-              {
-                action: "cp_show_toast",
-                message: "❗ 이미지 추출에 실패했습니다.",
-              },
-              "*"
-            );
-          }
-        } catch (e) {
-          console.error(e);
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: "❌ 저장 중 오류가 발생했습니다.",
-            },
-            "*"
-          );
-        } finally {
-          cleanup();
-        }
-      };
-    };
-
-    // 비동기 진행 시작
-    proceed();
+    });
   }
   const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
   const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
