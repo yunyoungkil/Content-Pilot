@@ -39,9 +39,12 @@ function initializeEditor() {
       "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
   });
 
-  // 텍스트 변경 이벤트 리스너
+  // --- 통합: 텍스트 변경 시 content-changed, cp_save_draft 모두 처리 ---
+  let saveTimeout = null;
+  const SAVE_DELAY = 500; // 0.5초
   quillEditor.on("text-change", function (delta, oldDelta, source) {
     if (source === "user") {
+      // 즉시 content-changed 메시지
       const content = quillEditor.getContents();
       const html = quillEditor.root.innerHTML;
       window.parent.postMessage(
@@ -55,6 +58,14 @@ function initializeEditor() {
         },
         "*"
       );
+      // 디바운스 후 cp_save_draft 메시지
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        window.parent.postMessage({
+          action: "cp_save_draft",
+          content: html,
+        }, "*");
+      }, SAVE_DELAY);
     }
   });
 
@@ -129,7 +140,7 @@ function initializeEditor() {
       adjustEditorHeight();
     }
   });
-}
+
 
 window.addEventListener("message", function (event) {
   if (!quillEditor) return;
@@ -145,6 +156,13 @@ window.addEventListener("message", function (event) {
       } else if (data.text) {
         quillEditor.setText(data.text);
       }
+      break;
+    case "get-content":
+      // 이미지 삽입 등 외부 요청 시 현재 내용 저장
+      window.parent.postMessage({
+        action: "cp_save_draft",
+        content: quillEditor.root.innerHTML,
+      }, "*");
       break;
     case "apply-format":
       const range = quillEditor.getSelection();
@@ -248,7 +266,10 @@ window.addEventListener("message", function (event) {
     default:
       console.log("Unknown action:", action);
   }
+
+
 });
+}
 
 document.addEventListener("DOMContentLoaded", function () {
   initializeEditor();

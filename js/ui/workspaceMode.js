@@ -49,6 +49,8 @@ function renderImageGallery(linkedScrapsData) {
 import { shortenLink } from "../utils.js";
 import { marked } from "marked";
 
+
+
 export function renderWorkspace(container, ideaData) {
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps)
     ? ideaData.linkedScraps
@@ -56,6 +58,26 @@ export function renderWorkspace(container, ideaData) {
     ? Object.keys(ideaData.linkedScraps)
     : [];
 
+  // --- 에디터 draft 저장 메시지 수신 및 background로 전달 ---
+  window.__cp_workspace_idea_id = ideaData.id;
+  if (!window.__cp_workspace_save_listener) {
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.action === 'cp_save_draft' && event.data.content) {
+        const draftContent = event.data.content;
+        const ideaId = window.__cp_workspace_idea_id;
+        if (ideaId) {
+          chrome.runtime.sendMessage({
+            action: 'save_idea_draft',
+            ideaId: ideaId,
+            draft: draftContent
+          }, function(response) {
+            // 저장 성공/실패에 따라 피드백 처리 가능 (선택)
+          });
+        }
+      }
+    });
+    window.__cp_workspace_save_listener = true;
+  }
   const outlineHtml =
     ideaData.outline && ideaData.outline.length > 0
       ? ideaData.outline.map((item) => `<li>${item}</li>`).join("")
@@ -328,6 +350,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   function sendCommand(action, data = {}) {
     if (editorReady && editorIframe.contentWindow) {
       editorIframe.contentWindow.postMessage({ action, data }, "*");
+      // 이미지 삽입 시 바로 저장 트리거
+      if (action === "insert-image") {
+        setTimeout(() => {
+          editorIframe.contentWindow.postMessage({ action: "get-content" }, "*");
+        }, 100); // 이미지 렌더링 후 약간의 지연
+      }
     }
   }
 

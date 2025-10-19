@@ -449,6 +449,39 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 워크스페이스 draft 저장
+  if (msg.action === 'save_idea_draft' && msg.ideaId && msg.draft !== undefined) {
+    try {
+      const db = firebase.database();
+      // 아이디어 카드가 어떤 status(컬럼)에 있는지 찾아야 함
+      db.ref('kanban').once('value').then(snapshot => {
+        const allCards = snapshot.val() || {};
+        let foundStatus = null;
+        for (const status in allCards) {
+          if (allCards[status] && allCards[status][msg.ideaId]) {
+            foundStatus = status;
+            break;
+          }
+        }
+        if (!foundStatus) {
+          sendResponse({ success: false, message: 'Idea card not found.' });
+          return;
+        }
+        db.ref(`kanban/${foundStatus}/${msg.ideaId}/draftContent`).set(msg.draft)
+          .then(() => {
+            db.ref(`kanban/${foundStatus}/${msg.ideaId}/updatedAt`).set(firebase.database.ServerValue.TIMESTAMP);
+            sendResponse({ success: true, message: 'Draft saved successfully.' });
+          })
+          .catch(error => {
+            console.error('Firebase Draft Save Error:', error);
+            sendResponse({ success: false, error: error.message });
+          });
+      });
+      return true; // 비동기 응답
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+  }
   // K-4: 초안 삭제 핸들러
   if (msg.action === "delete_draft_content") {
     const cardId = msg.data.cardId;
