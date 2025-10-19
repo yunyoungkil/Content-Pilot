@@ -51,7 +51,7 @@ function showImageControls(img) {
         border-radius: 10px; 
         box-shadow: 0 6px 16px rgba(16,24,40,0.12); 
         backdrop-filter: saturate(160%) blur(8px);
-        pointer-events: auto;
+        pointer-events: none; /* 컨테이너는 이벤트 통과 */
       }
       .editor-image-controls .tag-btn{ 
         display: inline-flex; 
@@ -68,6 +68,7 @@ function showImageControls(img) {
         cursor: pointer; 
         transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; 
         box-shadow: 0 1px 2px rgba(16,24,40,0.06);
+        pointer-events: auto; /* 버튼만 클릭 가능 */
       }
       .editor-image-controls .tag-btn:hover{ 
         background: #F3F4F6; 
@@ -203,13 +204,50 @@ function initializeEditor() {
       "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
   });
 
+  // 안전장치: 에디터 편집 가능 상태 보장 및 포인터/선택 가능 설정
+  try {
+    quillEditor.enable(true);
+    if (quillEditor.root) {
+      quillEditor.root.setAttribute("contenteditable", "true");
+      quillEditor.root.style.pointerEvents = "auto";
+      quillEditor.root.style.userSelect = "text";
+    }
+  } catch (e) {}
+
   // W-17: 이미지 클릭 시 커스텀 오버레이 생성
   quillEditor.root.addEventListener("click", function (e) {
     if (e.target && e.target.tagName === "IMG") {
+      // 커서를 이미지(임베드) 위치로 이동
+      try {
+        const blot =
+          window.Quill && window.Quill.find
+            ? window.Quill.find(e.target)
+            : null;
+        if (blot && quillEditor && quillEditor.scroll) {
+          const index = blot.offset(quillEditor.scroll);
+          if (typeof index === "number") {
+            quillEditor.setSelection(index, 1, "user");
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to set selection to image:", err);
+      }
       showImageControls(e.target);
     } else {
       removeImageControls();
     }
+    // 클릭 시 에디터에 포커스 보장
+    try {
+      quillEditor.focus();
+    } catch (e) {}
+  });
+
+  // 키 입력 시 오버레이 제거 및 편집 보장
+  quillEditor.root.addEventListener("keydown", function () {
+    removeImageControls();
+    try {
+      quillEditor.enable(true);
+    } catch (e) {}
   });
 
   // --- 통합: 텍스트 변경 시 content-changed, cp_save_draft 모두 처리 ---
