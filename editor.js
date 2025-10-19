@@ -56,26 +56,30 @@ function showImageControls(img) {
       .editor-image-controls .tag-btn{ 
         display: inline-flex; 
         align-items: center; 
-        gap: 6px; 
-        height: 24px; 
-        padding: 2px 10px; 
-        font-size: 12px; 
-        line-height: 1.2; 
+        justify-content: center;
+        gap: 0; 
+        width: 28px;
+        height: 28px; 
+        padding: 0; 
+        font-size: 16px; 
+        line-height: 1; 
         color: #111827; 
         background: #F9FAFB; 
         border: 1px solid #E5EAF0; 
         border-radius: 999px; 
         cursor: pointer; 
-        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; 
+        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; 
         box-shadow: 0 1px 2px rgba(16,24,40,0.06);
       }
       .editor-image-controls .tag-btn:hover{ 
         background: #F3F4F6; 
-        border-color: #CBD5E1; 
+        border-color: #CBD5E1;
+        transform: scale(1.05);
       }
       .editor-image-controls .tag-btn:active{ 
         background: #E5E7EB; 
-        box-shadow: 0 0 0 2px rgba(45,140,240,0.15) inset; 
+        box-shadow: 0 0 0 2px rgba(45,140,240,0.15) inset;
+        transform: scale(0.95);
       }
       .editor-image-controls .tag-btn + .tag-btn{ margin-left: 6px; }
     `;
@@ -89,8 +93,8 @@ function showImageControls(img) {
         <circle cx="12" cy="12" r="12" fill="#2D8CF0"/>
         <text x="12" y="16" text-anchor="middle" fill="#fff" font-size="12" font-family="Arial" font-weight="bold">CP</text>
       </svg>
-      <button type="button" class="tag-btn ai-edit-btn">🧠 AI 이미지 수정</button>
-      <button type="button" class="tag-btn tui-edit-btn">🎨 TUI 편집기 열기</button>
+      <button type="button" class="tag-btn ai-edit-btn" title="AI 이미지 수정">🧠</button>
+      <button type="button" class="tag-btn tui-edit-btn" title="TUI 편집기 열기">🎨</button>
     </span>
   `;
   // 위치 계산: .ql-container 기준으로 오버레이를 붙이고, 이미지 위치는 getBoundingClientRect()로 계산
