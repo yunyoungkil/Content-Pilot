@@ -155,7 +155,7 @@ function showImageControls(img) {
   controls.querySelector(".tui-edit-btn").onclick = function (e) {
     e.stopPropagation();
     window.parent.postMessage(
-      { action: "cp_open_tui_editor", imgSrc: img.src },
+      { action: "cp_open_tui_editor", imageUrl: img.src },
       "*"
     );
     removeImageControls();

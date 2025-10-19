@@ -49,8 +49,6 @@ function renderImageGallery(linkedScrapsData) {
 import { shortenLink } from "../utils.js";
 import { marked } from "marked";
 
-
-
 export function renderWorkspace(container, ideaData) {
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps)
     ? ideaData.linkedScraps
@@ -61,18 +59,25 @@ export function renderWorkspace(container, ideaData) {
   // --- 에디터 draft 저장 메시지 수신 및 background로 전달 ---
   window.__cp_workspace_idea_id = ideaData.id;
   if (!window.__cp_workspace_save_listener) {
-    window.addEventListener('message', function(event) {
-      if (event.data && event.data.action === 'cp_save_draft' && event.data.content) {
+    window.addEventListener("message", function (event) {
+      if (
+        event.data &&
+        event.data.action === "cp_save_draft" &&
+        event.data.content
+      ) {
         const draftContent = event.data.content;
         const ideaId = window.__cp_workspace_idea_id;
         if (ideaId) {
-          chrome.runtime.sendMessage({
-            action: 'save_idea_draft',
-            ideaId: ideaId,
-            draft: draftContent
-          }, function(response) {
-            // 저장 성공/실패에 따라 피드백 처리 가능 (선택)
-          });
+          chrome.runtime.sendMessage(
+            {
+              action: "save_idea_draft",
+              ideaId: ideaId,
+              draft: draftContent,
+            },
+            function (response) {
+              // 저장 성공/실패에 따라 피드백 처리 가능 (선택)
+            }
+          );
         }
       }
     });
@@ -304,6 +309,244 @@ function createScrapCard(scrap, isLinked) {
 }
 
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
+  // --- TUI Image Editor 동적 로더 (옵션) ---
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) return resolve();
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = (e) => reject(e);
+      document.head.appendChild(s);
+    });
+  }
+  function loadCSS(href) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`link[rel="stylesheet"][href="${href}"]`))
+        return resolve();
+      const l = document.createElement("link");
+      l.rel = "stylesheet";
+      l.href = href;
+      l.onload = () => resolve();
+      l.onerror = (e) => reject(e);
+      document.head.appendChild(l);
+    });
+  }
+  async function ensureTuiEditorLoaded() {
+    if (window.tui && window.tui.ImageEditor) return true;
+    // 1. 로컬(lib/) 우선 로드 시도 (의존성 순서 중요)
+    try {
+      // 필수 의존성을 순서대로 로드
+      await loadCSS(chrome.runtime.getURL("lib/tui-color-picker.min.css"));
+      await loadCSS(chrome.runtime.getURL("lib/tui-image-editor.min.css"));
+      // fabric.js 먼저 로드 (TUI Image Editor의 핵심 의존성)
+      if (!window.fabric) {
+        await loadScript(chrome.runtime.getURL("lib/fabric.min.js"));
+      }
+      // tui-code-snippet 로드
+      if (!window.tui || !window.tui.util) {
+        await loadScript(chrome.runtime.getURL("lib/tui-code-snippet.js"));
+      }
+      // tui-color-picker 로드
+      if (!window.tui || !window.tui.colorPicker) {
+        await loadScript(chrome.runtime.getURL("lib/tui-color-picker.min.js"));
+      }
+      // 마지막으로 TUI Image Editor 로드
+      await loadScript(chrome.runtime.getURL("lib/tui-image-editor.min.js"));
+      if (window.tui && window.tui.ImageEditor) return true;
+    } catch (e) {
+      console.warn("로컬 TUI Image Editor 로드 실패, CDN 시도", e);
+    }
+    // 2. window.CP_ENABLE_TUI_CDN === true일 때 CDN에서 로드
+    if (!window.CP_ENABLE_TUI_CDN) return false;
+    try {
+      await loadCSS(
+        "https://uicdn.toast.com/tui-color-picker/latest/tui-color-picker.css"
+      );
+      await loadCSS(
+        "https://uicdn.toast.com/tui-image-editor/latest/tui-image-editor.css"
+      );
+      await loadScript(
+        "https://cdnjs.cloudflare.com/ajax/libs/fabric.js/4.6.0/fabric.min.js"
+      );
+      await loadScript(
+        "https://uicdn.toast.com/tui-code-snippet/latest/tui-code-snippet.js"
+      );
+      await loadScript(
+        "https://uicdn.toast.com/tui-color-picker/latest/tui-color-picker.js"
+      );
+      await loadScript(
+        "https://uicdn.toast.com/tui-image-editor/latest/tui-image-editor.js"
+      );
+      return !!(window.tui && window.tui.ImageEditor);
+    } catch (e) {
+      console.error("Failed to load TUI Editor libs", e);
+      return false;
+    }
+  }
+  // --- W-21/W-22/W-23: TUI 편집 모달 렌더링 유틸 ---
+  function renderTUIEditorModal(imageUrl, sendCommand) {
+    if (!imageUrl) {
+      window.parent.postMessage(
+        {
+          action: "cp_show_toast",
+          message: "❗ 편집할 이미지 URL이 없습니다.",
+        },
+        "*"
+      );
+      return;
+    }
+
+    // 중복 모달 방지
+    const existing = workspaceEl.querySelector(".cp-tui-modal-wrap");
+    if (existing) {
+      try {
+        existing.remove();
+      } catch (e) {}
+    }
+
+    // 모달 컨테이너 생성
+    const modalWrap = document.createElement("div");
+    modalWrap.className = "cp-tui-modal-wrap";
+    modalWrap.innerHTML = `
+      <div class="cp-modal-backdrop"></div>
+      <div class="cp-modal">
+        <div class="cp-modal-header">
+          <div class="cp-modal-title">🎨 TUI 이미지 편집기</div>
+          <button class="cp-modal-close" title="닫기">×</button>
+        </div>
+        <div class="cp-modal-body">
+          <div id="cp-tui-editor-mount" class="cp-tui-editor-mount"></div>
+        </div>
+        <div class="cp-modal-footer">
+          <button class="cp-btn cp-btn-secondary">취소</button>
+          <button class="cp-btn cp-btn-primary">저장</button>
+        </div>
+      </div>`;
+
+    workspaceEl.appendChild(modalWrap);
+
+    const btnClose = modalWrap.querySelector(".cp-modal-close");
+    const btnCancel = modalWrap.querySelector(".cp-btn-secondary");
+    const btnSave = modalWrap.querySelector(".cp-btn-primary");
+    const mountEl = modalWrap.querySelector("#cp-tui-editor-mount");
+    const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
+
+    const onKeydown = (e) => {
+      if (e.key === "Escape") cleanup();
+    };
+    const cleanup = () => {
+      try {
+        modalWrap.remove();
+      } catch (e) {}
+      document.removeEventListener("keydown", onKeydown);
+    };
+    btnClose.onclick = btnCancel.onclick = cleanup;
+    backdrop.onclick = cleanup;
+    document.addEventListener("keydown", onKeydown);
+
+    // 라이브러리 존재 여부 확인 및 필요 시 로드
+    const proceed = async () => {
+      window.parent.postMessage(
+        { action: "cp_show_toast", message: "⏳ TUI Editor 로드 중..." },
+        "*"
+      );
+      const ready = await ensureTuiEditorLoaded();
+      if (!ready) {
+        window.parent.postMessage(
+          {
+            action: "cp_show_toast",
+            message:
+              "ℹ️ TUI Image Editor 라이브러리가 로드되지 않았습니다. 프로젝트에 라이브러리를 포함하거나 window.CP_ENABLE_TUI_CDN = true 설정 후 다시 시도하세요.",
+          },
+          "*"
+        );
+        cleanup();
+        return;
+      }
+      window.parent.postMessage(
+        { action: "cp_show_toast", message: "✅ TUI Editor 로드 완료" },
+        "*"
+      );
+
+      // 인스턴스 생성
+      let editorInstance = null;
+      try {
+        editorInstance = new window.tui.ImageEditor(mountEl, {
+          includeUI: {
+            loadImage: { path: imageUrl, name: "image" },
+            menu: [
+              "crop",
+              "flip",
+              "rotate",
+              "draw",
+              "shape",
+              "icon",
+              "text",
+              "mask",
+              "filter",
+            ],
+            uiSize: { width: "100%", height: "100%" },
+            theme: {},
+          },
+          cssMaxWidth: 1200,
+          cssMaxHeight: 800,
+          selectionStyle: {
+            cornerSize: 16,
+            rotatingPointOffset: 48,
+          },
+        });
+      } catch (err) {
+        console.error("TUI Editor init error:", err);
+        window.parent.postMessage(
+          { action: "cp_show_toast", message: "❌ TUI Editor 초기화 실패" },
+          "*"
+        );
+        cleanup();
+        return;
+      }
+
+      btnSave.onclick = async () => {
+        try {
+          // 편집 결과를 dataURL로 추출
+          const dataUrl = editorInstance.toDataURL();
+          if (dataUrl) {
+            sendCommand("insert-image", { url: dataUrl });
+            sendCommand("focus");
+            window.parent.postMessage(
+              {
+                action: "cp_show_toast",
+                message: "✅ 편집된 이미지가 삽입되었습니다.",
+              },
+              "*"
+            );
+          } else {
+            window.parent.postMessage(
+              {
+                action: "cp_show_toast",
+                message: "❗ 이미지 추출에 실패했습니다.",
+              },
+              "*"
+            );
+          }
+        } catch (e) {
+          console.error(e);
+          window.parent.postMessage(
+            {
+              action: "cp_show_toast",
+              message: "❌ 저장 중 오류가 발생했습니다.",
+            },
+            "*"
+          );
+        } finally {
+          cleanup();
+        }
+      };
+    };
+
+    // 비동기 진행 시작
+    proceed();
+  }
   const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
   const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
   const tabBtns = resourceLibrary.querySelectorAll(".resource-tab-btn");
@@ -353,7 +596,10 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       // 이미지 삽입 시 바로 저장 트리거
       if (action === "insert-image") {
         setTimeout(() => {
-          editorIframe.contentWindow.postMessage({ action: "get-content" }, "*");
+          editorIframe.contentWindow.postMessage(
+            { action: "get-content" },
+            "*"
+          );
         }, 100); // 이미지 렌더링 후 약간의 지연
       }
     }
@@ -399,6 +645,16 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       case "editor-error":
         console.error("Editor error:", data.error);
         break;
+      case "cp_open_tui_editor": {
+        // 수신 필드 호환: imageUrl 우선, 과거 imgSrc도 지원
+        const tuiImageUrl =
+          event.data?.imageUrl ||
+          event.data?.imgSrc ||
+          data?.imageUrl ||
+          data?.imgSrc;
+        renderTUIEditorModal(tuiImageUrl, sendCommand);
+        break;
+      }
     }
   });
 
