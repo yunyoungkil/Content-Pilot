@@ -1,3 +1,27 @@
+/* W-17: 이미지 편집 툴팁 오버레이 */
+.editor-image-controls {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10001;
+}
+.editor-image-controls button {
+  background: #505050;
+  color: white;
+  padding: 4px 8px;
+  font-size: 11px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.95;
+  transition: background 0.2s;
+}
+.editor-image-controls button:hover {
+  background: #2a2a2a;
+}
 /* 자료 보관함 탭 UI */
 .resource-tabs {
   display: flex;

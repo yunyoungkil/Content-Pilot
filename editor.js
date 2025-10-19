@@ -1,3 +1,47 @@
+// W-17: 이미지 편집 툴팁 오버레이 생성/제거 및 액션 메시지
+function removeImageControls() {
+  const doc = document;
+  const controls = doc.querySelector(".editor-image-controls");
+  if (controls) controls.parentNode.removeChild(controls);
+}
+
+function showImageControls(img) {
+  removeImageControls();
+  const doc = document;
+  const controls = doc.createElement("div");
+  controls.className = "editor-image-controls";
+  controls.innerHTML = `
+    <button type="button" class="ai-edit-btn">🧠 AI 이미지 수정</button>
+    <button type="button" class="tui-edit-btn">🎨 TUI 편집기 열기</button>
+  `;
+  // 위치 계산: 이미지 상단 중앙 (스크롤/레이아웃 대응)
+  const imgRect = img.getBoundingClientRect();
+  console.log("이미지 클릭됨", img);
+  console.log("오버레이 위치 계산:", imgRect);
+  controls.style.position = "fixed";
+  controls.style.top = imgRect.top - 30 + "px";
+  controls.style.left = imgRect.left + imgRect.width / 2 + "px";
+  controls.style.transform = "translateX(-50%)";
+  controls.style.zIndex = 10001;
+  document.body.appendChild(controls);
+
+  controls.querySelector(".ai-edit-btn").onclick = function (e) {
+    e.stopPropagation();
+    window.parent.postMessage(
+      { action: "cp_open_ai_editor", imgSrc: img.src },
+      "*"
+    );
+    removeImageControls();
+  };
+  controls.querySelector(".tui-edit-btn").onclick = function (e) {
+    e.stopPropagation();
+    window.parent.postMessage(
+      { action: "cp_open_tui_editor", imgSrc: img.src },
+      "*"
+    );
+    removeImageControls();
+  };
+}
 // editor.js - iframe 내에서 동작하는 Quill 에디터 제어 스크립트
 // Quill Image Resize 모듈 등록 (최상단에서 전역 등록)
 if (window.Quill && window.ImageResize) {
@@ -42,6 +86,15 @@ function initializeEditor() {
     },
     placeholder:
       "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
+  });
+
+  // W-17: 이미지 클릭 시 커스텀 오버레이 생성
+  quillEditor.root.addEventListener("click", function (e) {
+    if (e.target && e.target.tagName === "IMG") {
+      showImageControls(e.target);
+    } else {
+      removeImageControls();
+    }
   });
 
   // --- 통합: 텍스트 변경 시 content-changed, cp_save_draft 모두 처리 ---
