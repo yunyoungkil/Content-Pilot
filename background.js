@@ -449,6 +449,70 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 썸네일용 Gemini 슬로건 생성 (draft 전체와 outline 리스트를 함께 보냄)
+  if (
+    msg.action === "gemini_generate_thumbnail_texts" &&
+    Array.isArray(msg.data?.outlines)
+  ) {
+    (async () => {
+      try {
+        const { geminiApiKey } = await chrome.storage.local.get([
+          "geminiApiKey",
+        ]);
+        if (!geminiApiKey) {
+          sendResponse({ success: false, error: "Gemini API 키가 없습니다." });
+          return;
+        }
+        const outlines = msg.data.outlines;
+        const draft = msg.data.draft || "";
+        // draft와 outline을 함께 프롬프트에 포함
+        const prompt = `아래는 콘텐츠 초안과 세션(아웃라인) 목록입니다.\n\n[초안]\n${draft}\n\n[세션 목록]\n${outlines
+          .map((t, i) => `${i + 1}. ${t}`)
+          .join(
+            "\n"
+          )}\n\n각 세션에 어울리는 썸네일용 짧은 슬로건 또는 키워드를 한글로 1개씩, 12자 이내로, 꾸밈말 없이 핵심만 배열로 추천해줘.\n예시: ["슬로건1", "슬로건2", ...]`;
+        const res = await fetch(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" +
+            geminiApiKey,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+            }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          console.error("[Gemini 슬로건] API 오류 응답:", data);
+          sendResponse({ success: false, error: "Gemini API 오류", data });
+          return;
+        }
+        // Gemini 응답에서 배열 파싱
+        let slogans = [];
+        try {
+          const raw =
+            data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+          const arrayMatch = raw.match(/\[.*\]/s);
+          if (arrayMatch) {
+            slogans = JSON.parse(arrayMatch[0]);
+          } else {
+            console.warn("[Gemini 슬로건] 배열 형식 파싱 실패, 원본:", raw);
+          }
+        } catch (e) {
+          console.error("[Gemini 슬로건] 배열 파싱 예외:", e, data);
+        }
+        // 개수 맞추기 (실패 시 빈값 채움)
+        if (!Array.isArray(slogans) || slogans.length !== outlines.length) {
+          slogans = Array(outlines.length).fill("");
+        }
+        sendResponse({ success: true, slogans });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
   // 워크스페이스 draft 저장
   if (
     msg.action === "save_idea_draft" &&
@@ -603,54 +667,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
       });
     return true;
-  } else if (msg.action === "ai_generate_images") {
-    // Placeholder generator: create simple canvases as Data URLs
-    (async () => {
-      try {
-        const {
-          prompt = "",
-          style = "none",
-          aspect = "1:1",
-          count = 3,
-          size,
-        } = msg.data || {};
-        const width = Math.min(Math.max(size?.width || 768, 256), 1536);
-        const height = Math.min(Math.max(size?.height || 768, 256), 1536);
-
-        // Optional simple per-session rate-limit: max 12 images per minute
-        const now = Date.now();
-        if (!globalThis.__cp_ai_rate) globalThis.__cp_ai_rate = [];
-        // remove old entries
-        globalThis.__cp_ai_rate = globalThis.__cp_ai_rate.filter(
-          (t) => now - t < 60_000
-        );
-        if (globalThis.__cp_ai_rate.length + count > 12) {
-          sendResponse({
-            success: false,
-            error: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
-          });
-          return;
-        }
-        for (let i = 0; i < count; i++) globalThis.__cp_ai_rate.push(now);
-
-        const images = await Promise.all(
-          Array.from({ length: count }).map((_, idx) =>
-            generatePlaceholderImage({
-              width,
-              height,
-              text: truncate(`${prompt}`.trim() || "AI Image", 60),
-              subtitle: `${style.toUpperCase()} • ${aspect} • #${idx + 1}`,
-            })
-          )
-        );
-
-        sendResponse({ success: true, images });
-      } catch (e) {
-        console.error("AI 이미지 생성 실패:", e);
-        sendResponse({ success: false, error: e?.message || "생성 중 오류" });
-      }
-    })();
-    return true; // async
+    // (이전 placeholder/canvas 기반 핸들러 완전 제거, Gemini API만 사용)
   } else if (msg.action === "scrap_entire_analysis") {
     const analysisContent = msg.data;
     if (!analysisContent) return true;
@@ -1076,74 +1093,72 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
 
     return true;
-  } else if (msg.action === "generate_blog_ideas") {
-    const { myContent, competitorContent, myAnalysisSummary } = msg.data;
-
-    const myDataSummary = myContent
-      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
-      .join("\n");
-
-    const competitorDataSummary = competitorContent
-      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0})`)
-      .join("\n");
-
-    const blogIdeasPrompt = `
-        당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
-
-        [정보 1: 내 블로그의 핵심 성공 요인]
-        ${myAnalysisSummary}
-
-        [정보 2: 내 블로그의 인기 포스트 목록]
-        ${myDataSummary}
-
-        [정보 3: 경쟁 블로그의 인기 포스트 목록]
-        ${competitorDataSummary}
-
-        [요청]
-        나의 강점(정보 1)과 경쟁자의 인기 요소(정보 3)를 결합하여 새로운 아이디어 5가지를 제안해주세요.
-
-        [응답 형식]
-        - 다른 설명 없이, 반드시 아래와 같은 JSON 배열 형식으로만 응답해주세요.
-        - 'keywords'는 주제를 대표하는 4~5개의 핵심 단어입니다.
-        - 'longTailKeywords'는 사용자의 구체적인 검색 의도가 담긴 3단어 이상의 구문입니다.
-        - 'recommendedSearches'는 구체적인 정보 탐색을 위한 3~4개의 검색어 질문입니다.
-        - 'outline'은 서론, 본론, 결론을 포함하는 3~5개 항목의 배열입니다.
-
-        [
-            {
-                "title": "AI 글쓰기 도구, 당신의 블로그를 어떻게 바꿀까?",
-                "description": "ChatGPT와 같은 AI 도구를 블로그 콘텐츠 제작에 활용하는 구체적인 방법과 SEO에 미치는 영향을 분석합니다.",
-                "keywords": ["AI 글쓰기", "콘텐츠 자동화", "SEO", "블로그 전략", "ChatGPT"],
-                "longTailKeywords": ["초보자를 위한 AI 글쓰기 가이드",
-                    "블로그 방문자 늘리는 AI 활용법",
-                    "AI 콘텐츠 SEO 최적화 전략"
-                    ],
-                "recommendedSearches": [
-                "AI 글쓰기 도구 비교 2024", 
-                "블로그 글 AI로 작성 시 저품질 위험",
-                "AI 글쓰기 도구 사용법",
-                "AI 콘텐츠 SEO 최적화 방법"
-                ],
-                "outline": [
-                "1. 서론: AI, 콘텐츠 마케팅의 새로운 패러다임",
-                "2. 본론 1: 주요 AI 글쓰기 도구 심층 비교 (ChatGPT vs Claude)",
-                "3. 본론 2: 성공적인 AI 활용 콘텐츠 제작 사례 분석",
-                "4. 본론 3: AI 사용 시 주의해야 할 저작권 및 윤리 문제",
-                "5. 결론: AI를 활용한 지속 가능한 콘텐츠 전략 수립하기"
-                ]
-        }
-        ]
-    `;
-
+  } else if (msg.action === "ai_generate_images") {
+    // Gemini 2.5 Flash Image REST API 연동
     (async () => {
-      const ideasResult = await callGeminiAPI(blogIdeasPrompt);
-      sendResponse({ success: true, ideas: ideasResult });
-    })();
+      try {
+        const {
+          prompt = "",
+          style = "none",
+          aspect = "1:1",
+          count = 3,
+        } = msg.data || {};
+        // 1. Gemini API 키를 안전하게 가져오기
+        const { geminiApiKey } = await chrome.storage.local.get([
+          "geminiApiKey",
+        ]);
+        if (!geminiApiKey) {
+          sendResponse({
+            success: false,
+            error: "Gemini API 키가 설정되지 않았습니다.",
+          });
+          return;
+        }
 
+        // 2. 프롬프트 및 옵션 구성
+        const model = "gemini-2.5-flash-image";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+        // 3. 여러 장 요청: Gemini는 1회 1장만 반환하므로 count만큼 반복 호출
+        const images = [];
+        for (let i = 0; i < count; i++) {
+          const res = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.candidates) {
+            sendResponse({
+              success: false,
+              error: data.error?.message || "Gemini 이미지 생성 실패",
+            });
+            return;
+          }
+          let found = false;
+          for (const part of data.candidates[0].content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              images.push(`data:image/png;base64,${part.inlineData.data}`);
+              found = true;
+            }
+          }
+          if (!found) {
+            sendResponse({
+              success: false,
+              error: "이미지 생성 결과가 없습니다.",
+            });
+            return;
+          }
+        }
+        sendResponse({ success: true, images });
+      } catch (e) {
+        sendResponse({
+          success: false,
+          error: e?.message || "Gemini 호출 오류",
+        });
+      }
+    })();
     return true;
   } else if (msg.action === "analyze_video_comments") {
     const videoId = msg.videoId;

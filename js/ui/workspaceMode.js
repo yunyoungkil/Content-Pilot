@@ -207,29 +207,43 @@ export function renderWorkspace(container, ideaData) {
               <label>
                 <span class="ai-label">스타일</span>
                 <select id="ai-image-style" class="ai-select">
-                  <option value="none">None</option>
-                  <option value="realistic">Realistic Photo</option>
-                  <option value="3d">3D Render</option>
-                  <option value="watercolor">Watercolor</option>
-                  <option value="cyberpunk">Cyberpunk</option>
+                  <option value="realistic">실사 사진</option>
+                  <option value="3d">3D 렌더</option>
+                  <option value="watercolor">수채화</option>
+                  <option value="cyberpunk">사이버펑크</option>
+                  <option value="none">기본/기타</option>
+                </select>
+              </label>
+               <label>
+                <span class="ai-label">종횡비</span>
+                <select id="ai-image-aspect" class="ai-select">
+                  <option value="1:1">1:1</option>
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
                 </select>
               </label>
               <label>
-                <span class="ai-label">종횡비</span>
-                <select id="ai-image-aspect" class="ai-select">
-                  <option value="1:1">1:1 (Square)</option>
-                  <option value="16:9">16:9 (Landscape)</option>
-                  <option value="9:16">9:16 (Vertical)</option>
+                <span class="ai-label">생성 개수</span>
+                <select id="ai-image-count" class="ai-select">
+                  <option value="1">1장</option>
+                  <option value="2">2장</option>
+                  <option value="3" selected>3장</option>
+                  <option value="4">4장</option>
                 </select>
               </label>
             </div>
             <div class="ai-row ai-actions">
-              <button id="ai-generate-btn" class="ai-generate-btn">✨ 3개의 이미지 생성하기</button>
+              <button id="ai-generate-btn" class="ai-generate-btn">이미지 생성하기</button>
+              <button id="ai-generate-thumb-btn" class="ai-generate-btn" style="margin-left:6px;">썸네일 예시 생성</button>
               <span class="ai-cost-note">유의: 생성은 비용이 발생할 수 있습니다. 데모에서는 로컬/플레이스홀더 방식으로 생성됩니다.</span>
+
+            </div>
+            <div class="ai-row ai-message-row">
+              <span id="ai-image-message" class="loading-images">프롬프트를 입력하고 이미지를 생성해보세요.</span>
             </div>
           </div>
           <div class="ai-image-grid" id="ai-image-grid">
-            <p class="loading-images">프롬프트를 입력하고 이미지를 생성해보세요.</p>
+            <!-- 메시지는 위 ai-image-message에서 출력 -->
           </div>
         </div>
       </div>
@@ -565,6 +579,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const aiPromptInput = resourceLibrary.querySelector("#ai-image-prompt");
   const aiStyleSelect = resourceLibrary.querySelector("#ai-image-style");
   const aiAspectSelect = resourceLibrary.querySelector("#ai-image-aspect");
+  const aiCountSelect = resourceLibrary.querySelector("#ai-image-count");
   const aiGenerateBtn = resourceLibrary.querySelector("#ai-generate-btn");
   const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
 
@@ -581,6 +596,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   if (aiPromptInput) {
     aiPromptInput.value = buildDefaultPromptFromIdea(ideaData);
   }
+  // 스타일 기본값: 실사 사진
+  if (aiStyleSelect) aiStyleSelect.value = "realistic";
 
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -908,25 +925,266 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   }
 
   if (aiGenerateBtn) {
+    // 썸네일 예시 생성 버튼 이벤트는 한 번만 등록 (중복 방지)
+    const aiGenerateThumbBtn = resourceLibrary.querySelector(
+      "#ai-generate-thumb-btn"
+    );
+    if (aiGenerateThumbBtn && !aiGenerateThumbBtn.__cp_thumb_event) {
+      aiGenerateThumbBtn.addEventListener("click", async () => {
+        const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
+        const aiMessage = resourceLibrary.querySelector("#ai-image-message");
+        let outline = [];
+        if (
+          window.__cp_workspace_ideaData &&
+          Array.isArray(window.__cp_workspace_ideaData.outline)
+        ) {
+          outline = window.__cp_workspace_ideaData.outline;
+        } else if (
+          typeof ideaData !== "undefined" &&
+          Array.isArray(ideaData.outline)
+        ) {
+          outline = ideaData.outline;
+        }
+        if (!outline.length) outline = ["썸네일 예시"];
+        // 스타일/비율 정보 추출
+        const style = aiStyleSelect?.value || "NONE";
+        const aspect = aiAspectSelect?.value || "1:1";
+        const { width, height } = mapAspectToSize(aspect);
+        if (aiMessage)
+          aiMessage.textContent = "Gemini로 세션별 슬로건을 생성 중...";
+        // Gemini에 outline별 슬로건 요청 (background.js에 메시지)
+        chrome.runtime.sendMessage(
+          {
+            action: "gemini_generate_thumbnail_texts",
+            data: { outlines: outline },
+          },
+          (response) => {
+            let sloganList = [];
+            if (
+              response &&
+              response.success &&
+              Array.isArray(response.slogans)
+            ) {
+              sloganList = response.slogans;
+            } else {
+              sloganList = outline.map(() => "AI 슬로건 예시");
+            }
+            console.log("[Gemini 썸네일 슬로건]", sloganList);
+            const thumbHtml = outline
+              .map((title, idx) => {
+                // Canvas로 진짜 썸네일 느낌의 카드 스타일 생성
+                const canvas = document.createElement("canvas");
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                // 1. 그림자 효과
+                ctx.save();
+                ctx.shadowColor = "rgba(0,0,0,0.18)";
+                ctx.shadowBlur = 18;
+                ctx.shadowOffsetY = 8;
+                ctx.shadowOffsetX = 0;
+                // 2. 라운드+gradient 배경
+                ctx.beginPath();
+                const r = Math.max(
+                  18,
+                  Math.floor(Math.min(width, height) / 18)
+                );
+                ctx.moveTo(r, 0);
+                ctx.lineTo(width - r, 0);
+                ctx.quadraticCurveTo(width, 0, width, r);
+                ctx.lineTo(width, height - r);
+                ctx.quadraticCurveTo(width, height, width - r, height);
+                ctx.lineTo(r, height);
+                ctx.quadraticCurveTo(0, height, 0, height - r);
+                ctx.lineTo(0, r);
+                ctx.quadraticCurveTo(0, 0, r, 0);
+                ctx.closePath();
+                // gradient
+                const grad = ctx.createLinearGradient(0, 0, width, height);
+                grad.addColorStop(0, "#3498fd");
+                grad.addColorStop(1, "#1a73e8");
+                ctx.fillStyle = grad;
+                ctx.fill();
+                ctx.restore();
+                // 3. 상단 라벨/아이콘
+                ctx.save();
+                ctx.font = `bold ${
+                  Math.floor(height / 18) + 8
+                }px Pretendard, Arial, sans-serif`;
+                ctx.fillStyle = "rgba(255,255,255,0.92)";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "top";
+                ctx.globalAlpha = 0.92;
+                ctx.fillText("썸네일", 24, 18);
+                // 아이콘(작은 원+카메라)
+                ctx.beginPath();
+                ctx.arc(width - 38, 32, 14, 0, 2 * Math.PI);
+                ctx.fillStyle = "#fff";
+                ctx.globalAlpha = 0.18;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.font = `bold ${
+                  Math.floor(height / 22) + 6
+                }px Pretendard, Arial, sans-serif`;
+                ctx.fillStyle = "#4285f4";
+                ctx.fillText("📷", width - 48, 22);
+                ctx.restore();
+                // 4. 중앙 텍스트(세션명)
+                ctx.save();
+                ctx.font = `bold ${
+                  Math.floor(height / 12) + 18
+                }px Pretendard, Arial, sans-serif`;
+                ctx.fillStyle = "#fff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                let mainText =
+                  title.length > 40 ? title.slice(0, 37) + "..." : title;
+                // 여러 줄 처리
+                const lines = [];
+                while (mainText.length > 0) {
+                  let chunk = mainText.slice(0, 20);
+                  if (mainText.length > 20) {
+                    const lastSpace = chunk.lastIndexOf(" ");
+                    if (lastSpace > 0) chunk = chunk.slice(0, lastSpace);
+                  }
+                  lines.push(chunk);
+                  mainText = mainText.slice(chunk.length).trim();
+                }
+                const lineHeight = Math.floor(height / 10) + 10;
+                const startY =
+                  height / 2 - ((lines.length - 1) * lineHeight) / 2;
+                lines.forEach((line, i) => {
+                  ctx.fillText(line, width / 2, startY + i * lineHeight);
+                });
+                ctx.restore();
+                // 5. 중앙 하단에 Gemini 슬로건
+                ctx.save();
+                ctx.font = `bold ${
+                  Math.floor(height / 18) + 10
+                }px Pretendard, Arial, sans-serif`;
+                ctx.fillStyle = "#fff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.globalAlpha = 0.92;
+                const slogan = sloganList[idx] || "AI 슬로건";
+                ctx.fillText(slogan, width / 2, height * 0.72);
+                ctx.restore();
+                // 6. 하단 스타일/비율/번호 (라벨 느낌)
+                ctx.save();
+                ctx.font = `bold ${
+                  Math.floor(height / 18) + 8
+                }px Pretendard, Arial, sans-serif`;
+                ctx.fillStyle = "rgba(255,255,255,0.92)";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "bottom";
+                ctx.globalAlpha = 0.92;
+                const infoText = `${style.toUpperCase()} • ${aspect} • #${
+                  idx + 1
+                }`;
+                // 라벨 배경
+                const labelW = ctx.measureText(infoText).width + 36;
+                const labelH = Math.floor(height / 18) + 18;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(width / 2 - labelW / 2 + 12, height - 38);
+                ctx.lineTo(width / 2 + labelW / 2 - 12, height - 38);
+                ctx.quadraticCurveTo(
+                  width / 2 + labelW / 2,
+                  height - 38,
+                  width / 2 + labelW / 2,
+                  height - 38 + 12
+                );
+                ctx.lineTo(width / 2 + labelW / 2, height - 38 + labelH - 12);
+                ctx.quadraticCurveTo(
+                  width / 2 + labelW / 2,
+                  height - 38 + labelH,
+                  width / 2 + labelW / 2 - 12,
+                  height - 38 + labelH
+                );
+                ctx.lineTo(width / 2 - labelW / 2 + 12, height - 38 + labelH);
+                ctx.quadraticCurveTo(
+                  width / 2 - labelW / 2,
+                  height - 38 + labelH,
+                  width / 2 - labelW / 2,
+                  height - 38 + labelH - 12
+                );
+                ctx.lineTo(width / 2 - labelW / 2, height - 38 + 12);
+                ctx.quadraticCurveTo(
+                  width / 2 - labelW / 2,
+                  height - 38,
+                  width / 2 - labelW / 2 + 12,
+                  height - 38
+                );
+                ctx.closePath();
+                ctx.globalAlpha = 0.22;
+                ctx.fillStyle = "#222";
+                ctx.fill();
+                ctx.restore();
+                ctx.globalAlpha = 1;
+                ctx.fillText(infoText, width / 2, height - 38 + labelH / 2);
+                ctx.restore();
+                // 7. 입체감(빛 반사 효과)
+                ctx.save();
+                const shineGrad = ctx.createLinearGradient(0, 0, width, 0);
+                shineGrad.addColorStop(0, "rgba(255,255,255,0.10)");
+                shineGrad.addColorStop(0.5, "rgba(255,255,255,0.04)");
+                shineGrad.addColorStop(1, "rgba(255,255,255,0.10)");
+                ctx.fillStyle = shineGrad;
+                ctx.fillRect(0, 0, width, height / 2.2);
+                ctx.restore();
+                // 8. border
+                ctx.save();
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = "rgba(255,255,255,0.13)";
+                ctx.beginPath();
+                ctx.moveTo(r, 0);
+                ctx.lineTo(width - r, 0);
+                ctx.quadraticCurveTo(width, 0, width, r);
+                ctx.lineTo(width, height - r);
+                ctx.quadraticCurveTo(width, height, width - r, height);
+                ctx.lineTo(r, height);
+                ctx.quadraticCurveTo(0, height, 0, height - r);
+                ctx.lineTo(0, r);
+                ctx.quadraticCurveTo(0, 0, r, 0);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.restore();
+                // 이미지 DataURL 반환
+                const url = canvas.toDataURL("image/png");
+                return `<div class=\"ai-thumb-wrap\"><img src=\"${url}\" class=\"ai-generated-thumb\" alt=\"썸네일 예시${
+                  idx + 1
+                }\" /></div>`;
+              })
+              .join("");
+            aiImageGrid.innerHTML = thumbHtml;
+            if (aiMessage)
+              aiMessage.textContent = `세션별 썸네일 예시 ${outline.length}개를 생성했습니다.`;
+          }
+        );
+      });
+      aiGenerateThumbBtn.__cp_thumb_event = true;
+    }
     aiGenerateBtn.addEventListener("click", () => {
       const prompt = (aiPromptInput?.value || "").trim();
+      const aiMessage = resourceLibrary.querySelector("#ai-image-message");
       if (!prompt) {
+        if (aiMessage) aiMessage.textContent = "프롬프트를 입력해주세요.";
         window.parent.postMessage(
           { action: "cp_show_toast", message: "프롬프트를 입력해주세요." },
           "*"
         );
         return;
       }
-      const style = aiStyleSelect?.value || "none";
+      const style = aiStyleSelect?.value || "realistic";
       const aspect = aiAspectSelect?.value || "1:1";
       const { width, height } = mapAspectToSize(aspect);
-      const count = 3;
+      const count = parseInt(aiCountSelect?.value, 10) || 3;
 
       aiGenerateBtn.disabled = true;
       const prevText = aiGenerateBtn.textContent;
       aiGenerateBtn.textContent = "✨ 생성 중...";
-      aiImageGrid.innerHTML =
-        '<p class="loading-images">이미지를 생성하는 중입니다...</p>';
+      if (aiMessage) aiMessage.textContent = "이미지를 생성하는 중입니다...";
+      aiImageGrid.innerHTML = "";
 
       chrome.runtime.sendMessage(
         {
@@ -937,10 +1195,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           aiGenerateBtn.disabled = false;
           aiGenerateBtn.textContent = prevText;
           if (response?.success) {
+            if (aiMessage) aiMessage.textContent = "이미지 생성 완료!";
             renderAIGallery(response.images || []);
           } else {
             const msg = response?.error || "이미지 생성 실패";
-            aiImageGrid.innerHTML = `<p>${msg}</p>`;
+            if (aiMessage) aiMessage.textContent = msg;
+            aiImageGrid.innerHTML = "";
             window.parent.postMessage(
               { action: "cp_show_toast", message: "❌ " + msg },
               "*"
