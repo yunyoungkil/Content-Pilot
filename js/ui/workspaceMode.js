@@ -182,6 +182,7 @@ export function renderWorkspace(container, ideaData) {
         <div class="resource-tabs">
           <button class="resource-tab-btn" data-tab="all-scraps" style="font-weight:bold;">📖 모든 스크랩</button>
           <button class="resource-tab-btn" data-tab="image-gallery">🖼️ 이미지 갤러리</button>
+          <button class="resource-tab-btn" data-tab="ai-image">✨ AI 이미지 생성</button>
         </div>
   <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
           <div class="scrap-list all-scraps-list">
@@ -191,6 +192,44 @@ export function renderWorkspace(container, ideaData) {
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
           <div class="image-gallery-grid">
             <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
+          </div>
+        </div>
+        <div class="resource-content-area ai-image-area" id="ai-image-area" style="display: none;">
+          <div class="ai-image-controls">
+            <label class="ai-field" style="display:block;width:100%;">
+              <div class="ai-field-row">
+                <span>프롬프트</span>
+                <span class="ai-hint">최대 250자 · 기본 프롬프트 자동 생성</span>
+              </div>
+              <textarea id="ai-image-prompt" maxlength="250" class="ai-prompt-textarea" placeholder="어떤 이미지를 원하시나요? 예: 미래지향적 도시의 야경, 네온사인, 시네마틱 라이트"></textarea>
+            </label>
+            <div class="ai-row">
+              <label>
+                <span class="ai-label">스타일</span>
+                <select id="ai-image-style" class="ai-select">
+                  <option value="none">None</option>
+                  <option value="realistic">Realistic Photo</option>
+                  <option value="3d">3D Render</option>
+                  <option value="watercolor">Watercolor</option>
+                  <option value="cyberpunk">Cyberpunk</option>
+                </select>
+              </label>
+              <label>
+                <span class="ai-label">종횡비</span>
+                <select id="ai-image-aspect" class="ai-select">
+                  <option value="1:1">1:1 (Square)</option>
+                  <option value="16:9">16:9 (Landscape)</option>
+                  <option value="9:16">9:16 (Vertical)</option>
+                </select>
+              </label>
+            </div>
+            <div class="ai-row ai-actions">
+              <button id="ai-generate-btn" class="ai-generate-btn">✨ 3개의 이미지 생성하기</button>
+              <span class="ai-cost-note">유의: 생성은 비용이 발생할 수 있습니다. 데모에서는 로컬/플레이스홀더 방식으로 생성됩니다.</span>
+            </div>
+          </div>
+          <div class="ai-image-grid" id="ai-image-grid">
+            <p class="loading-images">프롬프트를 입력하고 이미지를 생성해보세요.</p>
           </div>
         </div>
       </div>
@@ -499,11 +538,18 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         );
         cleanup();
         window.removeEventListener("message", onResult);
-      } else if (event.data && event.data.action === "cp_update_editing_range" && (event.data.data?.range || event.data.data?.url)) {
+      } else if (
+        event.data &&
+        event.data.action === "cp_update_editing_range" &&
+        (event.data.data?.range || event.data.data?.url)
+      ) {
         // TUI iframe에서 전달한 Range를 Quill iframe으로 전달
         if (editorIframe && editorIframe.contentWindow) {
           editorIframe.contentWindow.postMessage(
-            { action: "cp_update_editing_range", data: { range: event.data.data.range, url: event.data.data.url } },
+            {
+              action: "cp_update_editing_range",
+              data: { range: event.data.data.range, url: event.data.data.url },
+            },
             "*"
           );
         }
@@ -515,17 +561,38 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const tabBtns = resourceLibrary.querySelectorAll(".resource-tab-btn");
   const allScrapsArea = resourceLibrary.querySelector(".all-scraps-area");
   const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
+  const aiImageArea = resourceLibrary.querySelector(".ai-image-area");
+  const aiPromptInput = resourceLibrary.querySelector("#ai-image-prompt");
+  const aiStyleSelect = resourceLibrary.querySelector("#ai-image-style");
+  const aiAspectSelect = resourceLibrary.querySelector("#ai-image-aspect");
+  const aiGenerateBtn = resourceLibrary.querySelector("#ai-generate-btn");
+  const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
+
+  // 기본 프롬프트 자동 생성
+  function buildDefaultPromptFromIdea(idea) {
+    const base = (idea?.title || "").trim();
+    const tags = Array.isArray(idea?.tags)
+      ? idea.tags.filter((t) => t && t !== "#AI-추천").slice(0, 4)
+      : [];
+    const tagLine = tags.length ? `, ${tags.join(", ")}` : "";
+    const quality = ", high quality photo, professional, cinematic lighting";
+    return `${base}${tagLine}${quality}`.trim();
+  }
+  if (aiPromptInput) {
+    aiPromptInput.value = buildDefaultPromptFromIdea(ideaData);
+  }
 
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       tabBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      if (btn.dataset.tab === "all-scraps") {
-        allScrapsArea.style.display = "block";
-        imageGalleryArea.style.display = "none";
-      } else {
-        allScrapsArea.style.display = "none";
-        imageGalleryArea.style.display = "block";
+      const tab = btn.dataset.tab;
+      allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
+      imageGalleryArea.style.display =
+        tab === "image-gallery" ? "block" : "none";
+      aiImageArea.style.display = tab === "ai-image" ? "block" : "none";
+
+      if (tab === "image-gallery") {
         // 연결된 스크랩 데이터로 이미지 갤러리 갱신
         chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
           if (response && response.success) {
@@ -618,13 +685,16 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           data?.imageUrl ||
           data?.imgSrc;
         // allDocumentImages가 있으면 iframe에 전달
-        if (event.data?.allDocumentImages && Array.isArray(event.data.allDocumentImages)) {
+        if (
+          event.data?.allDocumentImages &&
+          Array.isArray(event.data.allDocumentImages)
+        ) {
           // 모달 생성 및 iframe 준비
           renderTUIEditorModal(tuiImageUrl, sendCommand, (iframe) => {
             iframe.contentWindow.postMessage(
               {
                 action: "set-document-images",
-                images: event.data.allDocumentImages
+                images: event.data.allDocumentImages,
               },
               "*"
             );
@@ -775,6 +845,109 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         sendCommand("insert-text", { text: ` ${keyword} ` });
         sendCommand("focus");
       }
+    });
+  }
+
+  // --- AI 이미지 생성 기능 ---
+  function mapAspectToSize(aspect) {
+    switch (aspect) {
+      case "16:9":
+        return { width: 1024, height: 576 };
+      case "9:16":
+        return { width: 576, height: 1024 };
+      case "1:1":
+      default:
+        return { width: 768, height: 768 };
+    }
+  }
+
+  function renderAIGallery(images) {
+    if (!aiImageGrid) return;
+    if (!images || images.length === 0) {
+      aiImageGrid.innerHTML = "<p>이미지 생성 결과가 없습니다.</p>";
+      return;
+    }
+    const html = images
+      .map(
+        (dataUrl, idx) => `
+        <div class="ai-thumb-wrap">
+          <img src="${dataUrl}" class="ai-generated-thumb" draggable="true" alt="AI 생성 이미지 ${
+          idx + 1
+        }" />
+          <div class="ai-thumb-actions">
+            <button class="ai-insert-btn" data-url="${dataUrl}">에디터에 삽입</button>
+            <a class="ai-download-btn" href="${dataUrl}" download="cp-ai-image-${
+          idx + 1
+        }.png">다운로드</a>
+          </div>
+        </div>
+      `
+      )
+      .join("");
+    aiImageGrid.innerHTML = html;
+
+    aiImageGrid.querySelectorAll(".ai-generated-thumb").forEach((img) => {
+      img.addEventListener("click", () => {
+        sendCommand("insert-image", { url: img.src });
+        sendCommand("focus");
+      });
+      img.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("application/x-cp-ai-image", img.src);
+        e.dataTransfer.effectAllowed = "copy";
+      });
+    });
+    aiImageGrid.querySelectorAll(".ai-insert-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const url = btn.getAttribute("data-url");
+        if (url) {
+          sendCommand("insert-image", { url });
+          sendCommand("focus");
+        }
+      });
+    });
+  }
+
+  if (aiGenerateBtn) {
+    aiGenerateBtn.addEventListener("click", () => {
+      const prompt = (aiPromptInput?.value || "").trim();
+      if (!prompt) {
+        window.parent.postMessage(
+          { action: "cp_show_toast", message: "프롬프트를 입력해주세요." },
+          "*"
+        );
+        return;
+      }
+      const style = aiStyleSelect?.value || "none";
+      const aspect = aiAspectSelect?.value || "1:1";
+      const { width, height } = mapAspectToSize(aspect);
+      const count = 3;
+
+      aiGenerateBtn.disabled = true;
+      const prevText = aiGenerateBtn.textContent;
+      aiGenerateBtn.textContent = "✨ 생성 중...";
+      aiImageGrid.innerHTML =
+        '<p class="loading-images">이미지를 생성하는 중입니다...</p>';
+
+      chrome.runtime.sendMessage(
+        {
+          action: "ai_generate_images",
+          data: { prompt, style, aspect, count, size: { width, height } },
+        },
+        (response) => {
+          aiGenerateBtn.disabled = false;
+          aiGenerateBtn.textContent = prevText;
+          if (response?.success) {
+            renderAIGallery(response.images || []);
+          } else {
+            const msg = response?.error || "이미지 생성 실패";
+            aiImageGrid.innerHTML = `<p>${msg}</p>`;
+            window.parent.postMessage(
+              { action: "cp_show_toast", message: "❌ " + msg },
+              "*"
+            );
+          }
+        }
+      );
     });
   }
 
@@ -935,6 +1108,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     try {
       scrapData = JSON.parse(e.dataTransfer.getData("application/json"));
     } catch (error) {
+      // scrap json이 아니면 AI 이미지 드래그 여부 확인
+      const aiDataUrl = e.dataTransfer.getData("application/x-cp-ai-image");
+      if (aiDataUrl && e.target.closest("#main-editor-panel")) {
+        sendCommand("insert-image", { url: aiDataUrl });
+        sendCommand("focus");
+      }
       return;
     }
 

@@ -167,6 +167,110 @@
   gap: 8px;
   padding: 12px 0;
 }
+/* AI 이미지 생성 탭 */
+.ai-image-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-image-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ai-field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ai-hint {
+  color: #888;
+  font-size: 11px;
+}
+.ai-prompt-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid #e5eaf0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.ai-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.ai-label {
+  display: block;
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 4px;
+}
+.ai-select {
+  padding: 6px 8px;
+  border: 1px solid #e5eaf0;
+  border-radius: 6px;
+}
+.ai-actions {
+  align-items: center;
+  justify-content: space-between;
+}
+.ai-generate-btn {
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #a3c3f9;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ai-generate-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.ai-cost-note {
+  color: #999;
+  font-size: 12px;
+}
+.ai-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 6px 0 12px;
+}
+.ai-thumb-wrap {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f7f8fa;
+  border: 1px solid #eef2f7;
+}
+.ai-generated-thumb {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  cursor: pointer;
+  display: block;
+}
+.ai-thumb-actions {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: flex;
+  gap: 6px;
+}
+.ai-thumb-actions .ai-insert-btn,
+.ai-thumb-actions .ai-download-btn {
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}
 /* --- 워크스페이스 UI 스타일 --- */
 
 /* 3. 초안 작성 및 연결된 자료 패널 (중앙) */

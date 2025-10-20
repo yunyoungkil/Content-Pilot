@@ -450,33 +450,45 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 워크스페이스 draft 저장
-  if (msg.action === 'save_idea_draft' && msg.ideaId && msg.draft !== undefined) {
+  if (
+    msg.action === "save_idea_draft" &&
+    msg.ideaId &&
+    msg.draft !== undefined
+  ) {
     try {
       const db = firebase.database();
       // 아이디어 카드가 어떤 status(컬럼)에 있는지 찾아야 함
-      db.ref('kanban').once('value').then(snapshot => {
-        const allCards = snapshot.val() || {};
-        let foundStatus = null;
-        for (const status in allCards) {
-          if (allCards[status] && allCards[status][msg.ideaId]) {
-            foundStatus = status;
-            break;
+      db.ref("kanban")
+        .once("value")
+        .then((snapshot) => {
+          const allCards = snapshot.val() || {};
+          let foundStatus = null;
+          for (const status in allCards) {
+            if (allCards[status] && allCards[status][msg.ideaId]) {
+              foundStatus = status;
+              break;
+            }
           }
-        }
-        if (!foundStatus) {
-          sendResponse({ success: false, message: 'Idea card not found.' });
-          return;
-        }
-        db.ref(`kanban/${foundStatus}/${msg.ideaId}/draftContent`).set(msg.draft)
-          .then(() => {
-            db.ref(`kanban/${foundStatus}/${msg.ideaId}/updatedAt`).set(firebase.database.ServerValue.TIMESTAMP);
-            sendResponse({ success: true, message: 'Draft saved successfully.' });
-          })
-          .catch(error => {
-            console.error('Firebase Draft Save Error:', error);
-            sendResponse({ success: false, error: error.message });
-          });
-      });
+          if (!foundStatus) {
+            sendResponse({ success: false, message: "Idea card not found." });
+            return;
+          }
+          db.ref(`kanban/${foundStatus}/${msg.ideaId}/draftContent`)
+            .set(msg.draft)
+            .then(() => {
+              db.ref(`kanban/${foundStatus}/${msg.ideaId}/updatedAt`).set(
+                firebase.database.ServerValue.TIMESTAMP
+              );
+              sendResponse({
+                success: true,
+                message: "Draft saved successfully.",
+              });
+            })
+            .catch((error) => {
+              console.error("Firebase Draft Save Error:", error);
+              sendResponse({ success: false, error: error.message });
+            });
+        });
       return true; // 비동기 응답
     } catch (e) {
       sendResponse({ success: false, error: e.message });
@@ -591,6 +603,54 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
       });
     return true;
+  } else if (msg.action === "ai_generate_images") {
+    // Placeholder generator: create simple canvases as Data URLs
+    (async () => {
+      try {
+        const {
+          prompt = "",
+          style = "none",
+          aspect = "1:1",
+          count = 3,
+          size,
+        } = msg.data || {};
+        const width = Math.min(Math.max(size?.width || 768, 256), 1536);
+        const height = Math.min(Math.max(size?.height || 768, 256), 1536);
+
+        // Optional simple per-session rate-limit: max 12 images per minute
+        const now = Date.now();
+        if (!globalThis.__cp_ai_rate) globalThis.__cp_ai_rate = [];
+        // remove old entries
+        globalThis.__cp_ai_rate = globalThis.__cp_ai_rate.filter(
+          (t) => now - t < 60_000
+        );
+        if (globalThis.__cp_ai_rate.length + count > 12) {
+          sendResponse({
+            success: false,
+            error: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+          });
+          return;
+        }
+        for (let i = 0; i < count; i++) globalThis.__cp_ai_rate.push(now);
+
+        const images = await Promise.all(
+          Array.from({ length: count }).map((_, idx) =>
+            generatePlaceholderImage({
+              width,
+              height,
+              text: truncate(`${prompt}`.trim() || "AI Image", 60),
+              subtitle: `${style.toUpperCase()} • ${aspect} • #${idx + 1}`,
+            })
+          )
+        );
+
+        sendResponse({ success: true, images });
+      } catch (e) {
+        console.error("AI 이미지 생성 실패:", e);
+        sendResponse({ success: false, error: e?.message || "생성 중 오류" });
+      }
+    })();
+    return true; // async
   } else if (msg.action === "scrap_entire_analysis") {
     const analysisContent = msg.data;
     if (!analysisContent) return true;
@@ -1409,7 +1469,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "unlink_scrap_from_idea") {
     const { ideaId, scrapId, status } = msg.data;
     if (!ideaId || !scrapId || !status) {
-      sendResponse({ success: false, error: "ID 또는 상태가 유효하지 않습니다." });
+      sendResponse({
+        success: false,
+        error: "ID 또는 상태가 유효하지 않습니다.",
+      });
       return true;
     }
 
@@ -1583,6 +1646,136 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Util: create a simple PNG data URL with text
+function generatePlaceholderImage({
+  width = 768,
+  height = 768,
+  text = "AI Image",
+  subtitle = "",
+}) {
+  return new Promise((resolve) => {
+    try {
+      // OffscreenCanvas is available in service worker contexts in modern Chrome
+      let canvas;
+      if (typeof OffscreenCanvas !== "undefined") {
+        canvas = new OffscreenCanvas(width, height);
+      } else {
+        // Fallback size
+        canvas = new OffscreenCanvas(512, 512);
+      }
+      const ctx = canvas.getContext("2d");
+      // background gradient
+      const grad = ctx.createLinearGradient(0, 0, width, height);
+      grad.addColorStop(0, "#1a73e8");
+      grad.addColorStop(1, "#4285f4");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+
+      // rounded rectangle overlay
+      const pad = Math.round(Math.min(width, height) * 0.06);
+      const r = Math.round(Math.min(width, height) * 0.04);
+      drawRoundedRect(ctx, pad, pad, width - pad * 2, height - pad * 2, r);
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fill();
+
+      // title text
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold ${Math.round(
+        Math.min(width, height) * 0.06
+      )}px ui-sans-serif,system-ui,Segoe UI`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      wrapText(
+        ctx,
+        text,
+        width / 2,
+        height / 2 - Math.round(height * 0.06),
+        Math.round(width * 0.7),
+        Math.round(Math.min(width, height) * 0.08)
+      );
+
+      // subtitle
+      ctx.font = `500 ${Math.round(
+        Math.min(width, height) * 0.035
+      )}px ui-sans-serif,system-ui,Segoe UI`;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      wrapText(
+        ctx,
+        subtitle,
+        width / 2,
+        height / 2 + Math.round(height * 0.14),
+        Math.round(width * 0.75),
+        Math.round(Math.min(width, height) * 0.06)
+      );
+
+      const blobPromise = canvas.convertToBlob
+        ? canvas.convertToBlob({ type: "image/png", quality: 0.92 })
+        : new Promise((res) => canvas.toBlob(res));
+      blobPromise.then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn(
+        "Placeholder canvas not available, fetching fallback image and converting to Data URL"
+      );
+      const url = `https://dummyimage.com/${width}x${height}/4285f4/ffffff.png&text=AI+Image`;
+      fetch(url)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        })
+        .catch(() =>
+          resolve(
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABF3n2NQAAAABJRU5ErkJggg=="
+          )
+        );
+    }
+  });
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = String(text || "").split(" ");
+  let line = "";
+  let yy = y;
+  const lines = [];
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + " ";
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      lines.push(line);
+      line = words[n] + " ";
+    } else {
+      line = testLine;
+    }
+  }
+  lines.push(line);
+  const totalHeight = lines.length * lineHeight;
+  yy -= totalHeight / 2;
+  lines.forEach((l, i) => ctx.fillText(l.trim(), x, yy + i * lineHeight));
+}
+
+function truncate(str, max) {
+  return (str || "").length > max ? str.slice(0, max - 1) + "…" : str;
+}
+
 // --- 3. 주기적 데이터 수집 로직 ---
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -1692,15 +1885,12 @@ async function fetchRssFeed(url, channelType) {
 
     const finalTitle = channelTitle || url;
     const sourceId = btoa(url).replace(/=/g, "");
-    firebase
-      .database()
-      .ref(`channel_meta/${sourceId}`)
-      .set({
-        title: finalTitle,
-        type: "blog",
-        source: url,
-        fetchedAt: Date.now(),
-      });
+    firebase.database().ref(`channel_meta/${sourceId}`).set({
+      title: finalTitle,
+      type: "blog",
+      source: url,
+      fetchedAt: Date.now(),
+    });
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
 
