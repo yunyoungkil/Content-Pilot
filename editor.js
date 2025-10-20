@@ -1,166 +1,18 @@
+// 툴바 커스텀 버튼 렌더링 (Quill 초기화 후)
+  setTimeout(() => {
+    const toolbar = document.querySelector('.ql-toolbar');
+    if (toolbar) {
+      const tuiBtn = toolbar.querySelector('.ql-tui-edit');
+      if (tuiBtn) {
+        tuiBtn.innerHTML = '<span style="font-size:16px;vertical-align:middle;">🎨</span>';
+        tuiBtn.title = 'TUI 이미지 편집';
+      }
+    }
+  }, 100);
 // W-17: 이미지 편집 툴팁 오버레이 생성/제거 및 액션 메시지
 let __cp_currentImageForControls = null; // 현재 오버레이가 붙은 이미지 참조
 let __cp_controlsScrollRoot = null; // 스크롤 이벤트를 구독하는 루트(.ql-editor)
 
-function removeImageControls() {
-  const doc = document;
-  const controls = doc.querySelector(".editor-image-controls");
-  if (controls) controls.parentNode.removeChild(controls);
-  __cp_currentImageForControls = null;
-  if (__cp_controlsScrollRoot) {
-    try {
-      __cp_controlsScrollRoot.removeEventListener(
-        "scroll",
-        updateImageControlsPosition
-      );
-    } catch (e) {}
-    __cp_controlsScrollRoot = null;
-  }
-}
-
-function updateImageControlsPosition() {
-  const doc = document;
-  const controls = doc.querySelector(".editor-image-controls");
-  const img = __cp_currentImageForControls;
-  if (!controls || !img || !img.isConnected) return;
-  const container =
-    doc.querySelector(".ql-container") ||
-    img.closest(".ql-container") ||
-    doc.body;
-  const imgRect = img.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
-  // 이미지 중앙 상단 30px 위에 배치
-  const top = imgRect.top - containerRect.top - 30;
-  const left = imgRect.left - containerRect.left + imgRect.width / 2;
-  controls.style.top = top + "px";
-  controls.style.left = left + "px";
-}
-
-function showImageControls(img) {
-  removeImageControls();
-  const doc = document;
-  // 태그형 스몰 버튼 스타일을 문서에 1회 주입
-  if (!doc.getElementById("cp-image-controls-style")) {
-    const style = doc.createElement("style");
-    style.id = "cp-image-controls-style";
-    style.textContent = `
-      .editor-image-controls{ 
-        padding: 6px 8px; 
-        background: rgba(255,255,255,0.96);
-        border: 1px solid #E5EAF0; 
-        border-radius: 10px; 
-        box-shadow: 0 6px 16px rgba(16,24,40,0.12); 
-        backdrop-filter: saturate(160%) blur(8px);
-        pointer-events: auto;
-      }
-      .editor-image-controls .tag-btn{ 
-        display: inline-flex; 
-        align-items: center; 
-        justify-content: center;
-        gap: 0; 
-        width: 28px;
-        height: 28px; 
-        padding: 0; 
-        font-size: 16px; 
-        line-height: 1; 
-        color: #111827; 
-        background: #F9FAFB; 
-        border: 1px solid #E5EAF0; 
-        border-radius: 999px; 
-        cursor: pointer; 
-        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; 
-        box-shadow: 0 1px 2px rgba(16,24,40,0.06);
-      }
-      .editor-image-controls .tag-btn:hover{ 
-        background: #F3F4F6; 
-        border-color: #CBD5E1;
-        transform: scale(1.05);
-      }
-      .editor-image-controls .tag-btn:active{ 
-        background: #E5E7EB; 
-        box-shadow: 0 0 0 2px rgba(45,140,240,0.15) inset;
-        transform: scale(0.95);
-      }
-      .editor-image-controls .tag-btn + .tag-btn{ margin-left: 6px; }
-    `;
-    doc.head.appendChild(style);
-  }
-  const controls = doc.createElement("div");
-  controls.className = "editor-image-controls";
-  controls.innerHTML = `
-    <span style="display:flex;align-items:center;gap:8px;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;">
-        <circle cx="12" cy="12" r="12" fill="#2D8CF0"/>
-        <text x="12" y="16" text-anchor="middle" fill="#fff" font-size="12" font-family="Arial" font-weight="bold">CP</text>
-      </svg>
-      <button type="button" class="tag-btn ai-edit-btn" title="AI 이미지 수정">🧠</button>
-      <button type="button" class="tag-btn tui-edit-btn" title="TUI 편집기 열기">🎨</button>
-    </span>
-  `;
-  // 위치 계산: .ql-container 기준으로 오버레이를 붙이고, 이미지 위치는 getBoundingClientRect()로 계산
-  const container =
-    doc.querySelector(".ql-container") ||
-    img.closest(".ql-container") ||
-    doc.body;
-  const imgRect = img.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
-  console.log("이미지 클릭됨", img);
-  console.log("오버레이 위치 계산:", imgRect);
-  controls.style.position = "absolute";
-  controls.style.top = imgRect.top - containerRect.top - 30 + "px";
-  controls.style.left =
-    imgRect.left - containerRect.left + imgRect.width / 2 + "px";
-  controls.style.transform = "translateX(-50%)";
-  controls.style.zIndex = 10001;
-  // 컨테이너가 position 기준이 되도록 보정
-  try {
-    const cs = window.getComputedStyle(container);
-    if (cs && cs.position === "static") {
-      container.style.position = "relative";
-    }
-  } catch (e) {}
-  container.appendChild(controls);
-  console.log("[Content Pilot] editor-image-controls 추가 위치:", container);
-  console.log("[Content Pilot] 오버레이 innerHTML:", controls.innerHTML);
-  __cp_currentImageForControls = img;
-  // 안전을 위해 최초 추가 직후 한 번 더 위치 재계산
-  updateImageControlsPosition();
-  // 에디터 내부 스크롤에 반응하여 위치 업데이트
-  __cp_controlsScrollRoot =
-    (window.quillEditor && window.quillEditor.root) ||
-    doc.querySelector(".ql-editor");
-  if (__cp_controlsScrollRoot) {
-    try {
-      __cp_controlsScrollRoot.addEventListener(
-        "scroll",
-        updateImageControlsPosition,
-        { passive: true }
-      );
-    } catch (e) {
-      __cp_controlsScrollRoot.addEventListener(
-        "scroll",
-        updateImageControlsPosition
-      );
-    }
-  }
-
-  controls.querySelector(".ai-edit-btn").onclick = function (e) {
-    e.stopPropagation();
-    window.parent.postMessage(
-      { action: "cp_open_ai_editor", imgSrc: img.src },
-      "*"
-    );
-    removeImageControls();
-  };
-  controls.querySelector(".tui-edit-btn").onclick = function (e) {
-    e.stopPropagation();
-    window.parent.postMessage(
-      { action: "cp_open_tui_editor", imageUrl: img.src },
-      "*"
-    );
-    removeImageControls();
-  };
-}
 // editor.js - iframe 내에서 동작하는 Quill 에디터 제어 스크립트
 // Quill Image Resize 모듈 등록 (최상단에서 전역 등록)
 if (window.Quill && window.ImageResize) {
@@ -193,26 +45,71 @@ function initializeEditor() {
           [{ font: [] }],
           [{ align: [] }],
           ["link", "image", "video"],
+          ["tui-edit"], // TUI 편집 버튼만 남김
           ["clean"],
           ["undo", "redo"],
         ],
         handlers: {
           undo: () => quillEditor.history.undo(),
           redo: () => quillEditor.history.redo(),
+          "tui-edit": function () {
+            // Quill 문서 내 모든 이미지와 Range 추출
+            let allDocumentImages = [];
+            const contents = quillEditor.getContents();
+            let idx = 0;
+            contents.ops.forEach(op => {
+              if (op.insert && op.insert.image) {
+                allDocumentImages.push({
+                  url: op.insert.image,
+                  range: { index: idx, length: 1 }
+                });
+                idx += 1;
+              } else if (typeof op.insert === 'string') {
+                idx += op.insert.length;
+              }
+            });
+            if (allDocumentImages.length === 0) return; // 이미지 없으면 동작X
+            // 첫 번째 이미지를 자동 선택
+            const firstImage = allDocumentImages[0];
+            window.__cp_editingImageRange = firstImage.range;
+            window.__cp_selectedImageRange = firstImage.range;
+            window.__cp_selectedImageUrl = firstImage.url;
+            window.parent.postMessage({
+              action: "cp_open_tui_editor",
+              currentImageUrl: firstImage.url,
+              allDocumentImages
+            }, "*");
+          }
         },
       },
-      imageResize: {}, // 이미지 리사이즈 모듈 활성화
+      imageResize: {},
     },
     placeholder:
       "이곳에 콘텐츠 초안을 작성하거나, 자료 보관함에서 스크랩을 끌어다 놓으세요...",
   });
 
-  // W-17: 이미지 클릭 시 커스텀 오버레이 생성
+  // 이미지 클릭 시 Range/URL 저장, 툴바 버튼 활성화
   quillEditor.root.addEventListener("click", function (e) {
     if (e.target && e.target.tagName === "IMG") {
-      showImageControls(e.target);
+      const selection = quillEditor.getSelection();
+      // 이미지의 index를 계산
+      let idx = 0;
+      const contents = quillEditor.getContents();
+      for (const op of contents.ops) {
+        if (op.insert && op.insert.image) {
+          if (e.target.src === op.insert.image) {
+            window.__cp_selectedImageRange = { index: idx, length: 1 };
+            window.__cp_selectedImageUrl = op.insert.image;
+            break;
+          }
+          idx += 1;
+        } else if (typeof op.insert === 'string') {
+          idx += op.insert.length;
+        }
+      }
     } else {
-      removeImageControls();
+      window.__cp_selectedImageRange = null;
+      window.__cp_selectedImageUrl = null;
     }
   });
 
@@ -335,6 +232,108 @@ function initializeEditor() {
     if (!quillEditor) return;
     const { action, data } = event.data;
     switch (action) {
+      case "replace-edited-image": {
+        try {
+          const range = window.__cp_editingImageRange;
+          if (!range || !data || !data.dataUrl) {
+            console.error("이미지 교체 실패: Range 또는 Data URL 누락", { range, hasDataUrl: !!(data && data.dataUrl) });
+            break;
+          }
+          const length = typeof range.length === "number" && range.length > 0 ? range.length : 1;
+          // 우선 포맷에서 이미지 여부 확인
+          let isImageAtRange = false;
+          let prevImgNode = null;
+          try {
+            const fmt = quillEditor.getFormat(range.index, length);
+            if (fmt && fmt.image) isImageAtRange = true;
+          } catch (e) {}
+          // 포맷으로 확인이 어려울 경우 Leaf로 보조 확인
+          if (!isImageAtRange) {
+            try {
+              const leafTuple = quillEditor.getLeaf(range.index);
+              const leaf = Array.isArray(leafTuple) ? leafTuple[0] : null;
+              if (leaf && leaf.domNode && leaf.domNode.tagName === "IMG") {
+                isImageAtRange = true;
+                prevImgNode = leaf.domNode;
+              }
+            } catch (e) {}
+          } else {
+            // 포맷으로 이미지가 맞으면 DOM 노드도 찾아둠
+            try {
+              const leafTuple = quillEditor.getLeaf(range.index);
+              const leaf = Array.isArray(leafTuple) ? leafTuple[0] : null;
+              if (leaf && leaf.domNode && leaf.domNode.tagName === "IMG") {
+                prevImgNode = leaf.domNode;
+              }
+            } catch (e) {}
+          }
+          if (!isImageAtRange) {
+            console.error("이미지 교체 실패: Range 위치가 이미지가 아닙니다.", range);
+            window.__cp_editingImageRange = null;
+            break;
+          }
+          // 기존 이미지의 크기 스타일 추출
+          let prevWidth = null, prevHeight = null;
+          if (prevImgNode) {
+            // style 우선, 없으면 getBoundingClientRect로 픽셀값
+            prevWidth = prevImgNode.style.width || prevImgNode.getAttribute('width');
+            prevHeight = prevImgNode.style.height || prevImgNode.getAttribute('height');
+            const rect = prevImgNode.getBoundingClientRect();
+            if ((!prevWidth || prevWidth === 'auto') && rect.width) prevWidth = rect.width + 'px';
+            if ((!prevHeight || prevHeight === 'auto') && rect.height) prevHeight = rect.height + 'px';
+          }
+          // 기존 이미지 삭제 및 새 이미지 삽입
+          quillEditor.deleteText(range.index, length);
+          quillEditor.insertEmbed(range.index, "image", data.dataUrl);
+          // 새 이미지 노드에 동일 스타일/속성 적용
+          setTimeout(() => {
+            const leafTuple = quillEditor.getLeaf(range.index);
+            const leaf = Array.isArray(leafTuple) ? leafTuple[0] : null;
+            if (leaf && leaf.domNode && leaf.domNode.tagName === "IMG") {
+              if (prevWidth) {
+                leaf.domNode.style.width = prevWidth;
+                leaf.domNode.setAttribute('width', prevWidth.replace('px',''));
+              }
+              if (prevHeight) {
+                leaf.domNode.style.height = prevHeight;
+                leaf.domNode.setAttribute('height', prevHeight.replace('px',''));
+              }
+            }
+          }, 0);
+          quillEditor.setSelection(range.index + 1, 0);
+          window.__cp_editingImageRange = null;
+          // 저장 트리거 (선택) - 부모에 저장 요청 전달
+          window.parent.postMessage(
+            { action: "cp_save_draft", content: quillEditor.root.innerHTML },
+            "*"
+          );
+        } catch (err) {
+          console.error("이미지 교체 처리 중 오류:", err);
+        }
+        break;
+      }
+      case "cp_update_editing_range":
+        if (data && data.range) {
+          window.__cp_editingImageRange = data.range;
+        } else if (data && data.url) {
+          // URL만 온 경우 현재 문서에서 해당 이미지의 최초 인덱스를 탐색해 Range 설정
+          try {
+            const contents = quillEditor.getContents();
+            let idx = 0;
+            for (const op of contents.ops) {
+              if (op.insert && op.insert.image) {
+                if (op.insert.image === data.url) {
+                  window.__cp_editingImageRange = { index: idx, length: 1 };
+                  break;
+                }
+                idx += 1;
+              } else if (typeof op.insert === 'string') {
+                idx += op.insert.length;
+              }
+            }
+          } catch (e) {}
+        }
+        break;
       case "set-content":
         if (data.delta) {
           quillEditor.setContents(data.delta);
@@ -455,6 +454,20 @@ function initializeEditor() {
           "*"
         );
         break;
+      case "edit-image": {
+        // TUI 에디터 iframe에 이미지 전달
+        tuiEditorIframe.contentWindow.postMessage({
+          action: "set-image",
+          data: { dataUrl: imageUrl }
+        }, "*");
+        // 이미지 set 후 undo/redo 스택에 첫 상태 강제 push
+        setTimeout(() => {
+          tuiEditorIframe.contentWindow.postMessage({
+            action: "add-undo-stack"
+          }, "*");
+        }, 300);
+        break;
+      }
       default:
         console.log("Unknown action:", action);
     }

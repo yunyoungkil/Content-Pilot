@@ -385,7 +385,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     }
   }
   // --- W-21/W-22/W-23: TUI 편집 모달 렌더링 유틸 ---
-  function renderTUIEditorModal(imageUrl, sendCommand) {
+  function renderTUIEditorModal(imageUrl, sendCommand, onIframeReady) {
     if (!imageUrl) {
       window.parent.postMessage(
         {
@@ -463,12 +463,15 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     iframe.style.zIndex = "9999"; // 백드롭(9998)보다 앞에 위치
     mountEl.appendChild(iframe);
 
-    // iframe 로드 후 이미지 URL 전달
+    // iframe 로드 후 이미지 URL 전달 및 추가 콜백 실행
     iframe.onload = () => {
       iframe.contentWindow.postMessage(
         { action: "open-tui-editor", imageUrl },
         "*"
       );
+      if (typeof onIframeReady === "function") {
+        onIframeReady(iframe);
+      }
     };
 
     // 저장 버튼 클릭 시 iframe에 편집 결과 요청
@@ -476,24 +479,33 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       iframe.contentWindow.postMessage({ action: "get-edited-image" }, "*");
     };
 
-    // 부모 창에서 결과 수신 후 Quill에 반영
+    // 부모 창에서 결과/범위 갱신 수신 후 Quill에 반영
     window.addEventListener("message", function onResult(event) {
       if (
         event.data &&
         event.data.action === "tui-editor-result" &&
         event.data.dataUrl
       ) {
-        sendCommand("insert-image", { url: event.data.dataUrl });
+        // 중복 삽입 방지: replace-edited-image 한 번만 호출
+        sendCommand("replace-edited-image", { dataUrl: event.data.dataUrl });
         sendCommand("focus");
         window.parent.postMessage(
           {
             action: "cp_show_toast",
-            message: "✅ 편집된 이미지가 삽입되었습니다.",
+            message: "✅ 편집된 이미지로 교체했습니다.",
           },
           "*"
         );
         cleanup();
         window.removeEventListener("message", onResult);
+      } else if (event.data && event.data.action === "cp_update_editing_range" && (event.data.data?.range || event.data.data?.url)) {
+        // TUI iframe에서 전달한 Range를 Quill iframe으로 전달
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage(
+            { action: "cp_update_editing_range", data: { range: event.data.data.range, url: event.data.data.url } },
+            "*"
+          );
+        }
       }
     });
   }
@@ -598,11 +610,27 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       case "cp_open_tui_editor": {
         // 수신 필드 호환: imageUrl 우선, 과거 imgSrc도 지원
         const tuiImageUrl =
+          event.data?.currentImageUrl ||
           event.data?.imageUrl ||
           event.data?.imgSrc ||
+          data?.currentImageUrl ||
           data?.imageUrl ||
           data?.imgSrc;
-        renderTUIEditorModal(tuiImageUrl, sendCommand);
+        // allDocumentImages가 있으면 iframe에 전달
+        if (event.data?.allDocumentImages && Array.isArray(event.data.allDocumentImages)) {
+          // 모달 생성 및 iframe 준비
+          renderTUIEditorModal(tuiImageUrl, sendCommand, (iframe) => {
+            iframe.contentWindow.postMessage(
+              {
+                action: "set-document-images",
+                images: event.data.allDocumentImages
+              },
+              "*"
+            );
+          });
+        } else {
+          renderTUIEditorModal(tuiImageUrl, sendCommand);
+        }
         break;
       }
     }

@@ -2,7 +2,7 @@
 
 ## 프로젝트 개요
 
-**Content Pilot**는 웹 콘텐츠 큐레이션을 위한 Chrome 확장 프로그램입니다. Manifest V3 기반으로 구축되어 Alt 키 토글 하이라이터, 원클릭 스크랩, Firebase 실시간 동기화, 워크스페이스 기반 콘텐츠 관리 기능을 제공합니다.
+**Content Pilot**는 웹 콘텐츠 큐레이션을 위한 Chrome 확장 프로그램입니다. Manifest V3 기반으로 구축되어 Alt 키 토글 하이라이터, 원클릭 스크랩, Firebase 실시간 동기화, iframe 기반 Quill 에디터, 워크스페이스 기반 콘텐츠 관리 기능을 제공합니다.
 
 ## 핵심 아키텍처 패턴
 
@@ -73,11 +73,11 @@ npm run watch      # Development 모드 (파일 변경 감지)
 
 **중요**: 모든 코드 변경 후 반드시 빌드 필요. `content.js`는 `dist/bundle.js`로 번들링되어 실제 로드됩니다.
 
-### 현재 개발 브랜치
+### 개발 브랜치 전략
 
-- **Main Branch**: `Master`
+- **Main Branch**: `Master` (안정 버전)
 - **Current Working Branch**: `에디터-iframe-적용` (Editor iframe implementation)
-- 현재 브랜치는 iframe 기반 에디터 시스템 구현에 집중하고 있음
+- iframe 기반 Quill 에디터 시스템 완료, postMessage 통신 패턴 확립
 
 ### 테스트 환경
 
@@ -118,13 +118,25 @@ chrome.storage.local.get(
 
 ### 3. Firebase 데이터 정제 패턴
 
-Firebase 저장 전 모든 `undefined` 값을 `null`로 변환하는 정제 함수를 사용합니다:
+Firebase 저장 전 모든 `undefined` 값을 `null`로 변환하는 정제 함수를 **반드시** 사용해야 합니다:
 
 ```javascript
-// background.js
+// background.js - 모든 Firebase 저장 전 필수 호출
 function cleanDataForFirebase(data) {
   if (data === undefined) return null;
-  // 재귀적으로 객체/배열 정제
+  if (data === null || typeof data !== "object") return data;
+  if (Array.isArray(data)) return data.map(item => cleanDataForFirebase(item));
+  
+  const cleanedObj = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      const value = data[key];
+      if (value !== undefined) {
+        cleanedObj[key] = cleanDataForFirebase(value);
+      }
+    }
+  }
+  return cleanedObj;
 }
 ```
 
@@ -142,27 +154,56 @@ const result = await chrome.runtime.sendMessage({
 });
 ```
 
-### 5. iframe 기반 에디터 패턴
+### 5. iframe 기반 에디터 패턴 (핵심 아키텍처)
 
-워크스페이스의 Quill 에디터는 포커스 문제 해결을 위해 독립된 iframe 환경에서 실행됩니다:
+워크스페이스의 Quill 에디터는 포커스 문제 해결을 위해 독립된 iframe에서 실행됩니다. 이는 프로젝트의 가장 복잡한 통신 패턴입니다:
 
 ```javascript
-// editor.html - iframe 내 독립 실행 환경
+// workspaceMode.js - iframe 생성 및 통신 설정
 <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL('editor.html')}">
 
-// editor.js - iframe 에디터 제어
+// 에디터 준비 상태 관리
+let editorReady = false;
+function sendCommand(action, data = {}) {
+  if (editorReady && editorIframe.contentWindow) {
+    editorIframe.contentWindow.postMessage({ action, data }, '*');
+  }
+}
+
+// 양방향 메시지 수신 처리
+window.addEventListener('message', (event) => {
+  if (event.source !== editorIframe.contentWindow) return;
+  const { action, data } = event.data;
+  
+  switch (action) {
+    case 'editor-ready': 
+      editorReady = true; 
+      // 초기 콘텐츠 로드
+      break;
+    case 'content-changed': 
+      currentEditorContent = data.content;
+      // 자동 저장 로직
+      break;
+  }
+});
+
+// editor.js - iframe 내부 에디터 제어
 window.addEventListener('message', function(event) {
   const { action, data } = event.data;
   switch (action) {
     case 'set-content': quillEditor.root.innerHTML = data.html; break;
-    case 'apply-format': quillEditor.formatText(range.index, range.length, data.format, data.value); break;
+    case 'get-content': 
+      window.parent.postMessage({
+        action: 'content-changed', 
+        data: { content: quillEditor.root.innerHTML }
+      }, '*'); 
+      break;
+    case 'insert-image': 
+      const range = quillEditor.getSelection(); 
+      quillEditor.insertEmbed(range?.index || 0, 'image', data.url);
+      break;
   }
 });
-
-// workspaceMode.js - 부모 창에서 iframe 통신
-function sendCommand(action, data = {}) {
-  editorIframe.contentWindow.postMessage({ action, data }, '*');
-}
 ```
 
 ## 상태 관리 및 데이터 흐름
@@ -237,6 +278,8 @@ function switchMode(mode, container) {
 3. 부모 창에서 `sendCommand()` 함수를 통한 에디터 제어
 4. `manifest.json`의 `web_accessible_resources`에 새 파일 등록 필수
 
+**중요**: 에디터 통신은 항상 준비 상태(`editorReady`)를 확인하고, iframe의 `contentWindow`가 존재하는지 검증해야 합니다. 모든 액션은 비동기적으로 처리되며, 에디터 응답을 기다려야 하는 경우 적절한 콜백 패턴을 사용하세요.
+
 ## 핵심 라이브러리 및 의존성
 
 ### 외부 라이브러리
@@ -257,6 +300,19 @@ function switchMode(mode, container) {
 - **storage.local**: Alt 키 상태 및 UI 상태 동기화
 - **runtime.sendMessage**: Background ↔ Content Script 통신
 - **web_accessible_resources**: iframe 및 CSS 리소스 접근
+
+## 디버깅 및 문제 해결
+
+### 일반적인 이슈
+
+1. **에디터 iframe 통신 실패**: `editorReady` 상태 확인, `contentWindow` 존재 여부 검증
+2. **Firebase undefined 오류**: 모든 데이터를 `cleanDataForFirebase()`로 정제 후 저장
+3. **하이라이터 동작 안함**: `chrome.storage.local`의 상태값 확인, Alt 키 이벤트 리스너 점검
+4. **빌드 후 변경사항 미적용**: Chrome 확장 프로그램 새로고침 필요
+
+### 개발 환경 Chrome 버전 요구사항
+
+**Chrome 109+ 필수** - Offscreen Document API 지원
 
 ---
 
