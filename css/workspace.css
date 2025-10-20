@@ -724,3 +724,16 @@
   background: #ffe0b2;
   color: #b06000;
 }
+
+/* TUI 이미지 에디터 헤더 로고 숨김 */
+.tui-image-editor-header-logo {
+  display: none !important;
+}
+
+/* TUI 이미지 에디터 도움말 메뉴(top) 왼쪽 정렬 */
+.tui-image-editor-help-menu.top {
+  left: 0 !important;
+  transform: none !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+}

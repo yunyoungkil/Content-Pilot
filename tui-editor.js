@@ -3,6 +3,7 @@
 let documentImages = [];
 let currentImageUrl = null;
 let isDirty = false;
+let tuiEditorInstance = null;
 
 window.addEventListener("message", async function (event) {
   if (!event.data || !event.data.action) return;
@@ -18,6 +19,22 @@ window.addEventListener("message", async function (event) {
     if (window.tuiEditorInstance) {
       const dataUrl = window.tuiEditorInstance.toDataURL();
       window.parent.postMessage({ action: "tui-editor-result", dataUrl }, "*");
+    }
+  }
+  if (event.data.action === "add-undo-stack") {
+    if (window.tuiEditorInstance && window.tuiEditorInstance._graphics) {
+      // TUI ImageEditor 내부 Graphics 객체의 undoStack에 현재 상태 push
+      try {
+        window.tuiEditorInstance._graphics.undoStack.push(
+          window.tuiEditorInstance._graphics.getCurrentState()
+        );
+        // undoStackChanged 이벤트 강제 발생
+        if (typeof window.tuiEditorInstance._graphics.fire === "function") {
+          window.tuiEditorInstance._graphics.fire("undoStackChanged");
+        }
+      } catch (e) {
+        console.warn("add-undo-stack 실패", e);
+      }
     }
   }
 });
@@ -73,47 +90,53 @@ function renderSidebar() {
 
 function openTuiEditor(imageUrl) {
   const mount = document.getElementById("mount");
-  mount.innerHTML = "";
-  mount.style.width = "100vw";
+  mount.style.position = "fixed";
+  mount.style.left = "120px";
+  mount.style.top = "0";
+  mount.style.width = "calc(100vw - 120px)";
   mount.style.height = "100vh";
-  try {
-    window.tuiEditorInstance = new window.tui.ImageEditor(mount, {
-      includeUI: {
-        loadImage: { path: imageUrl, name: "image" },
-        menu: [
-          "crop",
-          "flip",
-          "rotate",
-          "draw",
-          "shape",
-          "icon",
-          "text",
-          "mask",
-          "filter",
-        ],
-        uiSize: { width: "100vw", height: "100vh" },
-        theme: {},
-      },
-      cssMaxWidth: 1200,
-      cssMaxHeight: 800,
-      selectionStyle: {
-        cornerSize: 16,
-        rotatingPointOffset: 48,
-      },
-    });
-    // 이미지 로드 실패(CORS 등) 감지
-    window.tuiEditorInstance.loadImageFromURL(imageUrl, "image").catch((err) => {
+  if (!tuiEditorInstance) {
+    mount.innerHTML = "";
+    try {
+      tuiEditorInstance = new window.tui.ImageEditor(mount, {
+        includeUI: {
+          loadImage: { path: imageUrl, name: "image" },
+          menu: [
+            "crop",
+            "flip",
+            "rotate",
+            "draw",
+            "shape",
+            "icon",
+            "text",
+            "mask",
+            "filter",
+          ],
+          uiSize: { width: "calc(100vw - 120px)", height: "100vh" },
+          theme: {},
+        },
+        cssMaxWidth: 1200,
+        cssMaxHeight: 800,
+        selectionStyle: {
+          cornerSize: 16,
+          rotatingPointOffset: 48,
+        },
+      });
+      window.tuiEditorInstance = tuiEditorInstance;
+      tuiEditorInstance.on("object:added", () => { isDirty = true; });
+      tuiEditorInstance.on("object:modified", () => { isDirty = true; });
+      tuiEditorInstance.on("object:removed", () => { isDirty = true; });
+      tuiEditorInstance.on("undoStackChanged", () => { isDirty = true; });
+      console.log("[TUI-IFRAME] mount:", mount);
+      console.log("[TUI-IFRAME] tuiEditorInstance:", tuiEditorInstance);
+    } catch (err) {
+      alert("이미지 에디터 초기화 중 오류가 발생했습니다.\n\n" + (err?.message || err));
+      console.error("[TUI-IFRAME] TUI Editor init error:", err);
+    }
+  } else {
+    // 인스턴스가 이미 있으면 이미지 교체만 수행 (history 보존)
+    tuiEditorInstance.loadImageFromURL(imageUrl, "image").catch((err) => {
       alert("이미지 서버의 보안 정책(CORS)으로 인해 이미지를 불러올 수 없습니다. 다른 이미지를 선택하거나, 직접 업로드해 주세요.\n\n오류: " + (err?.message || err));
     });
-    // 편집 내용 변경 감지
-    window.tuiEditorInstance.on("object:added", () => { isDirty = true; });
-    window.tuiEditorInstance.on("object:modified", () => { isDirty = true; });
-    window.tuiEditorInstance.on("object:removed", () => { isDirty = true; });
-    window.tuiEditorInstance.on("undoStackChanged", () => { isDirty = true; });
-    console.log("[TUI-IFRAME] mount:", mount);
-    console.log("[TUI-IFRAME] tuiEditorInstance:", window.tuiEditorInstance);
-  } catch (err) {
-    alert("이미지 에디터 초기화 중 오류가 발생했습니다.\n\n" + (err?.message || err));
-    console.error("[TUI-IFRAME] TUI Editor init error:", err);
   }
 }

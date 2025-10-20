@@ -455,7 +455,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     // iframe 기반 TUI Image Editor 모달 구현
     const iframe = document.createElement("iframe");
     iframe.src = chrome.runtime.getURL("tui-editor.html");
-    iframe.style.width = "100%";
+    iframe.style.width = "calc(100% - 32px)";
+    iframe.style.marginRight = "32px";
     iframe.style.height = "600px";
     iframe.style.border = "none";
     iframe.style.background = "#fff";
