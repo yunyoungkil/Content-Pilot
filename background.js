@@ -25,6 +25,101 @@ function cleanDataForFirebase(data) {
   return cleanedObj;
 }
 
+/**
+ * Blob 객체를 Base64 문자열로 변환하는 헬퍼 함수 (PRD v2.2)
+ * 웹 이미지 URL을 다운로드하여 Gemini Vision API로 전송할 때 사용됩니다.
+ * @param {Blob} blob - 변환할 Blob 객체
+ * @returns {Promise<string>} Base64 데이터 URI (예: "data:image/jpeg;base64,/9j/4AAQ...")
+ */
+function convertBlobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * FR-V-Validate (PRD v2.5): AI가 반환한 템플릿 데이터를 검증하는 함수
+ * Firebase 저장 전에 필수 필드와 데이터 타입을 확인하여 불완전한 데이터를 차단합니다.
+ * @param {Object} data - AI가 반환한 템플릿 JSON 객체
+ * @throws {Error} 검증 실패 시 구체적인 에러 메시지와 함께 예외 발생
+ */
+function validateTemplateData(data) {
+  if (!data) {
+    throw new Error("AI가 유효한 데이터를 반환하지 않았습니다.");
+  }
+
+  // PRD v2.4 반응형 스키마 기준 필수 필드 검증
+  if (!data.name || typeof data.name !== "string") {
+    throw new Error("필수 필드 'name'이 누락되었거나 문자열이 아닙니다.");
+  }
+
+  if (!data.background || typeof data.background !== "object") {
+    throw new Error("필수 필드 'background'가 누락되었거나 객체가 아닙니다.");
+  }
+
+  if (!data.background.type || !data.background.value) {
+    throw new Error("background 필드에 'type'과 'value'가 필요합니다.");
+  }
+
+  if (!Array.isArray(data.layers) || data.layers.length === 0) {
+    throw new Error(
+      "필수 필드 'layers'가 비어있거나 배열이 아닙니다. 최소 1개 이상의 레이어가 필요합니다."
+    );
+  }
+
+  // 플레이스홀더 레이어 검증 (고충실도 복제 지원)
+  const sloganLayer = data.layers.find(
+    (l) =>
+      l.type === "text" &&
+      (l.text === "{{SLOGAN}}" ||
+        (typeof l.text === "string" && l.text.length > 0))
+  );
+  if (!sloganLayer) {
+    throw new Error(
+      "필수 텍스트 레이어가 없습니다. 메인 텍스트(실제 텍스트 또는 '{{SLOGAN}}')가 반드시 포함되어야 합니다."
+    );
+  }
+
+  // PRD v2.4: 상대 좌표 검증 (0.0 ~ 1.0 범위)
+  for (let i = 0; i < data.layers.length; i++) {
+    const layer = data.layers[i];
+
+    if (layer.type === "text") {
+      if (typeof layer.x !== "number" || typeof layer.y !== "number") {
+        throw new Error(`레이어 ${i}: x, y 좌표가 숫자가 아닙니다.`);
+      }
+
+      if (layer.x < 0 || layer.x > 1 || layer.y < 0 || layer.y > 1) {
+        throw new Error(
+          `레이어 ${i}: x, y 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: x=${layer.x}, y=${layer.y})`
+        );
+      }
+
+      if (!layer.styles || typeof layer.styles !== "object") {
+        throw new Error(`레이어 ${i}: styles 객체가 필요합니다.`);
+      }
+
+      if (typeof layer.styles.fontRatio !== "number") {
+        throw new Error(`레이어 ${i}: styles.fontRatio가 숫자가 아닙니다.`);
+      }
+
+      if (layer.styles.fontRatio <= 0 || layer.styles.fontRatio > 1) {
+        throw new Error(
+          `레이어 ${i}: fontRatio는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: ${layer.styles.fontRatio})`
+        );
+      }
+    }
+  }
+
+  console.log(`[Template Validator] ✅ 템플릿 "${data.name}" 검증 통과`);
+  return true;
+}
+
 async function getOffscreenDocument() {
   if (await chrome.offscreen.hasDocument()) return;
   if (creating) {
@@ -697,6 +792,533 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     return true;
   }
+  // FR3 (PRD v2.0/v2.2): AI 기반 썸네일 템플릿 자동 생성기
+  else if (msg.action === "analyze_image_for_template") {
+    (async () => {
+      try {
+        const { data } = msg; // { base64Image?, imageUrl?, templateName }
+
+        // 1. [신규 v2.2] 이미지 소스(Base64 또는 URL) 처리
+        let imageBase64Data;
+        let imageMimeType = "image/jpeg"; // 기본값
+
+        if (data.base64Image) {
+          // 로컬 파일 (Base64)
+          const parts = data.base64Image.split(",");
+          if (parts.length === 2) {
+            // MIME 타입 추출 (예: "data:image/png;base64," -> "image/png")
+            const mimeMatch = parts[0].match(/data:(.+);base64/);
+            if (mimeMatch) imageMimeType = mimeMatch[1];
+            imageBase64Data = parts[1];
+          } else {
+            throw new Error("Invalid Base64 image format");
+          }
+        } else if (data.imageUrl) {
+          // 웹 이미지 URL (v2.2 신규)
+          const response = await fetch(data.imageUrl);
+          if (!response.ok)
+            throw new Error(
+              `Failed to fetch image: ${response.status} ${response.statusText}`
+            );
+
+          // Content-Type에서 MIME 타입 추출
+          const contentType = response.headers.get("Content-Type");
+          if (contentType && contentType.startsWith("image/")) {
+            imageMimeType = contentType;
+          }
+
+          // Blob으로 변환 후 Base64 인코딩
+          const blob = await response.blob();
+          const base64Result = await convertBlobToBase64(blob);
+          imageBase64Data = base64Result.split(",")[1];
+        } else {
+          throw new Error("No image data provided (base64Image or imageUrl)");
+        }
+
+        // 2. [기존 v2.0] Gemini Vision API 호출
+        const { geminiApiKey } = await chrome.storage.local.get([
+          "geminiApiKey",
+        ]);
+        if (!geminiApiKey) {
+          sendResponse({ success: false, error: "Gemini API 키가 없습니다." });
+          return;
+        }
+
+        const VISION_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+
+        // CR1 (PRD v3.1): JSON 스키마 정의 - API 레벨에서 구조 강제
+        const templateSchema = {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "템플릿의 이름(예: 원본 파일명 등)",
+            },
+            background: {
+              type: "object",
+              description: "이미지의 주요 배경색(단색, HEX 또는 rgba 형식)",
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["solid"],
+                  description: "배경의 종류(단색만 허용)",
+                },
+                value: {
+                  type: "string",
+                  description: "배경 색상(HEX 또는 rgba 형식)",
+                },
+              },
+              required: ["type", "value"],
+            },
+            layers: {
+              type: "array",
+              description: "텍스트, 도형 등 모든 시각적 요소의 배열",
+              items: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["text", "shape"],
+                    description: "요소 타입(text 또는 shape)",
+                  },
+                  text: {
+                    type: "string",
+                    description:
+                      "텍스트 레이어일 경우: 반드시 '{{SLOGAN}}' 또는 '{{VISUALIZATION_CUE}}' 중 하나여야 함",
+                  },
+                  shape: {
+                    type: "string",
+                    enum: ["rect", "circle"],
+                    description:
+                      "도형 레이어일 경우: 'rect'(사각형), 'circle'(원) 중 하나",
+                  },
+                  x: {
+                    type: "number",
+                    description: "가로 위치(중심 좌표, 0.0~1.0 비율)",
+                  },
+                  y: {
+                    type: "number",
+                    description: "세로 위치(중심 좌표, 0.0~1.0 비율)",
+                  },
+                  widthRatio: {
+                    type: "number",
+                    description:
+                      "도형의 가로 크기(이미지 너비 대비 비율, 0.0~1.0)",
+                  },
+                  heightRatio: {
+                    type: "number",
+                    description:
+                      "도형의 세로 크기(이미지 높이 대비 비율, 0.0~1.0)",
+                  },
+                  styles: {
+                    type: "object",
+                    properties: {
+                      fontRatio: {
+                        type: "number",
+                        description:
+                          "텍스트의 폰트 크기(이미지 높이 대비 비율, 0.0~1.0)",
+                      },
+                      fontWeight: {
+                        type: "string",
+                        enum: ["normal", "bold"],
+                        description: "폰트 두께(normal 또는 bold)",
+                      },
+                      fontFamily: {
+                        type: "string",
+                        description: "폰트 패밀리(예: 'Noto Sans KR')",
+                      },
+                      fill: {
+                        type: "string",
+                        description: "채우기 색상(HEX 또는 rgba)",
+                      },
+                      align: {
+                        type: "string",
+                        enum: ["left", "center", "right"],
+                        description: "텍스트 정렬(left, center, right)",
+                      },
+                      baseline: {
+                        type: "string",
+                        enum: ["top", "middle", "bottom", "alphabetic"],
+                        description:
+                          "텍스트 기준선(top, middle, bottom, alphabetic)",
+                      },
+                      shadow: {
+                        type: "object",
+                        properties: {
+                          color: {
+                            type: "string",
+                            description: "그림자 색상(rgba 권장)",
+                          },
+                          blur: {
+                            type: "number",
+                            description:
+                              "그림자 블러(이미지 높이 대비 비율, 0.0~1.0)",
+                          },
+                          offsetX: {
+                            type: "number",
+                            description:
+                              "그림자 X 오프셋(이미지 너비 대비 비율, 0.0~1.0)",
+                          },
+                          offsetY: {
+                            type: "number",
+                            description:
+                              "그림자 Y 오프셋(이미지 높이 대비 비율, 0.0~1.0)",
+                          },
+                        },
+                      },
+                    },
+                    required: ["fill"],
+                  },
+                },
+                required: ["type", "x", "y", "styles"],
+              },
+            },
+          },
+          required: ["name", "background", "layers"],
+        };
+
+        // CR3 (PRD v3.2 Enhanced): 고충실도(High-Fidelity) 모드 프롬프트 - 복잡한 그래픽 감지 강화
+        const jsonStructurePrompt = `
+당신은 썸네일 디자인 이미지를 HTML5 Canvas에서 정확히 복제하기 위한 고충실도 JSON 템플릿을 생성하는 전문가입니다.
+
+**템플릿 이름**: "${data.templateName || "새 템플릿"}"
+
+**[핵심 원칙: 초고충실도 복제]**
+- 이미지의 **모든 시각적 요소**를 레이어별로 완벽하게 추출합니다.
+- 단순한 텍스트만이 아니라, 복잡한 그래픽 요소(3D 텍스트, 아이콘, 복합 도형)도 정확히 감지합니다.
+- **복잡도 판단 우선**: 요소가 복잡하면(그라디언트, 3D 효과, 테두리, 그림자 등) type: "image"로 추출합니다.
+
+**1. 배경 분석**:
+- 주요 단색(가장 넓게 사용된 색상)을 HEX 코드로 추출 (예: "#1A1A1A").
+- 그라디언트가 있으면 linear-gradient(...) 또는 대표 색상 선택.
+
+**2. 텍스트 레이어 - 복잡도 기반 분류 (가장 중요!)**:
+
+**[2-1] 단순 텍스트 (type: "text"로 추출)**:
+- 조건: 단색 채우기 + 단순 그림자만 있는 평범한 텍스트
+- 예: "간단한 제목", "설명 텍스트"
+- JSON: type: "text", text: "실제내용", styles: { fill, fontRatio, fontWeight }
+
+**[2-2] 복잡한 텍스트 그래픽 (type: "image"로 추출, 매우 중요!)**:
+- 조건: 다음 중 하나라도 해당하면 type: "image"로 추출
+  ✓ 3D 효과, 입체감, 깊이감이 있는 텍스트
+  ✓ 텍스트에 그라디언트 채우기가 적용된 경우
+  ✓ 텍스트에 복잡한 테두리(두꺼운 stroke, 다중 레이어)가 있는 경우
+  ✓ 텍스트에 빛/광선/후광 효과가 있는 경우
+  ✓ 텍스트가 아치형/곡선형으로 배치된 경우
+  ✓ 텍스트가 변형(perspective, 기울기)된 경우
+- 예: "동네 일거리 바라회" (3D 효과 + 테두리 + 그림자)
+- JSON: type: "image", src: null, x: 0.5, y: 0.3, widthRatio: 0.8, heightRatio: 0.2
+- 설명: 이런 복잡한 텍스트는 Canvas로 100% 복제 불가능하므로, 나중에 Base64 이미지로 대체할 placeholder로 남깁니다.
+
+**3. 도형/장식 레이어 - 세밀한 추출 (복합 도형 분리!)**:
+
+**[3-1] 단일 도형**:
+- 사각형: type: "shape", shape: "rect", fill/stroke
+- 원: type: "shape", shape: "circle", fill/stroke
+
+**[3-2] 복합 도형 (여러 레이어로 분리!)**:
+- 예: '24' 뱃지 (녹색 원 + 짙은 녹색 테두리)
+  → 레이어 1: { type: "shape", shape: "circle", fill: "#90EE90" }
+  → 레이어 2: { type: "shape", shape: "circle", stroke: "#228B22", styles: { lineWidth: 0.01 } }
+- 예: 카드 배경 (흰색 사각형 + 회색 테두리)
+  → 레이어 1: { type: "shape", shape: "rect", fill: "#FFFFFF" }
+  → 레이어 2: { type: "shape", shape: "rect", stroke: "#CCCCCC" }
+
+**[3-3] 장식선/밑줄**:
+- 얇은 사각형으로 표현: heightRatio: 0.01~0.03
+
+**4. 아이콘 레이어 (작은 그래픽 요소, 매우 중요!)**:
+
+**[4-1] 벡터 아이콘 감지 (우선순위 높음)**:
+- 조건: 작은 심볼/픽토그램 (크기 5~10% 이하)
+- 예: 스프레이 아이콘, 커피잔, 별, 하트, 화살표, 체크마크
+- JSON: type: "svg", pathData: "M 0,0 L 10,10..." (근사치 허용)
+- 복잡한 아이콘은 단순화된 path로 표현
+
+**[4-2] 아이콘 플레이스홀더 (SVG 변환 어려울 때)**:
+- JSON: type: "image", src: null, widthRatio: 0.05~0.1
+- 예: { type: "image", x: 0.1, y: 0.2, widthRatio: 0.08, heightRatio: 0.08, src: null }
+
+**5. 사진/이미지 레이어 (실물 사진)**:
+- 조건: 실제 사진(인물, 동물, 풍경, 제품 등)
+- JSON: type: "image", src: null, widthRatio, heightRatio
+- 예: 강아지 사진 → { type: "image", x: 0.5, y: 0.55, widthRatio: 0.3, heightRatio: 0.4, src: null }
+
+**6. 좌표/크기 체계 (0.0~1.0 비율)**:
+- 모든 좌표는 이미지 크기 대비 비율.
+- 예: 600×400px 이미지
+  - 중심점 (300, 200) → x: 0.5, y: 0.5
+  - 왼쪽 상단 (60, 80) → x: 0.1, y: 0.2
+- 텍스트: (x, y) = 텍스트가 그려지는 위치.
+- 도형/아이콘/이미지: (x, y) = 중심 좌표.
+- 크기: widthRatio, heightRatio (절대값 사용 금지).
+- fontRatio = fontSize / imageHeight (예: 72px / 400px → 0.18)
+
+**7. 스타일 속성**:
+- 색상: HEX(#FF6B35) 또는 rgba(255, 107, 53, 1.0).
+- fontWeight: "normal" 또는 "bold".
+- fontFamily: "'Noto Sans KR'" (따옴표 포함).
+- align: "left", "center", "right".
+- baseline: "top", "middle", "bottom", "alphabetic".
+- lineWidth: 테두리 두께 비율 (0.01 = 1%)
+
+**8. 그림자 속성 (단순 텍스트만)**:
+- shadow.blur, offsetX, offsetY는 비율 값 (0.0~1.0)
+- 복잡한 그림자는 type: "image"로 추출
+
+**중요한 예시 (초고충실도 모드)**:
+
+**예시 1: 복잡한 3D 텍스트 (type: "image"로 추출)**
+- 시각적: "동네 일거리 바라회" - 3D 효과 + 두꺼운 테두리 + 그림자
+- JSON:
+{
+  "type": "image",
+  "x": 0.5,
+  "y": 0.3,
+  "widthRatio": 0.8,
+  "heightRatio": 0.2,
+  "src": null
+}
+→ Canvas로 복제 불가능한 복잡한 텍스트는 이미지 placeholder로 처리
+
+**예시 2: 아이콘 5개 감지 (각각 별도 레이어)**
+- 시각적: 스프레이, 커피잔, 등 작은 아이콘 5개
+- JSON:
+[
+  { "type": "svg", "pathData": "M ...", "x": 0.15, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
+  { "type": "image", "src": null, "x": 0.35, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
+  { "type": "image", "src": null, "x": 0.55, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
+  { "type": "image", "src": null, "x": 0.75, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
+  { "type": "image", "src": null, "x": 0.95, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 }
+]
+
+**예시 3: 복합 도형 - '24' 뱃지 (2개 레이어로 분리)**
+- 시각적: 녹색 원 + 짙은 녹색 테두리
+- JSON:
+[
+  { "type": "shape", "shape": "circle", "x": 0.9, "y": 0.1, "widthRatio": 0.1, "heightRatio": 0.1, "styles": { "fill": "#90EE90" } },
+  { "type": "shape", "shape": "circle", "x": 0.9, "y": 0.1, "widthRatio": 0.1, "heightRatio": 0.1, "styles": { "stroke": "#228B22", "lineWidth": 0.01 } },
+  { "type": "text", "text": "24", "x": 0.9, "y": 0.1, "styles": { "fontRatio": 0.05, "fontWeight": "bold", "fill": "#FFFFFF", "align": "center", "baseline": "middle" } }
+]
+
+**예시 4: 단순 텍스트 + 밑줄**
+- 시각적: "간단한 제목" + 주황색 밑줄
+- JSON:
+[
+  { "type": "text", "text": "간단한 제목", "x": 0.5, "y": 0.2, "styles": { "fontRatio": 0.08, "fontWeight": "bold", "fill": "#000000", "align": "center" } },
+  { "type": "shape", "shape": "rect", "x": 0.5, "y": 0.25, "widthRatio": 0.7, "heightRatio": 0.02, "styles": { "fill": "#FF6B35" } }
+]
+
+**출력 형식 (필수)**:
+- JSON 객체만 반환 (마크다운 코드 블록 금지, 설명 금지).
+- 응답은 제공된 JSON 스키마와 정확히 일치.
+- 모든 좌표와 크기는 0.0~1.0 비율 값.
+- **복잡한 요소는 반드시 type: "image"로 추출**.
+`;
+
+        // CR2 (PRD v3.1): Gemini API 호출 시 generationConfig에 스키마 전달
+        // [강화] 재시도 로직 (503 과부하 대응)
+        let visionResponse;
+        let retryCount = 0;
+        const MAX_RETRIES = 5; // 3 → 5회로 증가
+        const RETRY_DELAY = 3000; // 2초 → 3초로 증가
+
+        while (retryCount < MAX_RETRIES) {
+          try {
+            visionResponse = await fetch(VISION_API_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [
+                      { text: jsonStructurePrompt },
+                      {
+                        inlineData: {
+                          mimeType: imageMimeType,
+                          data: imageBase64Data,
+                        },
+                      },
+                    ],
+                  },
+                ],
+                generationConfig: {
+                  temperature: 0.1,
+                  responseMimeType: "application/json",
+                  responseSchema: templateSchema,
+                },
+              }),
+            });
+
+            if (visionResponse.ok) {
+              break; // 성공하면 루프 탈출
+            }
+
+            const errorData = await visionResponse.json();
+
+            // 503 (과부하) 또는 429 (요청 제한) 에러인 경우에만 재시도
+            if (
+              visionResponse.status === 503 ||
+              visionResponse.status === 429
+            ) {
+              retryCount++;
+              if (retryCount < MAX_RETRIES) {
+                console.warn(
+                  `[Gemini Vision] ${visionResponse.status} 오류, ${retryCount}/${MAX_RETRIES} 재시도 중... (${RETRY_DELAY}ms 후)`
+                );
+                await new Promise((resolve) =>
+                  setTimeout(resolve, RETRY_DELAY * retryCount)
+                ); // 지수 백오프
+                continue;
+              }
+            }
+
+            // 재시도 불가능한 에러이거나 최대 재시도 횟수 초과
+            console.error("[Gemini Vision] API 오류 응답:", errorData);
+
+            // 사용자 친화적 에러 메시지
+            let userMessage = errorData.error?.message || "알 수 없는 오류";
+            if (visionResponse.status === 503) {
+              userMessage =
+                "Gemini API 서버가 현재 과부하 상태입니다. 잠시 후 다시 시도해주세요.";
+            } else if (visionResponse.status === 429) {
+              userMessage =
+                "API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.";
+            }
+
+            throw new Error(
+              `${userMessage} (상태 코드: ${visionResponse.status}${
+                retryCount >= MAX_RETRIES ? ", 최대 재시도 횟수 초과" : ""
+              })`
+            );
+          } catch (fetchError) {
+            // 네트워크 오류 등
+            if (retryCount < MAX_RETRIES - 1) {
+              retryCount++;
+              console.warn(
+                `[Gemini Vision] 네트워크 오류, ${retryCount}/${MAX_RETRIES} 재시도 중...`,
+                fetchError.message
+              );
+              await new Promise((resolve) =>
+                setTimeout(resolve, RETRY_DELAY * retryCount)
+              );
+              continue;
+            }
+            throw fetchError;
+          }
+        }
+
+        const visionData = await visionResponse.json();
+
+        // 3. FR-V-Validate (PRD v2.5): JSON 파싱 및 강화된 검증
+        const rawText =
+          visionData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+        console.log(
+          "[Template Generator] AI 응답 원문:",
+          rawText.substring(0, 200) + "..."
+        );
+
+        // JSON 추출 (코드 블록 또는 순수 JSON)
+        let templateDataJson;
+        const jsonMatch = rawText.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+        if (jsonMatch) {
+          templateDataJson = jsonMatch[1];
+          console.log("[Template Generator] 코드 블록에서 JSON 추출 완료");
+        } else {
+          const pureJsonMatch = rawText.match(/\{[\s\S]*\}/);
+          if (pureJsonMatch) {
+            templateDataJson = pureJsonMatch[0];
+            console.log("[Template Generator] 순수 JSON 추출 완료");
+          } else {
+            throw new Error(
+              "Gemini 응답에서 JSON을 추출할 수 없습니다. AI 응답: " +
+                rawText.substring(0, 300)
+            );
+          }
+        }
+
+        // JSON 파싱
+        const parsedTemplate = JSON.parse(templateDataJson);
+        console.log(
+          "[Template Generator] JSON 파싱 성공:",
+          parsedTemplate.name
+        );
+
+        // [신규 v2.5] validateTemplateData 함수로 철저한 검증
+        validateTemplateData(parsedTemplate);
+
+        // 4. 검증 통과 후 Firebase에 저장 (undefined → null 정제)
+        const cleanedTemplate = cleanDataForFirebase(parsedTemplate);
+        const newTemplateRef = await firebase
+          .database()
+          .ref("thumbnail_templates")
+          .push(cleanedTemplate);
+
+        console.log(
+          `[Template Generator] ✅ 템플릿 "${parsedTemplate.name}" 저장 완료 (ID: ${newTemplateRef.key})`
+        );
+        sendResponse({
+          success: true,
+          template: parsedTemplate,
+          id: newTemplateRef.key,
+        });
+      } catch (error) {
+        console.error("[Template Generator] ❌ 오류:", error);
+
+        // 구체적인 에러 메시지 반환 (v2.5)
+        const errorMessage = error.message || "알 수 없는 오류가 발생했습니다.";
+        sendResponse({
+          success: false,
+          error: `템플릿 분석 실패: ${errorMessage}`,
+        });
+      }
+    })();
+    return true; // 비동기 응답
+  }
+  // FR5 (PRD v2.3): 템플릿 목록 조회
+  else if (msg.action === "get_thumbnail_templates") {
+    firebase
+      .database()
+      .ref("thumbnail_templates")
+      .once("value", (snapshot) => {
+        const val = snapshot.val() || {};
+        const templates = Object.entries(val).map(([id, data]) => ({
+          id,
+          ...data,
+        }));
+        sendResponse({ success: true, templates });
+      })
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+  // FR-A-Delete (PRD v2.3): 템플릿 삭제
+  else if (msg.action === "delete_template") {
+    const templateId = msg.templateId;
+    if (!templateId) {
+      sendResponse({ success: false, error: "템플릿 ID가 없습니다." });
+      return true;
+    }
+
+    firebase
+      .database()
+      .ref(`thumbnail_templates/${templateId}`)
+      .remove()
+      .then(() => {
+        console.log(
+          `[Template Manager] ✅ 템플릿 ID "${templateId}" 삭제 완료`
+        );
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error("[Template Manager] ❌ 삭제 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
 
   // 채널 및 설정
   else if (msg.action === "save_channels_and_key") {
@@ -1116,8 +1738,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         // 2. 프롬프트 및 옵션 구성
-        const model = "gemini-2.5-flash-image";
-        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+        const model = "gemini-2.5-flash";
+        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiApiKey}`;
         // 3. 여러 장 요청: Gemini는 1회 1장만 반환하므로 count만큼 반복 호출
         const images = [];
         for (let i = 0; i < count; i++) {
@@ -1251,7 +1873,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           adSenseAccountId: adSenseAccountId,
         });
 
-        // ▼▼▼ [수정] UI 업데이트에 필요한 모든 데이터를 함께 보냅니다. ▼▼▼
+        // ▼▼▼ [수정] UI 업데이트에 필요한 모든 데이터를 함께 보냅니다. ▼▼
         const responseData = {
           email: userInfo.email,
           gaProperties: gaProperties,

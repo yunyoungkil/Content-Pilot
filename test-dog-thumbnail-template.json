@@ -1,0 +1,43 @@
+{
+  "name": "강아지 썸네일",
+  "background": {
+    "type": "solid",
+    "value": "#F5F5F5"
+  },
+  "layers": [
+    {
+      "type": "text",
+      "text": "{{SLOGAN}}",
+      "x": 0.5,
+      "y": 0.35,
+      "styles": {
+        "fontWeight": "bold",
+        "fontRatio": 0.08,
+        "fontFamily": "'Noto Sans KR', sans-serif",
+        "align": "center",
+        "baseline": "middle",
+        "fill": "#000080",
+        "shadow": {
+          "blur": 0.005,
+          "color": "rgba(0, 0, 0, 0.3)",
+          "offsetX": 0.002,
+          "offsetY": 0.002
+        }
+      }
+    },
+    {
+      "type": "text",
+      "text": "{{VISUALIZATION_CUE}}",
+      "x": 0.5,
+      "y": 0.5,
+      "styles": {
+        "fontWeight": "normal",
+        "fontRatio": 0.05,
+        "fontFamily": "'Noto Sans KR', sans-serif",
+        "align": "center",
+        "baseline": "middle",
+        "fill": "#333333"
+      }
+    }
+  ]
+}
