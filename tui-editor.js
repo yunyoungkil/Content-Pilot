@@ -4,6 +4,9 @@ let documentImages = [];
 let currentImageUrl = null;
 let isDirty = false;
 let tuiEditorInstance = null;
+let __cp_controlsBound = false; // zoom/hand 제어 바인딩 여부
+let __cp_isPanning = false;
+let __cp_lastPos = { x: 0, y: 0 };
 
 window.addEventListener("message", async function (event) {
   if (!event.data || !event.data.action) return;
@@ -129,6 +132,12 @@ function openTuiEditor(imageUrl) {
       tuiEditorInstance.on("undoStackChanged", () => { isDirty = true; });
       console.log("[TUI-IFRAME] mount:", mount);
       console.log("[TUI-IFRAME] tuiEditorInstance:", tuiEditorInstance);
+
+      // 커스텀 Zoom/Hand 제어 바인딩 (한 번만)
+      if (!__cp_controlsBound) {
+        __cp_bindZoomAndHandControls();
+        __cp_controlsBound = true;
+      }
     } catch (err) {
       alert("이미지 에디터 초기화 중 오류가 발생했습니다.\n\n" + (err?.message || err));
       console.error("[TUI-IFRAME] TUI Editor init error:", err);
@@ -139,4 +148,94 @@ function openTuiEditor(imageUrl) {
       alert("이미지 서버의 보안 정책(CORS)으로 인해 이미지를 불러올 수 없습니다. 다른 이미지를 선택하거나, 직접 업로드해 주세요.\n\n오류: " + (err?.message || err));
     });
   }
+}
+
+// =====================
+// 커스텀 Zoom & Hand 제어
+// =====================
+function __cp_getCanvas() {
+  try {
+    return tuiEditorInstance?._graphics?.getCanvas?.();
+  } catch (e) {
+    return null;
+  }
+}
+
+function __cp_setHandMode(enabled) {
+  const canvas = __cp_getCanvas();
+  if (!canvas) return;
+  __cp_isPanning = !!enabled;
+  canvas.selection = !enabled;
+  canvas.defaultCursor = enabled ? 'grab' : 'default';
+}
+
+function __cp_zoomBy(delta) {
+  const canvas = __cp_getCanvas();
+  if (!canvas || typeof fabric === 'undefined' || !fabric?.Point) return;
+  const currentZoom = canvas.getZoom() || 1;
+  let nextZoom = currentZoom + delta;
+  nextZoom = Math.max(0.1, Math.min(5, nextZoom));
+  const center = new fabric.Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+  canvas.zoomToPoint(center, nextZoom);
+  canvas.requestRenderAll();
+}
+
+function __cp_bindZoomAndHandControls() {
+  const canvas = __cp_getCanvas();
+  if (!canvas) return;
+
+  // 마우스 드래그로 패닝
+  canvas.on('mouse:down', (opt) => {
+    if (!__cp_isPanning) return;
+    canvas.defaultCursor = 'grabbing';
+    const evt = opt.e;
+    __cp_lastPos = { x: evt.clientX, y: evt.clientY };
+  });
+  canvas.on('mouse:move', (opt) => {
+    if (!__cp_isPanning) return;
+    const evt = opt.e;
+    const vpt = canvas.viewportTransform;
+    if (!vpt) return;
+    const dx = evt.clientX - __cp_lastPos.x;
+    const dy = evt.clientY - __cp_lastPos.y;
+    vpt[4] += dx;
+    vpt[5] += dy;
+    __cp_lastPos = { x: evt.clientX, y: evt.clientY };
+    canvas.requestRenderAll();
+  });
+  canvas.on('mouse:up', () => {
+    if (!__cp_isPanning) return;
+    canvas.defaultCursor = 'grab';
+  });
+
+  // 키보드 단축키: Ctrl/Cmd + '+'/'-' 줌, 'h' 핸드 토글
+  window.addEventListener('keydown', (e) => {
+    const ctrlLike = e.ctrlKey || e.metaKey;
+    // Zoom In
+    if (ctrlLike && (e.key === '+' || e.key === '=')) {
+      e.preventDefault();
+      __cp_zoomBy(0.1);
+      return;
+    }
+    // Zoom Out
+    if (ctrlLike && (e.key === '-' || e.key === '_')) {
+      e.preventDefault();
+      __cp_zoomBy(-0.1);
+      return;
+    }
+    // Hand toggle
+    if (e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      __cp_setHandMode(!__cp_isPanning);
+      return;
+    }
+  }, { passive: false });
+
+  // Ctrl/Cmd + 마우스휠로 줌
+  canvas.upperCanvasEl.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    __cp_zoomBy(delta);
+  }, { passive: false });
 }

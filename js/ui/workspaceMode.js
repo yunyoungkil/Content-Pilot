@@ -186,7 +186,7 @@ export function renderWorkspace(container, ideaData) {
         </div>
   <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
           <div class="scrap-list all-scraps-list">
-            <p class="loading-scraps">스크랩 목록을 불러오는 중...</p>
+            <p class="loading-scr랩">스크랩 목록을 불러오는 중...</p>
           </div>
         </div>
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
@@ -945,222 +945,27 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         ) {
           outline = ideaData.outline;
         }
-        if (!outline.length) outline = ["썸네일 예시"];
-        // 스타일/비율 정보 추출
-        const style = aiStyleSelect?.value || "NONE";
-        const aspect = aiAspectSelect?.value || "1:1";
-        const { width, height } = mapAspectToSize(aspect);
+        if (!outline.length) outline = ["고퀄리티 썸네일"];
+        // 썸네일 스타일 Canvas 생성 (첨부 이미지 스타일)
+        const width = 600, height = 400;
+        const thumbHtml = outline.map((title, idx) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          // drawKoreanThumbnailStyle로 첨부 이미지 스타일 썸네일 생성
+          const topText = "고퀄리티";
+          const bottomText = "썸네일";
+          const logoText = "36.5lab";
+          window.drawKoreanThumbnailStyle
+            ? window.drawKoreanThumbnailStyle(ctx, { width, height, topText, bottomText, logoText })
+            : (typeof drawKoreanThumbnailStyle === 'function' && drawKoreanThumbnailStyle(ctx, { width, height, topText, bottomText, logoText }));
+          const url = canvas.toDataURL("image/png");
+          return `<div class=\"ai-thumb-wrap\"><img src=\"${url}\" class=\"ai-generated-thumb\" alt=\"썸네일 예시${idx + 1}\" /></div>`;
+        }).join("");
+        aiImageGrid.innerHTML = thumbHtml;
         if (aiMessage)
-          aiMessage.textContent = "Gemini로 세션별 슬로건을 생성 중...";
-        // Gemini에 outline별 슬로건 요청 (background.js에 메시지)
-        chrome.runtime.sendMessage(
-          {
-            action: "gemini_generate_thumbnail_texts",
-            data: { outlines: outline },
-          },
-          (response) => {
-            let sloganList = [];
-            if (
-              response &&
-              response.success &&
-              Array.isArray(response.slogans)
-            ) {
-              sloganList = response.slogans;
-            } else {
-              sloganList = outline.map(() => "AI 슬로건 예시");
-            }
-            console.log("[Gemini 썸네일 슬로건]", sloganList);
-            const thumbHtml = outline
-              .map((title, idx) => {
-                // Canvas로 진짜 썸네일 느낌의 카드 스타일 생성
-                const canvas = document.createElement("canvas");
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                // 1. 그림자 효과
-                ctx.save();
-                ctx.shadowColor = "rgba(0,0,0,0.18)";
-                ctx.shadowBlur = 18;
-                ctx.shadowOffsetY = 8;
-                ctx.shadowOffsetX = 0;
-                // 2. 라운드+gradient 배경
-                ctx.beginPath();
-                const r = Math.max(
-                  18,
-                  Math.floor(Math.min(width, height) / 18)
-                );
-                ctx.moveTo(r, 0);
-                ctx.lineTo(width - r, 0);
-                ctx.quadraticCurveTo(width, 0, width, r);
-                ctx.lineTo(width, height - r);
-                ctx.quadraticCurveTo(width, height, width - r, height);
-                ctx.lineTo(r, height);
-                ctx.quadraticCurveTo(0, height, 0, height - r);
-                ctx.lineTo(0, r);
-                ctx.quadraticCurveTo(0, 0, r, 0);
-                ctx.closePath();
-                // gradient
-                const grad = ctx.createLinearGradient(0, 0, width, height);
-                grad.addColorStop(0, "#3498fd");
-                grad.addColorStop(1, "#1a73e8");
-                ctx.fillStyle = grad;
-                ctx.fill();
-                ctx.restore();
-                // 3. 상단 라벨/아이콘
-                ctx.save();
-                ctx.font = `bold ${
-                  Math.floor(height / 18) + 8
-                }px Pretendard, Arial, sans-serif`;
-                ctx.fillStyle = "rgba(255,255,255,0.92)";
-                ctx.textAlign = "left";
-                ctx.textBaseline = "top";
-                ctx.globalAlpha = 0.92;
-                ctx.fillText("썸네일", 24, 18);
-                // 아이콘(작은 원+카메라)
-                ctx.beginPath();
-                ctx.arc(width - 38, 32, 14, 0, 2 * Math.PI);
-                ctx.fillStyle = "#fff";
-                ctx.globalAlpha = 0.18;
-                ctx.fill();
-                ctx.globalAlpha = 1;
-                ctx.font = `bold ${
-                  Math.floor(height / 22) + 6
-                }px Pretendard, Arial, sans-serif`;
-                ctx.fillStyle = "#4285f4";
-                ctx.fillText("📷", width - 48, 22);
-                ctx.restore();
-                // 4. 중앙 텍스트(세션명)
-                ctx.save();
-                ctx.font = `bold ${
-                  Math.floor(height / 12) + 18
-                }px Pretendard, Arial, sans-serif`;
-                ctx.fillStyle = "#fff";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                let mainText =
-                  title.length > 40 ? title.slice(0, 37) + "..." : title;
-                // 여러 줄 처리
-                const lines = [];
-                while (mainText.length > 0) {
-                  let chunk = mainText.slice(0, 20);
-                  if (mainText.length > 20) {
-                    const lastSpace = chunk.lastIndexOf(" ");
-                    if (lastSpace > 0) chunk = chunk.slice(0, lastSpace);
-                  }
-                  lines.push(chunk);
-                  mainText = mainText.slice(chunk.length).trim();
-                }
-                const lineHeight = Math.floor(height / 10) + 10;
-                const startY =
-                  height / 2 - ((lines.length - 1) * lineHeight) / 2;
-                lines.forEach((line, i) => {
-                  ctx.fillText(line, width / 2, startY + i * lineHeight);
-                });
-                ctx.restore();
-                // 5. 중앙 하단에 Gemini 슬로건
-                ctx.save();
-                ctx.font = `bold ${
-                  Math.floor(height / 18) + 10
-                }px Pretendard, Arial, sans-serif`;
-                ctx.fillStyle = "#fff";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.globalAlpha = 0.92;
-                const slogan = sloganList[idx] || "AI 슬로건";
-                ctx.fillText(slogan, width / 2, height * 0.72);
-                ctx.restore();
-                // 6. 하단 스타일/비율/번호 (라벨 느낌)
-                ctx.save();
-                ctx.font = `bold ${
-                  Math.floor(height / 18) + 8
-                }px Pretendard, Arial, sans-serif`;
-                ctx.fillStyle = "rgba(255,255,255,0.92)";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "bottom";
-                ctx.globalAlpha = 0.92;
-                const infoText = `${style.toUpperCase()} • ${aspect} • #${
-                  idx + 1
-                }`;
-                // 라벨 배경
-                const labelW = ctx.measureText(infoText).width + 36;
-                const labelH = Math.floor(height / 18) + 18;
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(width / 2 - labelW / 2 + 12, height - 38);
-                ctx.lineTo(width / 2 + labelW / 2 - 12, height - 38);
-                ctx.quadraticCurveTo(
-                  width / 2 + labelW / 2,
-                  height - 38,
-                  width / 2 + labelW / 2,
-                  height - 38 + 12
-                );
-                ctx.lineTo(width / 2 + labelW / 2, height - 38 + labelH - 12);
-                ctx.quadraticCurveTo(
-                  width / 2 + labelW / 2,
-                  height - 38 + labelH,
-                  width / 2 + labelW / 2 - 12,
-                  height - 38 + labelH
-                );
-                ctx.lineTo(width / 2 - labelW / 2 + 12, height - 38 + labelH);
-                ctx.quadraticCurveTo(
-                  width / 2 - labelW / 2,
-                  height - 38 + labelH,
-                  width / 2 - labelW / 2,
-                  height - 38 + labelH - 12
-                );
-                ctx.lineTo(width / 2 - labelW / 2, height - 38 + 12);
-                ctx.quadraticCurveTo(
-                  width / 2 - labelW / 2,
-                  height - 38,
-                  width / 2 - labelW / 2 + 12,
-                  height - 38
-                );
-                ctx.closePath();
-                ctx.globalAlpha = 0.22;
-                ctx.fillStyle = "#222";
-                ctx.fill();
-                ctx.restore();
-                ctx.globalAlpha = 1;
-                ctx.fillText(infoText, width / 2, height - 38 + labelH / 2);
-                ctx.restore();
-                // 7. 입체감(빛 반사 효과)
-                ctx.save();
-                const shineGrad = ctx.createLinearGradient(0, 0, width, 0);
-                shineGrad.addColorStop(0, "rgba(255,255,255,0.10)");
-                shineGrad.addColorStop(0.5, "rgba(255,255,255,0.04)");
-                shineGrad.addColorStop(1, "rgba(255,255,255,0.10)");
-                ctx.fillStyle = shineGrad;
-                ctx.fillRect(0, 0, width, height / 2.2);
-                ctx.restore();
-                // 8. border
-                ctx.save();
-                ctx.lineWidth = 2.5;
-                ctx.strokeStyle = "rgba(255,255,255,0.13)";
-                ctx.beginPath();
-                ctx.moveTo(r, 0);
-                ctx.lineTo(width - r, 0);
-                ctx.quadraticCurveTo(width, 0, width, r);
-                ctx.lineTo(width, height - r);
-                ctx.quadraticCurveTo(width, height, width - r, height);
-                ctx.lineTo(r, height);
-                ctx.quadraticCurveTo(0, height, 0, height - r);
-                ctx.lineTo(0, r);
-                ctx.quadraticCurveTo(0, 0, r, 0);
-                ctx.closePath();
-                ctx.stroke();
-                ctx.restore();
-                // 이미지 DataURL 반환
-                const url = canvas.toDataURL("image/png");
-                return `<div class=\"ai-thumb-wrap\"><img src=\"${url}\" class=\"ai-generated-thumb\" alt=\"썸네일 예시${
-                  idx + 1
-                }\" /></div>`;
-              })
-              .join("");
-            aiImageGrid.innerHTML = thumbHtml;
-            if (aiMessage)
-              aiMessage.textContent = `세션별 썸네일 예시 ${outline.length}개를 생성했습니다.`;
-          }
-        );
+          aiMessage.textContent = `썸네일 예시 ${outline.length}개를 생성했습니다.`;
       });
       aiGenerateThumbBtn.__cp_thumb_event = true;
     }
@@ -1465,4 +1270,114 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       }
     });
   }
+}
+
+/**
+ * 첨부 이미지와 동일한 한국형 유튜브 썸네일 스타일을 Canvas에 그려줍니다.
+ * @param {CanvasRenderingContext2D} ctx - 캔버스 2D 컨텍스트
+ * @param {Object} options - { width, height, topText, bottomText, logoText, fontFamily }
+ */
+export function drawKoreanThumbnailStyle(ctx, options = {}) {
+  const width = options.width || 600;
+  const height = options.height || 400;
+  const topText = options.topText || "고퀄리티";
+  const bottomText = options.bottomText || "썸네일";
+  const logoText = options.logoText || "36.5lab";
+  const fontFamily = options.fontFamily || "'BM JUA', 'Nanum Gothic', 'Malgun Gothic', 'Arial Black', sans-serif";
+
+  // 1. 배경(어두운 패턴/이미지 대신 단색+노이즈)
+  ctx.save();
+  ctx.fillStyle = "#181828";
+  ctx.fillRect(0, 0, width, height);
+  // 노이즈 효과(랜덤 점)
+  for (let i = 0; i < 1200; i++) {
+    ctx.globalAlpha = Math.random() * 0.08;
+    ctx.fillStyle = ["#fff", "#888", "#222"][Math.floor(Math.random()*3)];
+    ctx.fillRect(Math.random()*width, Math.random()*height, 1, 1);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // 2. 집중선(만화 라인)
+  ctx.save();
+  const centerX = width/2, centerY = height/2+10;
+  const rays = 22;
+  for (let i = 0; i < rays; i++) {
+    const angle = (Math.PI * 2 * i) / rays + Math.PI/16;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX + Math.cos(angle) * width * 0.95, centerY + Math.sin(angle) * height * 0.95);
+    ctx.strokeStyle = i%2===0 ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.09)";
+    ctx.lineWidth = i%2===0 ? 4 : 2;
+    ctx.shadowColor = "#fff";
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 3. 그라디언트 테두리
+  ctx.save();
+  const borderGrad = ctx.createLinearGradient(0,0,width,height);
+  borderGrad.addColorStop(0, "#ff5ecb");
+  borderGrad.addColorStop(1, "#7c5fff");
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = borderGrad;
+  ctx.strokeRect(5, 5, width-10, height-10);
+  ctx.restore();
+
+  // 4. 3D 그림자/돌출 효과(텍스트)
+  function draw3DText(text, x, y, fill, stroke, shadow, font, align, baseline) {
+    ctx.save();
+    ctx.font = font;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    // 3D 그림자(아래/오른쪽)
+    ctx.fillStyle = shadow;
+    for (let i=8; i>=2; i-=2) ctx.fillText(text, x+i, y+i);
+    // 메인 텍스트
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = stroke;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = fill;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  // 5. 메인 텍스트(상단: 핑크, 하단: 노랑)
+  const topFont = `bold 82px ${fontFamily}`;
+  const bottomFont = `bold 100px ${fontFamily}`;
+  draw3DText(topText, width/2, height/2-30, "#ff3399", "#b1005a", "#2a001a", topFont, "center", "middle");
+  draw3DText(bottomText, width/2, height/2+70, "#ffb333", "#a86a00", "#4a2a00", bottomFont, "center", "middle");
+
+  // 6. 별 아이콘(텍스트 or 직접 그리기)
+  function drawStar(cx, cy, r, color, rot=0) {
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const angle = ((Math.PI * 2) / 5) * i - Math.PI/2 + rot;
+      ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      const angle2 = angle + Math.PI/5;
+      ctx.lineTo(cx + Math.cos(angle2) * (r*0.45), cy + Math.sin(angle2) * (r*0.45));
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.restore();
+  }
+  drawStar(width-60, height/2-60, 18, "#ffb333");
+  drawStar(width-100, height/2+40, 12, "#ff3399");
+  drawStar(width-30, height-60, 10, "#fff700");
+  drawStar(width-120, height-30, 8, "#ff3399");
+
+  // 7. 우측 하단 로고
+  ctx.save();
+  ctx.font = "bold 28px Arial, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = "#36a5ff";
+  ctx.fillText(logoText, width-18, height-18);
+  ctx.restore();
 }
