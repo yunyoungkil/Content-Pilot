@@ -826,9 +826,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // FR3 (PRD v2.0/v2.2): AI 기반 썸네일 템플릿 자동 생성기
   else if (msg.action === "analyze_image_for_template") {
+    console.log("[Template Generator] 🚀 템플릿 분석 요청 수신");
     (async () => {
       try {
         const { data } = msg; // { base64Image?, imageUrl?, templateName }
+        console.log("[Template Generator] 📦 데이터:", {
+          hasBase64: !!data.base64Image,
+          hasUrl: !!data.imageUrl,
+          templateName: data.templateName
+        });
 
         // 1. [신규 v2.2] 이미지 소스(Base64 또는 URL) 처리
         let imageBase64Data;
@@ -871,11 +877,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { geminiApiKey } = await chrome.storage.local.get([
           "geminiApiKey",
         ]);
+        console.log("[Template Generator] 🔑 API 키 확인:", geminiApiKey ? "존재함" : "없음");
+        
         if (!geminiApiKey) {
           throw new Error("Gemini API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해주세요.");
         }
 
         const VISION_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+        console.log("[Template Generator] 🌐 API URL 생성 완료");
 
         // CR1 (PRD v3.1): JSON 스키마 정의 - API 레벨에서 구조 강제
         const templateSchema = {
@@ -1174,6 +1183,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         while (retryCount < MAX_RETRIES) {
           try {
+            console.log(`[Template Generator] 📡 API 호출 시도 ${retryCount + 1}/${MAX_RETRIES}`);
+            
             visionResponse = await fetch(VISION_API_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1199,7 +1210,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               }),
             });
 
+            console.log(`[Template Generator] 📨 응답 수신: ${visionResponse.status} ${visionResponse.statusText}`);
+
             if (visionResponse.ok) {
+              console.log("[Template Generator] ✅ API 호출 성공");
               break; // 성공하면 루프 탈출
             }
 
@@ -1258,6 +1272,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         const visionData = await visionResponse.json();
+        console.log("[Template Generator] 📄 JSON 파싱 완료, candidates 길이:", visionData.candidates?.length || 0);
 
         // 3. FR-V-Validate (PRD v2.5): JSON 파싱 및 강화된 검증
         const rawText =
