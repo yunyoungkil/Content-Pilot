@@ -85,21 +85,28 @@ function validateTemplateData(data) {
     );
   }
 
-  // PRD v2.4: 상대 좌표 검증 (0.0 ~ 1.0 범위)
+  // PRD v3.2: 타입별 상대 좌표 검증 (0.0 ~ 1.0 범위)
   for (let i = 0; i < data.layers.length; i++) {
     const layer = data.layers[i];
 
+    // 공통 검증: 타입 필수
+    if (!layer.type || !["text", "shape", "svg", "image"].includes(layer.type)) {
+      throw new Error(`레이어 ${i}: type 필드가 누락되었거나 유효하지 않은 값입니다. (허용: text, shape, svg, image)`);
+    }
+
+    // 공통 검증: 좌표 범위
+    if (typeof layer.x !== "number" || typeof layer.y !== "number") {
+      throw new Error(`레이어 ${i}: x, y 좌표가 숫자가 아닙니다.`);
+    }
+
+    if (layer.x < 0 || layer.x > 1 || layer.y < 0 || layer.y > 1) {
+      throw new Error(
+        `레이어 ${i}: x, y 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: x=${layer.x}, y=${layer.y})`
+      );
+    }
+
+    // 타입별 검증
     if (layer.type === "text") {
-      if (typeof layer.x !== "number" || typeof layer.y !== "number") {
-        throw new Error(`레이어 ${i}: x, y 좌표가 숫자가 아닙니다.`);
-      }
-
-      if (layer.x < 0 || layer.x > 1 || layer.y < 0 || layer.y > 1) {
-        throw new Error(
-          `레이어 ${i}: x, y 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: x=${layer.x}, y=${layer.y})`
-        );
-      }
-
       if (!layer.styles || typeof layer.styles !== "object") {
         throw new Error(`레이어 ${i}: styles 객체가 필요합니다.`);
       }
@@ -112,6 +119,22 @@ function validateTemplateData(data) {
         throw new Error(
           `레이어 ${i}: fontRatio는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: ${layer.styles.fontRatio})`
         );
+      }
+    } else if (layer.type === "svg") {
+      // SVG 레이어 검증 (pathData는 선택적, widthRatio/heightRatio 필수)
+      if (layer.widthRatio && (layer.widthRatio <= 0 || layer.widthRatio > 1)) {
+        throw new Error(`레이어 ${i}: widthRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
+      }
+      if (layer.heightRatio && (layer.heightRatio <= 0 || layer.heightRatio > 1)) {
+        throw new Error(`레이어 ${i}: heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
+      }
+    } else if (layer.type === "image") {
+      // 이미지 레이어 검증 (widthRatio/heightRatio 필수)
+      if (!layer.widthRatio || !layer.heightRatio) {
+        throw new Error(`레이어 ${i}: 이미지 타입은 widthRatio와 heightRatio가 필수입니다.`);
+      }
+      if (layer.widthRatio <= 0 || layer.widthRatio > 1 || layer.heightRatio <= 0 || layer.heightRatio > 1) {
+        throw new Error(`레이어 ${i}: widthRatio, heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
       }
     }
   }
@@ -872,25 +895,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             },
             layers: {
               type: "array",
-              description: "텍스트, 도형 등 모든 시각적 요소의 배열",
+              description: "텍스트, 도형, SVG 아이콘, 이미지 등 모든 시각적 요소의 배열",
               items: {
                 type: "object",
                 properties: {
                   type: {
                     type: "string",
-                    enum: ["text", "shape"],
-                    description: "요소 타입(text 또는 shape)",
+                    enum: ["text", "shape", "svg", "image"],
+                    description: "요소 타입(text, shape, svg, image)",
                   },
                   text: {
                     type: "string",
                     description:
-                      "텍스트 레이어일 경우: 반드시 '{{SLOGAN}}' 또는 '{{VISUALIZATION_CUE}}' 중 하나여야 함",
+                      "텍스트 레이어일 경우: 플레이스홀더({{SLOGAN}}, {{VISUALIZATION_CUE}}) 또는 실제 텍스트 문자열",
                   },
                   shape: {
                     type: "string",
                     enum: ["rect", "circle"],
                     description:
                       "도형 레이어일 경우: 'rect'(사각형), 'circle'(원) 중 하나",
+                  },
+                  pathData: {
+                    type: "string",
+                    description:
+                      "SVG 레이어일 경우: SVG path 데이터(예: 'M 0,0 L 10,10 Z')",
+                  },
+                  src: {
+                    type: "string",
+                    description:
+                      "이미지 레이어일 경우: Base64 이미지 데이터 또는 null(placeholder)",
                   },
                   x: {
                     type: "number",
@@ -903,12 +936,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   widthRatio: {
                     type: "number",
                     description:
-                      "도형의 가로 크기(이미지 너비 대비 비율, 0.0~1.0)",
+                      "요소의 가로 크기(이미지 너비 대비 비율, 0.0~1.0)",
                   },
                   heightRatio: {
                     type: "number",
                     description:
-                      "도형의 세로 크기(이미지 높이 대비 비율, 0.0~1.0)",
+                      "요소의 세로 크기(이미지 높이 대비 비율, 0.0~1.0)",
                   },
                   styles: {
                     type: "object",
@@ -930,6 +963,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                       fill: {
                         type: "string",
                         description: "채우기 색상(HEX 또는 rgba)",
+                      },
+                      stroke: {
+                        type: "string",
+                        description: "테두리 색상(HEX 또는 rgba)",
+                      },
+                      lineWidth: {
+                        type: "number",
+                        description: "테두리 두께(이미지 대비 비율, 0.0~1.0)",
                       },
                       align: {
                         type: "string",
@@ -967,10 +1008,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         },
                       },
                     },
-                    required: ["fill"],
                   },
                 },
-                required: ["type", "x", "y", "styles"],
+                required: ["type", "x", "y"],
               },
             },
           },

@@ -9,9 +9,21 @@
  */
 
 /**
- * [PRD v2.7] 캔버스 렌더링 헬퍼 함수
+ * [PRD v3.2 TR-1] 캔버스 렌더링 헬퍼 함수
  */
 const renderHelpers = {
+  /**
+   * [TR-1] 공통 좌표 변환 헬퍼 (v2.3 절대 좌표 vs v2.4+ 비율 좌표)
+   * @param {number} value - x, y, width, height 등의 값
+   * @param {number} canvasSize - canvasWidth 또는 canvasHeight
+   * @returns {number} 절대 픽셀 값
+   */
+  convertCoordinate: (value, canvasSize) => {
+    if (!value) return 0;
+    // v2.3 하위 호환성: 값이 1보다 크면 절대 픽셀로 간주
+    return value > 1 ? value : value * canvasSize;
+  },
+
   /**
    * FR-T1: 텍스트 레이어를 그립니다 (강화)
    * @param {CanvasRenderingContext2D} ctx - 캔버스 컨텍스트
@@ -36,17 +48,9 @@ const renderHelpers = {
 
     ctx.save();
 
-    // 하위 호환성: v2.3 템플릿(절대 좌표) vs v2.4+ 템플릿(비율 좌표) 자동 감지
-    let actualX, actualY;
-    if (layer.x > 1 || layer.y > 1) {
-      // v2.3 이하: 절대 픽셀 좌표
-      actualX = layer.x || 0;
-      actualY = layer.y || 0;
-    } else {
-      // v2.4+: 상대 좌표 → 절대 픽셀 변환
-      actualX = (layer.x || 0) * canvasWidth;
-      actualY = (layer.y || 0) * canvasHeight;
-    }
+    // [TR-1] 공통 헬퍼를 사용한 좌표 변환
+    const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
+    const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
 
     // 하위 호환성: v2.3 템플릿의 'font' 문자열 vs v2.4+ 템플릿의 fontRatio/fontWeight/fontFamily 분리
     let actualFontSize, fontWeight, fontFamily;
@@ -137,16 +141,13 @@ const renderHelpers = {
     if (layer.shape === "rect") {
       ctx.save();
 
-      // v3.1: AI는 widthRatio, heightRatio로 크기를 전달 (중심 좌표 기준)
-      const widthRatio = layer.widthRatio || 0;
-      const heightRatio = layer.heightRatio || 0;
+      // [TR-1] 공통 헬퍼를 사용한 크기 변환
+      const actualWidth = renderHelpers.convertCoordinate(layer.widthRatio || 0, canvasWidth);
+      const actualHeight = renderHelpers.convertCoordinate(layer.heightRatio || 0, canvasHeight);
 
-      const actualWidth = widthRatio * canvasWidth;
-      const actualHeight = heightRatio * canvasHeight;
-
-      // v3.1: x, y는 중심 좌표 → 좌측 상단 좌표로 변환
-      const centerX = (layer.x || 0) * canvasWidth;
-      const centerY = (layer.y || 0) * canvasHeight;
+      // [TR-1] 중심 좌표 → 좌측 상단 좌표 변환
+      const centerX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
+      const centerY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
       const actualX = centerX - actualWidth / 2;
       const actualY = centerY - actualHeight / 2;
 
@@ -172,13 +173,10 @@ const renderHelpers = {
     } else if (layer.shape === "circle") {
       ctx.save();
 
-      // v3.1: x, y는 중심 좌표 (비율)
-      const actualX = (layer.x || 0) * canvasWidth;
-      const actualY = (layer.y || 0) * canvasHeight;
-
-      // v3.1: widthRatio를 지름으로 사용, 반지름은 절반
-      const widthRatio = layer.widthRatio || 0.05;
-      const actualRadius = (widthRatio * canvasWidth) / 2;
+      // [TR-1] 공통 헬퍼를 사용한 좌표 및 크기 변환
+      const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
+      const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
+      const actualRadius = renderHelpers.convertCoordinate(layer.widthRatio || 0.05, canvasWidth) / 2;
 
       console.log(
         `[Shape Render] ⭕ circle: center(${actualX}, ${actualY}), radius: ${actualRadius}`
@@ -281,25 +279,16 @@ const renderHelpers = {
   drawSVG: (ctx, layer, canvasWidth, canvasHeight) => {
     const styles = layer.styles || {};
 
-    // 1. 좌표 및 크기 계산 (비율 → 절대 픽셀)
-    let actualX, actualY, actualW, actualH;
-    if (layer.x > 1 || layer.y > 1) {
-      // v2.3 하위 호환성: 절대 좌표
-      actualX = layer.x || 0;
-      actualY = layer.y || 0;
-      actualW = layer.widthRatio
-        ? layer.widthRatio * canvasWidth
-        : layer.width || 50;
-      actualH = layer.heightRatio
-        ? layer.heightRatio * canvasHeight
-        : layer.height || 50;
-    } else {
-      // v2.4+: 비율 좌표
-      actualX = (layer.x || 0) * canvasWidth;
-      actualY = (layer.y || 0) * canvasHeight;
-      actualW = (layer.widthRatio || 0.1) * canvasWidth;
-      actualH = (layer.heightRatio || 0.1) * canvasHeight;
-    }
+    // [TR-1] 공통 헬퍼를 사용한 좌표 및 크기 변환
+    const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
+    const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
+    // widthRatio가 있으면 사용, 없으면 legacy width 또는 기본값
+    const actualW = layer.widthRatio 
+      ? renderHelpers.convertCoordinate(layer.widthRatio, canvasWidth)
+      : (layer.width || 50);
+    const actualH = layer.heightRatio
+      ? renderHelpers.convertCoordinate(layer.heightRatio, canvasHeight)
+      : (layer.height || 50);
 
     console.log(
       `[SVG Render] 🎨 SVG 아이콘: pos(${actualX}, ${actualY}), size: ${actualW}x${actualH}`
@@ -366,18 +355,11 @@ const renderHelpers = {
    */
   drawImage: (ctx, layer, canvasWidth, canvasHeight) => {
     return new Promise((resolve) => {
-      let actualX, actualY, actualW, actualH;
-      if (layer.x > 1 || layer.y > 1) {
-        actualX = layer.x || 0;
-        actualY = layer.y || 0;
-        actualW = layer.width || 100;
-        actualH = layer.height || 100;
-      } else {
-        actualX = (layer.x || 0) * canvasWidth;
-        actualY = (layer.y || 0) * canvasHeight;
-        actualW = (layer.width || 0.1) * canvasWidth;
-        actualH = (layer.height || 0.1) * canvasHeight;
-      }
+      // [TR-1] 공통 헬퍼를 사용한 좌표 및 크기 변환
+      const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
+      const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
+      const actualW = renderHelpers.convertCoordinate(layer.width || layer.widthRatio || 0.1, canvasWidth);
+      const actualH = renderHelpers.convertCoordinate(layer.height || layer.heightRatio || 0.1, canvasHeight);
 
       ctx.save();
 

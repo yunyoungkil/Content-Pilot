@@ -897,6 +897,7 @@
 
 .ai-template-dropzone-area span {
   pointer-events: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
