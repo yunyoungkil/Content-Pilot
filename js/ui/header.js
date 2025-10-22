@@ -3,23 +3,28 @@
 // 공통 헤더 렌더링 함수
 export function renderPanelHeader() {
   const iconUrl = chrome.runtime.getURL("images/icon-32.png");
+  const manifest = chrome.runtime.getManifest();
+  const version = manifest.version || "1.0.0";
   const activeMode = window.__cp_active_mode || "scrapbook";
-  const isWorkspaceMode = activeMode === 'workspace';
+  const isWorkspaceMode = activeMode === "workspace";
   const isLayoutMode = !!window.__cp_layout_mode_active;
 
   const tabs = [
-     { key: "dashboard", label: "대시보드", color: "#1a73e8" }, 
-     { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
-     { key: "kanban", label: "기획 보드", color: "#34A853" },
-     { key: "draft", label: "초안 작성", color: "#FBBC05" },
-     { key: "channel", label: "채널 연동", color: "#EA4335" },
+    { key: "dashboard", label: "대시보드", color: "#1a73e8" },
+    { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
+    { key: "kanban", label: "기획 보드", color: "#34A853" },
+    { key: "draft", label: "초안 작성", color: "#FBBC05" },
+    { key: "channel", label: "채널 연동", color: "#EA4335" },
   ];
 
   return `
     <div id="cp-panel-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px 10px 18px;border-bottom:1.5px solid #f0f0f0;background:#fff;border-radius:12px 12px 0 0;">
       <div style="display:flex;align-items:center;gap:10px;">
-        <img src="${iconUrl}" alt="Content Pilot" style="height:26px;width:26px;">
-        <span style="font-size:18px;font-weight:700;color:#222;letter-spacing:0.5px;">Content Pilot</span>
+        <img src="${iconUrl}" alt="Content Pilot" style="height:26px;width:26px;" onerror="this.style.display='none';">
+        <div style="display:flex;flex-direction:column;">
+          <span style="font-size:18px;font-weight:700;color:#222;letter-spacing:0.5px;">Content Pilot</span>
+          <span style="font-size:12px;font-weight:500;color:#666;">v${version}</span>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:2px;">
         <button id="cp-panel-fullscreen-exit" class="cp-panel-icon-btn">
@@ -49,22 +54,42 @@ export function renderPanelHeader() {
       </div>
     </div>
     
-    ${/* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */''}
-    ${isWorkspaceMode ? `
+    ${
+      /* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */ ""
+    }
+    ${
+      isWorkspaceMode
+        ? `
     <div id="cp-navigation-bar" style="display:flex; align-items:center; padding: 0 18px 8px 18px; border-bottom: 1.5px solid #f0f0f0; margin-bottom: 8px;">
       <button id="cp-back-to-dashboard" style="background:none; border:none; cursor:pointer; display:flex; align-items:center; gap: 4px; font-size: 15px; font-weight: 600; color: #555;">
         <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="#555"><path d="M400-80 0-480l400-400 56 56-344 344 344 344-56 56Z"/></svg>
         <span>대시보드로 돌아가기</span>
       </button>
     </div>
-    ` : `
+    `
+        : `
     <div id="cp-mode-tabs" style="display:flex;gap:8px;margin-bottom:8px;padding:0 18px 0 18px;">
-      ${tabs.map(tab => `
-        <div class="cp-mode-tab ${activeMode === tab.key ? " active" : ""}" data-key="${tab.key}" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${activeMode === tab.key ? tab.color : "#888"};background:${activeMode === tab.key ? "#f2f3f7" : "transparent"};border:2px solid ${activeMode === tab.key ? tab.color : "transparent"};transition:all 0.2s;">
+      ${tabs
+        .map(
+          (tab) => `
+        <div class="cp-mode-tab ${
+          activeMode === tab.key ? " active" : ""
+        }" data-key="${
+            tab.key
+          }" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${
+            activeMode === tab.key ? tab.color : "#888"
+          };background:${
+            activeMode === tab.key ? "#f2f3f7" : "transparent"
+          };border:2px solid ${
+            activeMode === tab.key ? tab.color : "transparent"
+          };transition:all 0.2s;">
           ${tab.label}
         </div>
-      `).join("")}
+      `
+        )
+        .join("")}
     </div>
-    `}
+    `
+    }
   `;
 }

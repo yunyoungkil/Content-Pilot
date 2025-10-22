@@ -70,6 +70,13 @@ if (window.self === window.top) {
         }
         break;
       }
+      // AI 이미지 분석 진행 상태 콘솔 로고 표시
+      case "ai_analysis_started":
+        console.log("🟢 [Content Pilot] AI 이미지 분석이 시작되었습니다.");
+        break;
+      case "ai_analysis_finished":
+        console.log("⚪ [Content Pilot] AI 이미지 분석이 완료되었습니다.");
+        break;
     }
   });
 

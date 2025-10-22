@@ -1,6 +1,8 @@
 // background.js (수정 완료된 최종 버전)
 
-let creating; // Offscreen Document 생성 플래그
+console.debug("[DEBUG] background.js 로드됨 - 시작");
+
+// ...existing code...
 let isKanbanListenerActive = false;
 
 /**
@@ -53,17 +55,16 @@ function validateTemplateData(data) {
     throw new Error("AI가 유효한 데이터를 반환하지 않았습니다.");
   }
 
-  // PRD v2.4 반응형 스키마 기준 필수 필드 검증
+  // PRD v2.4 반응형 스키마 기준 필수 필드 검증 (유연하게)
   if (!data.name || typeof data.name !== "string") {
-    throw new Error("필수 필드 'name'이 누락되었거나 문자열이 아닙니다.");
+    data.name = "새 템플릿"; // 기본값 제공
+    console.warn("[Validate] name 필드가 없어 기본값 '새 템플릿' 할당");
   }
 
+  // background는 선택적으로 만들기
   if (!data.background || typeof data.background !== "object") {
-    throw new Error("필수 필드 'background'가 누락되었거나 객체가 아닙니다.");
-  }
-
-  if (!data.background.type || !data.background.value) {
-    throw new Error("background 필드에 'type'과 'value'가 필요합니다.");
+    data.background = { type: "solid", value: "#FFFFFF" }; // 기본 흰색 배경
+    console.warn("[Validate] background 필드가 없어 기본값 할당");
   }
 
   if (!Array.isArray(data.layers) || data.layers.length === 0) {
@@ -72,17 +73,28 @@ function validateTemplateData(data) {
     );
   }
 
-  // 플레이스홀더 레이어 검증 (고충실도 복제 지원)
+  // 플레이스홀더 레이어 검증 (고충실도 복제 지원, 유연하게)
   const sloganLayer = data.layers.find(
     (l) =>
       l.type === "text" &&
       (l.text === "{{SLOGAN}}" ||
         (typeof l.text === "string" && l.text.length > 0))
   );
+
+  // [복잡한 이미지용] 텍스트 레이어가 없으면 기본 텍스트 추가
   if (!sloganLayer) {
-    throw new Error(
-      "필수 텍스트 레이어가 없습니다. 메인 텍스트(실제 텍스트 또는 '{{SLOGAN}}')가 반드시 포함되어야 합니다."
-    );
+    console.warn("[Validate] 텍스트 레이어가 없어 기본 텍스트 레이어 추가");
+    data.layers.push({
+      type: "text",
+      text: "제목",
+      x: 0.5,
+      y: 0.8,
+      styles: {
+        fontRatio: 0.05,
+        fill: "#000000",
+        align: "center",
+      },
+    });
   }
 
   // PRD v3.2: 타입별 상대 좌표 검증 (0.0 ~ 1.0 범위)
@@ -99,14 +111,27 @@ function validateTemplateData(data) {
       );
     }
 
-    // 공통 검증: 좌표 범위
-    if (typeof layer.x !== "number" || typeof layer.y !== "number") {
-      throw new Error(`레이어 ${i}: x, y 좌표가 숫자가 아닙니다.`);
+    // 공통 검증: 좌표 범위 (강화된 검증)
+    if (typeof layer.x !== "number" || isNaN(layer.x)) {
+      throw new Error(
+        `레이어 ${i}: x 좌표가 유효한 숫자가 아닙니다. (현재: ${layer.x})`
+      );
+    }
+    if (typeof layer.y !== "number" || isNaN(layer.y)) {
+      throw new Error(
+        `레이어 ${i}: y 좌표가 유효한 숫자가 아닙니다. (현재: ${layer.y})`
+      );
     }
 
-    if (layer.x < 0 || layer.x > 1 || layer.y < 0 || layer.y > 1) {
+    // 범위 검증 (자동 클리핑 대신 엄격 검증)
+    if (layer.x < 0 || layer.x > 1) {
       throw new Error(
-        `레이어 ${i}: x, y 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: x=${layer.x}, y=${layer.y})`
+        `레이어 ${i}: x 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: ${layer.x})`
+      );
+    }
+    if (layer.y < 0 || layer.y > 1) {
+      throw new Error(
+        `레이어 ${i}: y 좌표는 0.0~1.0 사이의 비율 값이어야 합니다. (현재: ${layer.y})`
       );
     }
 
@@ -138,6 +163,28 @@ function validateTemplateData(data) {
       ) {
         throw new Error(
           `레이어 ${i}: heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`
+        );
+      }
+    } else if (layer.type === "shape") {
+      // Shape 레이어 검증 (widthRatio/heightRatio 필수, styles는 선택적)
+      if (!layer.widthRatio || !layer.heightRatio) {
+        throw new Error(
+          `레이어 ${i}: shape 타입은 widthRatio와 heightRatio가 필수입니다.`
+        );
+      }
+      if (
+        layer.widthRatio <= 0 ||
+        layer.widthRatio > 1 ||
+        layer.heightRatio <= 0 ||
+        layer.heightRatio > 1
+      ) {
+        throw new Error(
+          `레이어 ${i}: widthRatio, heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`
+        );
+      }
+      if (!layer.shape || !["rect", "circle"].includes(layer.shape)) {
+        throw new Error(
+          `레이어 ${i}: shape 필드가 누락되었거나 유효하지 않은 값입니다. (허용: rect, circle)`
         );
       }
     } else if (layer.type === "image") {
@@ -588,6 +635,9 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // [DEBUG] 모든 메시지 수신 로그 - 강력한 확인
+  console.log("[DEBUG] 🚨 onMessage 핸들러 실행됨:", msg.action);
+  console.debug("[DEBUG] onMessage received:", msg.action, msg, sender);
   // 썸네일용 Gemini 슬로건 생성 (draft 전체와 outline 리스트를 함께 보냄)
   if (
     msg.action === "gemini_generate_thumbnail_texts" &&
@@ -850,8 +900,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // FR3 (PRD v2.0/v2.2): AI 기반 썸네일 템플릿 자동 생성기
   else if (msg.action === "analyze_image_for_template") {
+    console.debug("[DEBUG] analyze_image_for_template 트리거됨", msg.data);
     (async () => {
+      // 분석 시작 알림
+      chrome.runtime.sendMessage({ action: "ai_analysis_started" });
       try {
+        console.debug("[DEBUG] Gemini Vision API 분석 시작");
         console.log(
           "[Template Analysis] 🚀 시작 - 템플릿 이름:",
           msg.data?.templateName
@@ -897,6 +951,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           throw new Error("No image data provided (base64Image or imageUrl)");
         }
 
+        // 디버그 로그: Base64 길이 및 MIME을 출력하여 런타임 진단을 쉽게 함
+        try {
+          const previewHead = (data.base64Image || "").slice(0, 300);
+          console.debug(
+            "[Template Analysis] 🧪 요청 디버그 - imageMimeType:",
+            imageMimeType,
+            "imageBase64 length:",
+            (imageBase64Data || "").length
+          );
+          console.debug("[Template Analysis] 🧾 prompt head:", previewHead);
+        } catch (dbgErr) {
+          console.warn("[Template Analysis] 디버그 로그 생성 중 오류:", dbgErr);
+        }
+
         // 2. [기존 v2.0] Gemini Vision API 호출
         const { geminiApiKey } = await chrome.storage.local.get([
           "geminiApiKey",
@@ -908,297 +976,134 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         const VISION_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+        console.debug(
+          "[Template Analysis] 🌐 VISION_API_URL:",
+          VISION_API_URL.replace(/(key=)[^&]+/, "$1<REDACTED>")
+        );
 
-        // CR1 (PRD v3.1): JSON 스키마 정의 - API 레벨에서 구조 강제
+        // CR1 (PRD v3.1): 유연한 JSON 스키마로 성공률 향상
         const templateSchema = {
           type: "object",
           properties: {
             name: {
               type: "string",
-              description: "템플릿의 이름(예: 원본 파일명 등)",
+              description: "템플릿 이름",
             },
             background: {
               type: "object",
-              description: "이미지의 주요 배경색(단색, HEX 또는 rgba 형식)",
               properties: {
                 type: {
                   type: "string",
                   enum: ["solid"],
-                  description: "배경의 종류(단색만 허용)",
+                  description: "배경 타입",
                 },
                 value: {
                   type: "string",
-                  description: "배경 색상(HEX 또는 rgba 형식)",
+                  description: "배경 색상 (HEX)",
                 },
               },
-              required: ["type", "value"],
             },
             layers: {
               type: "array",
-              description:
-                "텍스트, 도형, SVG 아이콘, 이미지 등 모든 시각적 요소의 배열",
+              description: "시각적 요소 레이어 배열",
               items: {
                 type: "object",
                 properties: {
                   type: {
                     type: "string",
-                    enum: ["text", "shape", "svg", "image"],
-                    description: "요소 타입(text, shape, svg, image)",
+                    enum: ["text", "shape", "image"],
+                    description: "레이어 타입",
                   },
                   text: {
                     type: "string",
-                    description:
-                      "텍스트 레이어일 경우: 플레이스홀더({{SLOGAN}}, {{VISUALIZATION_CUE}}) 또는 실제 텍스트 문자열",
+                    description: "텍스트 레이어의 텍스트 내용",
                   },
                   shape: {
                     type: "string",
                     enum: ["rect", "circle"],
-                    description:
-                      "도형 레이어일 경우: 'rect'(사각형), 'circle'(원) 중 하나",
-                  },
-                  pathData: {
-                    type: "string",
-                    description:
-                      "SVG 레이어일 경우: SVG path 데이터(예: 'M 0,0 L 10,10 Z')",
-                  },
-                  src: {
-                    type: "string",
-                    description:
-                      "이미지 레이어일 경우: Base64 이미지 데이터 또는 null(placeholder)",
+                    description: "도형 타입",
                   },
                   x: {
                     type: "number",
-                    description:
-                      '[CRITICAL] 가로 위치 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 "0.5" 금지!',
+                    description: "X 좌표 (0.0~1.0)",
                   },
                   y: {
                     type: "number",
-                    description:
-                      "[CRITICAL] 세로 위치 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 금지!",
+                    description: "Y 좌표 (0.0~1.0)",
                   },
                   widthRatio: {
                     type: "number",
-                    description:
-                      "[CRITICAL] 가로 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입. 문자열 금지!",
+                    description: "너비 비율 (0.0~1.0)",
                   },
                   heightRatio: {
                     type: "number",
-                    description:
-                      "[CRITICAL] 세로 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입. 문자열 금지!",
+                    description: "높이 비율 (0.0~1.0)",
                   },
                   styles: {
                     type: "object",
+                    description: "스타일 속성",
                     properties: {
                       fontRatio: {
                         type: "number",
-                        description:
-                          '[CRITICAL] 폰트 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 "0.05" 절대 금지!',
-                      },
-                      fontWeight: {
-                        type: "string",
-                        enum: ["normal", "bold"],
-                        description:
-                          "폰트 두께(normal 또는 bold) - 숫자(700) 금지, 문자열만 허용",
-                      },
-                      fontFamily: {
-                        type: "string",
-                        description: "폰트 패밀리(예: 'Noto Sans KR')",
+                        description: "폰트 크기 비율",
                       },
                       fill: {
                         type: "string",
-                        description: "채우기 색상(HEX 또는 rgba)",
-                      },
-                      stroke: {
-                        type: "string",
-                        description: "테두리 색상(HEX 또는 rgba)",
-                      },
-                      lineWidth: {
-                        type: "number",
-                        description: "테두리 두께(이미지 대비 비율, 0.0~1.0)",
+                        description: "채우기 색상",
                       },
                       align: {
                         type: "string",
                         enum: ["left", "center", "right"],
-                        description: "텍스트 정렬(left, center, right)",
-                      },
-                      baseline: {
-                        type: "string",
-                        enum: ["top", "middle", "bottom", "alphabetic"],
-                        description:
-                          "텍스트 기준선(top, middle, bottom, alphabetic)",
-                      },
-                      shadow: {
-                        type: "object",
-                        properties: {
-                          color: {
-                            type: "string",
-                            description: "그림자 색상(rgba 권장)",
-                          },
-                          blur: {
-                            type: "number",
-                            description:
-                              "그림자 블러(이미지 높이 대비 비율, 0.0~1.0)",
-                          },
-                          offsetX: {
-                            type: "number",
-                            description:
-                              "그림자 X 오프셋(이미지 너비 대비 비율, 0.0~1.0)",
-                          },
-                          offsetY: {
-                            type: "number",
-                            description:
-                              "그림자 Y 오프셋(이미지 높이 대비 비율, 0.0~1.0)",
-                          },
-                        },
+                        description: "텍스트 정렬",
                       },
                     },
                   },
                 },
+                // 필수 필드 최소화
                 required: ["type", "x", "y"],
               },
             },
           },
-          required: ["name", "background", "layers"],
+          // 필수 필드 최소화
+          required: ["name", "layers"],
         };
 
-        // CR3 (PRD v3.2 Enhanced): 고충실도(High-Fidelity) 모드 프롬프트 - 복잡한 그래픽 감지 강화
+        // CR3 (PRD v3.2 Enhanced + 복잡한 이미지 최적화): 단계별 분석으로 성공률 향상
         const jsonStructurePrompt = `
-당신은 썸네일 디자인 이미지를 HTML5 Canvas에서 정확히 복제하기 위한 고충실도 JSON 템플릿을 생성하는 전문가입니다.
+이미지를 분석하여 Canvas에서 렌더링할 수 있는 JSON 템플릿을 생성하세요.
 
 **템플릿 이름**: "${data.templateName || "새 템플릿"}"
 
-**[핵심 원칙: 초고충실도 복제]**
-- 이미지의 **모든 시각적 요소**를 레이어별로 완벽하게 추출합니다.
-- 단순한 텍스트만이 아니라, 복잡한 그래픽 요소(3D 텍스트, 아이콘, 복합 도형)도 정확히 감지합니다.
-- **복잡도 판단 우선**: 요소가 복잡하면(그라디언트, 3D 효과, 테두리, 그림자 등) type: "image"로 추출합니다.
+**단계별 분석**:
 
-**1. 배경 분석**:
-- 주요 단색(가장 넓게 사용된 색상)을 HEX 코드로 추출 (예: "#1A1A1A").
-- 그라디언트가 있으면 linear-gradient(...) 또는 대표 색상 선택.
+1. **배경 분석**: 주요 배경색을 HEX 코드로 (예: "#FFFFFF")
 
-**2. 텍스트 레이어 - 복잡도 기반 분류 (가장 중요!)**:
+2. **요소 분류**:
+   - 텍스트: type: "text" (단순한 텍스트만)
+   - 도형: type: "shape" (rect, circle)
+   - 복잡한 요소: type: "image" (3D 텍스트, 아이콘, 사진 등)
 
-**[2-1] 단순 텍스트 (type: "text"로 추출)**:
-- 조건: 단색 채우기 + 단순 그림자만 있는 평범한 텍스트
-- 예: "간단한 제목", "설명 텍스트"
-- JSON: type: "text", text: "실제내용", styles: { fill, fontRatio, fontWeight }
+3. **좌표 지정**: 모든 x, y는 0.0~1.0 비율로
 
-**[2-2] 복잡한 텍스트 그래픽 (type: "image"로 추출, 매우 중요!)**:
-- 조건: 다음 중 하나라도 해당하면 type: "image"로 추출
-  ✓ 3D 효과, 입체감, 깊이감이 있는 텍스트
-  ✓ 텍스트에 그라디언트 채우기가 적용된 경우
-  ✓ 텍스트에 복잡한 테두리(두꺼운 stroke, 다중 레이어)가 있는 경우
-  ✓ 텍스트에 빛/광선/후광 효과가 있는 경우
-  ✓ 텍스트가 아치형/곡선형으로 배치된 경우
-  ✓ 텍스트가 변형(perspective, 기울기)된 경우
-- 예: "동네 일거리 바라회" (3D 효과 + 테두리 + 그림자)
-- JSON: type: "image", src: null, x: 0.5, y: 0.3, widthRatio: 0.8, heightRatio: 0.2
-- 설명: 이런 복잡한 텍스트는 Canvas로 100% 복제 불가능하므로, 나중에 Base64 이미지로 대체할 placeholder로 남깁니다.
+**중요 규칙**:
+- 최소 1개의 텍스트 레이어 필수
+- 복잡한 이미지는 type: "image"로 단순화
+- 좌표는 이미지 중앙을 0.5, 0.5로
 
-**3. 도형/장식 레이어 - 세밀한 추출 (복합 도형 분리!)**:
-
-**[3-1] 단일 도형**:
-- 사각형: type: "shape", shape: "rect", fill/stroke
-- 원: type: "shape", shape: "circle", fill/stroke
-
-**[3-2] 복합 도형 (여러 레이어로 분리!)**:
-- 예: '24' 뱃지 (녹색 원 + 짙은 녹색 테두리)
-  → 레이어 1: { type: "shape", shape: "circle", fill: "#90EE90" }
-  → 레이어 2: { type: "shape", shape: "circle", stroke: "#228B22", styles: { lineWidth: 0.01 } }
-- 예: 카드 배경 (흰색 사각형 + 회색 테두리)
-  → 레이어 1: { type: "shape", shape: "rect", fill: "#FFFFFF" }
-  → 레이어 2: { type: "shape", shape: "rect", stroke: "#CCCCCC" }
-
-**[3-3] 장식선/밑줄**:
-- 얇은 사각형으로 표현: heightRatio: 0.01~0.03
-
-**4. 아이콘 레이어 (작은 그래픽 요소, 매우 중요!)**:
-
-**[4-1] 벡터 아이콘 감지 (우선순위 높음)**:
-- 조건: 작은 심볼/픽토그램 (크기 5~10% 이하)
-- 예: 스프레이 아이콘, 커피잔, 별, 하트, 화살표, 체크마크
-- JSON: type: "svg", pathData: "M 0,0 L 10,10..." (근사치 허용)
-- 복잡한 아이콘은 단순화된 path로 표현
-
-**[4-2] 아이콘 플레이스홀더 (SVG 변환 어려울 때)**:
-- JSON: type: "image", src: null, widthRatio: 0.05~0.1
-- 예: { type: "image", x: 0.1, y: 0.2, widthRatio: 0.08, heightRatio: 0.08, src: null }
-
-**5. 사진/이미지 레이어 (실물 사진)**:
-- 조건: 실제 사진(인물, 동물, 풍경, 제품 등)
-- JSON: type: "image", src: null, widthRatio, heightRatio
-- 예: 강아지 사진 → { type: "image", x: 0.5, y: 0.55, widthRatio: 0.3, heightRatio: 0.4, src: null }
-
-**6. 좌표/크기 체계 (0.0~1.0 비율)**:
-- 모든 좌표는 이미지 크기 대비 비율.
-- 예: 600×400px 이미지
-  - 중심점 (300, 200) → x: 0.5, y: 0.5
-  - 왼쪽 상단 (60, 80) → x: 0.1, y: 0.2
-- 텍스트: (x, y) = 텍스트가 그려지는 위치.
-- 도형/아이콘/이미지: (x, y) = 중심 좌표.
-- 크기: widthRatio, heightRatio (절대값 사용 금지).
-- fontRatio = fontSize / imageHeight (예: 72px / 400px → 0.18)
-
-**7. 스타일 속성**:
-- 색상: HEX(#FF6B35) 또는 rgba(255, 107, 53, 1.0).
-- fontWeight: "normal" 또는 "bold".
-- fontFamily: "'Noto Sans KR'" (따옴표 포함).
-- align: "left", "center", "right".
-- baseline: "top", "middle", "bottom", "alphabetic".
-- lineWidth: 테두리 두께 비율 (0.01 = 1%)
-
-**8. 그림자 속성 (단순 텍스트만)**:
-- shadow.blur, offsetX, offsetY는 비율 값 (0.0~1.0)
-- 복잡한 그림자는 type: "image"로 추출
-
-**중요한 예시 (초고충실도 모드)**:
-
-**예시 1: 복잡한 3D 텍스트 (type: "image"로 추출)**
-- 시각적: "동네 일거리 바라회" - 3D 효과 + 두꺼운 테두리 + 그림자
-- JSON:
+**예시**:
+\`\`\`json
 {
-  "type": "image",
-  "x": 0.5,
-  "y": 0.3,
-  "widthRatio": 0.8,
-  "heightRatio": 0.2,
-  "src": null
+  "name": "복잡한 디자인",
+  "background": {"type": "solid", "value": "#1A1A1A"},
+  "layers": [
+    {"type": "image", "x": 0.5, "y": 0.3, "widthRatio": 0.8, "heightRatio": 0.4, "src": null},
+    {"type": "text", "text": "제목", "x": 0.5, "y": 0.7, "styles": {"fontRatio": 0.06, "fill": "#FFFFFF", "align": "center"}},
+    {"type": "shape", "shape": "circle", "x": 0.8, "y": 0.2, "widthRatio": 0.1, "heightRatio": 0.1, "styles": {"fill": "#FF6B35"}}
+  ]
 }
-→ Canvas로 복제 불가능한 복잡한 텍스트는 이미지 placeholder로 처리
+\`\`\`
 
-**예시 2: 아이콘 5개 감지 (각각 별도 레이어)**
-- 시각적: 스프레이, 커피잔, 등 작은 아이콘 5개
-- JSON:
-[
-  { "type": "svg", "pathData": "M ...", "x": 0.15, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
-  { "type": "image", "src": null, "x": 0.35, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
-  { "type": "image", "src": null, "x": 0.55, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
-  { "type": "image", "src": null, "x": 0.75, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 },
-  { "type": "image", "src": null, "x": 0.95, "y": 0.6, "widthRatio": 0.08, "heightRatio": 0.08 }
-]
-
-**예시 3: 복합 도형 - '24' 뱃지 (2개 레이어로 분리)**
-- 시각적: 녹색 원 + 짙은 녹색 테두리
-- JSON:
-[
-  { "type": "shape", "shape": "circle", "x": 0.9, "y": 0.1, "widthRatio": 0.1, "heightRatio": 0.1, "styles": { "fill": "#90EE90" } },
-  { "type": "shape", "shape": "circle", "x": 0.9, "y": 0.1, "widthRatio": 0.1, "heightRatio": 0.1, "styles": { "stroke": "#228B22", "lineWidth": 0.01 } },
-  { "type": "text", "text": "24", "x": 0.9, "y": 0.1, "styles": { "fontRatio": 0.05, "fontWeight": "bold", "fill": "#FFFFFF", "align": "center", "baseline": "middle" } }
-]
-
-**예시 4: 단순 텍스트 + 밑줄**
-- 시각적: "간단한 제목" + 주황색 밑줄
-- JSON:
-[
-  { "type": "text", "text": "간단한 제목", "x": 0.5, "y": 0.2, "styles": { "fontRatio": 0.08, "fontWeight": "bold", "fill": "#000000", "align": "center" } },
-  { "type": "shape", "shape": "rect", "x": 0.5, "y": 0.25, "widthRatio": 0.7, "heightRatio": 0.02, "styles": { "fill": "#FF6B35" } }
-]
-
-**출력 형식 (필수)**:
-- JSON 객체만 반환 (마크다운 코드 블록 금지, 설명 금지).
-- 응답은 제공된 JSON 스키마와 정확히 일치.
-- 모든 좌표와 크기는 0.0~1.0 비율 값.
-- **복잡한 요소는 반드시 type: "image"로 추출**.
+**출력**: JSON 객체만 반환
 `;
 
         // CR2 (PRD v3.1): Gemini API 호출 시 generationConfig에 스키마 전달
@@ -1206,9 +1111,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.log("[Template Analysis] 🤖 Gemini Vision API 호출 준비 중...");
         let visionResponse;
         let retryCount = 0;
-        const MAX_RETRIES = 5;
         const RETRY_DELAY = 3000;
-        const FETCH_TIMEOUT = 30000; // 30초 타임아웃
+        const FETCH_TIMEOUT = 300000; // 5분 타임아웃 (300초) - 복잡한 이미지 분석에 충분한 시간
+        const MAX_RETRIES = 3; // 최대 재시도 횟수
 
         // [FR-B1] 타임아웃 헬퍼 함수
         const fetchWithTimeout = (url, options, timeout) => {
@@ -1237,7 +1142,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             );
             const apiStartTime = Date.now();
 
-            // [FR-B1] fetch에 30초 타임아웃 적용
+            // [FR-B1] fetch에 지정된 타임아웃 적용
+            // 디버그 로그: 요청 직전 이미지/프롬프트 정보 출력
+            try {
+              console.log(
+                "[Template Analysis] 🧪 요청 디버그 - imageMimeType:",
+                imageMimeType,
+                "imageBase64 length:",
+                imageBase64Data ? imageBase64Data.length : 0
+              );
+              console.log(
+                "[Template Analysis] 🧾 prompt head:",
+                (jsonStructurePrompt || "").substring(0, 300)
+              );
+              console.log(
+                "[Template Analysis] 🌐 VISION_API_URL:",
+                VISION_API_URL
+              );
+            } catch (dbgErr) {
+              console.warn(
+                "[Template Analysis] ⚠️ 디버그 로그 생성 오류:",
+                dbgErr.message
+              );
+            }
+
+            // 실제 이미지 변수명 사용으로 수정
             visionResponse = await fetchWithTimeout(
               VISION_API_URL,
               {
@@ -1247,13 +1176,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   contents: [
                     {
                       parts: [
-                        { text: jsonStructurePrompt },
                         {
-                          inlineData: {
-                            mimeType: imageMimeType,
+                          inline_data: {
+                            mime_type: imageMimeType,
                             data: imageBase64Data,
                           },
                         },
+                        { text: jsonStructurePrompt },
                       ],
                     },
                   ],
@@ -1266,6 +1195,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               },
               FETCH_TIMEOUT
             );
+
+            // 보조 헬퍼: 특정 프롬프트로 Gemini에 재요청 (재사용 가능)
+            async function runVisionPrompt(promptText, opts = {}) {
+              const schema = opts.schema || null;
+              const temp =
+                typeof opts.temperature === "number" ? opts.temperature : 0.15;
+              const body = {
+                contents: [
+                  {
+                    parts: [
+                      {
+                        inline_data: {
+                          mime_type: imageMimeType,
+                          data: imageBase64Data,
+                        },
+                      },
+                      { text: promptText },
+                    ],
+                  },
+                ],
+              };
+              if (schema) {
+                body.generationConfig = {
+                  temperature: temp,
+                  responseMimeType: "application/json",
+                  responseSchema: schema,
+                };
+              } else {
+                body.generationConfig = {
+                  temperature: temp,
+                  responseMimeType: "application/json",
+                };
+              }
+
+              const resp = await fetchWithTimeout(
+                VISION_API_URL,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                },
+                FETCH_TIMEOUT
+              );
+              if (!resp.ok) {
+                const err = await resp.text();
+                throw new Error(`Vision API error: ${resp.status} ${err}`);
+              }
+              const data = await resp.json();
+              const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              return raw;
+            }
 
             const apiDuration = Date.now() - apiStartTime;
             console.log(
@@ -1316,20 +1296,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               })`
             );
           } catch (fetchError) {
-            // [FR-B1] 타임아웃 에러는 즉시 실패 처리 (재시도 불가)
-            if (fetchError.message.includes("AI 분석 시간 초과")) {
-              console.error(
-                "[Template Analysis] ⏱️ 타임아웃 발생:",
-                fetchError.message
-              );
-              throw fetchError; // 즉시 종료
-            }
+            // 변경: 타임아웃(AI 분석 시간 초과)도 일시적 문제일 수 있으므로 재시도 대상으로 포함
+            const isTimeout =
+              fetchError.message &&
+              fetchError.message.includes("AI 분석 시간 초과");
+            const isNetworkErr =
+              fetchError.message &&
+              /network|failed to fetch|fetch error/i.test(fetchError.message);
 
-            // 네트워크 오류 등은 재시도
-            if (retryCount < MAX_RETRIES - 1) {
+            if ((isTimeout || isNetworkErr) && retryCount < MAX_RETRIES - 1) {
               retryCount++;
               console.warn(
-                `[Gemini Vision] 네트워크 오류, ${retryCount}/${MAX_RETRIES} 재시도 중...`,
+                `[Gemini Vision] 일시적 오류(${
+                  isTimeout ? "timeout" : "network"
+                }), ${retryCount}/${MAX_RETRIES} 재시도 중...`,
                 fetchError.message
               );
               await new Promise((resolve) =>
@@ -1337,12 +1317,102 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               );
               continue;
             }
+
+            // 마지막 재시도에서도 실패했을 경우: 스키마를 제거한 경량 프롬프트로 폴백 시도
+            if (retryCount >= MAX_RETRIES - 1) {
+              console.warn(
+                "[Template Analysis] 최종 재시도 실패, 스키마 제거 경량 프롬프트로 폴백 시도"
+              );
+              try {
+                // 간단한 프롬프트: 주요 레이어 정보를 리스트 형태의 JSON로 요청
+                const lightweightPrompt = `이미지에서 주요 시각 요소를 추출하여 간단한 JSON 템플릿을 반환하세요. 최소한 각 레이어의 type(x,y,widthRatio,heightRatio)과 텍스트의 경우 text, 이미지의 경우 src(가능하면)를 포함하세요. 출력은 순수 JSON 객체여야 합니다.`;
+
+                const fallbackRaw = await runVisionPrompt(lightweightPrompt, {
+                  temperature: 0.08,
+                });
+                console.log(
+                  "[Template Analysis] 폴백(경량) 응답 일부:",
+                  fallbackRaw.substring(0, 300)
+                );
+
+                const fallbackJsonMatch =
+                  fallbackRaw.match(/```json\s*(\{[\s\S]*?\})\s*```/) ||
+                  fallbackRaw.match(/\{[\s\S]*\}/);
+                if (fallbackJsonMatch) {
+                  const fallbackJson =
+                    fallbackJsonMatch[1] || fallbackJsonMatch[0];
+                  try {
+                    const fallbackParsed = JSON.parse(fallbackJson);
+                    // 교체 전에 최소 레이어가 존재하는지 확인
+                    if (
+                      Array.isArray(fallbackParsed.layers) &&
+                      fallbackParsed.layers.length > 0
+                    ) {
+                      console.log(
+                        "[Template Analysis] ✅ 경량 폴백 템플릿 유효, parsedTemplate 교체"
+                      );
+                      parsedTemplate = fallbackParsed;
+                      // 파싱 성공 시 루프 탈출하여 이후 보정/검증 단계로 이동
+                      visionResponse = { ok: true };
+                      break;
+                    }
+                  } catch (e) {
+                    console.warn(
+                      "[Template Analysis] ❌ 경량 폴백 JSON 파싱 실패:",
+                      e.message
+                    );
+                    // 이 경우 최종 실패로 이어짐
+                  }
+                } else {
+                  console.warn(
+                    "[Template Analysis] ⚠️ 경량 폴백에서 JSON 추출 실패"
+                  );
+                }
+              } catch (fallbackErr) {
+                console.warn(
+                  "[Template Analysis] ❌ 경량 폴백 요청 실패:",
+                  fallbackErr.message
+                );
+              }
+            }
+
+            // 모든 조치 후에도 실패하면 원래 예외를 상위로 던짐
             throw fetchError;
           }
         }
 
         console.log("[Template Analysis] 📝 API 응답 파싱 중...");
         const visionData = await visionResponse.json();
+
+        // [복잡한 이미지용] AI 분석 실패 시 폴백 템플릿 생성
+        const createFallbackTemplate = (templateName) => {
+          console.warn("[Fallback] AI 분석 실패로 기본 템플릿 생성");
+          return {
+            name: templateName || "기본 템플릿",
+            background: { type: "solid", value: "#FFFFFF" },
+            layers: [
+              {
+                type: "image",
+                x: 0.5,
+                y: 0.4,
+                widthRatio: 0.8,
+                heightRatio: 0.5,
+                src: null,
+              },
+              {
+                type: "text",
+                text: "이미지 분석 중",
+                x: 0.5,
+                y: 0.8,
+                styles: {
+                  fontRatio: 0.05,
+                  fill: "#666666",
+                  align: "center",
+                },
+              },
+            ],
+          };
+        };
 
         // 3. FR-V-Validate (PRD v2.5): JSON 파싱 및 강화된 검증
         const rawText =
@@ -1372,9 +1442,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         }
 
-        // JSON 파싱
-        const parsedTemplate = JSON.parse(templateDataJson);
-        console.log("[Template Analysis] JSON 파싱 성공:", parsedTemplate.name);
+        // JSON 파싱 (복잡한 이미지용 강화)
+        let parsedTemplate;
+        try {
+          parsedTemplate = JSON.parse(templateDataJson);
+          console.log(
+            "[Template Analysis] JSON 파싱 성공:",
+            parsedTemplate.name
+          );
+          console.log(
+            "[Template Analysis] 🔍 파싱된 원본 데이터:",
+            JSON.stringify(parsedTemplate, null, 2)
+          );
+        } catch (parseError) {
+          console.error("[Template Analysis] ❌ JSON 파싱 실패:", parseError);
+          console.warn("[Template Analysis] ⚠️ 폴백 템플릿으로 전환");
+          parsedTemplate = createFallbackTemplate(data.templateName);
+        }
 
         // [PRD v3.3 FR-B2] AI 데이터 자동 보정 (Sanitization)
         const sanitizeTemplateData = (template) => {
@@ -1383,7 +1467,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           if (template.layers && Array.isArray(template.layers)) {
             template.layers.forEach((layer, idx) => {
-              // 좌표 보정
+              // 좌표 보정 (가장 중요!)
               if (typeof layer.x === "string") {
                 layer.x = parseFloat(layer.x) || 0.5;
                 fixCount++;
@@ -1396,6 +1480,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 fixCount++;
                 console.warn(
                   `[Sanitize] 레이어 ${idx}: y를 문자열에서 숫자로 변환 (${layer.y})`
+                );
+              }
+
+              // [강화] 좌표가 여전히 숫자가 아니면 기본값 할당
+              if (typeof layer.x !== "number" || isNaN(layer.x)) {
+                layer.x = 0.5; // 중앙
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: x가 유효하지 않아 기본값 0.5 할당`
+                );
+              }
+              if (typeof layer.y !== "number" || isNaN(layer.y)) {
+                layer.y = 0.5; // 중앙
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: y가 유효하지 않아 기본값 0.5 할당`
                 );
               }
 
@@ -1415,24 +1515,60 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 );
               }
 
+              // [강화] 크기가 유효하지 않으면 기본값 할당
+              if (
+                typeof layer.widthRatio !== "number" ||
+                isNaN(layer.widthRatio)
+              ) {
+                layer.widthRatio = 0.1; // 기본 크기
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: widthRatio가 유효하지 않아 기본값 0.1 할당`
+                );
+              }
+              if (
+                typeof layer.heightRatio !== "number" ||
+                isNaN(layer.heightRatio)
+              ) {
+                layer.heightRatio = 0.1; // 기본 크기
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: heightRatio가 유효하지 않아 기본값 0.1 할당`
+                );
+              }
+
               // 텍스트 레이어 스타일 보정
-              if (layer.type === "text" && layer.styles) {
-                // fontRatio 보정
-                if (typeof layer.styles.fontRatio === "string") {
-                  layer.styles.fontRatio = parseFloat(layer.styles.fontRatio);
+              if (layer.type === "text") {
+                // [복잡한 이미지용] 텍스트 레이어 필수 스타일 보정
+                if (!layer.styles) {
+                  layer.styles = {};
                   fixCount++;
                   console.warn(
-                    `[Sanitize] 레이어 ${idx}: fontRatio를 문자열에서 숫자로 변환 (${layer.styles.fontRatio})`
+                    `[Sanitize] 레이어 ${idx}: 텍스트 레이어에 빈 styles 객체 추가`
                   );
                 }
-                if (
-                  layer.styles.fontRatio == null ||
-                  isNaN(layer.styles.fontRatio)
-                ) {
-                  layer.styles.fontRatio = 0.05; // 기본값
+
+                if (typeof layer.styles.fontRatio !== "number") {
+                  layer.styles.fontRatio = layer.styles.fontRatio || 0.05;
                   fixCount++;
                   console.warn(
-                    `[Sanitize] 레이어 ${idx}: fontRatio가 null/NaN → 기본값 0.05 할당`
+                    `[Sanitize] 레이어 ${idx}: fontRatio 기본값 0.05 설정`
+                  );
+                }
+
+                if (!layer.styles.fill) {
+                  layer.styles.fill = "#000000"; // 검정색 기본값
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 텍스트 색상 기본값 #000000 설정`
+                  );
+                }
+
+                if (!layer.styles.align) {
+                  layer.styles.align = "center"; // 중앙 정렬 기본값
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 텍스트 정렬 기본값 center 설정`
                   );
                 }
 
@@ -1448,10 +1584,59 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     `[Sanitize] 레이어 ${idx}: fontWeight를 숫자에서 문자열로 변환`
                   );
                 }
+
+                // [신규] 그림자(shadow) 속성 보정
+                if (
+                  layer.styles.shadow &&
+                  typeof layer.styles.shadow === "object"
+                ) {
+                  if (typeof layer.styles.shadow.blur === "string") {
+                    layer.styles.shadow.blur =
+                      parseFloat(layer.styles.shadow.blur) || 0.01;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: shadow.blur를 문자열에서 숫자로 변환`
+                    );
+                  }
+                  if (typeof layer.styles.shadow.offsetX === "string") {
+                    layer.styles.shadow.offsetX =
+                      parseFloat(layer.styles.shadow.offsetX) || 0.005;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: shadow.offsetX를 문자열에서 숫자로 변환`
+                    );
+                  }
+                  if (typeof layer.styles.shadow.offsetY === "string") {
+                    layer.styles.shadow.offsetY =
+                      parseFloat(layer.styles.shadow.offsetY) || 0.005;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: shadow.offsetY를 문자열에서 숫자로 변환`
+                    );
+                  }
+                }
               }
 
               // Shape 레이어 스타일 보정
-              if (layer.type === "shape" && layer.styles) {
+              if (layer.type === "shape") {
+                // [복잡한 이미지용] 도형 레이어 보정
+                if (!layer.shape) {
+                  layer.shape = "rect"; // 사각형 기본값
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 도형 타입 기본값 rect 설정`
+                  );
+                }
+
+                if (!layer.styles) layer.styles = {};
+                if (!layer.styles.fill) {
+                  layer.styles.fill = "#CCCCCC"; // 회색 기본값
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 도형 색상 기본값 #CCCCCC 설정`
+                  );
+                }
+
                 if (typeof layer.styles.lineWidth === "string") {
                   layer.styles.lineWidth =
                     parseFloat(layer.styles.lineWidth) || 0.01;
@@ -1459,6 +1644,117 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   console.warn(
                     `[Sanitize] 레이어 ${idx}: lineWidth를 문자열에서 숫자로 변환`
                   );
+                }
+              }
+
+              // [복잡한 이미지용] 이미지 레이어 보정
+              if (layer.type === "image") {
+                // 가능한 한 src를 보존하거나 다양한 필드명에서 매핑
+                if (!layer.src) {
+                  if (layer.url) {
+                    layer.src = layer.url;
+                    fixCount++;
+                    console.warn(`[Sanitize] 레이어 ${idx}: url -> src 매핑`);
+                  } else if (layer.imageUrl) {
+                    layer.src = layer.imageUrl;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: imageUrl -> src 매핑`
+                    );
+                  } else if (layer.base64) {
+                    layer.src = layer.base64;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: base64 -> src 매핑`
+                    );
+                  } else if (layer.data && layer.data.src) {
+                    layer.src = layer.data.src;
+                    fixCount++;
+                    console.warn(
+                      `[Sanitize] 레이어 ${idx}: data.src -> src 매핑`
+                    );
+                  } else {
+                    // src가 없으면 null로 두되 플레이스홀더 렌더링을 허용
+                    layer.src = null;
+                  }
+                }
+
+                // styles 기본값 보장 (플레이스홀더 색상 등)
+                if (!layer.styles) {
+                  layer.styles = {};
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 이미지 레이어에 빈 styles 객체 추가`
+                  );
+                }
+                if (!layer.styles.placeholderColor) {
+                  layer.styles.placeholderColor = "#DDDDDD";
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: placeholderColor 기본값 설정 #DDDDDD`
+                  );
+                }
+
+                if (!layer.widthRatio) {
+                  layer.widthRatio = 0.5; // 기본 너비
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 이미지 너비 기본값 0.5 설정`
+                  );
+                }
+                if (!layer.heightRatio) {
+                  layer.heightRatio = 0.3; // 기본 높이
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: 이미지 높이 기본값 0.3 설정`
+                  );
+                }
+              }
+
+              // [신규] SVG 레이어 크기 보정 (선택적 필드)
+              if (layer.type === "svg") {
+                if (layer.widthRatio && typeof layer.widthRatio === "string") {
+                  layer.widthRatio = parseFloat(layer.widthRatio) || 0.1;
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: SVG widthRatio를 문자열에서 숫자로 변환`
+                  );
+                }
+                if (
+                  layer.heightRatio &&
+                  typeof layer.heightRatio === "string"
+                ) {
+                  layer.heightRatio = parseFloat(layer.heightRatio) || 0.1;
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: SVG heightRatio를 문자열에서 숫자로 변환`
+                  );
+                }
+              }
+
+              // [신규] 범위 초과 값 자동 보정 (0.0~1.0 범위)
+              if (typeof layer.x === "number") {
+                if (layer.x < 0) {
+                  layer.x = 0;
+                  fixCount++;
+                  console.warn(`[Sanitize] 레이어 ${idx}: x < 0 → 0으로 보정`);
+                }
+                if (layer.x > 1) {
+                  layer.x = 1;
+                  fixCount++;
+                  console.warn(`[Sanitize] 레이어 ${idx}: x > 1 → 1로 보정`);
+                }
+              }
+              if (typeof layer.y === "number") {
+                if (layer.y < 0) {
+                  layer.y = 0;
+                  fixCount++;
+                  console.warn(`[Sanitize] 레이어 ${idx}: y < 0 → 0으로 보정`);
+                }
+                if (layer.y > 1) {
+                  layer.y = 1;
+                  fixCount++;
+                  console.warn(`[Sanitize] 레이어 ${idx}: y > 1 → 1로 보정`);
                 }
               }
             });
@@ -1477,6 +1773,71 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return template;
         };
 
+        // 보조 전략: 파싱된 템플릿이 텍스트 레이어만 포함하는 경우, 더 강력한 프롬프트로 재요청
+        const hasNonTextLayer = parsedTemplate.layers.some(
+          (l) => l.type && l.type !== "text"
+        );
+
+        if (!hasNonTextLayer) {
+          console.warn(
+            "[Template Analysis] ⚠️ 파싱된 템플릿이 텍스트 전용입니다. 보조 프롬프트로 재요청합니다."
+          );
+
+          // 보조 프롬프트: 디자인 요소 분해(아이콘, 효과선, 도형, 그림자, 외곽선 등)를 강하게 요청
+          const secondaryPrompt = `${jsonStructurePrompt}\n\n"SECONDARY_ANALYSIS": 이미 응답된 템플릿이 텍스트 중심으로 보입니다. 다음 규칙을 엄격히 적용해 다시 출력하세요: 1) 모든 시각적 장식을 개별 레이어로 분해 (effect_line, star, stroke, shadow, icon 등) 2) 단일 이미지 블롭 대신 가능한 경우 shape 또는 svg로 분해 3) 텍스트는 별도 레이어로 유지. 출력은 여전히 JSON 객체만 허용.`;
+
+          try {
+            const secondaryRaw = await runVisionPrompt(secondaryPrompt, {
+              schema: templateSchema,
+              temperature: 0.12,
+            });
+            console.log(
+              "[Template Analysis] 🔁 보조 프롬프트 응답 일부: ",
+              secondaryRaw.substring(0, 300)
+            );
+
+            const secondaryJsonMatch =
+              secondaryRaw.match(/```json\s*(\{[\s\S]*?\})\s*```/) ||
+              secondaryRaw.match(/\{[\s\S]*\}/);
+            if (secondaryJsonMatch) {
+              const secJson = secondaryJsonMatch[1] || secondaryJsonMatch[0];
+              try {
+                const secParsed = JSON.parse(secJson);
+                // 보조 응답이 더 좋으면 교체
+                const secHasNonText =
+                  Array.isArray(secParsed.layers) &&
+                  secParsed.layers.some((l) => l.type && l.type !== "text");
+                if (secHasNonText) {
+                  console.log(
+                    "[Template Analysis] ✅ 보조 응답이 non-text 레이어를 포함합니다. 템플릿 교체 진행"
+                  );
+                  parsedTemplate = secParsed;
+                } else {
+                  console.warn(
+                    "[Template Analysis] ℹ️ 보조 응답에서도 non-text 레이어를 찾지 못했습니다."
+                  );
+                }
+              } catch (e) {
+                console.warn(
+                  "[Template Analysis] ❌ 보조 응답 JSON 파싱 실패:",
+                  e.message
+                );
+              }
+            } else {
+              console.warn(
+                "[Template Analysis] ⚠️ 보조 응답에서 JSON을 추출하지 못함"
+              );
+            }
+          } catch (secErr) {
+            console.warn(
+              "[Template Analysis] ❌ 보조 프롬프트 요청 실패:",
+              secErr.message
+            );
+            // 폴백: 계속 진행
+          }
+        }
+
+        // 이후 표준 보정 및 검증 적용
         sanitizeTemplateData(parsedTemplate);
 
         // [신규 v2.5] validateTemplateData 함수로 철저한 검증
@@ -1494,13 +1855,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.log(
           `[Template Analysis] ✅ 완료! 템플릿 "${parsedTemplate.name}" 저장 (ID: ${newTemplateRef.key}, 총 ${totalDuration}ms)`
         );
+        console.debug("[DEBUG] Gemini Vision API 분석 성공, 응답 전송 완료");
         sendResponse({
           success: true,
           template: parsedTemplate,
           id: newTemplateRef.key,
         });
+        // 분석 종료 알림 (성공)
+        chrome.runtime.sendMessage({ action: "ai_analysis_finished" });
       } catch (error) {
         console.error("[Template Generator] ❌ 오류:", error);
+        console.debug("[DEBUG] Gemini Vision API 분석 실패, 에러:", error);
+
+        // 분석 종료 알림 (실패)
+        chrome.runtime.sendMessage({ action: "ai_analysis_finished" });
 
         // 구체적인 에러 메시지 반환 (v2.5)
         const errorMessage = error.message || "알 수 없는 오류가 발생했습니다.";
@@ -1508,6 +1876,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           success: false,
           error: `템플릿 분석 실패: ${errorMessage}`,
         });
+        console.debug("[DEBUG] Gemini Vision API 분석 실패, 응답 전송 완료");
       }
     })();
     return true; // 비동기 응답
@@ -3249,3 +3618,5 @@ async function getAdsenseData(token, accountId, url) {
     return { estimatedEarnings: 0, pageRPM: 0 };
   }
 }
+
+console.debug("[DEBUG] background.js 로드됨 - 완료");

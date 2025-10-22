@@ -1658,8 +1658,52 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     );
   }
 
+  // 이미지 리사이즈 헬퍼: base64 -> canvas 리사이즈 -> base64 반환
+  function resizeBase64Image(base64Str, maxWidth = 1280, maxHeight = 1280) {
+    return new Promise((resolve, reject) => {
+      try {
+        const img = new Image();
+        img.onload = function () {
+          let width = img.width;
+          let height = img.height;
+          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+          const targetW = Math.round(width * ratio);
+          const targetH = Math.round(height * ratio);
+
+          const canvas = document.createElement("canvas");
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+
+          // 유지할 MIME 타입은 입력 base64의 헤더에서 유추
+          const matches = base64Str.match(
+            /^data:(image\/(png|jpeg|jpg));base64,/i
+          );
+          const mime = matches ? matches[1] : "image/png";
+          const quality =
+            mime === "image/jpeg" || mime === "image/jpg" ? 0.85 : undefined;
+          const resized = canvas.toDataURL(mime, quality);
+          resolve(resized);
+        };
+        img.onerror = function (err) {
+          reject(err || new Error("이미지 로드 실패"));
+        };
+        // src 할당은 onload 등록 후
+        img.src = base64Str;
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   // FR-T4-DnD (v2.2): 공통 업로드 처리 함수 - 중복 코드 제거
-  function processTemplateUpload(uploadData, defaultName = "새 템플릿") {
+  async function processTemplateUpload(uploadData, defaultName = "새 템플릿") {
+    console.log(
+      "[DEBUG] 🔴 processTemplateUpload 호출됨",
+      uploadData,
+      defaultName
+    );
     // uploadData = { base64Image: "..." } 또는 { imageUrl: "..." }
 
     // 템플릿 이름 입력받기
@@ -1667,7 +1711,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       "AI가 분석할 이 템플릿의 이름을 입력하세요:",
       defaultName
     );
+    console.log("[DEBUG] 🔴 템플릿 이름 입력:", templateName);
     if (!templateName) {
+      console.log("[DEBUG] 🔴 템플릿 이름 입력 취소됨");
       if (templateMessage) {
         templateMessage.textContent = "템플릿 등록이 취소되었습니다.";
         templateMessage.style.color = "#666";
@@ -1676,14 +1722,65 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     }
 
     // 로딩 상태 표시
+    console.log("[DEBUG] 🔴 로딩 상태 표시 시작");
     if (templateMessage) {
       templateMessage.textContent = "🔄 AI가 이미지를 분석하는 중...";
       templateMessage.style.color = "#1976d2";
     }
 
-    // [PRD v3.3 Enhanced] 타임아웃 처리 추가 (45초 - background.js 30초 fetch + 15초 여유)
+    // 자동 리사이즈: base64 이미지가 있으면 캔버스에서 리사이즈 후 재할당
+    try {
+      if (
+        uploadData?.base64Image &&
+        typeof uploadData.base64Image === "string"
+      ) {
+        const header = uploadData.base64Image.slice(0, 100);
+        const originalLength = uploadData.base64Image.length;
+        // 작은 이미지는 스킵(이미 충분히 작음)
+        if (originalLength > 200000) {
+          // ~200KB 기준 임계값
+          console.log(
+            "[Template Upload] 🔄 자동 리사이즈 시작 (base64 length):",
+            originalLength
+          );
+          const resizedBase64 = await resizeBase64Image(
+            uploadData.base64Image,
+            1280,
+            1280
+          );
+          if (resizedBase64 && resizedBase64.length < originalLength) {
+            uploadData = Object.assign({}, uploadData, {
+              base64Image: resizedBase64,
+            });
+            console.log(
+              "[Template Upload] ✅ 리사이즈 적용, 새 base64 length:",
+              resizedBase64.length,
+              "prompt head:",
+              header
+            );
+          } else {
+            console.log(
+              "[Template Upload] ⚠️ 리사이즈 결과가 원본보다 크거나 동일하여 적용하지 않음"
+            );
+          }
+        } else {
+          console.log(
+            "[Template Upload] ⚪ 이미지 크기 작음 - 리사이즈 생략 (length):",
+            originalLength
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[Template Upload] 자동 리사이즈 실패, 원본 전송 진행:",
+        err
+      );
+      // 실패 시 원본 이미지를 그대로 사용
+    }
+
+    // [PRD v3.3 Enhanced] 타임아웃 처리 추가 (5분 - 복잡한 이미지 분석 고려)
     let responseReceived = false;
-    const TIMEOUT_MS = 45000; // 45초 (background.js의 30초 fetch 타임아웃 + 처리 시간 15초)
+    const TIMEOUT_MS = 300000; // 5분 (300초) - 복잡한 이미지 분석에 충분한 시간
 
     const timeoutId = setTimeout(() => {
       if (!responseReceived) {
@@ -1720,12 +1817,36 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     }, 10000);
 
     // background.js로 데이터 전송
+    console.log("[DEBUG] 🔴 chrome.runtime.sendMessage 호출 직전", {
+      action: "analyze_image_for_template",
+      data: { ...uploadData, templateName: templateName },
+    });
     chrome.runtime.sendMessage(
       {
         action: "analyze_image_for_template",
         data: { ...uploadData, templateName: templateName },
       },
       (response) => {
+        console.log(
+          "[DEBUG] 🔴 chrome.runtime.sendMessage 콜백 실행됨",
+          response
+        );
+
+        // chrome.runtime.lastError 확인
+        if (chrome.runtime.lastError) {
+          console.error(
+            "[DEBUG] 🔴 chrome.runtime.lastError:",
+            chrome.runtime.lastError
+          );
+          clearTimeout(timeoutId);
+          clearInterval(progressInterval);
+          if (templateMessage) {
+            templateMessage.textContent = `❌ 메시지 전송 실패: ${chrome.runtime.lastError.message}`;
+            templateMessage.style.color = "#d32f2f";
+          }
+          return;
+        }
+
         if (responseReceived) return; // 타임아웃 후 응답은 무시
         responseReceived = true;
         clearTimeout(timeoutId);
