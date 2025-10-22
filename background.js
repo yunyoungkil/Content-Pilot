@@ -788,7 +788,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // (이전 placeholder/canvas 기반 핸들러 완전 제거, Gemini API만 사용)
   } else if (msg.action === "scrap_entire_analysis") {
     const analysisContent = msg.data;
-    if (!analysisContent) return true;
+    if (!analysisContent) {
+      sendResponse({ success: false, error: "분석 콘텐츠가 비어있습니다." });
+      return true;
+    }
 
     const today = new Date();
     const year = today.getFullYear();
@@ -810,10 +813,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const scrapRef = firebase.database().ref("scraps").push();
     scrapRef
       .set(cleanedScrapPayload)
-      .then(() => console.log("AI 분석 리포트가 스크랩북에 저장되었습니다."))
-      .catch((err) => console.error("AI 리포트 스크랩 중 오류:", err));
+      .then(() => {
+        console.log("AI 분석 리포트가 스크랩북에 저장되었습니다.");
+        sendResponse({ success: true, message: "AI 분석 리포트가 저장되었습니다." });
+      })
+      .catch((err) => {
+        console.error("AI 리포트 스크랩 중 오류:", err);
+        sendResponse({ success: false, error: err.message });
+      });
 
-    return true;
+    return true; // 비동기 응답
   }
   // FR3 (PRD v2.0/v2.2): AI 기반 썸네일 템플릿 자동 생성기
   else if (msg.action === "analyze_image_for_template") {
@@ -863,8 +872,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           "geminiApiKey",
         ]);
         if (!geminiApiKey) {
-          sendResponse({ success: false, error: "Gemini API 키가 없습니다." });
-          return;
+          throw new Error("Gemini API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해주세요.");
         }
 
         const VISION_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
