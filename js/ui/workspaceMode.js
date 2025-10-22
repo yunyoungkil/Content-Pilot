@@ -182,11 +182,11 @@ export function renderWorkspace(container, ideaData) {
         <div class="resource-tabs">
           <button class="resource-tab-btn" data-tab="all-scraps" style="font-weight:bold;">📖 모든 스크랩</button>
           <button class="resource-tab-btn" data-tab="image-gallery">🖼️ 이미지 갤러리</button>
-          <button class="resource-tab-btn" data-tab="ai-image">✨ AI 이미지 생성</button>
+          <button class="resource-tab-btn" data-tab="ai-image">✨ Style Analyzer</button>
         </div>
-  <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
+        <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
           <div class="scrap-list all-scraps-list">
-            <p class="loading-scr랩">스크랩 목록을 불러오는 중...</p>
+            <p class="loading-scrap">스크랩 목록을 불러오는 중...</p>
           </div>
         </div>
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
@@ -194,57 +194,37 @@ export function renderWorkspace(container, ideaData) {
             <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
           </div>
         </div>
-        <div class="resource-content-area ai-image-area" id="ai-image-area" style="display: none;">
+        <div class="resource-content-area ai-image-area" id="ai-image-area" style="display: block;">
           <div class="ai-image-controls">
             <label class="ai-field" style="display:block;width:100%;">
               <div class="ai-field-row">
-                <span>프롬프트</span>
-                <span class="ai-hint">최대 250자 · 기본 프롬프트 자동 생성</span>
+                <span>이미지 업로드</span>
+                <span class="ai-hint">드래그 또는 클릭하여 이미지를 선택하세요</span>
               </div>
-              <textarea id="ai-image-prompt" maxlength="250" class="ai-prompt-textarea" placeholder="어떤 이미지를 원하시나요? 예: 미래지향적 도시의 야경, 네온사인, 시네마틱 라이트"></textarea>
+              <input type="file" id="ai-image-upload" accept="image/*" style="display:none;" />
+              <div id="ai-image-dropzone" class="ai-dropzone" style="border:2px dashed #4285f4;background:#f7faff;padding:32px 0;text-align:center;border-radius:12px;cursor:pointer;transition:box-shadow 0.2s;box-shadow:0 2px 8px rgba(66,133,244,0.08);">
+                <div style="font-size:32px;color:#4285f4;margin-bottom:8px;">🖼️</div>
+                <div style="font-size:16px;font-weight:500;color:#222;">이미지 파일을 여기에 드래그하거나<br>클릭해서 업로드하세요</div>
+                <div style="font-size:13px;color:#888;margin-top:6px;">(JPG, PNG 지원 · 최대 5MB)</div>
+              </div>
+              <div id="ai-image-thumbnail" style="margin-top:12px;"></div>
             </label>
             <div class="ai-row">
               <label>
-                <span class="ai-label">스타일</span>
-                <select id="ai-image-style" class="ai-select">
-                  <option value="realistic">실사 사진</option>
-                  <option value="3d">3D 렌더</option>
-                  <option value="watercolor">수채화</option>
-                  <option value="cyberpunk">사이버펑크</option>
-                  <option value="none">기본/기타</option>
-                </select>
+                <span class="ai-label">프롬프트</span>
+                <textarea id="ai-image-prompt" maxlength="250" class="ai-prompt-textarea" placeholder="AI가 분석한 이미지 프롬프트가 여기에 자동 입력됩니다."></textarea>
               </label>
-               <label>
-                <span class="ai-label">종횡비</span>
-                <select id="ai-image-aspect" class="ai-select">
-                  <option value="1:1">1:1</option>
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                </select>
-              </label>
-              <label>
-                <span class="ai-label">생성 개수</span>
-                <select id="ai-image-count" class="ai-select">
-                  <option value="1">1장</option>
-                  <option value="2">2장</option>
-                  <option value="3" selected>3장</option>
-                  <option value="4">4장</option>
-                </select>
-              </label>
+              <button id="ai-copy-prompt-btn" class="ai-copy-btn" disabled>프롬프트 복사</button>
             </div>
             <div class="ai-row ai-actions">
-              <button id="ai-generate-btn" class="ai-generate-btn">이미지 생성하기</button>
-              <button id="ai-generate-thumb-btn" class="ai-generate-btn" style="margin-left:6px;">썸네일 예시 생성</button>
-              <span class="ai-cost-note">유의: 생성은 비용이 발생할 수 있습니다. 데모에서는 로컬/플레이스홀더 방식으로 생성됩니다.</span>
-
+              <button id="ai-generate-btn" class="ai-generate-btn" disabled>이미지 생성하기</button>
+              <span class="ai-cost-note">유의: 생성은 비용이 발생할 수 있습니다.</span>
             </div>
             <div class="ai-row ai-message-row">
-              <span id="ai-image-message" class="loading-images">프롬프트를 입력하고 이미지를 생성해보세요.</span>
+              <span id="ai-image-message" class="loading-images">이미지를 업로드하면 프롬프트가 자동 생성됩니다.</span>
             </div>
           </div>
-          <div class="ai-image-grid" id="ai-image-grid">
-            <!-- 메시지는 위 ai-image-message에서 출력 -->
-          </div>
+          <div class="ai-image-grid" id="ai-image-grid"></div>
         </div>
       </div>
     </div>
@@ -604,10 +584,13 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       tabBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       const tab = btn.dataset.tab;
-      allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
-      imageGalleryArea.style.display =
-        tab === "image-gallery" ? "block" : "none";
-      aiImageArea.style.display = tab === "ai-image" ? "block" : "none";
+      if (allScrapsArea)
+        allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
+      if (imageGalleryArea)
+        imageGalleryArea.style.display =
+          tab === "image-gallery" ? "block" : "none";
+      if (aiImageArea)
+        aiImageArea.style.display = tab === "ai-image" ? "block" : "none";
 
       if (tab === "image-gallery") {
         // 연결된 스크랩 데이터로 이미지 갤러리 갱신
@@ -622,6 +605,23 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       }
     });
   });
+  // Ensure first tab is active by default if none active
+  if (
+    tabBtns &&
+    tabBtns.length > 0 &&
+    !Array.from(tabBtns).some((b) => b.classList.contains("active"))
+  ) {
+    const first = tabBtns[0];
+    first.classList.add("active");
+    const tab = first.dataset.tab;
+    if (allScrapsArea)
+      allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
+    if (imageGalleryArea)
+      imageGalleryArea.style.display =
+        tab === "image-gallery" ? "block" : "none";
+    if (aiImageArea)
+      aiImageArea.style.display = tab === "ai-image" ? "block" : "none";
+  }
   const linkedScrapsList = workspaceEl.querySelector(".linked-scraps-list");
   // 주요 키워드, 롱테일 키워드 각각의 DOM을 분리해서 이벤트 적용
   const keywordSection = workspaceEl.querySelector(".editor-keyword-section");
@@ -925,91 +925,191 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   }
 
   if (aiGenerateBtn) {
-    // 썸네일 예시 생성 버튼 이벤트는 한 번만 등록 (중복 방지)
-    const aiGenerateThumbBtn = resourceLibrary.querySelector(
-      "#ai-generate-thumb-btn"
+    // 썸네일/템플릿 관련 코드 완전 제거 (aiGenerateThumbBtn 등 삭제)
+    // 이미지 업로드 → 프롬프트 생성 → 버튼 활성화 → 이미지 생성
+    const aiImageUpload = resourceLibrary.querySelector("#ai-image-upload");
+    const aiImageDropzone = resourceLibrary.querySelector("#ai-image-dropzone");
+    const aiImageThumbnail = resourceLibrary.querySelector(
+      "#ai-image-thumbnail"
     );
-    if (aiGenerateThumbBtn && !aiGenerateThumbBtn.__cp_thumb_event) {
-      aiGenerateThumbBtn.addEventListener("click", async () => {
-        const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
-        const aiMessage = resourceLibrary.querySelector("#ai-image-message");
-        let outline = [];
-        if (
-          window.__cp_workspace_ideaData &&
-          Array.isArray(window.__cp_workspace_ideaData.outline)
-        ) {
-          outline = window.__cp_workspace_ideaData.outline;
-        } else if (
-          typeof ideaData !== "undefined" &&
-          Array.isArray(ideaData.outline)
-        ) {
-          outline = ideaData.outline;
-        }
-        if (!outline.length) outline = ["고퀄리티 썸네일"];
-        // 썸네일 스타일 Canvas 생성 (첨부 이미지 스타일)
-        const width = 600, height = 400;
-        const thumbHtml = outline.map((title, idx) => {
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          // drawKoreanThumbnailStyle로 첨부 이미지 스타일 썸네일 생성
-          const topText = "고퀄리티";
-          const bottomText = "썸네일";
-          const logoText = "36.5lab";
-          window.drawKoreanThumbnailStyle
-            ? window.drawKoreanThumbnailStyle(ctx, { width, height, topText, bottomText, logoText })
-            : (typeof drawKoreanThumbnailStyle === 'function' && drawKoreanThumbnailStyle(ctx, { width, height, topText, bottomText, logoText }));
-          const url = canvas.toDataURL("image/png");
-          return `<div class=\"ai-thumb-wrap\"><img src=\"${url}\" class=\"ai-generated-thumb\" alt=\"썸네일 예시${idx + 1}\" /></div>`;
-        }).join("");
-        aiImageGrid.innerHTML = thumbHtml;
-        if (aiMessage)
-          aiMessage.textContent = `썸네일 예시 ${outline.length}개를 생성했습니다.`;
-      });
-      aiGenerateThumbBtn.__cp_thumb_event = true;
+    const aiPromptInput = resourceLibrary.querySelector("#ai-image-prompt");
+    const aiCopyPromptBtn = resourceLibrary.querySelector(
+      "#ai-copy-prompt-btn"
+    );
+    const aiGenerateBtn = resourceLibrary.querySelector("#ai-generate-btn");
+    const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
+    const aiMessage = resourceLibrary.querySelector("#ai-image-message");
+
+    let uploadedImageBase64 = null;
+
+    // 드랍존 클릭 시 파일 선택
+    aiImageDropzone.addEventListener("click", () => {
+      aiImageUpload.click();
+    });
+
+    // 파일 선택/드래그앤드랍 처리
+    function handleImageFile(file) {
+      if (!file || !file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        uploadedImageBase64 = e.target.result.split(",")[1];
+        // 드랍존에 이미지 표시
+        aiImageDropzone.innerHTML = `<img src="${e.target.result}" style="max-width:100%;max-height:200px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.08);" />`;
+        aiImageThumbnail.innerHTML = ""; // 기존 썸네일 영역 초기화
+        aiMessage.textContent = "AI가 이미지를 분석 중입니다...";
+        aiPromptInput.value = "";
+        aiGenerateBtn.disabled = true;
+        aiCopyPromptBtn.disabled = true;
+        // background.js에 프롬프트 생성 요청
+        chrome.runtime.sendMessage(
+          {
+            action: "gemini_generate_prompt_from_image",
+            data: {
+              imageBase64: uploadedImageBase64,
+              mimeType: file.type,
+            },
+          },
+          (response) => {
+            if (response?.success && response.prompt) {
+              aiPromptInput.value = response.prompt;
+              aiMessage.textContent = "프롬프트가 생성되었습니다.";
+              aiGenerateBtn.disabled = false;
+              aiCopyPromptBtn.disabled = false;
+            } else {
+              aiMessage.textContent = response?.error || "프롬프트 생성 실패";
+              window.parent.postMessage(
+                { action: "cp_show_toast", message: "❌ 프롬프트 생성 실패" },
+                "*"
+              );
+            }
+          }
+        );
+      };
+      reader.readAsDataURL(file);
     }
+
+    aiImageUpload.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      handleImageFile(file);
+    });
+
+    // Prevent browser default navigation/search on drag/drop by stopping propagation
+    aiImageDropzone.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      aiImageDropzone.classList.add("dragover");
+    });
+    aiImageDropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      aiImageDropzone.classList.add("dragover");
+    });
+    aiImageDropzone.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      aiImageDropzone.classList.remove("dragover");
+    });
+    aiImageDropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      aiImageDropzone.classList.remove("dragover");
+      const file = e.dataTransfer.files[0];
+      handleImageFile(file);
+    });
+
+    // 프롬프트 복사 버튼
+    aiCopyPromptBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(aiPromptInput.value);
+      window.parent.postMessage(
+        { action: "cp_show_toast", message: "프롬프트가 복사되었습니다." },
+        "*"
+      );
+    });
+
+    // 이미지 생성 버튼
     aiGenerateBtn.addEventListener("click", () => {
       const prompt = (aiPromptInput?.value || "").trim();
-      const aiMessage = resourceLibrary.querySelector("#ai-image-message");
       if (!prompt) {
-        if (aiMessage) aiMessage.textContent = "프롬프트를 입력해주세요.";
+        aiMessage.textContent = "프롬프트를 입력해주세요.";
         window.parent.postMessage(
           { action: "cp_show_toast", message: "프롬프트를 입력해주세요." },
           "*"
         );
         return;
       }
-      const style = aiStyleSelect?.value || "realistic";
-      const aspect = aiAspectSelect?.value || "1:1";
-      const { width, height } = mapAspectToSize(aspect);
-      const count = parseInt(aiCountSelect?.value, 10) || 3;
-
       aiGenerateBtn.disabled = true;
-      const prevText = aiGenerateBtn.textContent;
-      aiGenerateBtn.textContent = "✨ 생성 중...";
-      if (aiMessage) aiMessage.textContent = "이미지를 생성하는 중입니다...";
+      aiMessage.textContent = "이미지를 생성하는 중입니다...";
       aiImageGrid.innerHTML = "";
-
+      // 기본값: 3장, 1:1 비율, realistic 스타일
       chrome.runtime.sendMessage(
         {
           action: "ai_generate_images",
-          data: { prompt, style, aspect, count, size: { width, height } },
+          data: {
+            prompt,
+            style: "realistic",
+            aspect: "1:1",
+            count: 3,
+            size: { width: 512, height: 512 },
+          },
         },
         (response) => {
           aiGenerateBtn.disabled = false;
-          aiGenerateBtn.textContent = prevText;
           if (response?.success) {
-            if (aiMessage) aiMessage.textContent = "이미지 생성 완료!";
-            renderAIGallery(response.images || []);
+            aiMessage.textContent = "이미지 생성 완료!";
+            // 이미지 그리드 출력
+            aiImageGrid.innerHTML = (response.images || [])
+              .map(
+                (img, idx) =>
+                  `<img src="${img}" style="max-width:180px;max-height:120px;margin:8px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="AI 이미지${
+                    idx + 1
+                  }" />`
+              )
+              .join("");
           } else {
             const msg = response?.error || "이미지 생성 실패";
-            if (aiMessage) aiMessage.textContent = msg;
+
+            // 사용자 친화적인 안내 메시지 표시
+            if (response?.suggestedServices) {
+              aiMessage.innerHTML = `
+                <div style="text-align:left;line-height:1.6;color:#333;">
+                  <strong>💡 이미지 생성 기능 안내</strong><br>
+                  현재 Gemini API는 이미지 생성을 지원하지 않습니다.<br><br>
+                  <strong>프롬프트를 복사하여 아래 서비스를 이용해주세요:</strong><br>
+                  ${response.suggestedServices
+                    .map(
+                      (s) =>
+                        `• <a href="${s.url}" target="_blank" style="color:#1a73e8;text-decoration:none;">${s.name}</a>`
+                    )
+                    .join("<br>")}
+                </div>
+              `;
+
+              // 프롬프트 자동 복사
+              if (response.promptForCopy) {
+                navigator.clipboard
+                  .writeText(response.promptForCopy)
+                  .then(() => {
+                    window.parent.postMessage(
+                      {
+                        action: "cp_show_toast",
+                        message: "✅ 프롬프트가 클립보드에 복사되었습니다!",
+                      },
+                      "*"
+                    );
+                  });
+              }
+            } else {
+              aiMessage.textContent = msg;
+              window.parent.postMessage(
+                { action: "cp_show_toast", message: "❌ " + msg },
+                "*"
+              );
+            }
+
             aiImageGrid.innerHTML = "";
-            window.parent.postMessage(
-              { action: "cp_show_toast", message: "❌ " + msg },
-              "*"
-            );
           }
         }
       );
@@ -1283,7 +1383,9 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
   const topText = options.topText || "고퀄리티";
   const bottomText = options.bottomText || "썸네일";
   const logoText = options.logoText || "36.5lab";
-  const fontFamily = options.fontFamily || "'BM JUA', 'Nanum Gothic', 'Malgun Gothic', 'Arial Black', sans-serif";
+  const fontFamily =
+    options.fontFamily ||
+    "'BM JUA', 'Nanum Gothic', 'Malgun Gothic', 'Arial Black', sans-serif";
 
   // 1. 배경(어두운 패턴/이미지 대신 단색+노이즈)
   ctx.save();
@@ -1292,23 +1394,28 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
   // 노이즈 효과(랜덤 점)
   for (let i = 0; i < 1200; i++) {
     ctx.globalAlpha = Math.random() * 0.08;
-    ctx.fillStyle = ["#fff", "#888", "#222"][Math.floor(Math.random()*3)];
-    ctx.fillRect(Math.random()*width, Math.random()*height, 1, 1);
+    ctx.fillStyle = ["#fff", "#888", "#222"][Math.floor(Math.random() * 3)];
+    ctx.fillRect(Math.random() * width, Math.random() * height, 1, 1);
   }
   ctx.globalAlpha = 1;
   ctx.restore();
 
   // 2. 집중선(만화 라인)
   ctx.save();
-  const centerX = width/2, centerY = height/2+10;
+  const centerX = width / 2,
+    centerY = height / 2 + 10;
   const rays = 22;
   for (let i = 0; i < rays; i++) {
-    const angle = (Math.PI * 2 * i) / rays + Math.PI/16;
+    const angle = (Math.PI * 2 * i) / rays + Math.PI / 16;
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
-    ctx.lineTo(centerX + Math.cos(angle) * width * 0.95, centerY + Math.sin(angle) * height * 0.95);
-    ctx.strokeStyle = i%2===0 ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.09)";
-    ctx.lineWidth = i%2===0 ? 4 : 2;
+    ctx.lineTo(
+      centerX + Math.cos(angle) * width * 0.95,
+      centerY + Math.sin(angle) * height * 0.95
+    );
+    ctx.strokeStyle =
+      i % 2 === 0 ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.09)";
+    ctx.lineWidth = i % 2 === 0 ? 4 : 2;
     ctx.shadowColor = "#fff";
     ctx.shadowBlur = 0;
     ctx.stroke();
@@ -1317,12 +1424,12 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
 
   // 3. 그라디언트 테두리
   ctx.save();
-  const borderGrad = ctx.createLinearGradient(0,0,width,height);
+  const borderGrad = ctx.createLinearGradient(0, 0, width, height);
   borderGrad.addColorStop(0, "#ff5ecb");
   borderGrad.addColorStop(1, "#7c5fff");
   ctx.lineWidth = 10;
   ctx.strokeStyle = borderGrad;
-  ctx.strokeRect(5, 5, width-10, height-10);
+  ctx.strokeRect(5, 5, width - 10, height - 10);
   ctx.restore();
 
   // 4. 3D 그림자/돌출 효과(텍스트)
@@ -1333,7 +1440,7 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
     ctx.textBaseline = baseline;
     // 3D 그림자(아래/오른쪽)
     ctx.fillStyle = shadow;
-    for (let i=8; i>=2; i-=2) ctx.fillText(text, x+i, y+i);
+    for (let i = 8; i >= 2; i -= 2) ctx.fillText(text, x + i, y + i);
     // 메인 텍스트
     ctx.lineWidth = 10;
     ctx.strokeStyle = stroke;
@@ -1346,18 +1453,41 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
   // 5. 메인 텍스트(상단: 핑크, 하단: 노랑)
   const topFont = `bold 82px ${fontFamily}`;
   const bottomFont = `bold 100px ${fontFamily}`;
-  draw3DText(topText, width/2, height/2-30, "#ff3399", "#b1005a", "#2a001a", topFont, "center", "middle");
-  draw3DText(bottomText, width/2, height/2+70, "#ffb333", "#a86a00", "#4a2a00", bottomFont, "center", "middle");
+  draw3DText(
+    topText,
+    width / 2,
+    height / 2 - 30,
+    "#ff3399",
+    "#b1005a",
+    "#2a001a",
+    topFont,
+    "center",
+    "middle"
+  );
+  draw3DText(
+    bottomText,
+    width / 2,
+    height / 2 + 70,
+    "#ffb333",
+    "#a86a00",
+    "#4a2a00",
+    bottomFont,
+    "center",
+    "middle"
+  );
 
   // 6. 별 아이콘(텍스트 or 직접 그리기)
-  function drawStar(cx, cy, r, color, rot=0) {
+  function drawStar(cx, cy, r, color, rot = 0) {
     ctx.save();
     ctx.beginPath();
     for (let i = 0; i < 5; i++) {
-      const angle = ((Math.PI * 2) / 5) * i - Math.PI/2 + rot;
+      const angle = ((Math.PI * 2) / 5) * i - Math.PI / 2 + rot;
       ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
-      const angle2 = angle + Math.PI/5;
-      ctx.lineTo(cx + Math.cos(angle2) * (r*0.45), cy + Math.sin(angle2) * (r*0.45));
+      const angle2 = angle + Math.PI / 5;
+      ctx.lineTo(
+        cx + Math.cos(angle2) * (r * 0.45),
+        cy + Math.sin(angle2) * (r * 0.45)
+      );
     }
     ctx.closePath();
     ctx.fillStyle = color;
@@ -1366,10 +1496,10 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
     ctx.fill();
     ctx.restore();
   }
-  drawStar(width-60, height/2-60, 18, "#ffb333");
-  drawStar(width-100, height/2+40, 12, "#ff3399");
-  drawStar(width-30, height-60, 10, "#fff700");
-  drawStar(width-120, height-30, 8, "#ff3399");
+  drawStar(width - 60, height / 2 - 60, 18, "#ffb333");
+  drawStar(width - 100, height / 2 + 40, 12, "#ff3399");
+  drawStar(width - 30, height - 60, 10, "#fff700");
+  drawStar(width - 120, height - 30, 8, "#ff3399");
 
   // 7. 우측 하단 로고
   ctx.save();
@@ -1378,6 +1508,6 @@ export function drawKoreanThumbnailStyle(ctx, options = {}) {
   ctx.textBaseline = "bottom";
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = "#36a5ff";
-  ctx.fillText(logoText, width-18, height-18);
+  ctx.fillText(logoText, width - 18, height - 18);
   ctx.restore();
 }

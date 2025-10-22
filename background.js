@@ -450,65 +450,165 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 썸네일용 Gemini 슬로건 생성 (draft 전체와 outline 리스트를 함께 보냄)
-  if (
-    msg.action === "gemini_generate_thumbnail_texts" &&
-    Array.isArray(msg.data?.outlines)
-  ) {
+  if (msg.action === "gemini_generate_prompt_from_image") {
     (async () => {
       try {
         const { geminiApiKey } = await chrome.storage.local.get([
           "geminiApiKey",
         ]);
         if (!geminiApiKey) {
-          sendResponse({ success: false, error: "Gemini API 키가 없습니다." });
+          sendResponse({
+            success: false,
+            error: "Gemini API 키가 설정되어 있지 않습니다.",
+          });
           return;
         }
-        const outlines = msg.data.outlines;
-        const draft = msg.data.draft || "";
-        // draft와 outline을 함께 프롬프트에 포함
-        const prompt = `아래는 콘텐츠 초안과 세션(아웃라인) 목록입니다.\n\n[초안]\n${draft}\n\n[세션 목록]\n${outlines
-          .map((t, i) => `${i + 1}. ${t}`)
-          .join(
-            "\n"
-          )}\n\n각 세션에 어울리는 썸네일용 짧은 슬로건 또는 키워드를 한글로 1개씩, 12자 이내로, 꾸밈말 없이 핵심만 배열로 추천해줘.\n예시: ["슬로건1", "슬로건2", ...]`;
-        const res = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" +
-            geminiApiKey,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-            }),
-          }
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          console.error("[Gemini 슬로건] API 오류 응답:", data);
-          sendResponse({ success: false, error: "Gemini API 오류", data });
+
+        const imageBase64 = msg.data?.imageBase64;
+        const mimeType = msg.data?.mimeType || "image/png";
+
+        if (!imageBase64) {
+          sendResponse({ success: false, error: "이미지 데이터가 없습니다." });
           return;
         }
-        // Gemini 응답에서 배열 파싱
-        let slogans = [];
-        try {
-          const raw =
-            data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-          const arrayMatch = raw.match(/\[.*\]/s);
-          if (arrayMatch) {
-            slogans = JSON.parse(arrayMatch[0]);
-          } else {
-            console.warn("[Gemini 슬로건] 배열 형식 파싱 실패, 원본:", raw);
+
+        const instruction = `You are an expert visual analyst and Imagen-optimized prompt engineer. Analyze this image and create a highly detailed, structured English prompt optimized for Google Imagen 4.0.
+
+PROMPT STRUCTURE (follow this exact format):
+1. Main Subject: Clearly identify the primary subject/object/person
+2. Context & Background: Describe the setting, environment, or scene
+3. Visual Style: Specify art style (photorealistic, cinematic, watercolor, sketch, digital art, etc.)
+4. Technical Details: Include relevant photography terms:
+   - Camera angle (close-up, wide shot, aerial view, low angle)
+   - Lens type (35mm, 50mm, macro, wide-angle, fisheye)
+   - Lighting (natural light, dramatic lighting, golden hour, studio lighting)
+   - Camera settings (motion blur, soft focus, bokeh, portrait mode)
+   - Film type (black and white, polaroid, HDR, 4K)
+5. Color Palette: Describe dominant colors and tone (warm, cool, vibrant, muted, duotone)
+6. Mood & Atmosphere: Convey the emotional quality or feeling
+7. Quality Modifiers: Add "high-quality, professional, detailed, beautiful" as appropriate
+
+EXAMPLES:
+- "A close-up photo of coffee beans on a wooden kitchen surface, photorealistic style, macro lens 60mm, natural lighting, warm brown tones, rustic atmosphere, high-quality professional photography"
+- "Modern apartment building sketch surrounded by skyscrapers, architectural drawing style, pencil technique, aerial perspective, monochromatic palette, precise detail, professional illustration"
+
+OUTPUT: Generate ONE concise but detailed prompt (2-3 sentences, max 480 tokens) that incorporates all relevant elements from the structure above. Focus on clarity and specificity for optimal Imagen generation.`;
+
+        // Try primary model then fallback to alternate if necessary
+        const modelsToTry = [
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-image"
+        ];
+
+        let lastError = null;
+        let successfulResponse = null;
+
+        for (const model of modelsToTry) {
+          try {
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+
+            // Gemini Multimodal API의 올바른 형식: inline_data 사용
+            const payload = {
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: instruction,
+                    },
+                    {
+                      inline_data: {
+                        mime_type: mimeType,
+                        data: imageBase64,
+                      },
+                    },
+                  ],
+                },
+              ],
+            };
+
+            const res = await fetch(API_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const bodyText = await res.text();
+            let parsed = null;
+            try {
+              parsed = JSON.parse(bodyText);
+            } catch (e) {
+              // keep raw bodyText if not JSON
+            }
+
+            if (!res.ok) {
+              lastError = {
+                model,
+                status: res.status,
+                statusText: res.statusText,
+                body: parsed || bodyText,
+              };
+              console.error(
+                `[Gemini 이미지->프롬프트] ${model} 오류. status: ${res.status} ${res.statusText}`,
+                lastError,
+                "raw:",
+                bodyText
+              );
+              continue; // 다음 모델 시도
+            }
+
+            successfulResponse =
+              parsed ||
+              (() => {
+                try {
+                  return JSON.parse(bodyText);
+                } catch (e) {
+                  return null;
+                }
+              })();
+            // attach which model succeeded
+            if (successfulResponse) successfulResponse._modelUsed = model;
+            // 성공하면 루프 종료
+            break;
+          } catch (innerErr) {
+            lastError = { model, error: innerErr.message || String(innerErr) };
+            console.error(`[Gemini 이미지->프롬프트] ${model} 예외:`, innerErr);
+            continue;
           }
-        } catch (e) {
-          console.error("[Gemini 슬로건] 배열 파싱 예외:", e, data);
         }
-        // 개수 맞추기 (실패 시 빈값 채움)
-        if (!Array.isArray(slogans) || slogans.length !== outlines.length) {
-          slogans = Array(outlines.length).fill("");
+
+        if (!successfulResponse) {
+          sendResponse({
+            success: false,
+            error: "Gemini 호출 실패 (모든 모델)",
+            debug: lastError,
+          });
+          return;
         }
-        sendResponse({ success: true, slogans });
-      } catch (e) {
-        sendResponse({ success: false, error: e.message });
+
+        const raw =
+          successfulResponse.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+          "";
+        let promptText = raw.split("\n")[0] || raw;
+        promptText = promptText.replace(/^"|"$/g, "").trim();
+
+        if (!promptText) {
+          sendResponse({
+            success: false,
+            error: "AI가 프롬프트를 생성하지 못했습니다.",
+            debug: successfulResponse,
+          });
+          return;
+        }
+
+        sendResponse({
+          success: true,
+          prompt: promptText,
+          raw: raw,
+          modelTried: successfulResponse?._modelUsed || null,
+          fullResponse: successfulResponse,
+        });
+      } catch (error) {
+        console.error("[gemini_generate_prompt_from_image] Error:", error);
+        sendResponse({ success: false, error: error.message || String(error) });
       }
     })();
     return true;
@@ -1094,68 +1194,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     return true;
   } else if (msg.action === "ai_generate_images") {
-    // Gemini 2.5 Flash Image REST API 연동
+    // 이미지 생성 API 연동 - 현재 Gemini는 이미지 생성 미지원
     (async () => {
       try {
-        const {
-          prompt = "",
-          style = "none",
-          aspect = "1:1",
-          count = 3,
-        } = msg.data || {};
-        // 1. Gemini API 키를 안전하게 가져오기
-        const { geminiApiKey } = await chrome.storage.local.get([
-          "geminiApiKey",
-        ]);
-        if (!geminiApiKey) {
-          sendResponse({
-            success: false,
-            error: "Gemini API 키가 설정되지 않았습니다.",
-          });
-          return;
-        }
+        const { prompt = "", count = 3 } = msg.data || {};
 
-        // 2. 프롬프트 및 옵션 구성
-        const model = "gemini-2.5-flash-image";
-        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-        // 3. 여러 장 요청: Gemini는 1회 1장만 반환하므로 count만큼 반복 호출
-        const images = [];
-        for (let i = 0; i < count; i++) {
-          const res = await fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.candidates) {
-            sendResponse({
-              success: false,
-              error: data.error?.message || "Gemini 이미지 생성 실패",
-            });
-            return;
-          }
-          let found = false;
-          for (const part of data.candidates[0].content.parts) {
-            if (part.inlineData && part.inlineData.data) {
-              images.push(`data:image/png;base64,${part.inlineData.data}`);
-              found = true;
-            }
-          }
-          if (!found) {
-            sendResponse({
-              success: false,
-              error: "이미지 생성 결과가 없습니다.",
-            });
-            return;
-          }
-        }
-        sendResponse({ success: true, images });
-      } catch (e) {
+        // 현재 Gemini API는 이미지 생성을 지원하지 않습니다
+        // 사용자에게 명확한 안내 제공
+        console.warn(
+          "[이미지 생성] Gemini API는 현재 이미지 생성 기능을 제공하지 않습니다."
+        );
+        console.log("[이미지 생성] 프롬프트:", prompt);
+
         sendResponse({
           success: false,
-          error: e?.message || "Gemini 호출 오류",
+          error:
+            "이미지 생성 기능은 현재 준비 중입니다.\n\n생성된 프롬프트를 복사하여 다음 서비스를 이용해주세요:\n• DALL-E (OpenAI)\n• Midjourney\n• Stable Diffusion\n• Leonardo.ai",
+          promptForCopy: prompt,
+          suggestedServices: [
+            { name: "DALL-E", url: "https://platform.openai.com/dall-e" },
+            { name: "Leonardo.ai", url: "https://leonardo.ai" },
+            { name: "Midjourney", url: "https://www.midjourney.com" },
+          ],
+        });
+      } catch (e) {
+        console.error("[ai_generate_images] 오류:", e);
+        sendResponse({
+          success: false,
+          error: e?.message || "이미지 생성 중 오류 발생",
         });
       }
     })();
