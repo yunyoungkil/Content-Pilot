@@ -336,27 +336,14 @@ export function renderWorkspace(container, ideaData) {
           "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
         allScrapsContainer.innerHTML = allScrapsHtml;
 
-        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
-        const editorIframe = container.querySelector("#quill-editor-iframe");
-        if (editorIframe && editorIframe.contentWindow) {
-          editorIframe.contentWindow.postMessage(
-            { action: "adjust-editor-height" },
-            "*"
-          );
-        }
+        // [PRD v3.3 FR-W2] 콘솔 오류 제거: adjust-editor-height 메시지 삭제
+        // (에디터 높이는 CSS flexbox로 자동 관리됨)
       } else {
         linkedScrapsContainer.innerHTML =
           "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
         allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
 
-        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
-        const editorIframe = container.querySelector("#quill-editor-iframe");
-        if (editorIframe && editorIframe.contentWindow) {
-          editorIframe.contentWindow.postMessage(
-            { action: "adjust-editor-height" },
-            "*"
-          );
-        }
+        // [PRD v3.3 FR-W2] 콘솔 오류 제거: adjust-editor-height 메시지 삭제
       }
     }
   });
@@ -1694,6 +1681,44 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       templateMessage.style.color = "#1976d2";
     }
 
+    // [PRD v3.3 Enhanced] 타임아웃 처리 추가 (45초 - background.js 30초 fetch + 15초 여유)
+    let responseReceived = false;
+    const TIMEOUT_MS = 45000; // 45초 (background.js의 30초 fetch 타임아웃 + 처리 시간 15초)
+
+    const timeoutId = setTimeout(() => {
+      if (!responseReceived) {
+        responseReceived = true;
+        if (templateMessage) {
+          templateMessage.textContent =
+            "⏱️ 분석 시간이 초과되었습니다. 더 작은 이미지로 다시 시도하세요.";
+          templateMessage.style.color = "#f57c00";
+        }
+        window.parent.postMessage(
+          {
+            action: "cp_show_toast",
+            message: "⏱️ AI 분석 시간 초과. 다시 시도하세요.",
+          },
+          "*"
+        );
+      }
+    }, TIMEOUT_MS);
+
+    // 진행 상태 업데이트 (10초마다)
+    let progressCount = 0;
+    const progressInterval = setInterval(() => {
+      if (responseReceived) {
+        clearInterval(progressInterval);
+        return;
+      }
+      progressCount++;
+      const dots = ".".repeat((progressCount % 3) + 1);
+      if (templateMessage) {
+        templateMessage.textContent = `🔄 AI가 이미지를 분석하는 중${dots} (${
+          progressCount * 10
+        }초)`;
+      }
+    }, 10000);
+
     // background.js로 데이터 전송
     chrome.runtime.sendMessage(
       {
@@ -1701,6 +1726,11 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         data: { ...uploadData, templateName: templateName },
       },
       (response) => {
+        if (responseReceived) return; // 타임아웃 후 응답은 무시
+        responseReceived = true;
+        clearTimeout(timeoutId);
+        clearInterval(progressInterval);
+
         if (response?.success) {
           if (templateMessage) {
             templateMessage.textContent =
@@ -1717,15 +1747,35 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           // FR-T3-DnD (v2.3): 등록 성공 시 즉시 새로고침
           refreshAllTemplateData();
         } else {
+          // [PRD v3.3 FR-W1] 구체적인 오류 메시지 UI 표시
           const errorMsg = response?.error || "알 수 없는 오류";
+          let userFriendlyMessage = `❌ 템플릿 등록 실패: ${errorMsg}`;
+
+          if (errorMsg.includes("fontRatio")) {
+            userFriendlyMessage =
+              "❌ 분석 실패: 폰트 크기(fontRatio)를 숫자로 인식하지 못했습니다. AI가 값을 추정하지 못했습니다.";
+          } else if (errorMsg.includes("시간 초과")) {
+            userFriendlyMessage =
+              "❌ 분석 실패: AI 분석 시간이 초과되었습니다. 더 단순한 이미지를 시도해보세요.";
+          } else if (
+            errorMsg.includes("widthRatio") ||
+            errorMsg.includes("heightRatio")
+          ) {
+            userFriendlyMessage =
+              "❌ 분석 실패: 요소 크기를 숫자로 인식하지 못했습니다.";
+          } else if (errorMsg.includes("x") || errorMsg.includes("y")) {
+            userFriendlyMessage =
+              "❌ 분석 실패: 요소 위치를 숫자로 인식하지 못했습니다.";
+          }
+
           if (templateMessage) {
-            templateMessage.textContent = `❌ 템플릿 등록 실패: ${errorMsg}`;
+            templateMessage.textContent = userFriendlyMessage;
             templateMessage.style.color = "#d32f2f";
           }
           window.parent.postMessage(
             {
               action: "cp_show_toast",
-              message: `❌ 템플릿 등록 실패: ${errorMsg}`,
+              message: userFriendlyMessage,
             },
             "*"
           );

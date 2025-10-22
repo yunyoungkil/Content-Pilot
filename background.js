@@ -90,8 +90,13 @@ function validateTemplateData(data) {
     const layer = data.layers[i];
 
     // 공통 검증: 타입 필수
-    if (!layer.type || !["text", "shape", "svg", "image"].includes(layer.type)) {
-      throw new Error(`레이어 ${i}: type 필드가 누락되었거나 유효하지 않은 값입니다. (허용: text, shape, svg, image)`);
+    if (
+      !layer.type ||
+      !["text", "shape", "svg", "image"].includes(layer.type)
+    ) {
+      throw new Error(
+        `레이어 ${i}: type 필드가 누락되었거나 유효하지 않은 값입니다. (허용: text, shape, svg, image)`
+      );
     }
 
     // 공통 검증: 좌표 범위
@@ -123,18 +128,34 @@ function validateTemplateData(data) {
     } else if (layer.type === "svg") {
       // SVG 레이어 검증 (pathData는 선택적, widthRatio/heightRatio 필수)
       if (layer.widthRatio && (layer.widthRatio <= 0 || layer.widthRatio > 1)) {
-        throw new Error(`레이어 ${i}: widthRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
+        throw new Error(
+          `레이어 ${i}: widthRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`
+        );
       }
-      if (layer.heightRatio && (layer.heightRatio <= 0 || layer.heightRatio > 1)) {
-        throw new Error(`레이어 ${i}: heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
+      if (
+        layer.heightRatio &&
+        (layer.heightRatio <= 0 || layer.heightRatio > 1)
+      ) {
+        throw new Error(
+          `레이어 ${i}: heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`
+        );
       }
     } else if (layer.type === "image") {
       // 이미지 레이어 검증 (widthRatio/heightRatio 필수)
       if (!layer.widthRatio || !layer.heightRatio) {
-        throw new Error(`레이어 ${i}: 이미지 타입은 widthRatio와 heightRatio가 필수입니다.`);
+        throw new Error(
+          `레이어 ${i}: 이미지 타입은 widthRatio와 heightRatio가 필수입니다.`
+        );
       }
-      if (layer.widthRatio <= 0 || layer.widthRatio > 1 || layer.heightRatio <= 0 || layer.heightRatio > 1) {
-        throw new Error(`레이어 ${i}: widthRatio, heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`);
+      if (
+        layer.widthRatio <= 0 ||
+        layer.widthRatio > 1 ||
+        layer.heightRatio <= 0 ||
+        layer.heightRatio > 1
+      ) {
+        throw new Error(
+          `레이어 ${i}: widthRatio, heightRatio는 0.0~1.0 사이의 비율 값이어야 합니다.`
+        );
       }
     }
   }
@@ -815,7 +836,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .set(cleanedScrapPayload)
       .then(() => {
         console.log("AI 분석 리포트가 스크랩북에 저장되었습니다.");
-        sendResponse({ success: true, message: "AI 분석 리포트가 저장되었습니다." });
+        sendResponse({
+          success: true,
+          message: "AI 분석 리포트가 저장되었습니다.",
+        });
       })
       .catch((err) => {
         console.error("AI 리포트 스크랩 중 오류:", err);
@@ -828,6 +852,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   else if (msg.action === "analyze_image_for_template") {
     (async () => {
       try {
+        console.log(
+          "[Template Analysis] 🚀 시작 - 템플릿 이름:",
+          msg.data?.templateName
+        );
+        const startTime = Date.now();
         const { data } = msg; // { base64Image?, imageUrl?, templateName }
 
         // 1. [신규 v2.2] 이미지 소스(Base64 또는 URL) 처리
@@ -835,6 +864,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let imageMimeType = "image/jpeg"; // 기본값
 
         if (data.base64Image) {
+          console.log("[Template Analysis] 📸 Base64 이미지 처리 중...");
           // 로컬 파일 (Base64)
           const parts = data.base64Image.split(",");
           if (parts.length === 2) {
@@ -872,7 +902,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           "geminiApiKey",
         ]);
         if (!geminiApiKey) {
-          throw new Error("Gemini API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해주세요.");
+          throw new Error(
+            "Gemini API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해주세요."
+          );
         }
 
         const VISION_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
@@ -903,7 +935,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             },
             layers: {
               type: "array",
-              description: "텍스트, 도형, SVG 아이콘, 이미지 등 모든 시각적 요소의 배열",
+              description:
+                "텍스트, 도형, SVG 아이콘, 이미지 등 모든 시각적 요소의 배열",
               items: {
                 type: "object",
                 properties: {
@@ -935,21 +968,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   },
                   x: {
                     type: "number",
-                    description: "가로 위치(중심 좌표, 0.0~1.0 비율)",
+                    description:
+                      '[CRITICAL] 가로 위치 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 "0.5" 금지!',
                   },
                   y: {
                     type: "number",
-                    description: "세로 위치(중심 좌표, 0.0~1.0 비율)",
+                    description:
+                      "[CRITICAL] 세로 위치 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 금지!",
                   },
                   widthRatio: {
                     type: "number",
                     description:
-                      "요소의 가로 크기(이미지 너비 대비 비율, 0.0~1.0)",
+                      "[CRITICAL] 가로 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입. 문자열 금지!",
                   },
                   heightRatio: {
                     type: "number",
                     description:
-                      "요소의 세로 크기(이미지 높이 대비 비율, 0.0~1.0)",
+                      "[CRITICAL] 세로 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입. 문자열 금지!",
                   },
                   styles: {
                     type: "object",
@@ -957,12 +992,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                       fontRatio: {
                         type: "number",
                         description:
-                          "텍스트의 폰트 크기(이미지 높이 대비 비율, 0.0~1.0)",
+                          '[CRITICAL] 폰트 크기 비율 (0.0~1.0) - 반드시 JSON Number 타입이어야 함. 문자열 "0.05" 절대 금지!',
                       },
                       fontWeight: {
                         type: "string",
                         enum: ["normal", "bold"],
-                        description: "폰트 두께(normal 또는 bold)",
+                        description:
+                          "폰트 두께(normal 또는 bold) - 숫자(700) 금지, 문자열만 허용",
                       },
                       fontFamily: {
                         type: "string",
@@ -1166,44 +1202,83 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 `;
 
         // CR2 (PRD v3.1): Gemini API 호출 시 generationConfig에 스키마 전달
-        // [강화] 재시도 로직 (503 과부하 대응)
+        // [PRD v3.3 FR-B1] 재시도 로직 + 30초 타임아웃
+        console.log("[Template Analysis] 🤖 Gemini Vision API 호출 준비 중...");
         let visionResponse;
         let retryCount = 0;
-        const MAX_RETRIES = 5; // 3 → 5회로 증가
-        const RETRY_DELAY = 3000; // 2초 → 3초로 증가
+        const MAX_RETRIES = 5;
+        const RETRY_DELAY = 3000;
+        const FETCH_TIMEOUT = 30000; // 30초 타임아웃
+
+        // [FR-B1] 타임아웃 헬퍼 함수
+        const fetchWithTimeout = (url, options, timeout) => {
+          return Promise.race([
+            fetch(url, options),
+            new Promise((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      "AI 분석 시간 초과: 이미지가 너무 복잡하거나 서버 응답이 없습니다."
+                    )
+                  ),
+                timeout
+              )
+            ),
+          ]);
+        };
 
         while (retryCount < MAX_RETRIES) {
           try {
-            visionResponse = await fetch(VISION_API_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    parts: [
-                      { text: jsonStructurePrompt },
-                      {
-                        inlineData: {
-                          mimeType: imageMimeType,
-                          data: imageBase64Data,
+            console.log(
+              `[Template Analysis] 📡 API 호출 시도 ${
+                retryCount + 1
+              }/${MAX_RETRIES}... (타임아웃: ${FETCH_TIMEOUT}ms)`
+            );
+            const apiStartTime = Date.now();
+
+            // [FR-B1] fetch에 30초 타임아웃 적용
+            visionResponse = await fetchWithTimeout(
+              VISION_API_URL,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [
+                    {
+                      parts: [
+                        { text: jsonStructurePrompt },
+                        {
+                          inlineData: {
+                            mimeType: imageMimeType,
+                            data: imageBase64Data,
+                          },
                         },
-                      },
-                    ],
+                      ],
+                    },
+                  ],
+                  generationConfig: {
+                    temperature: 0.1,
+                    responseMimeType: "application/json",
+                    responseSchema: templateSchema,
                   },
-                ],
-                generationConfig: {
-                  temperature: 0.1,
-                  responseMimeType: "application/json",
-                  responseSchema: templateSchema,
-                },
-              }),
-            });
+                }),
+              },
+              FETCH_TIMEOUT
+            );
+
+            const apiDuration = Date.now() - apiStartTime;
+            console.log(
+              `[Template Analysis] ⏱️ API 응답 시간: ${apiDuration}ms`
+            );
 
             if (visionResponse.ok) {
+              console.log("[Template Analysis] ✅ API 호출 성공!");
               break; // 성공하면 루프 탈출
             }
 
             const errorData = await visionResponse.json();
+            console.error(`[Template Analysis] ❌ API 에러 응답:`, errorData);
 
             // 503 (과부하) 또는 429 (요청 제한) 에러인 경우에만 재시도
             if (
@@ -1241,7 +1316,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               })`
             );
           } catch (fetchError) {
-            // 네트워크 오류 등
+            // [FR-B1] 타임아웃 에러는 즉시 실패 처리 (재시도 불가)
+            if (fetchError.message.includes("AI 분석 시간 초과")) {
+              console.error(
+                "[Template Analysis] ⏱️ 타임아웃 발생:",
+                fetchError.message
+              );
+              throw fetchError; // 즉시 종료
+            }
+
+            // 네트워크 오류 등은 재시도
             if (retryCount < MAX_RETRIES - 1) {
               retryCount++;
               console.warn(
@@ -1257,6 +1341,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         }
 
+        console.log("[Template Analysis] 📝 API 응답 파싱 중...");
         const visionData = await visionResponse.json();
 
         // 3. FR-V-Validate (PRD v2.5): JSON 파싱 및 강화된 검증
@@ -1264,7 +1349,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           visionData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
         console.log(
-          "[Template Generator] AI 응답 원문:",
+          "[Template Analysis] 📄 AI 응답 원문:",
           rawText.substring(0, 200) + "..."
         );
 
@@ -1289,23 +1374,125 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // JSON 파싱
         const parsedTemplate = JSON.parse(templateDataJson);
-        console.log(
-          "[Template Generator] JSON 파싱 성공:",
-          parsedTemplate.name
-        );
+        console.log("[Template Analysis] JSON 파싱 성공:", parsedTemplate.name);
+
+        // [PRD v3.3 FR-B2] AI 데이터 자동 보정 (Sanitization)
+        const sanitizeTemplateData = (template) => {
+          console.log("[Template Analysis] 🔧 데이터 자동 보정 시작...");
+          let fixCount = 0;
+
+          if (template.layers && Array.isArray(template.layers)) {
+            template.layers.forEach((layer, idx) => {
+              // 좌표 보정
+              if (typeof layer.x === "string") {
+                layer.x = parseFloat(layer.x) || 0.5;
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: x를 문자열에서 숫자로 변환 (${layer.x})`
+                );
+              }
+              if (typeof layer.y === "string") {
+                layer.y = parseFloat(layer.y) || 0.5;
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: y를 문자열에서 숫자로 변환 (${layer.y})`
+                );
+              }
+
+              // 크기 보정
+              if (typeof layer.widthRatio === "string") {
+                layer.widthRatio = parseFloat(layer.widthRatio) || 0.1;
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: widthRatio를 문자열에서 숫자로 변환`
+                );
+              }
+              if (typeof layer.heightRatio === "string") {
+                layer.heightRatio = parseFloat(layer.heightRatio) || 0.1;
+                fixCount++;
+                console.warn(
+                  `[Sanitize] 레이어 ${idx}: heightRatio를 문자열에서 숫자로 변환`
+                );
+              }
+
+              // 텍스트 레이어 스타일 보정
+              if (layer.type === "text" && layer.styles) {
+                // fontRatio 보정
+                if (typeof layer.styles.fontRatio === "string") {
+                  layer.styles.fontRatio = parseFloat(layer.styles.fontRatio);
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: fontRatio를 문자열에서 숫자로 변환 (${layer.styles.fontRatio})`
+                  );
+                }
+                if (
+                  layer.styles.fontRatio == null ||
+                  isNaN(layer.styles.fontRatio)
+                ) {
+                  layer.styles.fontRatio = 0.05; // 기본값
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: fontRatio가 null/NaN → 기본값 0.05 할당`
+                  );
+                }
+
+                // fontWeight 보정
+                if (
+                  layer.styles.fontWeight &&
+                  typeof layer.styles.fontWeight === "number"
+                ) {
+                  layer.styles.fontWeight =
+                    layer.styles.fontWeight >= 700 ? "bold" : "normal";
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: fontWeight를 숫자에서 문자열로 변환`
+                  );
+                }
+              }
+
+              // Shape 레이어 스타일 보정
+              if (layer.type === "shape" && layer.styles) {
+                if (typeof layer.styles.lineWidth === "string") {
+                  layer.styles.lineWidth =
+                    parseFloat(layer.styles.lineWidth) || 0.01;
+                  fixCount++;
+                  console.warn(
+                    `[Sanitize] 레이어 ${idx}: lineWidth를 문자열에서 숫자로 변환`
+                  );
+                }
+              }
+            });
+          }
+
+          if (fixCount > 0) {
+            console.log(
+              `[Template Analysis] ✅ 데이터 보정 완료: ${fixCount}개 항목 수정됨`
+            );
+          } else {
+            console.log(
+              "[Template Analysis] ℹ️ 데이터 보정 불필요 (모든 값이 올바른 형식)"
+            );
+          }
+
+          return template;
+        };
+
+        sanitizeTemplateData(parsedTemplate);
 
         // [신규 v2.5] validateTemplateData 함수로 철저한 검증
         validateTemplateData(parsedTemplate);
 
         // 4. 검증 통과 후 Firebase에 저장 (undefined → null 정제)
+        console.log("[Template Analysis] 💾 Firebase 저장 중...");
         const cleanedTemplate = cleanDataForFirebase(parsedTemplate);
         const newTemplateRef = await firebase
           .database()
           .ref("thumbnail_templates")
           .push(cleanedTemplate);
 
+        const totalDuration = Date.now() - startTime;
         console.log(
-          `[Template Generator] ✅ 템플릿 "${parsedTemplate.name}" 저장 완료 (ID: ${newTemplateRef.key})`
+          `[Template Analysis] ✅ 완료! 템플릿 "${parsedTemplate.name}" 저장 (ID: ${newTemplateRef.key}, 총 ${totalDuration}ms)`
         );
         sendResponse({
           success: true,
