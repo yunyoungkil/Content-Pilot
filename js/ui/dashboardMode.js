@@ -75,11 +75,22 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
 
 
     try {
-
-        const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) throw new Error("AI 응답에서 유효한 배열 형식을 찾지 못했습니다.");
+        // JSON 코드 블록에서 추출 시도
+        let jsonText = analysisText;
+        const codeBlockMatch = analysisText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+        if (codeBlockMatch) {
+            jsonText = codeBlockMatch[1];
+        } else {
+            // 코드 블록이 없으면 배열 패턴 찾기
+            const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+                jsonText = jsonMatch[0];
+            } else {
+                throw new Error("AI 응답에서 유효한 배열 형식을 찾지 못했습니다.");
+            }
+        }
         
-        const ideas = JSON.parse(jsonMatch[0]);
+        const ideas = JSON.parse(jsonText);
 
 
         if (!Array.isArray(ideas) || ideas.length === 0) {

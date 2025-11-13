@@ -556,6 +556,145 @@ async function generateAndSendKeywords(data, sender) {
     }
   }
 }
+
+/**
+ * 아이디어에 대한 AI 브리핑 데이터를 생성하는 함수
+ * outline, recommendedKeywords, longTailKeywords를 생성합니다.
+ */
+async function generateIdeaBriefing(cardId, title, description, options = {}) {
+  const cardRef = firebase.database().ref(`kanban/ideas/${cardId}`);
+  const {
+    generateOutline = true,
+    generateKeywords = true,
+    generateLongTail = true,
+    generateMainKeywords = true
+  } = options;
+  
+  try {
+    const promises = [];
+    
+    // 1. 목차(outline) 생성
+    if (generateOutline) {
+      const outlinePrompt = `
+      당신은 전문 콘텐츠 기획자입니다. 아래 아이디어를 바탕으로 블로그 포스트의 목차를 생성해주세요.
+      
+      [아이디어]
+      - 제목: ${title}
+      - 설명: ${description || "없음"}
+      
+      [요청]
+      SEO에 최적화되고 독자의 흥미를 끄는 목차 5-7개를 생성해주세요. 각 목차는 간결하고 명확해야 합니다.
+      
+      [응답 형식]
+      반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+      ["목차 1", "목차 2", "목차 3"]
+    `;
+      promises.push(callGeminiAPI(outlinePrompt).catch(() => null).then(result => ({ type: 'outline', result })));
+    }
+    
+    // 2. 주요 키워드(mainKeywords/tags) 생성
+    if (generateMainKeywords) {
+      const mainKeywordsPrompt = `
+      당신은 SEO 전문가입니다. 아래 아이디어를 바탕으로 콘텐츠의 핵심 주제를 나타내는 주요 키워드 5-7개를 생성해주세요.
+      
+      [아이디어]
+      - 제목: ${title}
+      - 설명: ${description || "없음"}
+      
+      [요청]
+      핵심 키워드(1-2 단어)와 중간 길이 키워드(3-4 단어)를 조합하여 생성해주세요. 예: "화장품 리뷰", "내돈내산", "이벤트 참여", "제품 추천"
+      
+      [응답 형식]
+      반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+      ["키워드 1", "키워드 2", "키워드 3"]
+    `;
+      promises.push(callGeminiAPI(mainKeywordsPrompt).catch(() => null).then(result => ({ type: 'mainKeywords', result })));
+    }
+    
+    // 3. 추천 검색어(recommendedKeywords) 생성
+    if (generateKeywords) {
+      const keywordsPrompt = `
+      당신은 특정 주제에 대한 자료 조사를 시작하는 전문 콘텐츠 기획자입니다.
+      아래 아이디어를 바탕으로, 구체적인 통계, 사례, 근거, 반론 등을 찾기 위한 가장 효과적인 구글 검색어 5개를 추천해주세요.
+      
+      [아이디어]
+      - 제목: ${title}
+      - 설명: ${description || "없음"}
+      
+      [응답 형식]
+      반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+      ["검색어 1", "검색어 2", "검색어 3"]
+    `;
+      promises.push(callGeminiAPI(keywordsPrompt).catch(() => null).then(result => ({ type: 'keywords', result })));
+    }
+    
+    // 4. 롱테일 키워드(longTailKeywords) 생성
+    if (generateLongTail) {
+      const longTailPrompt = `
+      당신은 SEO 전문가입니다. 아래 아이디어를 바탕으로 검색 최적화에 유용한 롱테일 키워드 5개를 생성해주세요.
+      
+      [아이디어]
+      - 제목: ${title}
+      - 설명: ${description || "없음"}
+      
+      [요청]
+      구체적이고 검색 의도가 명확한 롱테일 키워드를 생성해주세요. 예: "2024년 블로그 트래픽 늘리는 방법", "콘텐츠 마케팅 ROI 측정 가이드"
+      
+      [응답 형식]
+      반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+      ["롱테일 키워드 1", "롱테일 키워드 2", "롱테일 키워드 3"]
+    `;
+      promises.push(callGeminiAPI(longTailPrompt).catch(() => null).then(result => ({ type: 'longTail', result })));
+    }
+    
+    // 병렬로 필요한 데이터만 생성
+    const results = await Promise.all(promises);
+    
+    // 결과 파싱 및 업데이트
+    const updates = {};
+    let mainKeywordsParsed = null;
+    
+    results.forEach(({ type, result }) => {
+      if (!result) return;
+      
+      try {
+        const jsonMatch = result.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (type === 'outline') {
+            updates.outline = parsed;
+          } else if (type === 'mainKeywords') {
+            mainKeywordsParsed = parsed;
+          } else if (type === 'keywords') {
+            updates.recommendedKeywords = parsed;
+          } else if (type === 'longTail') {
+            updates.longTailKeywords = parsed;
+          }
+        }
+      } catch (e) {
+        console.error(`${type} 파싱 오류:`, e);
+      }
+    });
+    
+    // 주요 키워드가 있으면 기존 tags와 병합
+    if (mainKeywordsParsed) {
+      const snapshot = await cardRef.once('value');
+      const currentData = snapshot.val() || {};
+      const existingTags = currentData.tags || [];
+      const newTags = existingTags.filter(t => t !== '#AI-추천');
+      updates.tags = ['#AI-추천', ...newTags, ...mainKeywordsParsed];
+    }
+    
+    // Firebase에 업데이트
+    if (Object.keys(updates).length > 0) {
+      await cardRef.update(updates);
+      console.log(`[브리핑 데이터 생성 완료] 카드 ID: ${cardId}`, updates);
+    }
+    
+  } catch (error) {
+    console.error("AI 브리핑 데이터 생성 중 오류:", error);
+  }
+}
 // --- 2. 핵심 이벤트 리스너 ---
 
 chrome.action.onClicked.addListener((tab) => {
@@ -1724,11 +1863,73 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             [요청]
             나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
-            각 아이디어는 "### 아이디어 제목" 형식으로 시작하고, 왜 이 아이디어가 전략적으로 유효한지에 대한 설명을 반드시 포함해주세요.
+
+            [출력 형식]
+            반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+            [
+              {
+                "title": "아이디어 제목",
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+              },
+              {
+                "title": "아이디어 제목",
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+              }
+            ]
         `;
 
     (async () => {
       const ideasResult = await callGeminiAPI(youtubeIdeasPrompt);
+      sendResponse({ success: true, ideas: ideasResult });
+    })();
+
+    return true;
+  } else if (msg.action === "generate_blog_ideas") {
+    const { myContent, competitorContent, myAnalysisSummary } = msg.data;
+
+    const myDataSummary = myContent
+      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+      .slice(0, 10)
+      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
+      .join("\n");
+
+    const competitorDataSummary = competitorContent
+      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+      .slice(0, 10)
+      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
+      .join("\n");
+
+    const blogIdeasPrompt = `
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+
+            [정보 1: 내 채널의 핵심 성공 요인]
+            ${myAnalysisSummary}
+
+            [정보 2: 내 채널의 인기 게시물 목록]
+            ${myDataSummary}
+
+            [정보 3: 경쟁 채널의 인기 게시물 목록]
+            ${competitorDataSummary}
+
+            [요청]
+            나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+
+            [출력 형식]
+            반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+            [
+              {
+                "title": "아이디어 제목",
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+              },
+              {
+                "title": "아이디어 제목",
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+              }
+            ]
+        `;
+
+    (async () => {
+      const ideasResult = await callGeminiAPI(blogIdeasPrompt);
       sendResponse({ success: true, ideas: ideasResult });
     })();
 
@@ -2096,7 +2297,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         tags: ["#AI-추천", ...(ideaData.keywords || [])],
         recommendedKeywords: ideaData.recommendedSearches || [],
         outline: ideaData.outline || [],
-        createdAt: Date.now(),
         longTailKeywords: ideaData.longTailKeywords || [],
         createdAt: Date.now(),
       };
@@ -2108,6 +2308,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .set(newCard)
         .then(() => {
           sendResponse({ success: true, firebaseKey: newCardKey });
+          
+          // 아이디어 저장 후 브리핑 데이터 자동 생성 (비동기, 응답 대기하지 않음)
+          if (newCard.title && newCard.description) {
+            generateIdeaBriefing(newCardKey, newCard.title, newCard.description)
+              .catch((error) => {
+                console.error("브리핑 데이터 생성 실패:", error);
+              });
+          }
         })
         .catch((e) => {
           sendResponse({ success: false, error: e.message });
@@ -2127,6 +2335,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     return true;
+  } else if (msg.action === "generate_idea_briefing") {
+    const { cardId, title, description, generateOutline, generateMainKeywords, generateKeywords, generateLongTail } = msg.data;
+    if (!cardId || !title) {
+      sendResponse({
+        success: false,
+        error: "아이디어 ID와 제목이 필요합니다.",
+      });
+      return true;
+    }
+
+    // 비동기로 브리핑 데이터 생성 (옵션에 따라 필요한 것만 생성)
+    generateIdeaBriefing(cardId, title, description || "", {
+      generateOutline: generateOutline !== false, // 기본값 true
+      generateMainKeywords: generateMainKeywords !== false,
+      generateKeywords: generateKeywords !== false,
+      generateLongTail: generateLongTail !== false
+    })
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error("브리핑 데이터 생성 실패:", error);
+        sendResponse({ success: false, error: error.message });
+      });
+
+    return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "remove_idea_from_kanban") {
     const firebaseKey = msg.key;
     if (!firebaseKey) {

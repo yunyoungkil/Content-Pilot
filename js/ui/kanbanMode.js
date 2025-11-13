@@ -67,6 +67,24 @@ function addRealtimeUpdateListener() {
     if (msg.action === "kanban_data_updated") {
       allKanbanData = msg.data || {};
       updateKanbanUI(allKanbanData);
+      
+      // 워크스페이스가 열려있고 해당 아이디어 데이터가 업데이트된 경우 워크스페이스 갱신
+      if (window.__cp_active_mode === "workspace" && window.__cp_workspace_idea_id) {
+        const ideaId = window.__cp_workspace_idea_id;
+        const ideaData = allKanbanData.ideas?.[ideaId];
+        if (ideaData) {
+          const shadowRoot = kanbanContainer.getRootNode();
+          const container = shadowRoot.querySelector("#cp-main-content");
+          if (container) {
+            renderHeaderAndTabs(shadowRoot);
+            renderWorkspace(kanbanContainer, {
+              ...ideaData,
+              id: ideaId,
+              status: "ideas",
+            });
+          }
+        }
+      }
     }
   });
 }

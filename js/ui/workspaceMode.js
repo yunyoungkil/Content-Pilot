@@ -59,6 +59,38 @@ export function renderWorkspace(container, ideaData) {
     ? Object.keys(ideaData.linkedScraps)
     : [];
 
+  // --- 브리핑 데이터가 없으면 자동 생성 (각 필드별로 개별 체크) ---
+  const needsOutline = !ideaData.outline || ideaData.outline.length === 0;
+  const needsMainKeywords = !ideaData.tags || ideaData.tags.length <= 1 || (ideaData.tags.length === 1 && ideaData.tags[0] === '#AI-추천');
+  const needsKeywords = !ideaData.recommendedKeywords || ideaData.recommendedKeywords.length === 0;
+  const needsLongTail = !ideaData.longTailKeywords || ideaData.longTailKeywords.length === 0;
+  
+  // 각 필드가 없으면 개별적으로 생성 요청
+  if (ideaData.title && ideaData.description) {
+    if (needsOutline || needsMainKeywords || needsKeywords || needsLongTail) {
+      chrome.runtime.sendMessage({
+        action: "generate_idea_briefing",
+        data: {
+          cardId: ideaData.id,
+          title: ideaData.title,
+          description: ideaData.description,
+          // 생성할 필드만 지정 (없는 것만 생성)
+          generateOutline: needsOutline,
+          generateMainKeywords: needsMainKeywords,
+          generateKeywords: needsKeywords,
+          generateLongTail: needsLongTail
+        }
+      }, (response) => {
+        if (response && response.success) {
+          // Firebase 실시간 업데이트를 통해 자동으로 UI가 갱신됨
+          console.log("브리핑 데이터 생성 요청 완료");
+        } else if (response && response.error) {
+          console.error("브리핑 데이터 생성 실패:", response.error);
+        }
+      });
+    }
+  }
+
   // --- 에디터 draft 저장 메시지 수신 및 background로 전달 ---
   window.__cp_workspace_idea_id = ideaData.id;
   if (!window.__cp_workspace_save_listener) {
