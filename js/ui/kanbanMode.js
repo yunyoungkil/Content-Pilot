@@ -198,16 +198,38 @@ function createKanbanCard(id, data, status) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
   }
 
+  // 성과 지표가 있으면 카드에 시각적 표시 추가
+  const performance = data.performance;
+  const hasPerformance = performance && !performance.error;
+  if (hasPerformance) {
+    card.classList.add("has-performance");
+    const pageviews = performance.pageviews || 0;
+    const earnings = performance.estimatedEarnings || 0;
+    const avgDuration = performance.avgSessionDuration || 0;
+    
+    // 성과 지표 미리보기
+    const performancePreview = `
+      <div class="performance-preview">
+        <span class="perf-metric" title="페이지뷰">👁️ ${pageviews.toLocaleString()}</span>
+        <span class="perf-metric" title="수익">💰 $${earnings.toFixed(2)}</span>
+        ${avgDuration > 0 ? `<span class="perf-metric" title="평균 체류 시간">⏱️ ${Math.round(avgDuration)}초</span>` : ''}
+      </div>
+    `;
+    metaInfoHtml += performancePreview;
+  }
+
   let actionButtons = ``;
   // K-3: 초안 삭제 버튼 제거됨
   if (status === "done" && !data.publishedUrl) {
     actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
   } else if (data.publishedUrl) {
-    const performance = data.performance;
-    const earnings = performance
+    const earnings = hasPerformance
       ? `$${(performance.estimatedEarnings || 0).toFixed(2)}`
       : "대기중";
-    actionButtons += `<a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>`;
+    actionButtons += `
+      <a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>
+      ${hasPerformance ? `<button class="view-performance-detail-btn" data-card-id="${id}">📊 상세</button>` : ''}
+    `;
   }
   card.innerHTML = `
     <div class="kanban-card-body">
@@ -258,6 +280,14 @@ function addKanbanEventListeners(container) {
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
       showPublishUrlModal(container, cardId, status, cardData?.title || "");
+    } else if (e.target.closest(".view-performance-detail-btn")) {
+      e.stopPropagation();
+      const cardId = e.target.closest(".view-performance-detail-btn").dataset.cardId;
+      const status = card.dataset.status;
+      const cardData = allKanbanData[status]?.[cardId];
+      if (cardData && cardData.performance) {
+        showPerformanceDetailModal(container, cardId, cardData);
+      }
     } else {
       const cardId = card.dataset.id;
       const status = card.dataset.status;
@@ -554,4 +584,158 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
       urlInput.focus();
     }, 100);
   });
+}
+
+/**
+ * 성과 상세 보기 모달을 표시하는 함수
+ */
+function showPerformanceDetailModal(container, cardId, cardData) {
+  const performance = cardData.performance;
+  if (!performance || performance.error) {
+    showToast("성과 데이터가 없습니다.");
+    return;
+  }
+
+  // 기존 모달이 있으면 제거
+  const existingModal = container.querySelector(".cp-performance-detail-modal-wrap");
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  const modalWrap = document.createElement("div");
+  modalWrap.className = "cp-performance-detail-modal-wrap";
+  
+  // 시간대별 데이터 준비
+  const hourlyData = performance.hourlyViews || [];
+  const hourlyChartData = Array(24).fill(0);
+  hourlyData.forEach(item => {
+    if (item.hour >= 0 && item.hour < 24) {
+      hourlyChartData[item.hour] = item.views;
+    }
+  });
+
+  // 유입 경로 데이터 준비
+  const topSources = performance.topSources || [];
+
+  modalWrap.innerHTML = `
+    <div class="cp-modal-backdrop"></div>
+    <div class="cp-performance-detail-modal">
+      <div class="cp-modal-header">
+        <div class="cp-modal-title">📊 성과 상세 분석</div>
+        <button class="cp-modal-close" title="닫기">×</button>
+      </div>
+      <div class="cp-modal-body">
+        <div class="performance-detail-content">
+          <div class="perf-header">
+            <h3>${cardData.title || "제목 없음"}</h3>
+            ${cardData.publishedUrl ? `<a href="${cardData.publishedUrl}" target="_blank" class="perf-url-link">🔗 발행 URL 보기</a>` : ''}
+          </div>
+
+          <div class="perf-metrics-grid">
+            <div class="perf-metric-card">
+              <div class="metric-label">페이지뷰</div>
+              <div class="metric-value">${(performance.pageviews || 0).toLocaleString()}</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">세션 수</div>
+              <div class="metric-value">${(performance.sessions || 0).toLocaleString()}</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">평균 체류 시간</div>
+              <div class="metric-value">${Math.round(performance.avgSessionDuration || 0)}초</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">평균 페이지 수</div>
+              <div class="metric-value">${(performance.pagesPerSession || 0).toFixed(1)}</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">이탈률</div>
+              <div class="metric-value">${((performance.bounceRate || 0) * 100).toFixed(1)}%</div>
+            </div>
+            <div class="perf-metric-card highlight">
+              <div class="metric-label">예상 수익</div>
+              <div class="metric-value">$${(performance.estimatedEarnings || 0).toFixed(2)}</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">페이지 RPM</div>
+              <div class="metric-value">$${(performance.pageRPM || 0).toFixed(2)}</div>
+            </div>
+            <div class="perf-metric-card">
+              <div class="metric-label">클릭률 (CTR)</div>
+              <div class="metric-value">${(performance.ctr || 0).toFixed(2)}%</div>
+            </div>
+          </div>
+
+          ${hourlyData.length > 0 ? `
+            <div class="perf-chart-section">
+              <h4>시간대별 페이지뷰 추이</h4>
+              <div class="hourly-chart">
+                ${hourlyChartData.map((views, hour) => {
+                  const maxViews = Math.max(...hourlyChartData, 1);
+                  const height = maxViews > 0 ? (views / maxViews) * 100 : 0;
+                  return `
+                    <div class="hourly-bar" style="height: ${height}%">
+                      <div class="bar-value">${views > 0 ? views : ''}</div>
+                      <div class="bar-fill"></div>
+                      <div class="bar-label">${hour}시</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          ${topSources.length > 0 ? `
+            <div class="perf-traffic-section">
+              <h4>주요 유입 경로</h4>
+              <div class="traffic-sources-list">
+                ${topSources.map((source, idx) => `
+                  <div class="traffic-source-item">
+                    <span class="source-rank">${idx + 1}</span>
+                    <div class="source-info">
+                      <div class="source-name">${source.source === '(direct)' ? '직접 방문' : source.source}</div>
+                      <div class="source-medium">${source.medium || 'none'}</div>
+                    </div>
+                    <div class="source-sessions">${source.sessions.toLocaleString()} 세션</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          ${performance.lastUpdatedAt ? `
+            <div class="perf-footer">
+              <span class="last-updated">마지막 업데이트: ${new Date(performance.lastUpdatedAt).toLocaleString('ko-KR')}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+      <div class="cp-modal-footer">
+        <button class="cp-btn cp-btn-secondary" id="close-detail-btn">닫기</button>
+      </div>
+    </div>
+  `;
+
+  container.appendChild(modalWrap);
+
+  const closeBtn = modalWrap.querySelector(".cp-modal-close");
+  const cancelBtn = modalWrap.querySelector("#close-detail-btn");
+  const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
+
+  const cleanup = () => {
+    modalWrap.remove();
+  };
+
+  closeBtn.addEventListener("click", cleanup);
+  cancelBtn.addEventListener("click", cleanup);
+  backdrop.addEventListener("click", cleanup);
+
+  // ESC 키로 닫기
+  const handleKeydown = (e) => {
+    if (e.key === "Escape") {
+      cleanup();
+      document.removeEventListener("keydown", handleKeydown);
+    }
+  };
+  document.addEventListener("keydown", handleKeydown);
 }

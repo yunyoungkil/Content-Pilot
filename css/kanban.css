@@ -469,6 +469,325 @@
   background: #f0f0f0;
 }
 
+/* 성과 지표가 있는 카드 스타일 */
+.cp-kanban-card.has-performance {
+  border-left: 3px solid #34a853;
+  background: linear-gradient(to right, rgba(52, 168, 83, 0.02), transparent);
+}
+
+.performance-preview {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.perf-metric {
+  font-size: 11px;
+  color: #34a853;
+  background: #e8f5e9;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.view-performance-detail-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1967d2;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #dadce0;
+  background: #fff;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-left: 4px;
+}
+
+.view-performance-detail-btn:hover {
+  background-color: #e8f0fe;
+}
+
+/* 성과 상세 모달 스타일 */
+.cp-performance-detail-modal-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+}
+
+.cp-performance-detail-modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(90vw, 800px);
+  max-height: 90vh;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.cp-performance-detail-modal .cp-modal-header {
+  flex: 0 0 auto;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.cp-performance-detail-modal .cp-modal-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.cp-performance-detail-modal .cp-modal-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e5eaf0;
+  background: #f9fafb;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #666;
+  transition: all 0.2s;
+}
+
+.cp-performance-detail-modal .cp-modal-close:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.cp-performance-detail-modal .cp-modal-body {
+  flex: 1 1 auto;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.performance-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.perf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.perf-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.perf-url-link {
+  font-size: 13px;
+  color: #1967d2;
+  text-decoration: none;
+}
+
+.perf-url-link:hover {
+  text-decoration: underline;
+}
+
+.perf-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.perf-metric-card {
+  background: #f8f9fa;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.perf-metric-card.highlight {
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  border-color: #34a853;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.metric-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+}
+
+.perf-chart-section,
+.perf-traffic-section {
+  margin-top: 8px;
+}
+
+.perf-chart-section h4,
+.perf-traffic-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.hourly-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 200px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e5eaf0;
+}
+
+.hourly-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  position: relative;
+  min-height: 0;
+}
+
+.bar-fill {
+  width: 100%;
+  background: linear-gradient(to top, #34a853, #66bb6a);
+  border-radius: 4px 4px 0 0;
+  min-height: 4px;
+  transition: all 0.3s;
+}
+
+.hourly-bar:hover .bar-fill {
+  background: linear-gradient(to top, #2e7d32, #4caf50);
+}
+
+.bar-value {
+  position: absolute;
+  top: -20px;
+  font-size: 10px;
+  color: #666;
+  font-weight: 500;
+}
+
+.bar-label {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+}
+
+.traffic-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.traffic-source-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e5eaf0;
+}
+
+.source-rank {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1967d2;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.source-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.source-medium {
+  font-size: 12px;
+  color: #666;
+}
+
+.source-sessions {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1967d2;
+  white-space: nowrap;
+}
+
+.perf-footer {
+  padding-top: 16px;
+  border-top: 1px solid #eef2f7;
+  text-align: center;
+}
+
+.last-updated {
+  font-size: 12px;
+  color: #999;
+}
+
+.cp-performance-detail-modal .cp-modal-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid #eef2f7;
+}
+
+.cp-performance-detail-modal .cp-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid #e5eaf0;
+  background: #f9fafb;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.cp-performance-detail-modal .cp-btn-secondary:hover {
+  background: #f0f0f0;
+}
+
 /* outline-tag 색상 변경 */
 .outline-tag {
   background-color: #e0f7fa;
