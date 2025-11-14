@@ -1659,6 +1659,37 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
             }
             
             // 가독성 포맷팅 후처리
+            // "(참고 자료 X)" 같은 번호 표기 제거 (마크다운 파싱 후)
+            const textNodes = [];
+            let tagIndex = 0;
+            const tagPlaceholder = '__TAG_PLACEHOLDER__';
+            
+            // HTML 태그를 임시로 치환하여 텍스트만 처리
+            html = html.replace(/<[^>]+>/g, (match) => {
+              textNodes[tagIndex] = match;
+              return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
+            });
+            
+            // 텍스트에서 참고 자료 번호 표기 제거
+            html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+            html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
+            html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
+            html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
+            html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
+            html = html.replace(/참고\s*자료\s*\d+/gi, '');
+            // 문장 중간에 있는 경우 처리
+            html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
+            html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
+            // 빈 괄호 제거
+            html = html.replace(/\(\s*\)/g, '');
+            // 연속된 공백 정리 (줄바꿈은 유지)
+            html = html.replace(/[ \t]{2,}/g, ' ');
+            
+            // 태그 복원
+            html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
+              return textNodes[parseInt(index)] || match;
+            });
+            
             // 링크 밑줄 제거 (이미 background.js에서 처리되었지만, 추가 보장)
             html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
               if (!attrs.includes('style=')) {

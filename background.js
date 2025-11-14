@@ -2628,15 +2628,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "generate_draft_from_idea") {
     const ideaData = msg.data;
     
-    // 가독성 포맷팅 함수
-    function formatDraftForReadability(draftText) {
-      if (!draftText) return draftText;
-      
-      let html = draftText;
-      
-      // 마크다운 링크를 HTML로 변환하면서 밑줄 제거
-      // [텍스트](URL) 형식을 <a href="URL" style="text-decoration: none; color: #1a73e8;">텍스트</a>로 변환
-      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="text-decoration: none; color: #1a73e8;">$1</a>');
+      // 가독성 포맷팅 함수
+      function formatDraftForReadability(draftText) {
+        if (!draftText) return draftText;
+        
+        let html = draftText;
+        
+        // 마크다운 형식인지 확인 (마크다운 문법이 있으면 HTML로 변환 필요)
+        const isMarkdown = /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s|\[.*\]\(.*\)/m.test(draftText);
+        
+        // 마크다운이면 HTML로 변환 (marked는 background.js에서 사용 불가하므로 클라이언트에서 처리)
+        // 여기서는 마크다운 링크만 먼저 처리하고, 나머지는 클라이언트에서 처리
+        if (isMarkdown) {
+          // 마크다운 링크를 HTML로 변환하면서 밑줄 제거
+          // [텍스트](URL) 형식을 <a href="URL" style="text-decoration: none; color: #1a73e8;">텍스트</a>로 변환
+          html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="text-decoration: none; color: #1a73e8;">$1</a>');
+        }
       
       // 기존 HTML 링크의 밑줄 제거
       html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
@@ -2663,37 +2670,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       html = html.replace(/\n\s*---\s*\n/gi, '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n');
       
       // "(참고 자료 X)" 같은 번호 표기 제거
-      // 다양한 패턴 제거 (태그 내부는 제외하고 텍스트만 처리)
-      const textNodes = [];
-      let tagIndex = 0;
-      // HTML 태그를 임시로 치환하여 텍스트만 처리
-      html = html.replace(/<[^>]+>/g, (match) => {
-        textNodes[tagIndex] = match;
-        return `__TAG_${tagIndex++}__`;
-      });
-      
-      // 텍스트에서 참고 자료 번호 표기 제거
-      html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
-      html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
-      html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
-      html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
-      html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
-      html = html.replace(/참고\s*자료\s*\d+/gi, '');
-      // 문장 중간에 있는 경우 처리 (앞뒤 공백 정리)
-      html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
-      html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
-      // 빈 괄호 제거
-      html = html.replace(/\(\s*\)/g, '');
-      // 연속된 공백을 하나로
-      html = html.replace(/\s{2,}/g, ' ');
-      // 마침표 앞 공백 정리
-      html = html.replace(/\s+\./g, '.');
-      html = html.replace(/\.\s+\./g, '.');
-      
-      // 태그 복원
-      html = html.replace(/__TAG_(\d+)__/g, (match, index) => {
-        return textNodes[parseInt(index)] || match;
-      });
+      // 마크다운 형식이면 HTML로 변환 후 처리 (클라이언트에서 처리하도록 남겨둠)
+      // 여기서는 HTML 형식일 때만 처리
+      if (!isMarkdown || html.includes('<')) {
+        // HTML 태그가 있으면 태그를 임시로 치환하여 텍스트만 처리
+        const textNodes = [];
+        let tagIndex = 0;
+        const tagPlaceholder = '__TAG_PLACEHOLDER__';
+        
+        // HTML 태그를 임시로 치환
+        html = html.replace(/<[^>]+>/g, (match) => {
+          textNodes[tagIndex] = match;
+          return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
+        });
+        
+        // 텍스트에서 참고 자료 번호 표기 제거
+        html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+        html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+/gi, '');
+        // 문장 중간에 있는 경우 처리 (앞뒤 공백 정리)
+        html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
+        html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
+        // 빈 괄호 제거
+        html = html.replace(/\(\s*\)/g, '');
+        // 연속된 공백을 하나로 (줄바꿈은 유지)
+        html = html.replace(/[ \t]{2,}/g, ' ');
+        // 마침표 앞 공백 정리
+        html = html.replace(/\s+\./g, '.');
+        html = html.replace(/\.\s+\./g, '.');
+        
+        // 태그 복원
+        html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
+          return textNodes[parseInt(index)] || match;
+        });
+      } else {
+        // 마크다운 형식이면 텍스트에서만 제거 (마크다운 문법은 보존)
+        html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+        html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
+        html = html.replace(/참고\s*자료\s*\d+/gi, '');
+      }
       
       // 중요한 문장에 배경색 적용 (AI가 <mark> 태그를 사용하지 않은 경우)
       if (!html.includes('<mark')) {
