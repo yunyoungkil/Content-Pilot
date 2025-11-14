@@ -47,51 +47,210 @@ function renderImageGallery(linkedScrapsData) {
   return result;
 }
 
-// 파이어베이스 전체 스크랩에서 이미지 갤러리 업데이트
+// 파이어베이스 전체 스크랩과 캔버스 데이터에서 이미지 갤러리 업데이트
 function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand) {
-  const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
-  if (!imageGalleryGrid) return;
+  const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
+  if (!imageGalleryArea) return;
   
-  const imageSet = new Set();
+  // 이미지 갤러리 컨테이너 구조 생성
+  if (!imageGalleryArea.querySelector(".image-gallery-header")) {
+    imageGalleryArea.innerHTML = `
+      <div class="image-gallery-header" style="padding: 12px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 8px;">
+        <input type="text" id="image-search-input" placeholder="이미지 검색..." 
+          style="flex: 1; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+        <span id="image-count" style="font-size: 12px; color: #666; white-space: nowrap;">0개</span>
+      </div>
+      <div class="image-gallery-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px; max-height: calc(100vh - 200px); overflow-y: auto;"></div>
+      <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="position: relative; max-width: 90vw; max-height: 90vh;">
+          <button id="close-preview" style="position: absolute; top: -40px; right: 0; background: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">닫기</button>
+          <img id="preview-image" src="" style="max-width: 100%; max-height: 90vh; object-fit: contain;">
+          <div id="image-metadata" style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #fff; padding: 12px; font-size: 12px;"></div>
+        </div>
+      </div>
+    `;
+  }
+  
+  const imageGalleryGrid = imageGalleryArea.querySelector(".image-gallery-grid");
+  const searchInput = imageGalleryArea.querySelector("#image-search-input");
+  const imageCount = imageGalleryArea.querySelector("#image-count");
+  const previewModal = imageGalleryArea.querySelector("#image-preview-modal");
+  const previewImage = imageGalleryArea.querySelector("#preview-image");
+  const imageMetadata = imageGalleryArea.querySelector("#image-metadata");
+  const closePreview = imageGalleryArea.querySelector("#close-preview");
+  
+  imageGalleryGrid.innerHTML = "<p style='text-align:center;color:#888;padding:20px;'>이미지를 불러오는 중...</p>";
+  
+  // 이미지 데이터 수집 (URL과 메타데이터 포함)
+  const imageDataMap = new Map(); // URL을 키로, 메타데이터를 값으로
+  
+  // 스크랩에서 이미지 수집
   allScraps.forEach((scrap) => {
-    if (scrap.image) imageSet.add(scrap.image);
+    if (scrap.image) {
+      imageDataMap.set(scrap.image, {
+        url: scrap.image,
+        source: "스크랩",
+        title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
+        url_source: scrap.url || "",
+        timestamp: scrap.timestamp || Date.now()
+      });
+    }
     if (Array.isArray(scrap.allImages)) {
-      scrap.allImages.forEach((url) => imageSet.add(url));
+      scrap.allImages.forEach((url) => {
+        if (!imageDataMap.has(url)) {
+          imageDataMap.set(url, {
+            url: url,
+            source: "스크랩",
+            title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
+            url_source: scrap.url || "",
+            timestamp: scrap.timestamp || Date.now()
+          });
+        }
+      });
     }
   });
   
-  const imageUrls = Array.from(imageSet);
-  
-  if (imageUrls.length === 0) {
-    imageGalleryGrid.innerHTML =
-      "<p style='text-align:center;color:#888;padding:20px;'>이미지가 없습니다.</p>";
-    return;
-  }
-  
-  imageGalleryGrid.innerHTML = imageUrls
-    .map(
-      (url) => `
-      <div class="gallery-thumb-wrap" draggable="true" data-image-url="${url}">
-        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
-      </div>
-    `
-    )
-    .join("");
-  
-  // 클릭으로 이미지 삽입
-  imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
-    img.addEventListener("click", () => {
-      sendCommand("insert-image", { url: img.src });
-      sendCommand("focus");
+  // Firebase 캔버스 데이터에서 이미지 가져오기
+  chrome.runtime.sendMessage({ action: "get_canvas_images" }, (canvasResponse) => {
+    if (canvasResponse && canvasResponse.success && Array.isArray(canvasResponse.images)) {
+      canvasResponse.images.forEach((imageUrl) => {
+        if (imageUrl && typeof imageUrl === 'string' && !imageDataMap.has(imageUrl)) {
+          imageDataMap.set(imageUrl, {
+            url: imageUrl,
+            source: "캔버스",
+            title: "편집된 이미지",
+            url_source: "",
+            timestamp: Date.now()
+          });
+        }
+      });
+    }
+    
+    const allImages = Array.from(imageDataMap.values());
+    
+    // 이미지 렌더링 함수
+    function renderImages(images) {
+      if (images.length === 0) {
+        imageGalleryGrid.innerHTML =
+          "<p style='text-align:center;color:#888;padding:20px;'>이미지가 없습니다.</p>";
+        imageCount.textContent = "0개";
+        return;
+      }
+      
+      imageCount.textContent = `${images.length}개`;
+      
+      imageGalleryGrid.innerHTML = images
+        .map(
+          (imgData) => `
+          <div class="gallery-thumb-wrap" draggable="true" data-image-url="${imgData.url}" 
+            data-title="${(imgData.title || '').replace(/"/g, '&quot;')}" 
+            data-source="${imgData.source}" 
+            data-url-source="${imgData.url_source || ''}"
+            data-timestamp="${imgData.timestamp}"
+            style="position: relative; cursor: pointer;">
+            <img src="${imgData.url}" class="gallery-thumb" 
+              style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;box-shadow:0 1px 6px rgba(0,0,0,0.08);" 
+              alt="${imgData.title || '이미지'}"
+              loading="lazy">
+            <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); transition: background 0.2s; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <span style="opacity: 0; transition: opacity 0.2s; color: #fff; font-size: 24px;">🔍</span>
+            </div>
+          </div>
+        `
+        )
+        .join("");
+      
+      // 클릭으로 이미지 삽입
+      imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
+        img.addEventListener("click", (e) => {
+          if (e.target.closest(".gallery-thumb-overlay")) return; // 오버레이 클릭은 미리보기
+          sendCommand("insert-image", { url: img.src });
+          sendCommand("focus");
+        });
+      });
+      
+      // 드래그앤드랍으로 이미지 삽입
+      imageGalleryGrid.querySelectorAll(".gallery-thumb-wrap").forEach((wrap) => {
+        wrap.addEventListener("dragstart", (e) => {
+          e.dataTransfer.setData("text/plain", wrap.dataset.imageUrl);
+          e.dataTransfer.effectAllowed = "copy";
+        });
+        
+        // 미리보기 (더블클릭 또는 오버레이 클릭)
+        const overlay = wrap.querySelector(".gallery-thumb-overlay");
+        wrap.addEventListener("mouseenter", () => {
+          overlay.style.background = "rgba(0,0,0,0.5)";
+          overlay.querySelector("span").style.opacity = "1";
+        });
+        wrap.addEventListener("mouseleave", () => {
+          overlay.style.background = "rgba(0,0,0,0)";
+          overlay.querySelector("span").style.opacity = "0";
+        });
+        
+        wrap.addEventListener("dblclick", () => {
+          const imgData = {
+            url: wrap.dataset.imageUrl,
+            title: wrap.dataset.title,
+            source: wrap.dataset.source,
+            url_source: wrap.dataset.urlSource,
+            timestamp: wrap.dataset.timestamp
+          };
+          showImagePreview(imgData);
+        });
+        
+        overlay.addEventListener("click", () => {
+          const imgData = {
+            url: wrap.dataset.imageUrl,
+            title: wrap.dataset.title,
+            source: wrap.dataset.source,
+            url_source: wrap.dataset.urlSource,
+            timestamp: wrap.dataset.timestamp
+          };
+          showImagePreview(imgData);
+        });
+      });
+    }
+    
+    // 이미지 미리보기 함수
+    function showImagePreview(imgData) {
+      previewImage.src = imgData.url;
+      const date = new Date(parseInt(imgData.timestamp));
+      imageMetadata.innerHTML = `
+        <div><strong>${imgData.title || '이미지'}</strong></div>
+        <div style="margin-top: 4px; opacity: 0.8;">출처: ${imgData.source}${imgData.url_source ? ` | ${shortenLink(imgData.url_source, 40)}` : ''}</div>
+        <div style="margin-top: 4px; opacity: 0.8;">날짜: ${date.toLocaleDateString('ko-KR')} ${date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</div>
+      `;
+      previewModal.style.display = "flex";
+    }
+    
+    closePreview.addEventListener("click", () => {
+      previewModal.style.display = "none";
     });
-  });
-  
-  // 드래그앤드랍으로 이미지 삽입
-  imageGalleryGrid.querySelectorAll(".gallery-thumb-wrap").forEach((wrap) => {
-    wrap.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", wrap.dataset.imageUrl);
-      e.dataTransfer.effectAllowed = "copy";
+    
+    previewModal.addEventListener("click", (e) => {
+      if (e.target === previewModal) {
+        previewModal.style.display = "none";
+      }
     });
+    
+    // 검색 기능
+    searchInput.addEventListener("input", (e) => {
+      const searchTerm = e.target.value.toLowerCase().trim();
+      if (!searchTerm) {
+        renderImages(allImages);
+        return;
+      }
+      
+      const filtered = allImages.filter((img) => {
+        return (img.title && img.title.toLowerCase().includes(searchTerm)) ||
+               (img.url_source && img.url_source.toLowerCase().includes(searchTerm)) ||
+               (img.source && img.source.toLowerCase().includes(searchTerm));
+      });
+      renderImages(filtered);
+    });
+    
+    // 초기 렌더링
+    renderImages(allImages);
   });
 }
 // js/ui/workspaceMode.js (수정 완료된 최종 버전)
@@ -112,9 +271,79 @@ export function renderWorkspace(container, ideaData) {
   const needsKeywords = !ideaData.recommendedKeywords || ideaData.recommendedKeywords.length === 0;
   const needsLongTail = !ideaData.longTailKeywords || ideaData.longTailKeywords.length === 0;
   
+  // 브리핑 생성 진행률 표시 영역
+  let briefingProgressEl = null;
+  const createProgressIndicator = () => {
+    const aiBriefingArea = workspaceEl.querySelector("#ai-briefing-area");
+    if (!aiBriefingArea) return null;
+    
+    const existing = aiBriefingArea.querySelector(".briefing-progress-indicator");
+    if (existing) return existing;
+    
+    const progressEl = document.createElement("div");
+    progressEl.className = "briefing-progress-indicator";
+    progressEl.style.cssText = `
+      padding: 12px;
+      background: #f0f7ff;
+      border: 1px solid #b3d9ff;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      display: none;
+    `;
+    progressEl.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <div class="progress-spinner" style="width: 20px; height: 20px; border: 3px solid #e0e0e0; border-top-color: #4285f4; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; font-size: 13px; color: #333; margin-bottom: 4px;">브리핑 데이터 생성 중...</div>
+          <div class="progress-text" style="font-size: 12px; color: #666;">초기화 중...</div>
+        </div>
+        <div class="progress-percentage" style="font-weight: 600; font-size: 14px; color: #4285f4;">0%</div>
+      </div>
+      <div class="progress-bar-container" style="height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden;">
+        <div class="progress-bar" style="height: 100%; background: #4285f4; width: 0%; transition: width 0.3s;"></div>
+      </div>
+      <style>
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+    aiBriefingArea.insertBefore(progressEl, aiBriefingArea.firstChild);
+    return progressEl;
+  };
+  
+  // 브리핑 진행률 리스너
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === "briefing_progress" && msg.cardId === ideaData.id) {
+      if (!briefingProgressEl) {
+        briefingProgressEl = createProgressIndicator();
+      }
+      if (briefingProgressEl && msg.progress) {
+        const { completed, total, current, percentage } = msg.progress;
+        briefingProgressEl.style.display = "block";
+        briefingProgressEl.querySelector(".progress-text").textContent = `${current} (${completed}/${total})`;
+        briefingProgressEl.querySelector(".progress-percentage").textContent = `${percentage}%`;
+        briefingProgressEl.querySelector(".progress-bar").style.width = `${percentage}%`;
+        
+        if (completed >= total) {
+          setTimeout(() => {
+            if (briefingProgressEl) {
+              briefingProgressEl.style.display = "none";
+            }
+          }, 1000);
+        }
+      }
+    }
+  });
+  
   // 각 필드가 없으면 개별적으로 생성 요청
   if (ideaData.title && ideaData.description) {
     if (needsOutline || needsMainKeywords || needsKeywords || needsLongTail) {
+      briefingProgressEl = createProgressIndicator();
+      if (briefingProgressEl) {
+        briefingProgressEl.style.display = "block";
+      }
+      
       chrome.runtime.sendMessage({
         action: "generate_idea_briefing",
         data: {
@@ -133,6 +362,15 @@ export function renderWorkspace(container, ideaData) {
           console.log("브리핑 데이터 생성 요청 완료");
         } else if (response && response.error) {
           console.error("브리핑 데이터 생성 실패:", response.error);
+          if (briefingProgressEl) {
+            briefingProgressEl.querySelector(".progress-text").textContent = `오류: ${response.error}`;
+            briefingProgressEl.querySelector(".progress-text").style.color = "#ea4335";
+            setTimeout(() => {
+              if (briefingProgressEl) {
+                briefingProgressEl.style.display = "none";
+              }
+            }, 3000);
+          }
         }
       });
     }
@@ -682,38 +920,94 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
   }
 
+  // 탭 전환 애니메이션을 위한 스타일 추가
+  const tabStyle = document.createElement("style");
+  tabStyle.textContent = `
+    .resource-content-area {
+      transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+    }
+    .resource-content-area[style*="display: none"] {
+      opacity: 0;
+      transform: translateX(10px);
+    }
+    .resource-content-area[style*="display: block"] {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  `;
+  document.head.appendChild(tabStyle);
+  
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       tabBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       const tab = btn.dataset.tab;
       
-      // 모든 영역 숨기기
-      aiBriefingArea.style.display = "none";
-      outlineArea.style.display = "none";
-      recommendedKeywordsArea.style.display = "none";
-      allScrapsArea.style.display = "none";
-      imageGalleryArea.style.display = "none";
+      // 모든 영역 숨기기 (애니메이션)
+      [aiBriefingArea, outlineArea, recommendedKeywordsArea, allScrapsArea, imageGalleryArea].forEach(area => {
+        if (area) {
+          area.style.opacity = "0";
+          area.style.transform = "translateX(10px)";
+          setTimeout(() => {
+            area.style.display = "none";
+          }, 200);
+        }
+      });
       
-      // 선택된 탭에 따라 해당 영역 표시
-      if (tab === "ai-briefing") {
-        aiBriefingArea.style.display = "block";
-      } else if (tab === "outline") {
-        outlineArea.style.display = "block";
-      } else if (tab === "recommended-keywords") {
-        recommendedKeywordsArea.style.display = "block";
-      } else if (tab === "all-scraps") {
-        allScrapsArea.style.display = "block";
-      } else if (tab === "image-gallery") {
-        imageGalleryArea.style.display = "block";
-        // 파이어베이스 전체 스크랩에서 이미지 로드
-        chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
-          if (response && response.success) {
-            updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand);
-          }
-        });
-      }
+      // 선택된 탭에 따라 해당 영역 표시 (애니메이션)
+      setTimeout(() => {
+        let targetArea = null;
+        if (tab === "ai-briefing") {
+          targetArea = aiBriefingArea;
+        } else if (tab === "outline") {
+          targetArea = outlineArea;
+        } else if (tab === "recommended-keywords") {
+          targetArea = recommendedKeywordsArea;
+        } else if (tab === "all-scraps") {
+          targetArea = allScrapsArea;
+        } else if (tab === "image-gallery") {
+          targetArea = imageGalleryArea;
+          // 파이어베이스 전체 스크랩에서 이미지 로드
+          chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
+            if (response && response.success) {
+              updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand);
+            }
+          });
+        }
+        
+        if (targetArea) {
+          targetArea.style.display = "block";
+          setTimeout(() => {
+            targetArea.style.opacity = "1";
+            targetArea.style.transform = "translateX(0)";
+          }, 10);
+        }
+      }, 200);
     });
+  });
+  
+  // 키보드 단축키 지원
+  workspaceEl.addEventListener("keydown", (e) => {
+    // Ctrl/Cmd + 숫자로 탭 전환
+    if ((e.ctrlKey || e.metaKey) && e.key >= "1" && e.key <= "5") {
+      e.preventDefault();
+      const tabIndex = parseInt(e.key) - 1;
+      const tabs = ["ai-briefing", "outline", "recommended-keywords", "all-scraps", "image-gallery"];
+      if (tabs[tabIndex]) {
+        const targetBtn = Array.from(tabBtns).find(btn => btn.dataset.tab === tabs[tabIndex]);
+        if (targetBtn) targetBtn.click();
+      }
+    }
+    
+    // Ctrl/Cmd + S로 초안 저장
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      saveCurrentDraft();
+      window.parent.postMessage({
+        action: "cp_show_toast",
+        message: "💾 초안이 저장되었습니다."
+      }, "*");
+    }
   });
 
   const linkedScrapsList = workspaceEl.querySelector(".linked-scraps-list");
@@ -875,8 +1169,30 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   }
 
   generateDraftBtn.addEventListener("click", () => {
+    const originalText = generateDraftBtn.textContent;
     generateDraftBtn.textContent = "AI가 초안을 작성하는 중...";
     generateDraftBtn.disabled = true;
+    
+    // 로딩 애니메이션 추가
+    generateDraftBtn.style.position = "relative";
+    generateDraftBtn.style.overflow = "hidden";
+    const loadingOverlay = document.createElement("div");
+    loadingOverlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: shimmer 1.5s infinite;
+    `;
+    generateDraftBtn.appendChild(loadingOverlay);
+    
+    const style = document.createElement("style");
+    style.textContent = `
+      @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+      }
+    `;
+    document.head.appendChild(style);
 
     // 1. '연결된 자료' 목록에서 스크랩 텍스트를 모두 수집합니다.
     const linkedScrapsContent = Array.from(
@@ -930,11 +1246,25 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
             }
           );
         } else {
-          alert(
-            "초안 생성에 실패했습니다: " + (response.error || "알 수 없는 오류")
-          );
+          // 사용자 친화적인 에러 메시지
+          const errorMsg = response.error || "알 수 없는 오류";
+          let userFriendlyMsg = "초안 생성에 실패했습니다.";
+          
+          if (errorMsg.includes("API 키") || errorMsg.includes("API key")) {
+            userFriendlyMsg = "❌ Gemini API 키가 설정되지 않았습니다.\n\n해결 방법:\n1. 설정에서 Gemini API 키를 입력하세요.\n2. API 키가 유효한지 확인하세요.";
+          } else if (errorMsg.includes("네트워크") || errorMsg.includes("network") || errorMsg.includes("fetch")) {
+            userFriendlyMsg = "❌ 네트워크 연결 오류가 발생했습니다.\n\n해결 방법:\n1. 인터넷 연결을 확인하세요.\n2. 잠시 후 다시 시도하세요.";
+          } else if (errorMsg.includes("할당량") || errorMsg.includes("quota") || errorMsg.includes("rate limit")) {
+            userFriendlyMsg = "❌ API 사용 한도를 초과했습니다.\n\n해결 방법:\n1. 잠시 후 다시 시도하세요.\n2. API 할당량을 확인하세요.";
+          } else {
+            userFriendlyMsg = `❌ 초안 생성 실패\n\n오류: ${errorMsg}\n\n해결 방법:\n1. 잠시 후 다시 시도하세요.\n2. 문제가 계속되면 관리자에게 문의하세요.`;
+          }
+          
+          alert(userFriendlyMsg);
         }
-        generateDraftBtn.textContent = "📄 AI로 초안 생성하기";
+        loadingOverlay.remove();
+        style.remove();
+        generateDraftBtn.textContent = originalText;
         generateDraftBtn.disabled = false;
       }
     );
@@ -951,22 +1281,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
   }
 
-  // 주요 키워드 클릭 시 에디터에 삽입
+  // 주요 키워드 클릭 시 에디터에 삽입 (커서 위치에 삽입)
   if (mainKeywordList) {
     mainKeywordList.addEventListener("click", (e) => {
       if (e.target.classList.contains("interactive-tag")) {
-        const keyword = e.target.textContent;
+        const keyword = e.target.textContent.trim();
+        // 현재 커서 위치에 제목 형식으로 삽입
         sendCommand("insert-text", { text: `\n\n## ${keyword}\n\n` });
         sendCommand("focus");
       }
     });
   }
 
-  // 롱테일 키워드 클릭 시 에디터에 삽입
+  // 롱테일 키워드 클릭 시 에디터에 삽입 (커서 위치에 문맥에 맞게 삽입)
   if (longTailKeywordList) {
     longTailKeywordList.addEventListener("click", (e) => {
       if (e.target.classList.contains("interactive-tag")) {
-        const keyword = e.target.textContent;
+        const keyword = e.target.textContent.trim();
+        // 롱테일 키워드는 문맥에 맞게 삽입 (앞뒤 공백 포함)
         sendCommand("insert-text", { text: ` ${keyword} ` });
         sendCommand("focus");
       }

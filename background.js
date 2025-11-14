@@ -567,11 +567,27 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
     generateOutline = true,
     generateKeywords = true,
     generateLongTail = true,
-    generateMainKeywords = true
+    generateMainKeywords = true,
+    onProgress = null // 진행률 콜백 추가
   } = options;
   
   try {
     const promises = [];
+    const totalTasks = [generateOutline, generateMainKeywords, generateKeywords, generateLongTail].filter(Boolean).length;
+    let completedTasks = 0;
+    
+    // 진행률 업데이트 함수
+    const updateProgress = (taskName) => {
+      completedTasks++;
+      if (onProgress) {
+        onProgress({
+          completed: completedTasks,
+          total: totalTasks,
+          current: taskName,
+          percentage: Math.round((completedTasks / totalTasks) * 100)
+        });
+      }
+    };
     
     // 1. 목차(outline) 생성
     if (generateOutline) {
@@ -589,7 +605,14 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
       반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
       ["목차 1", "목차 2", "목차 3"]
     `;
-      promises.push(callGeminiAPI(outlinePrompt).catch(() => null).then(result => ({ type: 'outline', result })));
+      promises.push(
+        callGeminiAPI(outlinePrompt)
+          .catch(() => null)
+          .then(result => {
+            updateProgress('목차 생성');
+            return { type: 'outline', result };
+          })
+      );
     }
     
     // 2. 주요 키워드(mainKeywords/tags) 생성
@@ -608,7 +631,14 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
       반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
       ["키워드 1", "키워드 2", "키워드 3"]
     `;
-      promises.push(callGeminiAPI(mainKeywordsPrompt).catch(() => null).then(result => ({ type: 'mainKeywords', result })));
+      promises.push(
+        callGeminiAPI(mainKeywordsPrompt)
+          .catch(() => null)
+          .then(result => {
+            updateProgress('주요 키워드 생성');
+            return { type: 'mainKeywords', result };
+          })
+      );
     }
     
     // 3. 추천 검색어(recommendedKeywords) 생성
@@ -625,7 +655,14 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
       반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
       ["검색어 1", "검색어 2", "검색어 3"]
     `;
-      promises.push(callGeminiAPI(keywordsPrompt).catch(() => null).then(result => ({ type: 'keywords', result })));
+      promises.push(
+        callGeminiAPI(keywordsPrompt)
+          .catch(() => null)
+          .then(result => {
+            updateProgress('추천 검색어 생성');
+            return { type: 'keywords', result };
+          })
+      );
     }
     
     // 4. 롱테일 키워드(longTailKeywords) 생성
@@ -644,7 +681,14 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
       반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
       ["롱테일 키워드 1", "롱테일 키워드 2", "롱테일 키워드 3"]
     `;
-      promises.push(callGeminiAPI(longTailPrompt).catch(() => null).then(result => ({ type: 'longTail', result })));
+      promises.push(
+        callGeminiAPI(longTailPrompt)
+          .catch(() => null)
+          .then(result => {
+            updateProgress('롱테일 키워드 생성');
+            return { type: 'longTail', result };
+          })
+      );
     }
     
     // 병렬로 필요한 데이터만 생성
@@ -925,6 +969,65 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
     return true;
     // (이전 placeholder/canvas 기반 핸들러 완전 제거, Gemini API만 사용)
+  } else if (msg.action === "get_canvas_images") {
+    // Firebase 캔버스 데이터에서 이미지 URL 추출
+    const imageUrls = new Set();
+    
+    // 여러 가능한 경로에서 캔버스 데이터 확인
+    const canvasPaths = ["canvas", "canvases", "canvas_data", "edited_images", "images"];
+    const promises = canvasPaths.map((path) => {
+      return firebase
+        .database()
+        .ref(path)
+        .once("value")
+        .then((snapshot) => {
+          const data = snapshot.val();
+          if (!data) return;
+          
+          // 객체인 경우 모든 값 순회
+          if (typeof data === 'object' && !Array.isArray(data)) {
+            Object.values(data).forEach((item) => {
+              if (typeof item === 'object' && item !== null) {
+                // imageUrl, url, dataUrl, image 등의 필드 확인
+                if (item.imageUrl) imageUrls.add(item.imageUrl);
+                if (item.url && item.url.startsWith('data:image')) imageUrls.add(item.url);
+                if (item.url && (item.url.startsWith('http') || item.url.startsWith('https'))) imageUrls.add(item.url);
+                if (item.dataUrl && item.dataUrl.startsWith('data:image')) imageUrls.add(item.dataUrl);
+                if (item.image && typeof item.image === 'string') imageUrls.add(item.image);
+                // base64 이미지 데이터도 확인
+                if (item.base64 && item.base64.startsWith('data:image')) imageUrls.add(item.base64);
+              } else if (typeof item === 'string' && (item.startsWith('data:image') || item.startsWith('http'))) {
+                imageUrls.add(item);
+              }
+            });
+          } else if (Array.isArray(data)) {
+            data.forEach((item) => {
+              if (typeof item === 'object' && item !== null) {
+                if (item.imageUrl) imageUrls.add(item.imageUrl);
+                if (item.url && item.url.startsWith('data:image')) imageUrls.add(item.url);
+                if (item.url && (item.url.startsWith('http') || item.url.startsWith('https'))) imageUrls.add(item.url);
+                if (item.dataUrl && item.dataUrl.startsWith('data:image')) imageUrls.add(item.dataUrl);
+                if (item.image && typeof item.image === 'string') imageUrls.add(item.image);
+                if (item.base64 && item.base64.startsWith('data:image')) imageUrls.add(item.base64);
+              } else if (typeof item === 'string' && (item.startsWith('data:image') || item.startsWith('http'))) {
+                imageUrls.add(item);
+              }
+            });
+          }
+        })
+        .catch(() => {
+          // 경로가 없으면 무시
+        });
+    });
+    
+    Promise.all(promises).then(() => {
+      sendResponse({
+        success: true,
+        images: Array.from(imageUrls),
+      });
+    });
+    
+    return true;
   } else if (msg.action === "scrap_entire_analysis") {
     const analysisContent = msg.data;
     if (!analysisContent) {
@@ -2375,12 +2478,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
 
+    // 진행률 업데이트를 위한 메시지 전송 함수
+    const sendProgress = (progress) => {
+      if (sender.tab?.id) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "briefing_progress",
+          cardId: cardId,
+          progress: progress
+        }).catch(() => {}); // 오류 무시
+      }
+    };
+
     // 비동기로 브리핑 데이터 생성 (옵션에 따라 필요한 것만 생성)
     generateIdeaBriefing(cardId, title, description || "", {
       generateOutline: generateOutline !== false, // 기본값 true
       generateMainKeywords: generateMainKeywords !== false,
       generateKeywords: generateKeywords !== false,
-      generateLongTail: generateLongTail !== false
+      generateLongTail: generateLongTail !== false,
+      onProgress: sendProgress // 진행률 콜백 전달
     })
       .then(() => {
         sendResponse({ success: true });
@@ -2468,7 +2583,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .map((scrap, index) => `[참고 자료 ${index + 1}]\n${scrap.text}\n`)
         .join("\n");
 
-      // 3. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
+      // 3. 추천 검색어와 롱테일 키워드 수집
+      const recommendedSearches = ideaData.recommendedSearches || [];
+      const longTailKeywords = ideaData.longTailKeywords || [];
+      const tags = (ideaData.tags || []).filter((t) => t !== "#AI-추천");
+      
+      // 4. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
       const prompt = `
             당신은 특정 주제에 대한 전문 작가입니다. 아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
@@ -2482,18 +2602,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ${ideaData.currentDraft || "(비어 있음)"}
 
             ### 4. 글의 구조 (이 목차를 반드시 따라주세요)
-            ${(ideaData.outline || []).join("\n")}
+            ${(ideaData.outline || []).length > 0 
+              ? ideaData.outline.map((item, idx) => `${idx + 1}. ${item}`).join("\n")
+              : "목차가 제공되지 않았습니다. 논리적이고 체계적인 구조로 작성해주세요."}
 
-            ### 5. 반드시 포함할 키워드 (중복 제거된 최종 목록)
-            - ${keywordsText}
+            ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
+            ${tags.length > 0 ? tags.map(t => `- ${t.replace(/^#/, "")}`).join("\n") : "없음"}
 
-            ### 6. 핵심 참고 자료 (이 내용들을 근거로 본문을 작성해주세요)
+            ### 6. 롱테일 키워드 (SEO 최적화를 위해 본문에 자연스럽게 통합해주세요)
+            ${longTailKeywords.length > 0 
+              ? longTailKeywords.map(k => `- ${k}`).join("\n")
+              : "없음"}
+            
+            ### 7. 추천 검색어 (독자들이 검색할 수 있는 키워드, 본문에 자연스럽게 활용해주세요)
+            ${recommendedSearches.length > 0 
+              ? recommendedSearches.map((s, idx) => `${idx + 1}. ${s}`).join("\n")
+              : "없음"}
+
+            ### 8. 핵심 참고 자료 (이 내용들을 근거로 본문을 작성해주세요)
             ${linkedScrapsText || "참고 자료 없음"}
 
             [작성 규칙]
             1. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
-            2. '글의 최종 목표 구조'를 반드시 지켜주세요.
-            3. '핵심 참고 자료'의 내용을 단순 요약하지 말고, 자연스럽게 인용하거나 재해석하여 본문을 풍부하게 만들어주세요.
+            2. '글의 구조'를 반드시 따라주세요. 각 섹션을 명확하게 구분하고, 제목과 본문을 체계적으로 작성해주세요.
+            3. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
+            4. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
+            5. '핵심 참고 자료'의 내용을 단순 요약하지 말고, 자연스럽게 인용하거나 재해석하여 본문을 풍부하게 만들어주세요.
+            6. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요.
         `;
       // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
       const draft = await callGeminiAPI(prompt);
