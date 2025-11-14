@@ -1899,8 +1899,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
       .join("\n");
 
-    const blogIdeasPrompt = `
-            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+    // 성과 데이터 수집 및 분석
+    (async () => {
+      const performanceAnalysis = await analyzePerformanceData();
+      const userFeedback = await getUserFeedbackPatterns();
+      
+      const blogIdeasPrompt = `
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
 
             [정보 1: 내 채널의 핵심 성공 요인]
             ${myAnalysisSummary}
@@ -1911,8 +1916,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             [정보 3: 경쟁 채널의 인기 게시물 목록]
             ${competitorDataSummary}
 
+            ${performanceAnalysis ? `
+            [정보 4: 과거 발행 콘텐츠 성과 분석]
+            ${performanceAnalysis}
+            
+            이 성과 데이터를 바탕으로, 수익성이 높고 트래픽을 많이 유입시킨 콘텐츠의 패턴을 학습하여 유사한 성공을 재현할 수 있는 아이디어를 우선적으로 제안해주세요.
+            ` : ''}
+
+            ${userFeedback ? `
+            [정보 5: 사용자 선호도 패턴]
+            ${userFeedback}
+            
+            사용자가 선호하는 아이디어 유형과 주제를 고려하여 제안해주세요.
+            ` : ''}
+
             [요청]
-            나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            나의 핵심 성공 요인(정보 1)과 ${performanceAnalysis ? '과거 성과 데이터(정보 4)' : ''}${userFeedback ? ', 사용자 선호도(정보 5)' : ''}를 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            ${performanceAnalysis ? '특히 수익성과 트래픽 유입이 높은 콘텐츠 패턴을 참고하여 제안해주세요.' : ''}
 
             [출력 형식]
             반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
@@ -1928,7 +1948,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ]
         `;
 
-    (async () => {
       const ideasResult = await callGeminiAPI(blogIdeasPrompt);
       sendResponse({ success: true, ideas: ideasResult });
     })();
@@ -3146,6 +3165,201 @@ async function callGeminiAPI(prompt) {
     return responseData.candidates[0].content.parts[0].text;
   } catch (error) {
     return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
+  }
+}
+
+// ▼▼▼ [추가] AI 재학습 및 진화를 위한 함수들 ▼▼▼
+
+/**
+ * 성과 데이터를 분석하여 AI 프롬프트에 포함할 패턴을 추출합니다.
+ * @returns {Promise<string|null>} 성과 분석 텍스트 또는 null
+ */
+async function analyzePerformanceData() {
+  try {
+    const kanbanRef = firebase.database().ref("kanban");
+    const snapshot = await kanbanRef.once("value");
+    const allCards = snapshot.val() || {};
+    
+    const performanceData = [];
+    for (const status in allCards) {
+      for (const cardId in allCards[status]) {
+        const card = allCards[status][cardId];
+        if (card.performance && !card.performance.error && card.publishedUrl) {
+          performanceData.push({
+            title: card.title || "제목 없음",
+            earnings: card.performance.estimatedEarnings || 0,
+            pageviews: card.performance.pageviews || 0,
+            sessions: card.performance.sessions || 0,
+            avgDuration: card.performance.avgSessionDuration || 0,
+            ctr: card.performance.ctr || 0,
+            bounceRate: card.performance.bounceRate || 0,
+            tags: card.tags || [],
+            createdAt: card.createdAt || 0,
+          });
+        }
+      }
+    }
+    
+    if (performanceData.length === 0) {
+      return null;
+    }
+    
+    // 성과 데이터 정렬 (수익 기준)
+    const sortedByEarnings = [...performanceData].sort((a, b) => b.earnings - a.earnings);
+    const sortedByPageviews = [...performanceData].sort((a, b) => b.pageviews - a.pageviews);
+    
+    // 상위 5개 성공 콘텐츠
+    const top5ByEarnings = sortedByEarnings.slice(0, 5);
+    const top5ByPageviews = sortedByPageviews.slice(0, 5);
+    
+    // 평균 성과 계산
+    const avgEarnings = performanceData.reduce((sum, item) => sum + item.earnings, 0) / performanceData.length;
+    const avgPageviews = performanceData.reduce((sum, item) => sum + item.pageviews, 0) / performanceData.length;
+    const avgDuration = performanceData.reduce((sum, item) => sum + item.avgDuration, 0) / performanceData.length;
+    
+    // 성공 패턴 분석
+    const topTags = {};
+    top5ByEarnings.forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          topTags[tag] = (topTags[tag] || 0) + 1;
+        });
+      }
+    });
+    
+    const topTagsList = Object.entries(topTags)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tag, count]) => tag)
+      .join(", ");
+    
+    return `
+과거 발행 콘텐츠 성과 분석 (총 ${performanceData.length}개 콘텐츠):
+
+[평균 성과]
+- 평균 수익: $${avgEarnings.toFixed(2)}
+- 평균 페이지뷰: ${Math.round(avgPageviews).toLocaleString()}회
+- 평균 체류 시간: ${Math.round(avgDuration)}초
+
+[최고 성과 콘텐츠 - 수익 기준 상위 5개]
+${top5ByEarnings.map((item, idx) => 
+  `${idx + 1}. "${item.title}" - 수익: $${item.earnings.toFixed(2)}, 페이지뷰: ${item.pageviews.toLocaleString()}, 체류시간: ${Math.round(item.avgDuration)}초`
+).join("\n")}
+
+[최고 성과 콘텐츠 - 페이지뷰 기준 상위 5개]
+${top5ByPageviews.map((item, idx) => 
+  `${idx + 1}. "${item.title}" - 페이지뷰: ${item.pageviews.toLocaleString()}, 수익: $${item.earnings.toFixed(2)}, 체류시간: ${Math.round(item.avgDuration)}초`
+).join("\n")}
+
+[성공 패턴]
+- 고수익 콘텐츠의 주요 태그: ${topTagsList || "없음"}
+- 평균 대비 우수한 성과를 보인 콘텐츠들은 주로 위의 태그와 주제를 다루고 있습니다.
+`;
+  } catch (error) {
+    console.error("[성과 데이터 분석 실패]", error);
+    return null;
+  }
+}
+
+/**
+ * 사용자 피드백 패턴을 분석합니다 (아이디어 채택/무시 행동 추적).
+ * @returns {Promise<string|null>} 사용자 선호도 패턴 텍스트 또는 null
+ */
+async function getUserFeedbackPatterns() {
+  try {
+    const kanbanRef = firebase.database().ref("kanban");
+    const snapshot = await kanbanRef.once("value");
+    const allCards = snapshot.val() || {};
+    
+    const adoptedIdeas = []; // 채택된 아이디어 (워크스페이스로 이동하거나 초안 작성됨)
+    const ignoredIdeas = []; // 무시된 아이디어 (아이디어 상태로 오래 남아있음)
+    
+    for (const status in allCards) {
+      for (const cardId in allCards[status]) {
+        const card = allCards[status][cardId];
+        const isAiIdea = card.tags && Array.isArray(card.tags) && card.tags.includes("#AI-추천");
+        
+        if (!isAiIdea) continue;
+        
+        const createdAt = card.createdAt || 0;
+        const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+        
+        if (status === "ideas" && daysSinceCreation > 7 && !card.draftContent) {
+          // 7일 이상 아이디어 상태로 남아있고 초안이 없으면 무시된 것으로 간주
+          ignoredIdeas.push({
+            title: card.title || "제목 없음",
+            tags: card.tags || [],
+            daysSinceCreation: Math.round(daysSinceCreation),
+          });
+        } else if ((status === "in-progress" || status === "done") || card.draftContent) {
+          // 워크스페이스로 이동했거나 초안이 있으면 채택된 것으로 간주
+          adoptedIdeas.push({
+            title: card.title || "제목 없음",
+            tags: card.tags || [],
+            status: status,
+          });
+        }
+      }
+    }
+    
+    if (adoptedIdeas.length === 0 && ignoredIdeas.length === 0) {
+      return null;
+    }
+    
+    // 채택된 아이디어의 태그 분석
+    const adoptedTags = {};
+    adoptedIdeas.forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          if (tag !== "#AI-추천") {
+            adoptedTags[tag] = (adoptedTags[tag] || 0) + 1;
+          }
+        });
+      }
+    });
+    
+    // 무시된 아이디어의 태그 분석
+    const ignoredTags = {};
+    ignoredIdeas.forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          if (tag !== "#AI-추천") {
+            ignoredTags[tag] = (ignoredTags[tag] || 0) + 1;
+          }
+        });
+      }
+    });
+    
+    const preferredTags = Object.entries(adoptedTags)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tag, count]) => `${tag} (${count}회 채택)`)
+      .join(", ");
+    
+    const avoidedTags = Object.entries(ignoredTags)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([tag, count]) => `${tag} (${count}회 무시)`)
+      .join(", ");
+    
+    return `
+사용자 피드백 패턴 분석:
+
+[채택된 AI 아이디어] (${adoptedIdeas.length}개)
+- 사용자가 실제로 작업을 시작하거나 완료한 AI 추천 아이디어입니다.
+- 선호하는 태그/주제: ${preferredTags || "없음"}
+
+[무시된 AI 아이디어] (${ignoredIdeas.length}개)
+- 7일 이상 아이디어 상태로 남아있어 사용자가 관심을 보이지 않은 아이디어입니다.
+- 회피하는 태그/주제: ${avoidedTags || "없음"}
+
+[권장 사항]
+- 선호하는 태그와 주제를 중심으로 아이디어를 제안해주세요.
+- 회피하는 태그와 주제는 피하거나, 더 매력적인 각도로 재구성하여 제안해주세요.
+`;
+  } catch (error) {
+    console.error("[사용자 피드백 패턴 분석 실패]", error);
+    return null;
   }
 }
 

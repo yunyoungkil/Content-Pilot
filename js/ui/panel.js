@@ -5,7 +5,8 @@ import { renderPanelHeader } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
 import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js"; 
-import { renderWorkspace } from "./workspaceMode.js"; 
+import { renderWorkspace } from "./workspaceMode.js";
+import { renderPerformanceDashboard } from "./performanceDashboardMode.js"; 
 
 
 export function isPanelVisible() {
@@ -186,6 +187,8 @@ function addEventListenersToPanel(shadowRoot) {
             } else if (activeKey === 'kanban') {
                 renderKanban(mainArea);
                 addKanbanEventListeners(mainArea); 
+            } else if (activeKey === 'performance') {
+                renderPerformanceDashboard(mainArea);
             } else if (activeKey === 'channel') {
                 renderChannelMode(mainArea);
             } else {

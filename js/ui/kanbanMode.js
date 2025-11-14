@@ -617,6 +617,11 @@ function showPerformanceDetailModal(container, cardId, cardData) {
   // 유입 경로 데이터 준비
   const topSources = performance.topSources || [];
 
+  // 초기 최대값 (현재 성과 데이터 기준)
+  let maxEarnings = performance.estimatedEarnings || 1;
+  let maxPageviews = performance.pageviews || 1;
+  let maxDuration = performance.avgSessionDuration || 1;
+
   modalWrap.innerHTML = `
     <div class="cp-modal-backdrop"></div>
     <div class="cp-performance-detail-modal">
@@ -685,6 +690,36 @@ function showPerformanceDetailModal(container, cardId, cardData) {
             </div>
           ` : ''}
 
+          <div class="perf-chart-section">
+            <h4>주요 성과 지표 비교</h4>
+            <div class="metrics-comparison-chart" id="metrics-comparison-chart">
+              <div class="comparison-item">
+                <div class="comparison-label">수익</div>
+                <div class="comparison-bar-wrapper">
+                  <div class="comparison-bar earnings-comparison" style="width: ${Math.min((performance.estimatedEarnings || 0) / Math.max(maxEarnings || 1, 1) * 100, 100)}%">
+                    <span class="comparison-value">$${(performance.estimatedEarnings || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="comparison-item">
+                <div class="comparison-label">페이지뷰</div>
+                <div class="comparison-bar-wrapper">
+                  <div class="comparison-bar pageviews-comparison" style="width: ${Math.min((performance.pageviews || 0) / Math.max(maxPageviews || 1, 1) * 100, 100)}%">
+                    <span class="comparison-value">${(performance.pageviews || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="comparison-item">
+                <div class="comparison-label">체류 시간</div>
+                <div class="comparison-bar-wrapper">
+                  <div class="comparison-bar duration-comparison" style="width: ${Math.min((performance.avgSessionDuration || 0) / Math.max(maxDuration || 1, 1) * 100, 100)}%">
+                    <span class="comparison-value">${Math.round(performance.avgSessionDuration || 0)}초</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           ${topSources.length > 0 ? `
             <div class="perf-traffic-section">
               <h4>주요 유입 경로</h4>
@@ -718,6 +753,36 @@ function showPerformanceDetailModal(container, cardId, cardData) {
 
   container.appendChild(modalWrap);
 
+  // 전체 데이터에서 최대값 계산 (비교 차트용)
+  const firebase = window.firebase;
+  if (firebase) {
+    const kanbanRef = firebase.database().ref("kanban");
+    kanbanRef.once("value", (snapshot) => {
+      const allCards = snapshot.val() || {};
+      let allEarnings = [performance.estimatedEarnings || 0];
+      let allPageviews = [performance.pageviews || 0];
+      let allDurations = [performance.avgSessionDuration || 0];
+
+      for (const status in allCards) {
+        for (const cardId in allCards[status]) {
+          const card = allCards[status][cardId];
+          if (card.performance && !card.performance.error) {
+            allEarnings.push(card.performance.estimatedEarnings || 0);
+            allPageviews.push(card.performance.pageviews || 0);
+            allDurations.push(card.performance.avgSessionDuration || 0);
+          }
+        }
+      }
+
+      const maxEarnings = Math.max(...allEarnings, 1);
+      const maxPageviews = Math.max(...allPageviews, 1);
+      const maxDuration = Math.max(...allDurations, 1);
+
+      // 차트 업데이트
+      updateComparisonChart(modalWrap, performance, maxEarnings, maxPageviews, maxDuration);
+    });
+  }
+
   const closeBtn = modalWrap.querySelector(".cp-modal-close");
   const cancelBtn = modalWrap.querySelector("#close-detail-btn");
   const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
@@ -738,4 +803,30 @@ function showPerformanceDetailModal(container, cardId, cardData) {
     }
   };
   document.addEventListener("keydown", handleKeydown);
+}
+
+/**
+ * 비교 차트 업데이트 함수
+ */
+function updateComparisonChart(modalWrap, performance, maxEarnings, maxPageviews, maxDuration) {
+  const chartContainer = modalWrap.querySelector("#metrics-comparison-chart");
+  if (!chartContainer) return;
+
+  const earningsWidth = Math.min((performance.estimatedEarnings || 0) / Math.max(maxEarnings, 1) * 100, 100);
+  const pageviewsWidth = Math.min((performance.pageviews || 0) / Math.max(maxPageviews, 1) * 100, 100);
+  const durationWidth = Math.min((performance.avgSessionDuration || 0) / Math.max(maxDuration, 1) * 100, 100);
+
+  const earningsBar = chartContainer.querySelector(".earnings-comparison");
+  const pageviewsBar = chartContainer.querySelector(".pageviews-comparison");
+  const durationBar = chartContainer.querySelector(".duration-comparison");
+
+  if (earningsBar) {
+    earningsBar.style.width = `${earningsWidth}%`;
+  }
+  if (pageviewsBar) {
+    pageviewsBar.style.width = `${pageviewsWidth}%`;
+  }
+  if (durationBar) {
+    durationBar.style.width = `${durationWidth}%`;
+  }
 }

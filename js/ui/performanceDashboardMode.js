@@ -111,6 +111,13 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   const totalEarnings = sortedData.reduce((sum, item) => sum + (item.performance.estimatedEarnings || 0), 0);
   const totalPageviews = sortedData.reduce((sum, item) => sum + (item.performance.pageviews || 0), 0);
   const totalSessions = sortedData.reduce((sum, item) => sum + (item.performance.sessions || 0), 0);
+  const avgEarnings = sortedData.length > 0 ? totalEarnings / sortedData.length : 0;
+  const avgPageviews = sortedData.length > 0 ? totalPageviews / sortedData.length : 0;
+
+  // 상위 5개 콘텐츠 추출 (차트용)
+  const top5ForChart = sortedData.slice(0, 5);
+  const maxEarnings = Math.max(...sortedData.map(item => item.performance.estimatedEarnings || 0), 1);
+  const maxPageviews = Math.max(...sortedData.map(item => item.performance.pageviews || 0), 1);
 
   contentEl.innerHTML = `
     <div class="perf-stats-summary">
@@ -131,6 +138,50 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
         <div class="stat-value">${sortedData.length}개</div>
       </div>
     </div>
+    ${sortedData.length > 0 ? `
+      <div class="perf-charts-section">
+        <div class="perf-chart-container">
+          <h3 class="perf-chart-title">💰 상위 5개 콘텐츠 수익 비교</h3>
+          <div class="perf-bar-chart earnings-chart">
+            ${top5ForChart.map((item, idx) => {
+              const earnings = item.performance.estimatedEarnings || 0;
+              const percentage = maxEarnings > 0 ? (earnings / maxEarnings) * 100 : 0;
+              const shortTitle = item.title.length > 20 ? item.title.substring(0, 20) + '...' : item.title;
+              return `
+                <div class="chart-bar-item">
+                  <div class="chart-bar-label">${shortTitle}</div>
+                  <div class="chart-bar-wrapper">
+                    <div class="chart-bar earnings-bar" style="width: ${percentage}%">
+                      <span class="chart-bar-value">$${earnings.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        <div class="perf-chart-container">
+          <h3 class="perf-chart-title">👁️ 상위 5개 콘텐츠 페이지뷰 비교</h3>
+          <div class="perf-bar-chart pageviews-chart">
+            ${top5ForChart.map((item, idx) => {
+              const pageviews = item.performance.pageviews || 0;
+              const percentage = maxPageviews > 0 ? (pageviews / maxPageviews) * 100 : 0;
+              const shortTitle = item.title.length > 20 ? item.title.substring(0, 20) + '...' : item.title;
+              return `
+                <div class="chart-bar-item">
+                  <div class="chart-bar-label">${shortTitle}</div>
+                  <div class="chart-bar-wrapper">
+                    <div class="chart-bar pageviews-bar" style="width: ${percentage}%">
+                      <span class="chart-bar-value">${pageviews.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    ` : ''}
     <div class="perf-list-container">
       ${sortedData.map((item, index) => createPerformanceCard(item, index)).join("")}
     </div>
