@@ -163,11 +163,14 @@
 }
 .resource-content-area {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   display: none;
+  flex-direction: column;
 }
 .resource-content-area[style*="display: block"] {
-  display: block;
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden;
 }
 .image-gallery-grid {
   display: grid;

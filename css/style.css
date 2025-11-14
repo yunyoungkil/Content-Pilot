@@ -224,6 +224,7 @@
   align-items: flex-start;
   justify-content: flex-start;
   padding: 0 32px 32px 32px; /* 패딩으로 여백 확보 */
+  flex-wrap: wrap; /* 작은 화면에서 줄바꿈 */
 }
 .scrapbook-detail-empty {
   color: #b0b0b0;
@@ -235,12 +236,24 @@
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08);
   padding: 28px 28px 22px 28px;
-  min-width: 320px;
+  min-width: 300px;
   max-width: 420px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+  width: 100%;
+}
+.scrapbook-detail-images-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08);
+  padding: 20px;
+  min-width: 300px;
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .scrapbook-detail-img {
   width: 100%;
@@ -249,6 +262,17 @@
   object-fit: cover;
   background: #eee;
   margin-bottom: 8px;
+}
+.scrapbook-detail-images-grid {
+  width: 100%;
+}
+.scrapbook-detail-image-item {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.scrapbook-detail-image-item:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 .scrapbook-detail-title {
   font-size: 22px;

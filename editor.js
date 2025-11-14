@@ -382,6 +382,27 @@ function initializeEditor() {
         if (data.url) {
           quillEditor.insertEmbed(imageRange.index, "image", data.url);
           quillEditor.setSelection(imageRange.index + 1);
+          
+          // 삽입된 이미지에 referrerpolicy 설정 (네이버 블로그 이미지 403 에러 방지)
+          setTimeout(() => {
+            try {
+              const insertedImg = quillEditor.root.querySelector(`img[src="${data.url}"]`);
+              if (insertedImg) {
+                insertedImg.setAttribute("referrerpolicy", "no-referrer");
+                insertedImg.setAttribute("crossorigin", "anonymous");
+                // 네이버 블로그 이미지의 경우 원본 URL로 변경 시도
+                if (data.url.includes("postfiles.pstatic.net")) {
+                  // type=w966 같은 파라미터 제거하여 원본 URL 시도
+                  const originalUrl = data.url.split("?")[0];
+                  if (originalUrl !== data.url) {
+                    insertedImg.src = originalUrl;
+                  }
+                }
+              }
+            } catch (e) {
+              console.log("이미지 속성 설정 실패:", e);
+            }
+          }, 100);
         }
         break;
       case "focus":
@@ -445,6 +466,7 @@ function initializeEditor() {
         window.parent.postMessage(
           {
             action: "content-response",
+            requestId: data.requestId || null,
             data: {
               content: quillEditor.getContents(),
               html: quillEditor.root.innerHTML,

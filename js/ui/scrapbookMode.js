@@ -183,15 +183,263 @@ function renderDetailView(scrapId, container) {
     const detailText = formatDetailText(scrap.text);
     const detailTitle = (scrap.text || '제목 없음').replace(/\s+/g, ' ').trim().substring(0, 50);
 
+    // 이미지 수집 (image, allImages, images 모두 확인 - 하위 호환성)
+    // 유효한 이미지 URL만 필터링 및 정규화
+    const normalizeImageUrl = (url, baseUrl) => {
+      if (!url || typeof url !== 'string') return null;
+      const trimmed = url.trim();
+      if (trimmed.length === 0) return null;
+      
+      // 이미 절대 경로인 경우
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/')) {
+        return trimmed;
+      }
+      
+      // 상대 경로인 경우 절대 경로로 변환
+      if (trimmed.startsWith('//')) {
+        return 'https:' + trimmed;
+      }
+      
+      if (trimmed.startsWith('/')) {
+        // baseUrl에서 origin 추출
+        try {
+          const base = new URL(baseUrl || scrap.url || window.location.href);
+          return base.origin + trimmed;
+        } catch (e) {
+          return null;
+        }
+      }
+      
+      // 상대 경로 (./ 또는 ../ 없이 시작)
+      if (!trimmed.startsWith('http') && baseUrl) {
+        try {
+          return new URL(trimmed, baseUrl).href;
+        } catch (e) {
+          return null;
+        }
+      }
+      
+      return null;
+    };
 
+    const isValidImageUrl = (url) => {
+      if (!url || typeof url !== 'string') return false;
+      const trimmed = url.trim();
+      return trimmed.length > 0 && (
+        trimmed.startsWith('http://') || 
+        trimmed.startsWith('https://') || 
+        trimmed.startsWith('data:image/')
+      );
+    };
+
+    const allImageUrls = [];
+    const baseUrl = scrap.url || window.location.href;
+    
+    if (scrap.image) {
+      const normalized = normalizeImageUrl(scrap.image, baseUrl);
+      if (normalized && isValidImageUrl(normalized)) {
+        allImageUrls.push(normalized);
+      }
+    }
+    
+    if (Array.isArray(scrap.allImages)) {
+      scrap.allImages.forEach(url => {
+        const normalized = normalizeImageUrl(url, baseUrl);
+        if (normalized && isValidImageUrl(normalized) && !allImageUrls.includes(normalized)) {
+          allImageUrls.push(normalized);
+        }
+      });
+    }
+    
+    // 하위 호환성: images 배열도 확인 (구버전 데이터)
+    if (Array.isArray(scrap.images)) {
+      scrap.images.forEach(url => {
+        const normalized = normalizeImageUrl(url, baseUrl);
+        if (normalized && isValidImageUrl(normalized) && !allImageUrls.includes(normalized)) {
+          allImageUrls.push(normalized);
+        }
+      });
+    }
+
+    // 이미지 HTML 생성 (별도 카드로)
+    // 이미지 URL 정규화 및 에스케이프
+    const escapeHtml = (str) => {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    };
+
+    const imagesHtml = allImageUrls.length > 0 
+      ? `<div class="scrapbook-detail-images-grid" style="width: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; max-height: calc(100vh - 200px); overflow-y: auto;">
+          ${allImageUrls.map((imgUrl, idx) => {
+            const escapedUrl = escapeHtml(imgUrl);
+            return `
+            <div class="scrapbook-detail-image-item" style="position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; background: #f5f5f5;">
+              <img class="scrapbook-detail-img-item" 
+                src="${escapedUrl}" 
+                style="width: 100%; height: 100%; object-fit: cover; display: block; opacity: 1;" 
+                alt="스크랩 이미지 ${idx + 1}" 
+                loading="lazy"
+                decoding="async">
+              <div class="image-error" style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; color: #999; font-size: 11px; text-align: center; padding: 4px; position: absolute; inset: 0; background: #f5f5f5; z-index: 1;">로드 실패</div>
+              <button class="scrapbook-image-delete-btn" data-scrap-id="${scrap.id}" data-image-url="${escapedUrl}" 
+                style="position: absolute; top: 4px; right: 4px; background: rgba(234,67,53,0.9); color: #fff; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; z-index: 10; opacity: 0; transition: opacity 0.2s;"
+                title="이미지 삭제">
+                ×
+              </button>
+            </div>
+          `;
+          }).join('')}
+        </div>`
+      : '<div style="text-align: center; color: #999; padding: 40px; font-size: 14px;">이미지가 없습니다</div>';
+
+    // 2열 레이아웃: 왼쪽 텍스트 카드, 오른쪽 이미지 카드
     detailContainer.innerHTML = `
-        <div class="scrapbook-detail-card">
-            ${scrap.image ? `<img src="${scrap.image}" class="scrapbook-detail-img" alt="detail image" referrerpolicy="no-referrer">` : ''}
-            <div class="scrapbook-detail-title">${detailTitle}</div>
-            <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
-            <p class="scrapbook-detail-desc">${detailText}</p>
+        <div style="display: flex; gap: 16px; width: 100%; align-items: flex-start;">
+            <div class="scrapbook-detail-card" style="flex: 1; min-width: 300px; max-width: 420px;">
+                <div class="scrapbook-detail-title">${detailTitle}</div>
+                <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
+                <p class="scrapbook-detail-desc">${detailText}</p>
+            </div>
+            <div class="scrapbook-detail-images-card" style="flex: 1; min-width: 300px; max-width: 420px; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08); padding: 20px;">
+                <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px;">이미지 (${allImageUrls.length}개)</div>
+                ${imagesHtml}
+            </div>
         </div>
     `;
+
+    // 이미지 로드 확인 및 에러 처리 (워크스페이스 갤러리와 동일한 방식)
+    detailContainer.querySelectorAll('.scrapbook-detail-img-item').forEach(img => {
+      // 이미지가 이미 로드 완료된 경우 확인
+      if (img.complete) {
+        if (img.naturalHeight === 0 || img.naturalWidth === 0) {
+          // 이미지 로드 실패
+          img.style.display = 'none';
+          const errorDiv = img.parentElement.querySelector('.image-error');
+          if (errorDiv) {
+            errorDiv.style.display = 'flex';
+          }
+        } else {
+          // 이미지 로드 성공
+          img.style.display = 'block';
+        }
+      }
+      
+      // 이미지 로드 성공 이벤트
+      img.addEventListener('load', function() {
+        this.style.display = 'block';
+        this.style.opacity = '1';
+        const errorDiv = this.parentElement.querySelector('.image-error');
+        if (errorDiv) {
+          errorDiv.style.display = 'none';
+        }
+      }, { once: true });
+      
+      // 이미지 로드 실패 이벤트
+      img.addEventListener('error', function() {
+        const originalSrc = this.src;
+        if (!originalSrc) {
+          this.style.display = 'none';
+          const errorDiv = this.parentElement.querySelector('.image-error');
+          if (errorDiv) {
+            errorDiv.style.display = 'flex';
+          }
+          return;
+        }
+        
+        // 이미 재시도한 경우는 에러 메시지 표시
+        if (this.dataset.retried === 'true') {
+          this.style.display = 'none';
+          const errorDiv = this.parentElement.querySelector('.image-error');
+          if (errorDiv) {
+            errorDiv.style.display = 'flex';
+          }
+          return;
+        }
+        
+        this.dataset.retried = 'true';
+        
+        // 재시도: Image 객체로 먼저 테스트
+        const testImg = new Image();
+        testImg.onload = () => {
+          // 테스트 성공 시 실제 img에 적용
+          this.src = originalSrc;
+          this.style.display = 'block';
+        };
+        testImg.onerror = () => {
+          // 최종 실패
+          this.style.display = 'none';
+          const errorDiv = this.parentElement.querySelector('.image-error');
+          if (errorDiv) {
+            errorDiv.style.display = 'flex';
+          }
+        };
+        testImg.src = originalSrc;
+      }, { once: true });
+    });
+
+    // 이미지 삭제 버튼 이벤트 리스너 (이미지 카드 내부)
+    detailContainer.querySelectorAll('.scrapbook-image-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const scrapId = btn.dataset.scrapId;
+        const imageUrl = btn.dataset.imageUrl;
+        
+        if (confirm('이 이미지를 삭제하시겠습니까?')) {
+          chrome.runtime.sendMessage({
+            action: 'remove_scrap_image',
+            data: { scrapId, imageUrl }
+          }, (response) => {
+            if (response && response.success) {
+              // 상세보기 다시 렌더링
+              renderDetailView(scrapId, container);
+              // 스크랩 목록도 업데이트
+              requestScrapsAndRender(container);
+            } else {
+              alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+            }
+          });
+        }
+      });
+      
+      // 삭제 버튼 hover 시 표시
+      const imageItem = btn.closest('.scrapbook-detail-image-item');
+      if (imageItem) {
+        imageItem.addEventListener('mouseenter', () => {
+          btn.style.opacity = '1';
+        });
+        imageItem.addEventListener('mouseleave', () => {
+          btn.style.opacity = '0';
+        });
+      }
+    });
+    
+    // 이미지 클릭 시 확대 보기 (이미지 카드 내부)
+    detailContainer.querySelectorAll('.scrapbook-detail-image-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.scrapbook-image-delete-btn')) return;
+        
+        const img = item.querySelector('img');
+        if (!img || !img.src) return;
+        
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; display: flex; align-items: center; justify-content: center; cursor: pointer;';
+        modal.innerHTML = `
+          <img src="${img.src.replace(/"/g, '&quot;')}" style="max-width: 90vw; max-height: 90vh; object-fit: contain;">
+        `;
+        document.body.appendChild(modal);
+        
+        modal.addEventListener('click', () => {
+          if (document.body.contains(modal)) {
+            document.body.removeChild(modal);
+          }
+        });
+      });
+    });
 }
 
 // background.js로부터 실시간 업데이트 수신 (이제 Shadow DOM 내부를 찾도록 수정)

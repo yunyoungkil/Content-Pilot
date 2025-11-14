@@ -48,24 +48,29 @@ function renderImageGallery(linkedScrapsData) {
 }
 
 // 파이어베이스 전체 스크랩과 캔버스 데이터에서 이미지 갤러리 업데이트
-function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand) {
+function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand, ideaData = null) {
   const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
   if (!imageGalleryArea) return;
   
   // 이미지 갤러리 컨테이너 구조 생성
   if (!imageGalleryArea.querySelector(".image-gallery-header")) {
     imageGalleryArea.innerHTML = `
-      <div class="image-gallery-header" style="padding: 12px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 8px;">
+      <div class="image-gallery-header" style="flex-shrink: 0; padding: 12px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         <input type="text" id="image-search-input" placeholder="이미지 검색..." 
-          style="flex: 1; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+          style="flex: 1; min-width: 150px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+        <button id="filter-by-draft-btn" title="초안 내용에 맞는 이미지만 보기" 
+          style="padding: 6px 12px; border: 1px solid #dadce0; background: #fff; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 4px;">
+          <span>📝</span>
+          <span>초안 필터</span>
+        </button>
         <span id="image-count" style="font-size: 12px; color: #666; white-space: nowrap;">0개</span>
       </div>
-      <div class="image-gallery-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px; max-height: calc(100vh - 200px); overflow-y: auto;"></div>
-      <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center;">
-        <div style="position: relative; max-width: 90vw; max-height: 90vh;">
-          <button id="close-preview" style="position: absolute; top: -40px; right: 0; background: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">닫기</button>
-          <img id="preview-image" src="" style="max-width: 100%; max-height: 90vh; object-fit: contain;">
-          <div id="image-metadata" style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #fff; padding: 12px; font-size: 12px;"></div>
+      <div class="image-gallery-grid" style="flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px; overflow-y: auto; overflow-x: hidden;"></div>
+      <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
+        <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center;">
+          <button id="close-preview" style="position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: all 0.2s;">닫기</button>
+          <img id="preview-image" src="" style="max-width: 100%; max-height: calc(90vh - 80px); object-fit: contain; border-radius: 8px;">
+          <div id="image-metadata" style="margin-top: 12px; background: rgba(0,0,0,0.6); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 12px; max-width: 100%; text-align: center; backdrop-filter: blur(10px);"></div>
         </div>
       </div>
     `;
@@ -73,37 +78,135 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   
   const imageGalleryGrid = imageGalleryArea.querySelector(".image-gallery-grid");
   const searchInput = imageGalleryArea.querySelector("#image-search-input");
+  const filterByDraftBtn = imageGalleryArea.querySelector("#filter-by-draft-btn");
   const imageCount = imageGalleryArea.querySelector("#image-count");
   const previewModal = imageGalleryArea.querySelector("#image-preview-modal");
   const previewImage = imageGalleryArea.querySelector("#preview-image");
   const imageMetadata = imageGalleryArea.querySelector("#image-metadata");
   const closePreview = imageGalleryArea.querySelector("#close-preview");
   
+  let isDraftFilterActive = false;
+  let allImageData = []; // 전체 이미지 데이터 저장
+  let draftContentText = ""; // 초안 내용 텍스트
+  
   imageGalleryGrid.innerHTML = "<p style='text-align:center;color:#888;padding:20px;'>이미지를 불러오는 중...</p>";
   
   // 이미지 데이터 수집 (URL과 메타데이터 포함)
   const imageDataMap = new Map(); // URL을 키로, 메타데이터를 값으로
   
+  // 이미지 URL 유효성 검사 함수
+  const isValidImageUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    const trimmed = url.trim();
+    if (trimmed.length === 0) return false;
+    
+    // 실제 이미지가 아닌 URL 필터링
+    const invalidPatterns = [
+      /sync\.smartadserver\.com/i,  // 추적 스크립트
+      /getuid/i,                     // 추적 스크립트
+      /usersync/i,                   // 추적 스크립트
+      /pixel/i,                      // 추적 픽셀
+      /tracking/i,                   // 추적 URL
+      /analytics/i,                  // 분석 스크립트
+      /beacon/i,                     // 비콘
+      /\.js(\?|$)/i,                 // JavaScript 파일
+      /\.css(\?|$)/i,                // CSS 파일
+      /\.html(\?|$)/i,               // HTML 파일
+    ];
+    
+    // 유효하지 않은 패턴 체크
+    if (invalidPatterns.some(pattern => pattern.test(trimmed))) {
+      return false;
+    }
+    
+    // 유효한 이미지 URL 형식 체크
+    return trimmed.startsWith('http://') || 
+           trimmed.startsWith('https://') || 
+           trimmed.startsWith('data:image/');
+  };
+  
+  // 이미지 URL 정규화 함수
+  const normalizeImageUrl = (url, baseUrl) => {
+    if (!url || typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    if (trimmed.length === 0) return null;
+    
+    // 이미 절대 경로인 경우
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/')) {
+      return trimmed;
+    }
+    
+    // 상대 경로인 경우 절대 경로로 변환
+    if (trimmed.startsWith('//')) {
+      return 'https:' + trimmed;
+    }
+    
+    if (trimmed.startsWith('/') && baseUrl) {
+      try {
+        const base = new URL(baseUrl);
+        return base.origin + trimmed;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    if (!trimmed.startsWith('http') && baseUrl) {
+      try {
+        return new URL(trimmed, baseUrl).href;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    return null;
+  };
+
   // 스크랩에서 이미지 수집
   allScraps.forEach((scrap) => {
+    const baseUrl = scrap.url || window.location.href;
+    
     if (scrap.image) {
-      imageDataMap.set(scrap.image, {
-        url: scrap.image,
-        source: "스크랩",
-        title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
-        url_source: scrap.url || "",
-        timestamp: scrap.timestamp || Date.now()
-      });
+      const normalized = normalizeImageUrl(scrap.image, baseUrl);
+      if (normalized && isValidImageUrl(normalized)) {
+        imageDataMap.set(normalized, {
+          url: normalized,
+          source: "스크랩",
+          title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
+          url_source: scrap.url || "",
+          timestamp: scrap.timestamp || Date.now(),
+          scrapId: scrap.id
+        });
+      }
     }
+    
     if (Array.isArray(scrap.allImages)) {
       scrap.allImages.forEach((url) => {
-        if (!imageDataMap.has(url)) {
-          imageDataMap.set(url, {
-            url: url,
+        const normalized = normalizeImageUrl(url, baseUrl);
+        if (normalized && isValidImageUrl(normalized) && !imageDataMap.has(normalized)) {
+          imageDataMap.set(normalized, {
+            url: normalized,
             source: "스크랩",
             title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
             url_source: scrap.url || "",
-            timestamp: scrap.timestamp || Date.now()
+            timestamp: scrap.timestamp || Date.now(),
+            scrapId: scrap.id
+          });
+        }
+      });
+    }
+    
+    // 하위 호환성: images 배열도 확인 (구버전 데이터)
+    if (Array.isArray(scrap.images)) {
+      scrap.images.forEach((url) => {
+        const normalized = normalizeImageUrl(url, baseUrl);
+        if (normalized && isValidImageUrl(normalized) && !imageDataMap.has(normalized)) {
+          imageDataMap.set(normalized, {
+            url: normalized,
+            source: "스크랩",
+            title: scrap.text?.substring(0, 50) || scrap.url || "스크랩 이미지",
+            url_source: scrap.url || "",
+            timestamp: scrap.timestamp || Date.now(),
+            scrapId: scrap.id
           });
         }
       });
@@ -114,9 +217,11 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   chrome.runtime.sendMessage({ action: "get_canvas_images" }, (canvasResponse) => {
     if (canvasResponse && canvasResponse.success && Array.isArray(canvasResponse.images)) {
       canvasResponse.images.forEach((imageUrl) => {
-        if (imageUrl && typeof imageUrl === 'string' && !imageDataMap.has(imageUrl)) {
-          imageDataMap.set(imageUrl, {
-            url: imageUrl,
+        // 캔버스 이미지도 정규화 및 유효성 검사
+        const normalized = normalizeImageUrl(imageUrl, window.location.href);
+        if (normalized && isValidImageUrl(normalized) && !imageDataMap.has(normalized)) {
+          imageDataMap.set(normalized, {
+            url: normalized,
             source: "캔버스",
             title: "편집된 이미지",
             url_source: "",
@@ -127,6 +232,71 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
     }
     
     const allImages = Array.from(imageDataMap.values());
+    allImageData = allImages; // 전체 이미지 데이터 저장
+    
+    // 초안 내용에서 텍스트 추출 함수
+    function extractTextFromDraft(html) {
+      if (!html) return "";
+      // HTML 태그 제거
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = html;
+      let text = tempDiv.textContent || tempDiv.innerText || "";
+      // 공백 정리
+      text = text.replace(/\s+/g, " ").trim();
+      return text;
+    }
+    
+    // 초안 내용과 이미지 관련성 계산 함수
+    function calculateRelevance(imageData, draftText) {
+      if (!draftText || draftText.length < 10) return 0; // 초안 내용이 너무 짧으면 관련성 없음
+      
+      const draftWords = draftText.toLowerCase().split(/\s+/).filter(w => w.length > 2); // 2글자 이상 단어만
+      if (draftWords.length === 0) return 0;
+      
+      let score = 0;
+      const searchText = (
+        (imageData.title || "") + " " +
+        (imageData.url_source || "") + " " +
+        (imageData.url || "")
+      ).toLowerCase();
+      
+      // 키워드 매칭
+      draftWords.forEach(word => {
+        if (searchText.includes(word)) {
+          score += 1;
+        }
+      });
+      
+      // URL 도메인 매칭 (예: blog.kakaocdn.net, daumcdn.net 등)
+      try {
+        if (imageData.url) {
+          const urlDomain = new URL(imageData.url).hostname;
+          if (urlDomain && draftText.toLowerCase().includes(urlDomain.split(".")[0])) {
+            score += 0.5;
+          }
+        }
+      } catch (e) {
+        // URL 파싱 실패 시 무시
+      }
+      
+      // 정규화된 점수 (0-1 사이)
+      return Math.min(score / Math.max(draftWords.length, 1), 1);
+    }
+    
+    // 초안 내용에 맞는 이미지 필터링 함수
+    function filterImagesByDraft(images, draftText) {
+      if (!draftText || draftText.length < 10) return images; // 초안 내용이 없거나 너무 짧으면 전체 반환
+      
+      const filtered = images
+        .map(img => ({
+          ...img,
+          relevance: calculateRelevance(img, draftText)
+        }))
+        .filter(img => img.relevance > 0) // 관련성 점수가 0보다 큰 것만
+        .sort((a, b) => b.relevance - a.relevance); // 관련성 높은 순으로 정렬
+      
+      return filtered;
+    }
     
     // 이미지 렌더링 함수
     function renderImages(images) {
@@ -139,34 +309,103 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       
       imageCount.textContent = `${images.length}개`;
       
+      // HTML 이스케이프 함수
+      const escapeHtml = (str) => {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      };
+
       imageGalleryGrid.innerHTML = images
         .map(
-          (imgData) => `
-          <div class="gallery-thumb-wrap" draggable="true" data-image-url="${imgData.url}" 
-            data-title="${(imgData.title || '').replace(/"/g, '&quot;')}" 
+          (imgData) => {
+            const escapedUrl = escapeHtml(imgData.url);
+            const escapedTitle = escapeHtml(imgData.title || '이미지');
+            return `
+          <div class="gallery-thumb-wrap" draggable="true" data-image-url="${escapedUrl}" 
+            data-title="${escapedTitle}" 
             data-source="${imgData.source}" 
-            data-url-source="${imgData.url_source || ''}"
+            data-url-source="${escapeHtml(imgData.url_source || '')}"
             data-timestamp="${imgData.timestamp}"
+            data-scrap-id="${imgData.scrapId || ''}"
             style="position: relative; cursor: pointer;">
-            <img src="${imgData.url}" class="gallery-thumb" 
+            <img src="${escapedUrl}" class="gallery-thumb" 
               style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;box-shadow:0 1px 6px rgba(0,0,0,0.08);" 
-              alt="${imgData.title || '이미지'}"
-              loading="lazy">
-            <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); transition: background 0.2s; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
-              <span style="opacity: 0; transition: opacity 0.2s; color: #fff; font-size: 24px;">🔍</span>
+              alt="${escapedTitle}"
+              loading="lazy"
+              onerror="this.onerror=null; this.style.display='none'; const errorDiv = this.parentElement.querySelector('.gallery-image-error'); if(errorDiv) errorDiv.style.display='flex';">
+            <div class="gallery-image-error" style="display: none; position: absolute; inset: 0; background: #f5f5f5; align-items: center; justify-content: center; color: #999; font-size: 11px; text-align: center; border-radius: 8px;">로드 실패</div>
+            ${imgData.source === '스크랩' && imgData.scrapId ? `
+              <button class="gallery-image-delete-btn" data-scrap-id="${imgData.scrapId}" data-image-url="${escapedUrl}"
+                style="position: absolute; top: 4px; right: 4px; background: rgba(234,67,53,0.9); color: #fff; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; z-index: 10; opacity: 0; transition: opacity 0.2s;"
+                title="이미지 삭제">
+                ×
+              </button>
+            ` : ''}
+            <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); transition: background 0.2s; border-radius: 8px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+              <span class="gallery-preview-icon" style="opacity: 0; transition: opacity 0.2s; color: #fff; font-size: 24px; pointer-events: auto; cursor: pointer; padding: 8px; border-radius: 50%; background: rgba(0,0,0,0.3);">🔍</span>
             </div>
           </div>
-        `
+        `;
+          }
         )
         .join("");
       
-      // 클릭으로 이미지 삽입
+      // 이미지 로드 확인 및 에러 처리
       imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
-        img.addEventListener("click", (e) => {
-          if (e.target.closest(".gallery-thumb-overlay")) return; // 오버레이 클릭은 미리보기
-          sendCommand("insert-image", { url: img.src });
-          sendCommand("focus");
-        });
+        // 이미지가 이미 로드 완료된 경우 확인
+        if (img.complete) {
+          if (img.naturalHeight === 0 || img.naturalWidth === 0) {
+            // 이미지 로드 실패
+            img.style.display = 'none';
+            const errorDiv = img.parentElement.querySelector('.gallery-image-error');
+            if (errorDiv) {
+              errorDiv.style.display = 'flex';
+            }
+          }
+        }
+        
+        // 이미지 로드 성공 이벤트
+        img.addEventListener('load', function() {
+          this.style.display = 'block';
+          const errorDiv = this.parentElement.querySelector('.gallery-image-error');
+          if (errorDiv) {
+            errorDiv.style.display = 'none';
+          }
+        }, { once: true });
+        
+        // 이미지 로드 실패 이벤트 (이미 onerror가 있지만 추가 처리)
+        img.addEventListener('error', function() {
+          const originalSrc = this.src;
+          if (!originalSrc) return;
+          
+          // 이미 재시도한 경우는 무시
+          if (this.dataset.retried === 'true') return;
+          this.dataset.retried = 'true';
+          
+          // 재시도: Image 객체로 먼저 테스트
+          setTimeout(() => {
+            const testImg = new Image();
+            testImg.onload = () => {
+              // 테스트 성공 시 실제 img에 적용
+              this.src = originalSrc;
+              this.style.display = 'block';
+            };
+            testImg.onerror = () => {
+              // 최종 실패
+              this.style.display = 'none';
+              const errorDiv = this.parentElement.querySelector('.gallery-image-error');
+              if (errorDiv) {
+                errorDiv.style.display = 'flex';
+              }
+            };
+            testImg.src = originalSrc;
+          }, 200);
+        }, { once: true });
       });
       
       // 드래그앤드랍으로 이미지 삽입
@@ -176,49 +415,117 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           e.dataTransfer.effectAllowed = "copy";
         });
         
-        // 미리보기 (더블클릭 또는 오버레이 클릭)
+        // 삭제 버튼 이벤트
+        const deleteBtn = wrap.querySelector(".gallery-image-delete-btn");
+        if (deleteBtn) {
+          deleteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const scrapId = deleteBtn.dataset.scrapId;
+            const imageUrl = deleteBtn.dataset.imageUrl;
+            
+            if (confirm('이 이미지를 삭제하시겠습니까?')) {
+              chrome.runtime.sendMessage({
+                action: 'remove_scrap_image',
+                data: { scrapId, imageUrl }
+              }, (response) => {
+                if (response && response.success) {
+                  // 이미지 갤러리 새로고침
+                  chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
+                    if (response && response.success) {
+                      updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
+                    }
+                  });
+                } else {
+                  alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+                }
+              });
+            }
+          });
+          
+          // 삭제 버튼 hover 시 표시
+          wrap.addEventListener("mouseenter", () => {
+            if (deleteBtn) deleteBtn.style.opacity = "1";
+          });
+          wrap.addEventListener("mouseleave", () => {
+            if (deleteBtn) deleteBtn.style.opacity = "0";
+          });
+        }
+        
+        // 이미지 클릭: 에디터에 삽입
+        const img = wrap.querySelector(".gallery-thumb");
+        if (img) {
+          img.addEventListener("click", (e) => {
+            // 삭제 버튼이나 에러 메시지 클릭은 무시
+            if (e.target.closest(".gallery-image-delete-btn")) return;
+            if (e.target.closest(".gallery-image-error")) return;
+            // 미리보기 아이콘 클릭은 무시 (오버레이에서 처리)
+            if (e.target.closest(".gallery-preview-icon")) return;
+            
+            e.stopPropagation();
+            e.preventDefault();
+            const imageUrl = wrap.dataset.imageUrl || img.src;
+            if (imageUrl && imageUrl.startsWith("http")) {
+              sendCommand("insert-image", { url: imageUrl });
+              sendCommand("focus");
+            }
+          });
+        }
+        
+        // 미리보기 (더블클릭 또는 미리보기 아이콘 클릭)
         const overlay = wrap.querySelector(".gallery-thumb-overlay");
-        wrap.addEventListener("mouseenter", () => {
-          overlay.style.background = "rgba(0,0,0,0.5)";
-          overlay.querySelector("span").style.opacity = "1";
-        });
-        wrap.addEventListener("mouseleave", () => {
-          overlay.style.background = "rgba(0,0,0,0)";
-          overlay.querySelector("span").style.opacity = "0";
-        });
+        const previewIcon = overlay?.querySelector(".gallery-preview-icon");
         
-        wrap.addEventListener("dblclick", () => {
-          const imgData = {
-            url: wrap.dataset.imageUrl,
-            title: wrap.dataset.title,
-            source: wrap.dataset.source,
-            url_source: wrap.dataset.urlSource,
-            timestamp: wrap.dataset.timestamp
-          };
-          showImagePreview(imgData);
-        });
-        
-        overlay.addEventListener("click", () => {
-          const imgData = {
-            url: wrap.dataset.imageUrl,
-            title: wrap.dataset.title,
-            source: wrap.dataset.source,
-            url_source: wrap.dataset.urlSource,
-            timestamp: wrap.dataset.timestamp
-          };
-          showImagePreview(imgData);
-        });
+        if (overlay) {
+          wrap.addEventListener("mouseenter", () => {
+            overlay.style.background = "rgba(0,0,0,0.5)";
+            if (previewIcon) previewIcon.style.opacity = "1";
+          });
+          wrap.addEventListener("mouseleave", () => {
+            overlay.style.background = "rgba(0,0,0,0)";
+            if (previewIcon) previewIcon.style.opacity = "0";
+          });
+          
+          // 더블클릭: 미리보기
+          wrap.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const imgData = {
+              url: wrap.dataset.imageUrl || img?.src,
+              title: wrap.dataset.title,
+              source: wrap.dataset.source,
+              url_source: wrap.dataset.urlSource,
+              timestamp: wrap.dataset.timestamp
+            };
+            showImagePreview(imgData);
+          });
+          
+          // 미리보기 아이콘 클릭: 미리보기
+          if (previewIcon) {
+            previewIcon.addEventListener("click", (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              const imgData = {
+                url: wrap.dataset.imageUrl || img?.src,
+                title: wrap.dataset.title,
+                source: wrap.dataset.source,
+                url_source: wrap.dataset.urlSource,
+                timestamp: wrap.dataset.timestamp
+              };
+              showImagePreview(imgData);
+            });
+          }
+        }
       });
     }
     
     // 이미지 미리보기 함수
     function showImagePreview(imgData) {
       previewImage.src = imgData.url;
-      const date = new Date(parseInt(imgData.timestamp));
+      const date = imgData.timestamp ? new Date(parseInt(imgData.timestamp)) : new Date();
       imageMetadata.innerHTML = `
-        <div><strong>${imgData.title || '이미지'}</strong></div>
-        <div style="margin-top: 4px; opacity: 0.8;">출처: ${imgData.source}${imgData.url_source ? ` | ${shortenLink(imgData.url_source, 40)}` : ''}</div>
-        <div style="margin-top: 4px; opacity: 0.8;">날짜: ${date.toLocaleDateString('ko-KR')} ${date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</div>
+        <div style="font-weight: 600; margin-bottom: 6px;">${imgData.title || '이미지'}</div>
+        <div style="opacity: 0.9; font-size: 11px;">출처: ${imgData.source}${imgData.url_source ? ` | ${shortenLink(imgData.url_source, 30)}` : ''}</div>
+        <div style="opacity: 0.8; font-size: 11px; margin-top: 4px;">날짜: ${date.toLocaleDateString('ko-KR')} ${date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</div>
       `;
       previewModal.style.display = "flex";
     }
@@ -233,15 +540,105 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       }
     });
     
-    // 검색 기능
+    // 초안 내용 가져오기 함수
+    function getDraftContent() {
+      return new Promise((resolve) => {
+        // 1. 먼저 ideaData에서 draftContent 확인
+        if (ideaData && ideaData.draftContent) {
+          const text = extractTextFromDraft(ideaData.draftContent);
+          if (text && text.length >= 10) {
+            resolve(text);
+            return;
+          }
+        }
+        
+        // 2. 에디터에서 내용 가져오기
+        const editorIframe = document.querySelector("#quill-editor-iframe");
+        if (!editorIframe || !editorIframe.contentWindow) {
+          resolve("");
+          return;
+        }
+        
+        // 메시지 리스너 설정 (고유한 식별자 사용)
+        const messageId = `draft-content-${Date.now()}-${Math.random()}`;
+        const messageHandler = (event) => {
+          if (event.source !== editorIframe.contentWindow) return;
+          const { action, data, requestId } = event.data;
+          
+          if (action === "content-response" && requestId === messageId && data) {
+            window.removeEventListener("message", messageHandler);
+            const html = data.html || "";
+            const text = extractTextFromDraft(html);
+            resolve(text);
+          }
+        };
+        
+        window.addEventListener("message", messageHandler);
+        
+        // 에디터에 내용 요청 (고유 ID 포함)
+        editorIframe.contentWindow.postMessage({ 
+          action: "get-content",
+          requestId: messageId
+        }, "*");
+        
+        // 타임아웃 (5초 후 실패 처리)
+        setTimeout(() => {
+          window.removeEventListener("message", messageHandler);
+          resolve("");
+        }, 5000);
+      });
+    }
+    
+    // 초안 필터 토글 함수
+    async function toggleDraftFilter() {
+      if (!isDraftFilterActive) {
+        // 필터 활성화
+        filterByDraftBtn.style.background = "#e8f0fe";
+        filterByDraftBtn.style.borderColor = "#1a73e8";
+        filterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터 ON";
+        
+        // 초안 내용 가져오기
+        draftContentText = await getDraftContent();
+        
+        if (!draftContentText || draftContentText.length < 10) {
+          alert("초안 내용이 없거나 너무 짧습니다. 초안을 작성한 후 다시 시도해주세요.");
+          filterByDraftBtn.style.background = "#fff";
+          filterByDraftBtn.style.borderColor = "#dadce0";
+          filterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터";
+          return;
+        }
+        
+        isDraftFilterActive = true;
+        const filtered = filterImagesByDraft(allImages, draftContentText);
+        renderImages(filtered);
+      } else {
+        // 필터 비활성화
+        filterByDraftBtn.style.background = "#fff";
+        filterByDraftBtn.style.borderColor = "#dadce0";
+        filterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터";
+        isDraftFilterActive = false;
+        renderImages(allImages);
+      }
+    }
+    
+    // 초안 필터 버튼 이벤트
+    if (filterByDraftBtn) {
+      filterByDraftBtn.addEventListener("click", toggleDraftFilter);
+    }
+    
+    // 검색 기능 (초안 필터와 통합)
     searchInput.addEventListener("input", (e) => {
       const searchTerm = e.target.value.toLowerCase().trim();
+      let imagesToRender = isDraftFilterActive 
+        ? filterImagesByDraft(allImages, draftContentText)
+        : allImages;
+      
       if (!searchTerm) {
-        renderImages(allImages);
+        renderImages(imagesToRender);
         return;
       }
       
-      const filtered = allImages.filter((img) => {
+      const filtered = imagesToRender.filter((img) => {
         return (img.title && img.title.toLowerCase().includes(searchTerm)) ||
                (img.url_source && img.url_source.toLowerCase().includes(searchTerm)) ||
                (img.source && img.source.toLowerCase().includes(searchTerm));
@@ -970,7 +1367,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           // 파이어베이스 전체 스크랩에서 이미지 로드
           chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
             if (response && response.success) {
-              updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand);
+              updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
             }
           });
         }

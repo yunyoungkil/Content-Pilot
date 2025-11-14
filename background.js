@@ -906,6 +906,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         tags: tags || null,
       };
 
+      // images 배열을 allImages로 변환 (기존 allImages가 있으면 병합)
+      if (Array.isArray(msg.data.images) && msg.data.images.length > 0) {
+        const existingAllImages = scrapPayload.allImages || [];
+        // 중복 제거하면서 병합
+        const mergedImages = [...new Set([...existingAllImages, ...msg.data.images])];
+        scrapPayload.allImages = mergedImages.length > 0 ? mergedImages : null;
+        // images 필드는 제거 (allImages로 통합)
+        delete scrapPayload.images;
+      } else if (scrapPayload.images) {
+        // images가 배열이 아니면 제거
+        delete scrapPayload.images;
+      }
+
       const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
 
       const scrapRef = firebase.database().ref("scraps").push();
@@ -953,6 +966,50 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ success: false, error: error.message })
         );
     }
+    return true;
+  } else if (msg.action === "remove_scrap_image") {
+    const { scrapId, imageUrl } = msg.data;
+    if (!scrapId || !imageUrl) {
+      sendResponse({ success: false, error: "스크랩 ID와 이미지 URL이 필요합니다." });
+      return true;
+    }
+    
+    (async () => {
+      try {
+        const scrapRef = firebase.database().ref(`scraps/${scrapId}`);
+        const snapshot = await scrapRef.once("value");
+        const scrapData = snapshot.val();
+        
+        if (!scrapData) {
+          sendResponse({ success: false, error: "스크랩을 찾을 수 없습니다." });
+          return;
+        }
+        
+        const updates = {};
+        
+        // image 필드에서 삭제
+        if (scrapData.image === imageUrl) {
+          updates.image = null;
+        }
+        
+        // allImages 배열에서 삭제
+        if (Array.isArray(scrapData.allImages)) {
+          updates.allImages = scrapData.allImages.filter(url => url !== imageUrl);
+          // 배열이 비어있으면 null로 설정
+          if (updates.allImages.length === 0) {
+            updates.allImages = null;
+          }
+        }
+        
+        // Firebase 업데이트
+        await scrapRef.update(updates);
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error("이미지 삭제 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
     return true;
   } else if (msg.action === "get_all_scraps") {
     firebase
