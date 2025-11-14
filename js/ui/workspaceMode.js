@@ -1591,80 +1591,108 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     `;
     document.head.appendChild(style);
 
-    // 1. '연결된 자료' 목록에서 스크랩 텍스트를 모두 수집합니다.
-    const linkedScrapsContent = Array.from(
-      linkedScrapsList.querySelectorAll(".scrap-card-item")
-    ).map((cardItem) => {
-      return {
-        text: cardItem.dataset.text || "",
-        // 필요하다면 출처(URL)도 함께 보낼 수 있습니다.
-        url: cardItem.querySelector(".scrap-card-snippet")?.textContent || "",
-      };
-    });
-
-    // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
-    const payload = {
-      ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
-      currentDraft: currentEditorContent, // 현재 에디터에 작성된 내용
-      linkedScrapsContent: linkedScrapsContent, // 연결된 자료의 텍스트 목록
-    };
-
-    // 3. 통합된 데이터를 background.js로 전송합니다.
-    chrome.runtime.sendMessage(
-      { action: "generate_draft_from_idea", data: payload },
-      (response) => {
-        if (response && response.success) {
-          // iframe 에디터에 생성된 초안 설정 (Markdown → HTML 변환 지원)
-          const isLikelyMarkdown =
-            /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s/m.test(
-              response.draft || ""
-            );
-          const html = isLikelyMarkdown
-            ? marked.parse(response.draft)
-            : response.draft;
-          sendCommand("set-content", { html });
-          currentEditorContent = html;
-
-          const saveData = {
-            ideaId: ideaData.id,
-            status: ideaData.status,
-            draft: html,
-          };
-          chrome.runtime.sendMessage(
-            { action: "save_draft_content", data: saveData },
-            (saveResponse) => {
-              if (!saveResponse || !saveResponse.success) {
-                console.error("Failed to save draft:", saveResponse.error);
-                // (선택) 저장 실패 시 사용자에게 알림을 줄 수 있습니다.
-              } else {
-                console.log("Draft saved successfully.");
-                ideaData.draftContent = response.draft;
-              }
-            }
-          );
-        } else {
-          // 사용자 친화적인 에러 메시지
-          const errorMsg = response.error || "알 수 없는 오류";
-          let userFriendlyMsg = "초안 생성에 실패했습니다.";
-          
-          if (errorMsg.includes("API 키") || errorMsg.includes("API key")) {
-            userFriendlyMsg = "❌ Gemini API 키가 설정되지 않았습니다.\n\n해결 방법:\n1. 설정에서 Gemini API 키를 입력하세요.\n2. API 키가 유효한지 확인하세요.";
-          } else if (errorMsg.includes("네트워크") || errorMsg.includes("network") || errorMsg.includes("fetch")) {
-            userFriendlyMsg = "❌ 네트워크 연결 오류가 발생했습니다.\n\n해결 방법:\n1. 인터넷 연결을 확인하세요.\n2. 잠시 후 다시 시도하세요.";
-          } else if (errorMsg.includes("할당량") || errorMsg.includes("quota") || errorMsg.includes("rate limit")) {
-            userFriendlyMsg = "❌ API 사용 한도를 초과했습니다.\n\n해결 방법:\n1. 잠시 후 다시 시도하세요.\n2. API 할당량을 확인하세요.";
-          } else {
-            userFriendlyMsg = `❌ 초안 생성 실패\n\n오류: ${errorMsg}\n\n해결 방법:\n1. 잠시 후 다시 시도하세요.\n2. 문제가 계속되면 관리자에게 문의하세요.`;
-          }
-          
-          alert(userFriendlyMsg);
-        }
-        loadingOverlay.remove();
-        style.remove();
+    // 1. '연결된 자료' 목록에서 스크랩 텍스트와 URL을 모두 수집합니다.
+    // 실제 스크랩 데이터에서 URL을 가져오기 위해 Firebase에서 다시 조회
+    chrome.runtime.sendMessage({ action: "get_all_scraps" }, (scrapsResponse) => {
+      if (!scrapsResponse || !scrapsResponse.success) {
+        alert("스크랩 데이터를 불러올 수 없습니다.");
         generateDraftBtn.textContent = originalText;
         generateDraftBtn.disabled = false;
+        if (loadingOverlay.parentElement) loadingOverlay.remove();
+        return;
       }
-    );
+      
+      const allScraps = scrapsResponse.scraps || [];
+      const linkedScrapsContent = Array.from(
+        linkedScrapsList.querySelectorAll(".scrap-card-item")
+      ).map((cardItem) => {
+        const scrapId = cardItem.dataset.scrapId;
+        const scrap = allScraps.find(s => s.id === scrapId);
+        return {
+          text: cardItem.dataset.text || scrap?.text || "",
+          url: scrap?.url || "",
+          title: scrap?.text?.substring(0, 50) || "참고 자료"
+        };
+      });
+      
+      // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
+      const payload = {
+        ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
+        currentDraft: currentEditorContent, // 현재 에디터에 작성된 내용
+        linkedScrapsContent: linkedScrapsContent, // 연결된 자료의 텍스트와 URL 목록
+      };
+
+      // 3. 통합된 데이터를 background.js로 전송합니다.
+      chrome.runtime.sendMessage(
+        { action: "generate_draft_from_idea", data: payload },
+        (response) => {
+          generateDraftBtn.textContent = originalText;
+          generateDraftBtn.disabled = false;
+          if (loadingOverlay.parentElement) loadingOverlay.remove();
+          
+          if (response && response.success) {
+            // iframe 에디터에 생성된 초안 설정 (Markdown → HTML 변환 지원)
+            const isLikelyMarkdown =
+              /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s/m.test(
+                response.draft || ""
+              );
+            let html = isLikelyMarkdown
+              ? marked.parse(response.draft)
+              : response.draft;
+            
+            // 제목이 포함되어 있지 않으면 h1으로 추가 (이중 체크)
+            const title = ideaData.title || "";
+            if (title) {
+              const hasH1 = /<h1[^>]*>|<h1>/i.test(html);
+              if (!hasH1) {
+                html = `<h1>${title}</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n${html}`;
+              } else {
+                // h1이 있지만 구분선이 없으면 추가
+                html = html.replace(/<\/h1>([^<]*?)(?=<[^/]|$)/gi, (match, afterH1) => {
+                  const hasHr = /<hr|<hr\s|---/.test(afterH1);
+                  if (!hasHr) {
+                    return `</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${afterH1}`;
+                  }
+                  return match;
+                });
+              }
+            }
+            
+            // 가독성 포맷팅 후처리
+            // 링크 밑줄 제거 (이미 background.js에서 처리되었지만, 추가 보장)
+            html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
+              if (!attrs.includes('style=')) {
+                return `<a ${attrs} style="text-decoration: none; color: #1a73e8;">`;
+              } else if (!attrs.includes('text-decoration')) {
+                return `<a ${attrs.replace(/style="([^"]*)"/, 'style="$1; text-decoration: none; color: #1a73e8;"')}>`;
+              }
+              return match;
+            });
+            
+            // mark 태그 스타일 보장
+            html = html.replace(/<mark([^>]*?)>/gi, (match, attrs) => {
+              if (!attrs.includes('style=')) {
+                return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">`;
+              } else if (!attrs.includes('background-color')) {
+                return `<mark ${attrs.replace(/style="([^"]*)"/, 'style="$1; background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;"')}>`;
+              }
+              return match;
+            });
+            
+            currentEditorContent = html;
+            sendCommand("set-content", { html });
+            sendCommand("focus");
+            
+            // 자동 저장
+            setTimeout(() => {
+              saveCurrentDraft();
+            }, 500);
+          } else {
+            alert("초안 생성에 실패했습니다: " + (response?.error || "알 수 없는 오류"));
+          }
+        }
+      );
+    });
   });
 
   // 추천 목차 클릭 시 에디터 내 해당 위치로 스크롤 이동

@@ -100,6 +100,111 @@
         margin-right: 4px;
       }
 
+      /* 링크 밑줄 제거 및 스타일 */
+      .ql-editor a {
+        text-decoration: none !important;
+        color: #1a73e8;
+      }
+      .ql-editor a:hover {
+        text-decoration: underline !important;
+      }
+      
+      /* 중요한 문장 배경색 스타일 */
+      .ql-editor mark {
+        background-color: rgb(255, 255, 204) !important;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+      
+      /* 인용 블록 스타일 및 줄간격 */
+      .ql-editor blockquote {
+        border-left: 4px solid #4285f4;
+        padding-left: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        margin-left: 0;
+        margin-right: 0;
+        margin-top: 16px;
+        margin-bottom: 16px;
+        color: #666;
+        font-style: italic;
+        line-height: 1.8;
+        background-color: #f8f9fa;
+      }
+      
+      .ql-editor blockquote p {
+        margin-bottom: 8px;
+      }
+      
+      .ql-editor blockquote p:last-child {
+        margin-bottom: 0;
+      }
+      
+      /* 제목 태그 스타일 및 줄간격 */
+      .ql-editor h1 {
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-top: 0;
+        margin-bottom: 16px;
+        color: #1a1a1a;
+      }
+      
+      .ql-editor h2 {
+        font-size: 24px;
+        font-weight: 600;
+        line-height: 1.5;
+        margin-top: 32px;
+        margin-bottom: 16px;
+        color: #2a2a2a;
+      }
+      
+      .ql-editor h3 {
+        font-size: 20px;
+        font-weight: 600;
+        line-height: 1.5;
+        margin-top: 24px;
+        margin-bottom: 12px;
+        color: #333;
+      }
+      
+      .ql-editor h4 {
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.5;
+        margin-top: 20px;
+        margin-bottom: 10px;
+        color: #444;
+      }
+      
+      /* h1 아래 구분선 */
+      .ql-editor h1 + hr {
+        border: none;
+        border-top: 2px solid #e0e0e0;
+        margin: 24px 0 32px 0;
+      }
+      
+      /* 문단 간격 및 줄간격 */
+      .ql-editor p {
+        margin-bottom: 16px;
+        line-height: 1.8;
+        color: #333;
+      }
+      
+      /* 목록 들여쓰기 및 줄간격 */
+      .ql-editor ul,
+      .ql-editor ol {
+        padding-left: 24px;
+        margin-bottom: 16px;
+        line-height: 1.8;
+      }
+      
+      .ql-editor ul li,
+      .ql-editor ol li {
+        margin-bottom: 8px;
+        line-height: 1.8;
+      }
+      
       .ql-editor {
         box-sizing: border-box;
         width: 100%;

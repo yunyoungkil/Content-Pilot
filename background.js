@@ -2627,6 +2627,96 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   } else if (msg.action === "generate_draft_from_idea") {
     const ideaData = msg.data;
+    
+    // 가독성 포맷팅 함수
+    function formatDraftForReadability(draftText) {
+      if (!draftText) return draftText;
+      
+      let html = draftText;
+      
+      // 마크다운 링크를 HTML로 변환하면서 밑줄 제거
+      // [텍스트](URL) 형식을 <a href="URL" style="text-decoration: none; color: #1a73e8;">텍스트</a>로 변환
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="text-decoration: none; color: #1a73e8;">$1</a>');
+      
+      // 기존 HTML 링크의 밑줄 제거
+      html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
+        if (!attrs.includes('style=')) {
+          return `<a ${attrs} style="text-decoration: none; color: #1a73e8;">`;
+        } else if (!attrs.includes('text-decoration')) {
+          return `<a ${attrs.replace(/style="([^"]*)"/, 'style="$1; text-decoration: none; color: #1a73e8;"')}>`;
+        }
+        return match;
+      });
+      
+      // h1 태그 아래 구분선 추가
+      // 모든 h1 태그를 찾아서 구분선이 없으면 추가
+      html = html.replace(/<\/h1>([^<]*?)(?=<[^/]|$)/gi, (match, afterH1) => {
+        // h1 다음에 hr 태그나 구분선이 있는지 확인
+        const hasHr = /<hr|<hr\s|---/.test(afterH1);
+        if (!hasHr) {
+          return `</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${afterH1}`;
+        }
+        return match;
+      });
+      
+      // 마크다운 형식의 구분선도 HTML로 변환
+      html = html.replace(/\n\s*---\s*\n/gi, '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n');
+      
+      // "(참고 자료 X)" 같은 번호 표기 제거
+      // 다양한 패턴 제거 (태그 내부는 제외하고 텍스트만 처리)
+      const textNodes = [];
+      let tagIndex = 0;
+      // HTML 태그를 임시로 치환하여 텍스트만 처리
+      html = html.replace(/<[^>]+>/g, (match) => {
+        textNodes[tagIndex] = match;
+        return `__TAG_${tagIndex++}__`;
+      });
+      
+      // 텍스트에서 참고 자료 번호 표기 제거
+      html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+      html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
+      html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
+      html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
+      html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
+      html = html.replace(/참고\s*자료\s*\d+/gi, '');
+      // 문장 중간에 있는 경우 처리 (앞뒤 공백 정리)
+      html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
+      html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
+      // 빈 괄호 제거
+      html = html.replace(/\(\s*\)/g, '');
+      // 연속된 공백을 하나로
+      html = html.replace(/\s{2,}/g, ' ');
+      // 마침표 앞 공백 정리
+      html = html.replace(/\s+\./g, '.');
+      html = html.replace(/\.\s+\./g, '.');
+      
+      // 태그 복원
+      html = html.replace(/__TAG_(\d+)__/g, (match, index) => {
+        return textNodes[parseInt(index)] || match;
+      });
+      
+      // 중요한 문장에 배경색 적용 (AI가 <mark> 태그를 사용하지 않은 경우)
+      if (!html.includes('<mark')) {
+        const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수', '반드시', '꼭'];
+        let importantCount = 0;
+        
+        importantKeywords.forEach(keyword => {
+          if (importantCount >= 2) return;
+          // 문장 단위로 찾기 (마침표, 느낌표, 물음표로 끝나는 문장)
+          const regex = new RegExp(`([^<]*${keyword}[^<]*[.!?])`, 'gi');
+          html = html.replace(regex, (match) => {
+            if (importantCount < 2 && !match.includes('<mark') && match.trim().length > 10) {
+              importantCount++;
+              return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
+            }
+            return match;
+          });
+        });
+      }
+      
+      return html;
+    }
+    
     (async () => {
       // 1. 모든 키워드를 수집하고 중복을 제거합니다.
       const allKeywords = new Set([
@@ -2637,7 +2727,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
       const linkedScrapsText = (ideaData.linkedScrapsContent || [])
-        .map((scrap, index) => `[참고 자료 ${index + 1}]\n${scrap.text}\n`)
+        .map((scrap, index) => {
+          const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
+          const url = scrap.url || "";
+          return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용: ${scrap.text || ""}\n`;
+        })
         .join("\n");
 
       // 3. 추천 검색어와 롱테일 키워드 수집
@@ -2649,7 +2743,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const prompt = `
             당신은 특정 주제에 대한 전문 작가입니다. 아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
-            ### 1. 최종 주제
+            ### 1. 최종 주제 (이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요)
             - ${ideaData.title}
 
             ### 2. 핵심 요약
@@ -2662,6 +2756,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ${(ideaData.outline || []).length > 0 
               ? ideaData.outline.map((item, idx) => `${idx + 1}. ${item}`).join("\n")
               : "목차가 제공되지 않았습니다. 논리적이고 체계적인 구조로 작성해주세요."}
+            
+            [문서 구조 규칙]
+            - 문서의 메인 제목은 반드시 h1 태그(# 제목)를 사용해주세요.
+            - h1 태그 바로 아래에는 구분선(---)을 추가해주세요.
+            - 이후 본문을 작성하세요.
+            - 섹션 제목은 h2(## 제목), 하위 섹션은 h3(### 제목)를 사용해주세요.
 
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
             ${tags.length > 0 ? tags.map(t => `- ${t.replace(/^#/, "")}`).join("\n") : "없음"}
@@ -2676,7 +2776,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               ? recommendedSearches.map((s, idx) => `${idx + 1}. ${s}`).join("\n")
               : "없음"}
 
-            ### 8. 핵심 참고 자료 (이 내용들을 근거로 본문을 작성해주세요)
+            ### 8. 관련 참고 자료
             ${linkedScrapsText || "참고 자료 없음"}
 
             [작성 규칙]
@@ -2684,13 +2784,68 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             2. '글의 구조'를 반드시 따라주세요. 각 섹션을 명확하게 구분하고, 제목과 본문을 체계적으로 작성해주세요.
             3. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
             4. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
-            5. '핵심 참고 자료'의 내용을 단순 요약하지 말고, 자연스럽게 인용하거나 재해석하여 본문을 풍부하게 만들어주세요.
+            5. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
             6. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요.
+            7. **참고 자료 링크 통합 방법 (매우 중요):**
+               - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
+               - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
+               - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
+               - 링크는 문맥에 완전히 녹아들어야 하며, 독자가 자연스럽게 클릭하고 싶게 만들어주세요.
+               - 좋은 예시들:
+                 * "세탁기 고장 예방을 위해서는 [올바른 세제 사용법](URL)을 숙지하는 것이 중요합니다."
+                 * "이러한 증상이 나타난다면 전문가의 [자가 진단 가이드](URL)를 확인해보시기 바랍니다."
+                 * "더 자세한 내용은 [가전제품 A/S 정책 안내](URL)에서 확인할 수 있습니다."
+                 * "실제 사용자들의 경험담은 [고장 사례 모음](URL)에서 볼 수 있습니다."
+                 * "LG 워시콤보 사용자라면 [올바른 세제 사용법](URL)을 숙지하는 것이 중요합니다."
+               - 나쁜 예시들 (절대 사용 금지):
+                 * "참고 자료 1에 따르면..." (번호 표기 - 절대 금지)
+                 * "(참고 자료 2)" (번호 표기 - 절대 금지)
+                 * "참고 자료 3에서..." (번호 표기 - 절대 금지)
+                 * "자세한 내용은 [여기](URL)를 참고하시기 바랍니다." (모호한 표현)
+                 * "관련 자료: [제목](URL)" (나열식)
+            8. **독자 가독성을 위한 포맷팅 규칙:**
+               - 각 문단 사이에는 적절한 줄바꿈을 넣어주세요 (빈 줄 1개).
+               - 목록이나 단계별 설명에는 들여쓰기를 사용해주세요 (마크다운 리스트 형식: - 또는 1. ).
+               - 중요한 키워드나 개념은 **굵게** 표시해주세요 (마크다운: **텍스트**).
+               - 전문가 의견이나 인용구는 인용 블록을 사용해주세요 (마크다운: > 인용 내용).
+               - 본문에서 가장 중요한 핵심 문장 1~2개를 선택하여 <mark style="background-color: rgb(255, 255, 204);">핵심 문장</mark> 형식으로 강조해주세요.
+               - 링크는 밑줄 없이 작성해주세요 (마크다운 링크 형식 사용).
+               - 제목 태그(h1, h2, h3)는 적절한 간격을 두고 사용해주세요.
+               - 목록, 인용, 일반 텍스트는 읽기 편하도록 적절한 줄간격을 유지해주세요.
         `;
       // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
       const draft = await callGeminiAPI(prompt);
       if (draft && !draft.startsWith("오류:")) {
-        sendResponse({ success: true, draft: draft });
+        // 생성된 초안에 가독성 포맷팅 후처리 적용
+        let formattedDraft = formatDraftForReadability(draft);
+        
+        // 제목이 포함되어 있지 않으면 h1으로 추가
+        const title = ideaData.title || "";
+        if (title) {
+          // h1 태그나 # 제목 형식이 없으면 추가
+          const hasH1 = /<h1[^>]*>|<h1>|^#\s+/i.test(formattedDraft);
+          if (!hasH1) {
+            // 마크다운 형식이면 # 제목, HTML이면 <h1>제목</h1> 추가
+            if (formattedDraft.includes('<')) {
+              // HTML 형식
+              formattedDraft = `<h1>${title}</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n${formattedDraft}`;
+            } else {
+              // 마크다운 형식
+              formattedDraft = `# ${title}\n\n---\n\n${formattedDraft}`;
+            }
+          } else {
+            // h1이 있지만 구분선이 없으면 추가
+            formattedDraft = formattedDraft.replace(/<\/h1>([^<]*?)(?=<[^/]|$)/gi, (match, afterH1) => {
+              const hasHr = /<hr|<hr\s|---/.test(afterH1);
+              if (!hasHr) {
+                return `</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${afterH1}`;
+              }
+              return match;
+            });
+          }
+        }
+        
+        sendResponse({ success: true, draft: formattedDraft });
       } else {
         sendResponse({ success: false, error: draft });
       }
