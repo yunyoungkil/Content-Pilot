@@ -1,5 +1,4 @@
-// PRD v2.6: AI 템플릿 렌더링 시스템
-import { renderTemplateFromData } from "./thumbnailGenerator.js";
+// 썸네일 생성 기능 제거됨
 
 // 이미지 갤러리 렌더링 및 에디터 삽입 이벤트
 function updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
@@ -215,10 +214,8 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="resource-library-panel" class="workspace-column">
         <div class="resource-tabs">
-          <button class="resource-tab-btn" data-tab="all-scraps" style="font-weight:bold;" title="모든 스크랩">📖</button>
+          <button class="resource-tab-btn active" data-tab="all-scraps" style="font-weight:bold;" title="모든 스크랩">📖</button>
           <button class="resource-tab-btn" data-tab="image-gallery" title="이미지 갤러리">🖼️</button>
-          <button class="resource-tab-btn" data-tab="thumbnail-gen" title="썸네일 생성">🎨</button>
-          <button class="resource-tab-btn" data-tab="ai-image" title="AI 이미지 생성">✨</button>
           <button class="resource-tab-btn" data-tab="template-admin" title="템플릿 관리">⚙️</button>
         </div>
   <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
@@ -229,91 +226,6 @@ export function renderWorkspace(container, ideaData) {
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
           <div class="image-gallery-grid">
             <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
-          </div>
-        </div>
-        <div class="resource-content-area thumbnail-gen-area" id="thumbnail-gen-area" style="display: none;">
-          <div class="ai-image-controls">
-            <!-- FR-R-UI (PRD v2.4): 화면 비율 선택 추가 -->
-            <label class="ai-field" style="display:block;width:100%;margin-bottom:16px;">
-              <div class="ai-field-row">
-                <span>화면 비율</span>
-                <span class="ai-hint">생성할 썸네일의 가로:세로 비율을 선택하세요</span>
-              </div>
-              <div class="ai-aspect-ratio-group" style="display:flex;gap:8px;margin-top:8px;">
-                <button class="aspect-ratio-btn active" data-aspect="16:9">16:9 (유튜브)</button>
-                <button class="aspect-ratio-btn" data-aspect="1:1">1:1 (인스타그램)</button>
-                <button class="aspect-ratio-btn" data-aspect="9:16">9:16 (쇼츠)</button>
-              </div>
-            </label>
-            <label class="ai-field" style="display:block;width:100%;">
-              <div class="ai-field-row">
-                <span>썸네일 스타일 선택</span>
-                <span class="ai-hint">목차에 맞는 썸네일 예시를 생성합니다</span>
-              </div>
-              <select id="ai-thumb-style-select" class="ai-select" style="width:100%;margin-top:8px;">
-                <option value="">템플릿 선택...</option>
-              </select>
-            </label>
-            <div class="ai-row ai-actions" style="margin-top:16px;">
-              <button id="ai-generate-thumb-btn" class="ai-generate-btn">썸네일 예시 생성</button>
-              <span class="ai-cost-note">목차 기반으로 썸네일 예시를 자동 생성합니다.</span>
-            </div>
-            <div class="ai-row ai-message-row">
-              <span id="ai-thumbnail-message" class="loading-images">화면 비율과 스타일을 선택하고 썸네일을 생성해보세요.</span>
-            </div>
-          </div>
-          <div class="ai-image-grid" id="ai-thumbnail-grid">
-            <!-- 썸네일 예시가 여기에 표시됩니다 -->
-          </div>
-        </div>
-        <div class="resource-content-area ai-image-area" id="ai-image-area" style="display: none;">
-          <div class="ai-image-controls">
-            <label class="ai-field" style="display:block;width:100%;">
-              <div class="ai-field-row">
-                <span>프롬프트</span>
-                <span class="ai-hint">최대 250자 · 기본 프롬프트 자동 생성</span>
-              </div>
-              <textarea id="ai-image-prompt" maxlength="250" class="ai-prompt-textarea" placeholder="어떤 이미지를 원하시나요? 예: 미래지향적 도시의 야경, 네온사인, 시네마틱 라이트"></textarea>
-            </label>
-            <div class="ai-row">
-              <label>
-                <span class="ai-label">스타일</span>
-                <select id="ai-image-style" class="ai-select">
-                  <option value="realistic">실사 사진</option>
-                  <option value="3d">3D 렌더</option>
-                  <option value="watercolor">수채화</option>
-                  <option value="cyberpunk">사이버펑크</option>
-                  <option value="none">기본/기타</option>
-                </select>
-              </label>
-               <label>
-                <span class="ai-label">종횡비</span>
-                <select id="ai-image-aspect" class="ai-select">
-                  <option value="1:1">1:1</option>
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                </select>
-              </label>
-              <label>
-                <span class="ai-label">생성 개수</span>
-                <select id="ai-image-count" class="ai-select">
-                  <option value="1">1장</option>
-                  <option value="2">2장</option>
-                  <option value="3" selected>3장</option>
-                  <option value="4">4장</option>
-                </select>
-              </label>
-            </div>
-            <div class="ai-row ai-actions">
-              <button id="ai-generate-btn" class="ai-generate-btn">이미지 생성하기</button>
-              <span class="ai-cost-note">유의: 생성은 비용이 발생할 수 있습니다. 데모에서는 로컬/플레이스홀더 방식으로 생성됩니다.</span>
-            </div>
-            <div class="ai-row ai-message-row">
-              <span id="ai-image-message" class="loading-images">프롬프트를 입력하고 이미지를 생성해보세요.</span>
-            </div>
-          </div>
-          <div class="ai-image-grid" id="ai-image-grid">
-            <!-- 메시지는 위 ai-image-message에서 출력 -->
           </div>
         </div>
         <div class="resource-content-area template-admin-area" id="template-admin-area" style="display: none;">
@@ -669,33 +581,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const tabBtns = resourceLibrary.querySelectorAll(".resource-tab-btn");
   const allScrapsArea = resourceLibrary.querySelector(".all-scraps-area");
   const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
-  const thumbnailGenArea = resourceLibrary.querySelector(".thumbnail-gen-area");
-  const aiImageArea = resourceLibrary.querySelector(".ai-image-area");
   const templateAdminArea = resourceLibrary.querySelector(
     ".template-admin-area"
   );
-  const aiPromptInput = resourceLibrary.querySelector("#ai-image-prompt");
-  const aiStyleSelect = resourceLibrary.querySelector("#ai-image-style");
-  const aiAspectSelect = resourceLibrary.querySelector("#ai-image-aspect");
-  const aiCountSelect = resourceLibrary.querySelector("#ai-image-count");
-  const aiGenerateBtn = resourceLibrary.querySelector("#ai-generate-btn");
-  const aiImageGrid = resourceLibrary.querySelector("#ai-image-grid");
-
-  // 기본 프롬프트 자동 생성
-  function buildDefaultPromptFromIdea(idea) {
-    const base = (idea?.title || "").trim();
-    const tags = Array.isArray(idea?.tags)
-      ? idea.tags.filter((t) => t && t !== "#AI-추천").slice(0, 4)
-      : [];
-    const tagLine = tags.length ? `, ${tags.join(", ")}` : "";
-    const quality = ", high quality photo, professional, cinematic lighting";
-    return `${base}${tagLine}${quality}`.trim();
-  }
-  if (aiPromptInput) {
-    aiPromptInput.value = buildDefaultPromptFromIdea(ideaData);
-  }
-  // 스타일 기본값: 실사 사진
-  if (aiStyleSelect) aiStyleSelect.value = "realistic";
 
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -705,9 +593,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
       imageGalleryArea.style.display =
         tab === "image-gallery" ? "block" : "none";
-      thumbnailGenArea.style.display =
-        tab === "thumbnail-gen" ? "block" : "none";
-      aiImageArea.style.display = tab === "ai-image" ? "block" : "none";
       templateAdminArea.style.display =
         tab === "template-admin" ? "block" : "none";
 
@@ -722,19 +607,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           }
         });
       }
-    });
-  });
-
-  // FR-R-UI (PRD v2.4): 화면 비율 버튼 이벤트 리스너
-  const aspectRatioBtns =
-    thumbnailGenArea?.querySelectorAll(".aspect-ratio-btn");
-  aspectRatioBtns?.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      // 모든 버튼에서 active 제거
-      aspectRatioBtns.forEach((b) => b.classList.remove("active"));
-      // 클릭한 버튼에 active 추가
-      btn.classList.add("active");
-      console.log(`[PRD v2.4] 화면 비율 선택됨: ${btn.dataset.aspect}`);
     });
   });
 
@@ -981,230 +853,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
   }
 
-  // --- AI 이미지 생성 기능 ---
-  function mapAspectToSize(aspect) {
-    switch (aspect) {
-      case "16:9":
-        return { width: 1024, height: 576 };
-      case "9:16":
-        return { width: 576, height: 1024 };
-      case "1:1":
-      default:
-        return { width: 768, height: 768 };
-    }
-  }
-
-  function renderAIGallery(images) {
-    if (!aiImageGrid) return;
-    if (!images || images.length === 0) {
-      aiImageGrid.innerHTML = "<p>이미지 생성 결과가 없습니다.</p>";
-      return;
-    }
-    const html = images
-      .map(
-        (dataUrl, idx) => `
-        <div class="ai-thumb-wrap">
-          <img src="${dataUrl}" class="ai-generated-thumb" draggable="true" alt="AI 생성 이미지 ${
-          idx + 1
-        }" />
-          <div class="ai-thumb-actions">
-            <button class="ai-insert-btn" data-url="${dataUrl}">에디터에 삽입</button>
-            <a class="ai-download-btn" href="${dataUrl}" download="cp-ai-image-${
-          idx + 1
-        }.png">다운로드</a>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-    aiImageGrid.innerHTML = html;
-
-    aiImageGrid.querySelectorAll(".ai-generated-thumb").forEach((img) => {
-      img.addEventListener("click", () => {
-        sendCommand("insert-image", { url: img.src });
-        sendCommand("focus");
-      });
-      img.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("application/x-cp-ai-image", img.src);
-        e.dataTransfer.effectAllowed = "copy";
-      });
-    });
-    aiImageGrid.querySelectorAll(".ai-insert-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const url = btn.getAttribute("data-url");
-        if (url) {
-          sendCommand("insert-image", { url });
-          sendCommand("focus");
-        }
-      });
-    });
-  }
-
-  if (aiGenerateBtn) {
-    // 썸네일 예시 생성 버튼 이벤트는 한 번만 등록 (중복 방지)
-    const aiGenerateThumbBtn = resourceLibrary.querySelector(
-      "#ai-generate-thumb-btn"
-    );
-    if (aiGenerateThumbBtn && !aiGenerateThumbBtn.__cp_thumb_event) {
-      aiGenerateThumbBtn.addEventListener("click", async () => {
-        const aiThumbnailGrid =
-          resourceLibrary.querySelector("#ai-thumbnail-grid");
-        const aiThumbnailMessage = resourceLibrary.querySelector(
-          "#ai-thumbnail-message"
-        );
-
-        // 선택된 화면 비율에 따른 캔버스 크기 설정 (PRD v2.4)
-        const activeAspectBtn = resourceLibrary.querySelector(
-          ".aspect-ratio-btn.active"
-        );
-        const aspect = activeAspectBtn?.dataset?.aspect || "16:9";
-        let width = 1280,
-          height = 720;
-        if (aspect === "1:1") {
-          width = 1080;
-          height = 1080;
-        } else if (aspect === "9:16") {
-          width = 720;
-          height = 1280;
-        }
-
-        // 선택된 템플릿 로드
-        const selectEl = resourceLibrary.querySelector(
-          "#ai-thumb-style-select"
-        );
-        const selectedId = selectEl?.value || "";
-        if (!selectedId) {
-          if (aiThumbnailMessage)
-            aiThumbnailMessage.textContent =
-              "먼저 썸네일 스타일(템플릿)을 선택해주세요.";
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: "템플릿을 먼저 선택해주세요.",
-            },
-            "*"
-          );
-          return;
-        }
-
-        const template = (templateCache || []).find(
-          (t) => String(t.id) === String(selectedId)
-        );
-        if (!template) {
-          if (aiThumbnailMessage)
-            aiThumbnailMessage.textContent =
-              "선택한 템플릿을 찾을 수 없습니다.";
-          return;
-        }
-
-        // 목차 기반 동적 텍스트 구성
-        let outline = [];
-        if (
-          window.__cp_workspace_ideaData &&
-          Array.isArray(window.__cp_workspace_ideaData.outline)
-        ) {
-          outline = window.__cp_workspace_ideaData.outline;
-        } else if (Array.isArray(ideaData?.outline)) {
-          outline = ideaData.outline;
-        }
-        if (!outline.length) outline = ["고퀄리티 썸네일"];
-
-        // [FR-U2] 렌더링 및 갤러리 구성 - for...of로 변환하여 await 지원
-        const cards = [];
-        for (let idx = 0; idx < outline.length; idx++) {
-          const title = outline[idx];
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-
-          try {
-            // [FR-U2] renderTemplateFromData는 async 함수이므로 await 필요
-            await renderTemplateFromData(ctx, template, {
-              slogan: title,
-              visualizationCue: "PREVIEW",
-            });
-          } catch (e) {
-            console.error("[Thumbnail Gen] 렌더 오류", e);
-            ctx.fillStyle = "#FFCFCF";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = "#B00020";
-            ctx.font = "bold 24px Arial";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText("렌더링 오류", canvas.width / 2, canvas.height / 2);
-          }
-
-          const dataUrl = canvas.toDataURL("image/png");
-          cards.push(
-            `<div class="ai-thumb-wrap"><img src="${dataUrl}" class="ai-generated-thumb" alt="썸네일 예시${
-              idx + 1
-            }" /></div>`
-          );
-        }
-
-        aiThumbnailGrid.innerHTML = cards.join("");
-        if (aiThumbnailMessage)
-          aiThumbnailMessage.textContent = `썸네일 예시 ${outline.length}개를 생성했습니다.`;
-
-        // 생성된 썸네일 클릭 시 에디터에 삽입
-        aiThumbnailGrid
-          .querySelectorAll(".ai-generated-thumb")
-          .forEach((img) => {
-            img.addEventListener("click", () => {
-              sendCommand("insert-image", { url: img.src });
-              sendCommand("focus");
-            });
-          });
-      });
-      aiGenerateThumbBtn.__cp_thumb_event = true;
-    }
-    aiGenerateBtn.addEventListener("click", () => {
-      const prompt = (aiPromptInput?.value || "").trim();
-      const aiMessage = resourceLibrary.querySelector("#ai-image-message");
-      if (!prompt) {
-        if (aiMessage) aiMessage.textContent = "프롬프트를 입력해주세요.";
-        window.parent.postMessage(
-          { action: "cp_show_toast", message: "프롬프트를 입력해주세요." },
-          "*"
-        );
-        return;
-      }
-      const style = aiStyleSelect?.value || "realistic";
-      const aspect = aiAspectSelect?.value || "1:1";
-      const { width, height } = mapAspectToSize(aspect);
-      const count = parseInt(aiCountSelect?.value, 10) || 3;
-
-      aiGenerateBtn.disabled = true;
-      const prevText = aiGenerateBtn.textContent;
-      aiGenerateBtn.textContent = "✨ 생성 중...";
-      if (aiMessage) aiMessage.textContent = "이미지를 생성하는 중입니다...";
-      aiImageGrid.innerHTML = "";
-
-      chrome.runtime.sendMessage(
-        {
-          action: "ai_generate_images",
-          data: { prompt, style, aspect, count, size: { width, height } },
-        },
-        (response) => {
-          aiGenerateBtn.disabled = false;
-          aiGenerateBtn.textContent = prevText;
-          if (response?.success) {
-            if (aiMessage) aiMessage.textContent = "이미지 생성 완료!";
-            renderAIGallery(response.images || []);
-          } else {
-            const msg = response?.error || "이미지 생성 실패";
-            if (aiMessage) aiMessage.textContent = msg;
-            aiImageGrid.innerHTML = "";
-            window.parent.postMessage(
-              { action: "cp_show_toast", message: "❌ " + msg },
-              "*"
-            );
-          }
-        }
-      );
-    });
-  }
+  // 썸네일 생성 및 AI 이미지 생성 기능 제거됨
 
   // 드래그앤드랍 삭제: 스크랩을 리스트 바깥에 드롭하면 연결 해제
   linkedScrapsList.addEventListener("dragstart", (e) => {
@@ -1363,12 +1012,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     try {
       scrapData = JSON.parse(e.dataTransfer.getData("application/json"));
     } catch (error) {
-      // scrap json이 아니면 AI 이미지 드래그 여부 확인
-      const aiDataUrl = e.dataTransfer.getData("application/x-cp-ai-image");
-      if (aiDataUrl && e.target.closest("#main-editor-panel")) {
-        sendCommand("insert-image", { url: aiDataUrl });
-        sendCommand("focus");
-      }
+      // AI 이미지 드래그 앤 드롭 기능 제거됨
       return;
     }
 
