@@ -254,17 +254,10 @@ function addKanbanEventListeners(container) {
 
     if (e.target.closest(".track-performance-btn")) {
       e.stopPropagation();
-      const url = prompt("발행된 콘텐츠의 전체 URL을 입력하세요:", "https://");
-      if (url && url.startsWith("http")) {
-        chrome.runtime.sendMessage({
-          action: "link_published_url",
-          data: {
-            cardId: card.dataset.id,
-            url: url,
-            status: card.dataset.status,
-          },
-        });
-      }
+      const cardId = card.dataset.id;
+      const status = card.dataset.status;
+      const cardData = allKanbanData[status]?.[cardId];
+      showPublishUrlModal(container, cardId, status, cardData?.title || "");
     } else {
       const cardId = card.dataset.id;
       const status = card.dataset.status;
@@ -343,4 +336,222 @@ function renderHeaderAndTabs(shadowRoot) {
   if (headerArea) {
     headerArea.innerHTML = renderPanelHeader();
   }
+}
+
+/**
+ * 발행 URL 연결 모달을 표시하는 함수
+ */
+function showPublishUrlModal(container, cardId, status, cardTitle) {
+  // 기존 모달이 있으면 제거
+  const existingModal = container.querySelector(".cp-publish-url-modal-wrap");
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  // URL 히스토리 가져오기
+  chrome.storage.local.get(["publishUrlHistory"], (result) => {
+    const urlHistory = result.publishUrlHistory || [];
+
+    // 모달 생성
+    const modalWrap = document.createElement("div");
+    modalWrap.className = "cp-publish-url-modal-wrap";
+    modalWrap.innerHTML = `
+      <div class="cp-modal-backdrop"></div>
+      <div class="cp-publish-url-modal">
+        <div class="cp-modal-header">
+          <div class="cp-modal-title">🔗 발행 URL 연결</div>
+          <button class="cp-modal-close" title="닫기">×</button>
+        </div>
+        <div class="cp-modal-body">
+          <div class="publish-url-form">
+            <label class="form-label">
+              <span>콘텐츠 제목</span>
+              <input type="text" class="form-input" value="${cardTitle || ""}" readonly disabled>
+            </label>
+            <label class="form-label">
+              <span>발행 URL <span class="required">*</span></span>
+              <input type="url" id="publish-url-input" class="form-input" placeholder="https://example.com/article" autocomplete="off">
+              <div id="url-history-list" class="url-history-list" style="display: none;"></div>
+            </label>
+            <div id="platform-detection" class="platform-detection" style="display: none;">
+              <span class="platform-badge"></span>
+            </div>
+            <div id="url-error" class="url-error" style="display: none;"></div>
+          </div>
+        </div>
+        <div class="cp-modal-footer">
+          <button class="cp-btn cp-btn-secondary" id="cancel-btn">취소</button>
+          <button class="cp-btn cp-btn-primary" id="submit-btn">연결하기</button>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(modalWrap);
+
+    const urlInput = modalWrap.querySelector("#publish-url-input");
+    const urlHistoryList = modalWrap.querySelector("#url-history-list");
+    const platformDetection = modalWrap.querySelector("#platform-detection");
+    const platformBadge = platformDetection.querySelector(".platform-badge");
+    const urlError = modalWrap.querySelector("#url-error");
+    const submitBtn = modalWrap.querySelector("#submit-btn");
+    const cancelBtn = modalWrap.querySelector("#cancel-btn");
+    const closeBtn = modalWrap.querySelector(".cp-modal-close");
+    const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
+
+    // URL 유효성 검증 및 플랫폼 감지
+    function validateAndDetectPlatform(url) {
+      urlError.style.display = "none";
+      platformDetection.style.display = "none";
+
+      if (!url || url.trim() === "") {
+        return false;
+      }
+
+      // URL 형식 검증
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.protocol.startsWith("http")) {
+          urlError.textContent = "올바른 HTTP/HTTPS URL을 입력해주세요.";
+          urlError.style.display = "block";
+          return false;
+        }
+
+        // 플랫폼 자동 감지
+        const hostname = urlObj.hostname.toLowerCase();
+        let platform = "";
+        let platformIcon = "";
+
+        if (hostname.includes("blog.naver.com") || hostname.includes("blog.me")) {
+          platform = "네이버 블로그";
+          platformIcon = "📝";
+        } else if (hostname.includes("brunch.co.kr")) {
+          platform = "브런치";
+          platformIcon = "✍️";
+        } else if (hostname.includes("medium.com")) {
+          platform = "Medium";
+          platformIcon = "📄";
+        } else if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+          platform = "유튜브";
+          platformIcon = "▶️";
+        } else if (hostname.includes("tistory.com")) {
+          platform = "티스토리";
+          platformIcon = "📚";
+        } else if (hostname.includes("velog.io")) {
+          platform = "벨로그";
+          platformIcon = "💻";
+        } else {
+          platform = "기타";
+          platformIcon = "🌐";
+        }
+
+        platformBadge.textContent = `${platformIcon} ${platform}`;
+        platformDetection.style.display = "block";
+        return true;
+      } catch (e) {
+        urlError.textContent = "올바른 URL 형식이 아닙니다.";
+        urlError.style.display = "block";
+        return false;
+      }
+    }
+
+    // URL 히스토리 표시
+    function showUrlHistory() {
+      if (urlHistory.length === 0) {
+        urlHistoryList.style.display = "none";
+        return;
+      }
+
+      const filteredHistory = urlHistory
+        .filter(url => url.toLowerCase().includes(urlInput.value.toLowerCase()))
+        .slice(0, 5);
+
+      if (filteredHistory.length === 0 || !urlInput.value) {
+        urlHistoryList.style.display = "none";
+        return;
+      }
+
+      urlHistoryList.innerHTML = filteredHistory
+        .map(url => `<div class="url-history-item">${url}</div>`)
+        .join("");
+
+      urlHistoryList.style.display = "block";
+
+      // 히스토리 항목 클릭 이벤트
+      urlHistoryList.querySelectorAll(".url-history-item").forEach(item => {
+        item.addEventListener("click", () => {
+          urlInput.value = item.textContent;
+          urlHistoryList.style.display = "none";
+          validateAndDetectPlatform(urlInput.value);
+        });
+      });
+    }
+
+    // 이벤트 리스너
+    urlInput.addEventListener("input", (e) => {
+      validateAndDetectPlatform(e.target.value);
+      showUrlHistory();
+    });
+
+    urlInput.addEventListener("focus", () => {
+      if (urlInput.value) {
+        showUrlHistory();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!modalWrap.contains(e.target)) {
+        urlHistoryList.style.display = "none";
+      }
+    });
+
+    const cleanup = () => {
+      modalWrap.remove();
+    };
+
+    submitBtn.addEventListener("click", () => {
+      const url = urlInput.value.trim();
+      if (!validateAndDetectPlatform(url)) {
+        return;
+      }
+
+      // URL 히스토리에 추가 (중복 제거)
+      const newHistory = [url, ...urlHistory.filter(h => h !== url)].slice(0, 10);
+      chrome.storage.local.set({ publishUrlHistory: newHistory });
+
+      // 성과 추적 시작
+      chrome.runtime.sendMessage({
+        action: "link_published_url",
+        data: {
+          cardId: cardId,
+          url: url,
+          status: status,
+        },
+      }, (response) => {
+        if (response && response.success) {
+          showToast("✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.");
+          cleanup();
+        } else {
+          showToast("❌ URL 연결 실패: " + (response?.error || "알 수 없는 오류"));
+        }
+      });
+    });
+
+    cancelBtn.addEventListener("click", cleanup);
+    closeBtn.addEventListener("click", cleanup);
+    backdrop.addEventListener("click", cleanup);
+
+    // ESC 키로 닫기
+    const handleKeydown = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+        document.removeEventListener("keydown", handleKeydown);
+      }
+    };
+    document.addEventListener("keydown", handleKeydown);
+
+    // 모달 표시 후 입력 필드에 포커스
+    setTimeout(() => {
+      urlInput.focus();
+    }, 100);
+  });
 }

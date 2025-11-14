@@ -3183,7 +3183,16 @@ async function updateAllPerformanceMetrics() {
  * @param {object} contentInfo - { id, path, url }
  */
 async function updateSinglePerformanceMetric(contentInfo) {
+  const startTime = Date.now();
+  const logContext = {
+    cardId: contentInfo.id,
+    url: contentInfo.url,
+    timestamp: new Date().toISOString(),
+  };
+
   try {
+    console.log(`[성과 지표 수집 시작]`, logContext);
+
     // 저장된 Google 인증 정보 및 채널 연동 시 설정한 ID들을 가져옵니다.
     const { googleAuthToken, myChannels } = await new Promise((resolve) =>
       chrome.storage.local.get(["googleAuthToken", "channels"], (result) => {
@@ -3198,35 +3207,78 @@ async function updateSinglePerformanceMetric(contentInfo) {
     );
 
     if (!googleAuthToken) {
-      console.warn(
-        "Google 계정이 연동되지 않아 성과 지표를 수집할 수 없습니다."
-      );
+      const errorMsg = "Google 계정이 연동되지 않아 성과 지표를 수집할 수 없습니다.";
+      console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
+      
+      // Firebase에 에러 상태 저장
+      await firebase
+        .database()
+        .ref(contentInfo.path)
+        .child("performance")
+        .update({
+          lastUpdatedAt: Date.now(),
+          error: errorMsg,
+          errorType: "AUTH_MISSING",
+        });
       return;
     }
 
     // 블로그 URL을 기반으로 해당 블로그에 설정된 GA Property ID를 찾습니다.
-    const blogInfo = myChannels.blogs.find((b) =>
-      contentInfo.url.includes(new URL(b.inputUrl).hostname)
-    );
+    const blogInfo = myChannels.blogs.find((b) => {
+      try {
+        return contentInfo.url.includes(new URL(b.inputUrl).hostname);
+      } catch {
+        return false;
+      }
+    });
     const gaPropertyId = blogInfo?.gaPropertyId;
 
     if (!gaPropertyId || !adSenseAccountId) {
-      console.warn(
-        `성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId}, AdSense: ${adSenseAccountId})`
-      );
+      const errorMsg = `성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId || "없음"}, AdSense: ${adSenseAccountId || "없음"})`;
+      console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
+      
+      // Firebase에 에러 상태 저장
+      await firebase
+        .database()
+        .ref(contentInfo.path)
+        .child("performance")
+        .update({
+          lastUpdatedAt: Date.now(),
+          error: errorMsg,
+          errorType: "ID_MISSING",
+        });
       return;
     }
 
-    const [analyticsData, adsenseData] = await Promise.all([
+    // GA4와 AdSense 데이터를 병렬로 수집
+    const [analyticsData, adsenseData] = await Promise.allSettled([
       getAnalyticsData(googleAuthToken, gaPropertyId, contentInfo.url),
       getAdsenseData(googleAuthToken, adSenseAccountId, contentInfo.url),
     ]);
 
+    // 결과 처리
+    const analyticsResult = analyticsData.status === "fulfilled" 
+      ? analyticsData.value 
+      : { error: analyticsData.reason?.message || "알 수 없는 오류" };
+    
+    const adsenseResult = adsenseData.status === "fulfilled"
+      ? adsenseData.value
+      : { error: adsenseData.reason?.message || "알 수 없는 오류" };
+
     const performanceData = {
-      ...analyticsData,
-      ...adsenseData,
+      ...analyticsResult,
+      ...adsenseResult,
       lastUpdatedAt: Date.now(),
+      collectionDuration: Date.now() - startTime,
     };
+
+    // 에러가 있는 경우 기록
+    if (analyticsResult.error || adsenseResult.error) {
+      performanceData.collectionErrors = {
+        analytics: analyticsResult.error || null,
+        adsense: adsenseResult.error || null,
+      };
+    }
 
     // Firebase에 'performance' 자식 노드로 데이터 업데이트
     await firebase
@@ -3234,32 +3286,69 @@ async function updateSinglePerformanceMetric(contentInfo) {
       .ref(contentInfo.path)
       .child("performance")
       .update(performanceData);
-    console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료.`);
+
+    const duration = Date.now() - startTime;
+    console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료 (${duration}ms)`, {
+      ...logContext,
+      duration,
+      hasErrors: !!(analyticsResult.error || adsenseResult.error),
+    });
   } catch (error) {
-    console.error(
-      `성과 지표 업데이트 중 오류 발생 (${contentInfo.url}):`,
-      error
-    );
+    const duration = Date.now() - startTime;
+    const errorDetails = {
+      ...logContext,
+      duration,
+      error: error.message,
+      stack: error.stack,
+      errorType: "UNEXPECTED_ERROR",
+    };
+
+    console.error(`[성과 지표 업데이트 중 오류 발생]`, errorDetails);
+
+    // Firebase에 에러 상태 저장
+    try {
+      await firebase
+        .database()
+        .ref(contentInfo.path)
+        .child("performance")
+        .update({
+          lastUpdatedAt: Date.now(),
+          error: error.message,
+          errorType: "UNEXPECTED_ERROR",
+          collectionDuration: duration,
+        });
+    } catch (firebaseError) {
+      console.error(`[Firebase 업데이트 실패]`, firebaseError);
+    }
   }
 }
 
 /**
- * [G-14] Google Analytics Data API를 호출하여 지표를 가져옵니다. (구현 필요)
+ * [G-14] Google Analytics Data API를 호출하여 지표를 가져옵니다.
+ * 재시도 로직과 상세 로그를 포함합니다.
  */
-async function getAnalyticsData(token, propertyId, url) {
+async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   const pagePath = new URL(url).pathname;
+  const MAX_RETRIES = 3;
 
   try {
-    const response = await fetch(API_URL, {
+    // 기본 지표 요청
+    const basicMetricsResponse = await fetch(API_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
         dimensions: [{ name: "pagePath" }],
         metrics: [
           { name: "screenPageViews" },
           { name: "averageSessionDuration" },
+          { name: "sessions" },
+          { name: "screenPageViewsPerSession" },
+          { name: "bounceRate" },
         ],
         dimensionFilter: {
           filter: {
@@ -3269,45 +3358,248 @@ async function getAnalyticsData(token, propertyId, url) {
         },
       }),
     });
-    const data = await response.json();
-    const row = data.rows?.[0];
-    return {
-      pageviews: parseInt(row?.metricValues?.[0]?.value || "0", 10),
-      avgSessionDuration: parseFloat(row?.metricValues?.[1]?.value || "0.0"),
+
+    if (!basicMetricsResponse.ok) {
+      const errorData = await basicMetricsResponse.json().catch(() => ({}));
+      throw new Error(`GA4 API 오류 (${basicMetricsResponse.status}): ${errorData.error?.message || basicMetricsResponse.statusText}`);
+    }
+
+    const basicData = await basicMetricsResponse.json();
+    const basicRow = basicData.rows?.[0];
+
+    // 유입 경로 및 시간대별 데이터 요청 (별도 API 호출)
+    let trafficSourceData = {};
+    let hourlyTrafficData = {};
+
+    try {
+      // 유입 경로 데이터
+      const trafficSourceResponse = await fetch(API_URL, {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+          dimensions: [
+            { name: "pagePath" },
+            { name: "sessionSource" },
+            { name: "sessionMedium" },
+          ],
+          metrics: [{ name: "sessions" }],
+          dimensionFilter: {
+            filter: {
+              fieldName: "pagePath",
+              stringFilter: { matchType: "EXACT", value: pagePath },
+            },
+          },
+          orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+          limit: 5,
+        }),
+      });
+
+      if (trafficSourceResponse.ok) {
+        const trafficData = await trafficSourceResponse.json();
+        if (trafficData.rows && trafficData.rows.length > 0) {
+          trafficSourceData = {
+            topSources: trafficData.rows.slice(0, 5).map(row => ({
+              source: row.dimensionValues[1]?.value || "직접",
+              medium: row.dimensionValues[2]?.value || "none",
+              sessions: parseInt(row.metricValues[0]?.value || "0", 10),
+            })),
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[GA4] 유입 경로 데이터 수집 실패:", e.message);
+    }
+
+    try {
+      // 시간대별 트래픽 데이터
+      const hourlyResponse = await fetch(API_URL, {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
+          dimensions: [
+            { name: "pagePath" },
+            { name: "hour" },
+          ],
+          metrics: [{ name: "screenPageViews" }],
+          dimensionFilter: {
+            filter: {
+              fieldName: "pagePath",
+              stringFilter: { matchType: "EXACT", value: pagePath },
+            },
+          },
+        }),
+      });
+
+      if (hourlyResponse.ok) {
+        const hourlyData = await hourlyResponse.json();
+        if (hourlyData.rows && hourlyData.rows.length > 0) {
+          hourlyTrafficData = {
+            hourlyViews: hourlyData.rows.map(row => ({
+              hour: parseInt(row.dimensionValues[1]?.value || "0", 10),
+              views: parseInt(row.metricValues[0]?.value || "0", 10),
+            })),
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
+    }
+
+    const result = {
+      pageviews: parseInt(basicRow?.metricValues?.[0]?.value || "0", 10),
+      avgSessionDuration: parseFloat(basicRow?.metricValues?.[1]?.value || "0.0"),
+      sessions: parseInt(basicRow?.metricValues?.[2]?.value || "0", 10),
+      pagesPerSession: parseFloat(basicRow?.metricValues?.[3]?.value || "0.0"),
+      bounceRate: parseFloat(basicRow?.metricValues?.[4]?.value || "0.0"),
+      ...trafficSourceData,
+      ...hourlyTrafficData,
     };
+
+    console.log(`[GA4] 성과 지표 수집 완료 (${url}):`, result);
+    return result;
   } catch (error) {
-    console.error("GA 데이터 요청 실패:", error);
-    return { pageviews: 0, avgSessionDuration: 0 };
+    console.error(`[GA4] 데이터 요청 실패 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
+      url,
+      propertyId,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // 재시도 로직
+    if (retryCount < MAX_RETRIES) {
+      const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
+      console.log(`[GA4] ${delay}ms 후 재시도...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return getAnalyticsData(token, propertyId, url, retryCount + 1);
+    }
+
+    // 최종 실패 시 기본값 반환
+    return {
+      pageviews: 0,
+      avgSessionDuration: 0,
+      sessions: 0,
+      pagesPerSession: 0,
+      bounceRate: 0,
+      error: error.message,
+    };
   }
 }
 
 /**
- * [G-14] AdSense Management API를 호출하여 지표를 가져옵니다. (구현 필요)
+ * [G-14] AdSense Management API를 호출하여 지표를 가져옵니다.
+ * 재시도 로직과 상세 로그를 포함합니다.
  */
-async function getAdsenseData(token, accountId, url) {
-  // AdSense API는 'accounts/{accountId}' 형식을 요구합니다.
+async function getAdsenseData(token, accountId, url, retryCount = 0) {
   const parentAccount = `accounts/${accountId}`;
   const API_URL = `https://adsense.googleapis.com/v2/${parentAccount}/reports:generate`;
+  const MAX_RETRIES = 3;
 
   try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        dateRange: "LAST_30_DAYS",
-        metrics: ["ESTIMATED_EARNINGS", "PAGE_VIEWS_RPM"],
-        dimensions: ["URL_CHANNEL_NAME"],
-        filters: [`URL_CHANNEL_NAME=="${url}"`],
-      }),
-    });
-    const data = await response.json();
-    const row = data.rows?.[0]?.cells;
-    return {
-      estimatedEarnings: parseFloat(row?.[1]?.value || "0.0"),
-      pageRPM: parseFloat(row?.[2]?.value || "0.0"),
-    };
+    // URL 정규화 (도메인만 추출하여 필터링 정확도 향상)
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname;
+    const path = urlObj.pathname;
+
+    // 여러 필터 전략 시도
+    const filterStrategies = [
+      `URL_CHANNEL_NAME=="${url}"`, // 전체 URL
+      `URL_CHANNEL_NAME=="${path}"`, // 경로만
+      `URL_CHANNEL_NAME=="${domain}"`, // 도메인만
+    ];
+
+    let adsenseData = null;
+    let lastError = null;
+
+    for (const filter of filterStrategies) {
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRange: "LAST_30_DAYS",
+            metrics: [
+              "ESTIMATED_EARNINGS",
+              "PAGE_VIEWS_RPM",
+              "CLICKS",
+              "PAGE_VIEWS",
+            ],
+            dimensions: ["URL_CHANNEL_NAME"],
+            filters: [filter],
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`AdSense API 오류 (${response.status}): ${errorData.error?.message || response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.rows && data.rows.length > 0) {
+          const row = data.rows[0]?.cells;
+          if (row && row.length > 0) {
+            const clicks = parseFloat(row[2]?.value || "0.0");
+            const pageViews = parseFloat(row[3]?.value || "0.0");
+            const ctr = pageViews > 0 ? (clicks / pageViews) * 100 : 0;
+
+            adsenseData = {
+              estimatedEarnings: parseFloat(row[0]?.value || "0.0"),
+              pageRPM: parseFloat(row[1]?.value || "0.0"),
+              clicks: clicks,
+              pageViews: pageViews,
+              ctr: parseFloat(ctr.toFixed(2)),
+            };
+            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filter}):`, adsenseData);
+            break; // 성공하면 루프 종료
+          }
+        }
+      } catch (filterError) {
+        lastError = filterError;
+        console.warn(`[AdSense] 필터 전략 실패 (${filter}):`, filterError.message);
+        continue; // 다음 필터 전략 시도
+      }
+    }
+
+    if (!adsenseData) {
+      throw lastError || new Error("모든 필터 전략이 실패했습니다.");
+    }
+
+    return adsenseData;
   } catch (error) {
-    console.error("AdSense 데이터 요청 실패:", error);
-    return { estimatedEarnings: 0, pageRPM: 0 };
+    console.error(`[AdSense] 데이터 요청 실패 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
+      url,
+      accountId,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // 재시도 로직
+    if (retryCount < MAX_RETRIES) {
+      const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
+      console.log(`[AdSense] ${delay}ms 후 재시도...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return getAdsenseData(token, accountId, url, retryCount + 1);
+    }
+
+    // 최종 실패 시 기본값 반환
+    return {
+      estimatedEarnings: 0,
+      pageRPM: 0,
+      clicks: 0,
+      pageViews: 0,
+      ctr: 0,
+      error: error.message,
+    };
   }
 }
