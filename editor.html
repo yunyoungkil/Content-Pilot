@@ -46,18 +46,58 @@
       }
 
       /* W-11: 툴바 높이 자동 조정 */
-      .ql-toolbar {
+      .ql-toolbar,
+      .ql-toolbar.ql-snow {
         min-height: 40px;
         height: auto;
         max-height: none;
-        border: 1px solid #ccc;
         box-sizing: border-box;
         padding: 8px !important;
         margin: 0;
-        border-bottom: none;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
+        border: none !important; /* border 제거 */
+        gap: 2px; /* 아이콘 간 간격 */
+      }
+
+      /* 툴바 아이콘 정렬 최적화 */
+      .ql-toolbar .ql-formats {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+
+      .ql-toolbar .ql-formats:last-child {
+        margin-right: 0;
+      }
+
+      /* 툴바 버튼 정렬 개선 */
+      .ql-toolbar button,
+      .ql-toolbar .ql-picker {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        vertical-align: middle;
+        margin: 0;
+      }
+
+      /* 툴바 버튼 간격 조정 */
+      .ql-toolbar button + button,
+      .ql-toolbar .ql-picker + button,
+      .ql-toolbar button + .ql-picker {
+        margin-left: 0;
+      }
+
+      /* 툴바 구분선 추가 (선택사항) */
+      .ql-toolbar .ql-formats:not(:last-child)::after {
+        content: '';
+        width: 1px;
+        height: 20px;
+        background-color: #e0e0e0;
+        margin-left: 4px;
+        margin-right: 4px;
       }
 
       .ql-editor {
@@ -66,8 +106,6 @@
         min-height: 0; /* W-11: Flexbox 오버플로우 방지 */
         padding: 16px;
         color: #333;
-        border: 1px solid #ccc;
-        border-top: none;
         overflow-y: auto; /* 편집기 내부 스크롤만 허용 */
         overflow-x: hidden;
         overflow-wrap: break-word;

@@ -46,6 +46,54 @@ function renderImageGallery(linkedScrapsData) {
   }
   return result;
 }
+
+// 파이어베이스 전체 스크랩에서 이미지 갤러리 업데이트
+function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand) {
+  const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
+  if (!imageGalleryGrid) return;
+  
+  const imageSet = new Set();
+  allScraps.forEach((scrap) => {
+    if (scrap.image) imageSet.add(scrap.image);
+    if (Array.isArray(scrap.allImages)) {
+      scrap.allImages.forEach((url) => imageSet.add(url));
+    }
+  });
+  
+  const imageUrls = Array.from(imageSet);
+  
+  if (imageUrls.length === 0) {
+    imageGalleryGrid.innerHTML =
+      "<p style='text-align:center;color:#888;padding:20px;'>이미지가 없습니다.</p>";
+    return;
+  }
+  
+  imageGalleryGrid.innerHTML = imageUrls
+    .map(
+      (url) => `
+      <div class="gallery-thumb-wrap" draggable="true" data-image-url="${url}">
+        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
+      </div>
+    `
+    )
+    .join("");
+  
+  // 클릭으로 이미지 삽입
+  imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
+    img.addEventListener("click", () => {
+      sendCommand("insert-image", { url: img.src });
+      sendCommand("focus");
+    });
+  });
+  
+  // 드래그앤드랍으로 이미지 삽입
+  imageGalleryGrid.querySelectorAll(".gallery-thumb-wrap").forEach((wrap) => {
+    wrap.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", wrap.dataset.imageUrl);
+      e.dataTransfer.effectAllowed = "copy";
+    });
+  });
+}
 // js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
 import { shortenLink } from "../utils.js";
@@ -181,29 +229,14 @@ export function renderWorkspace(container, ideaData) {
 
   container.innerHTML = `
     <div class="workspace-container">
-      <div id="ai-briefing-panel" class="workspace-column">
-        <h2>✨ AI 브리핑</h2>
-        ${editorKeywordSectionHtml}
-        <div class="ai-briefing-content">
-          <h4>추천 목차</h4>
-          <ul class="outline-list">
-            ${outlineHtml}
-          </ul>
-          <h4>추천 검색어</h4>
-          <ul>
-            ${searchesHtml}
-          </ul>
-        </div>
-      </div>
-
       <div id="main-editor-panel" class="workspace-column" style="display: flex; flex-direction: column; min-height: 0;">
         ${draftActionsHtml}
-        <div style="flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;">
+        <div style="flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px;">
           <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
             "editor.html"
-          )}" frameborder="0" style="flex: 1 1 0; min-height: 0; width: 100%; display: block; border: none; border-radius: 0 0 6px 6px; background: white; overflow: hidden;"></iframe>
-          <div id="linked-scraps-section" style="flex-shrink: 0;">
-            <div class="scrap-list linked-scraps-list" data-idea-id="${
+          )}" frameborder="0" style="flex: 1 1 0; min-height: 0; width: 100%; display: block; border: 1.5px solid #e9ecef; border-radius: 8px; background: white; overflow: hidden;"></iframe>
+          <div id="linked-scraps-section" style="flex-shrink: 0; margin-top: 0;">
+            <div class="scrap-list linked-scraps-list empty-state" data-idea-id="${
               ideaData.id
             }">
               <p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>
@@ -214,42 +247,44 @@ export function renderWorkspace(container, ideaData) {
 
       <div id="resource-library-panel" class="workspace-column">
         <div class="resource-tabs">
-          <button class="resource-tab-btn active" data-tab="all-scraps" style="font-weight:bold;" title="모든 스크랩">📖</button>
+          <button class="resource-tab-btn active" data-tab="ai-briefing" style="font-weight:bold;" title="AI 브리핑">✨</button>
+          <button class="resource-tab-btn" data-tab="outline" title="추천 목차">📄</button>
+          <button class="resource-tab-btn" data-tab="recommended-keywords" title="추천 검색어">🔍</button>
+          <button class="resource-tab-btn" data-tab="all-scraps" title="모든 스크랩">📖</button>
           <button class="resource-tab-btn" data-tab="image-gallery" title="이미지 갤러리">🖼️</button>
-          <button class="resource-tab-btn" data-tab="template-admin" title="템플릿 관리">⚙️</button>
         </div>
-  <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: block;">
+        
+        <div class="resource-content-area ai-briefing-area" id="ai-briefing-area" style="display: block;">
+          ${editorKeywordSectionHtml}
+        </div>
+        
+        <div class="resource-content-area outline-area" id="outline-area" style="display: none;">
+          <div class="ai-briefing-content">
+            <h4>추천 목차</h4>
+            <ul class="outline-list">
+              ${outlineHtml}
+            </ul>
+          </div>
+        </div>
+        
+        <div class="resource-content-area recommended-keywords-area" id="recommended-keywords-area" style="display: none;">
+          <div class="ai-briefing-content">
+            <h4>추천 검색어</h4>
+            <ul>
+              ${searchesHtml}
+            </ul>
+          </div>
+        </div>
+        
+        <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: none;">
           <div class="scrap-list all-scraps-list">
             <p class="loading-scr랩">스크랩 목록을 불러오는 중...</p>
           </div>
         </div>
+        
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
           <div class="image-gallery-grid">
             <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
-          </div>
-        </div>
-        <div class="resource-content-area template-admin-area" id="template-admin-area" style="display: none;">
-          <div class="ai-image-controls">
-            <h4 style="margin:0 0 12px 0;font-size:18px;font-weight:600;">🎨 AI 템플릿 자동 등록</h4>
-            <p style="margin:0 0 20px 0;color:#666;font-size:14px;line-height:1.5;">
-              참고할 썸네일 이미지를 업로드하면, AI가 디자인을 분석하여 새로운 템플릿으로 자동 등록합니다.
-            </p>
-
-            <div id="ai-template-dropzone" class="ai-template-dropzone-area">
-              <span>📁 여기에 템플릿 이미지를 드래그 앤 드롭하세요<br><span style="font-size:13px;color:#888;">또는 클릭하여 파일 선택</span></span>
-            </div>
-            
-            <input type="file" id="ai-template-uploader" accept="image/png, image/jpeg, image/jpg" style="display:none;" />
-            
-            <div class="ai-row ai-message-row" style="margin-top:16px;">
-              <span id="ai-template-message" class="loading-images">드래그 앤 드롭 또는 클릭하여 이미지를 선택하세요.</span>
-            </div>
-          </div>
-          <div class="template-list-area" id="template-list-area">
-            <h4 style="margin-top:24px;">등록된 템플릿 목록</h4>
-            <div class="ai-image-grid" id="template-preview-grid">
-              <p>등록된 템플릿이 여기에 표시됩니다.</p>
-            </div>
           </div>
         </div>
       </div>
@@ -275,9 +310,14 @@ export function renderWorkspace(container, ideaData) {
           .map((s) => createScrapCard(s, false))
           .join("");
 
-        linkedScrapsContainer.innerHTML =
-          linkedScrapsHtml ||
-          "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+        if (linkedScrapsHtml) {
+          linkedScrapsContainer.innerHTML = linkedScrapsHtml;
+          linkedScrapsContainer.classList.remove("empty-state");
+        } else {
+          linkedScrapsContainer.innerHTML =
+            "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+          linkedScrapsContainer.classList.add("empty-state");
+        }
         allScrapsContainer.innerHTML = allScrapsHtml;
 
         // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
@@ -291,6 +331,7 @@ export function renderWorkspace(container, ideaData) {
       } else {
         linkedScrapsContainer.innerHTML =
           "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+        linkedScrapsContainer.classList.add("empty-state");
         allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
 
         // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
@@ -581,29 +622,38 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const tabBtns = resourceLibrary.querySelectorAll(".resource-tab-btn");
   const allScrapsArea = resourceLibrary.querySelector(".all-scraps-area");
   const imageGalleryArea = resourceLibrary.querySelector(".image-gallery-area");
-  const templateAdminArea = resourceLibrary.querySelector(
-    ".template-admin-area"
-  );
+  const aiBriefingArea = resourceLibrary.querySelector("#ai-briefing-area");
+  const outlineArea = resourceLibrary.querySelector("#outline-area");
+  const recommendedKeywordsArea = resourceLibrary.querySelector("#recommended-keywords-area");
 
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       tabBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       const tab = btn.dataset.tab;
-      allScrapsArea.style.display = tab === "all-scraps" ? "block" : "none";
-      imageGalleryArea.style.display =
-        tab === "image-gallery" ? "block" : "none";
-      templateAdminArea.style.display =
-        tab === "template-admin" ? "block" : "none";
-
-      if (tab === "image-gallery") {
-        // 연결된 스크랩 데이터로 이미지 갤러리 갱신
+      
+      // 모든 영역 숨기기
+      aiBriefingArea.style.display = "none";
+      outlineArea.style.display = "none";
+      recommendedKeywordsArea.style.display = "none";
+      allScrapsArea.style.display = "none";
+      imageGalleryArea.style.display = "none";
+      
+      // 선택된 탭에 따라 해당 영역 표시
+      if (tab === "ai-briefing") {
+        aiBriefingArea.style.display = "block";
+      } else if (tab === "outline") {
+        outlineArea.style.display = "block";
+      } else if (tab === "recommended-keywords") {
+        recommendedKeywordsArea.style.display = "block";
+      } else if (tab === "all-scraps") {
+        allScrapsArea.style.display = "block";
+      } else if (tab === "image-gallery") {
+        imageGalleryArea.style.display = "block";
+        // 파이어베이스 전체 스크랩에서 이미지 로드
         chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
           if (response && response.success) {
-            const linkedScrapsData = response.scraps.filter((s) =>
-              ideaData.linkedScraps.includes(s.id)
-            );
-            updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand);
+            updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand);
           }
         });
       }
@@ -900,6 +950,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
           if (linkedScrapsList.children.length === 0) {
             linkedScrapsList.innerHTML =
               "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+            linkedScrapsList.classList.add("empty-state");
           }
         } else {
           alert(
@@ -1008,11 +1059,21 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   workspaceEl.addEventListener("drop", (e) => {
     e.preventDefault();
 
+    // 이미지 갤러리에서 드래그한 이미지 URL 처리
+    const imageUrl = e.dataTransfer.getData("text/plain");
+    if (imageUrl && imageUrl.startsWith("http")) {
+      // 에디터 영역에 이미지 삽입
+      if (e.target.closest("#main-editor-panel") || e.target.closest("#quill-editor-iframe")) {
+        sendCommand("insert-image", { url: imageUrl });
+        sendCommand("focus");
+        return;
+      }
+    }
+
     let scrapData;
     try {
       scrapData = JSON.parse(e.dataTransfer.getData("application/json"));
     } catch (error) {
-      // AI 이미지 드래그 앤 드롭 기능 제거됨
       return;
     }
 
@@ -1038,7 +1099,10 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
         if (response && response.success) {
           const newLinkedCardHtml = createScrapCard(scrapData, true);
           const placeholder = linkedScrapsList.querySelector("p");
-          if (placeholder) placeholder.remove();
+          if (placeholder) {
+            placeholder.remove();
+            linkedScrapsList.classList.remove("empty-state");
+          }
           linkedScrapsList.insertAdjacentHTML("beforeend", newLinkedCardHtml);
 
           if (!ideaData.linkedScraps) ideaData.linkedScraps = [];
@@ -1063,6 +1127,23 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       sendCommand("focus");
     }
   });
+
+  // 에디터 iframe에 드래그앤드랍 이벤트 추가
+  if (editorIframe) {
+    editorIframe.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    });
+
+    editorIframe.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const imageUrl = e.dataTransfer.getData("text/plain");
+      if (imageUrl && imageUrl.startsWith("http")) {
+        sendCommand("insert-image", { url: imageUrl });
+        sendCommand("focus");
+      }
+    });
+  }
 
   if (deleteDraftBtn) {
     deleteDraftBtn.addEventListener("click", () => {
@@ -1105,477 +1186,5 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
     });
   }
 
-  // --- 템플릿 업로더 드래그 앤 드롭 기능 (PRD v2.2: 로컬 파일 + 웹 이미지 URL) ---
-  const templateDropzone = resourceLibrary.querySelector(
-    "#ai-template-dropzone"
-  );
-  const templateUploader = resourceLibrary.querySelector(
-    "#ai-template-uploader"
-  );
-  const templateMessage = resourceLibrary.querySelector("#ai-template-message");
-  const templatePreviewGrid = resourceLibrary.querySelector(
-    "#template-preview-grid"
-  );
-  const thumbStyleSelect = resourceLibrary.querySelector(
-    "#ai-thumb-style-select"
-  );
 
-  // 템플릿 캐시 (전역)
-  let templateCache = [];
-
-  // FR-R-Refresh (PRD v2.3): 마스터 템플릿 새로고침 함수
-  async function refreshAllTemplateData() {
-    try {
-      // 1. Firebase에서 최신 템플릿 목록 가져오기
-      const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage(
-          { action: "get_thumbnail_templates" },
-          resolve
-        );
-      });
-
-      if (!response?.success) {
-        console.error("[Template Refresh] 템플릿 로드 실패:", response?.error);
-        return;
-      }
-
-      // 2. 캐시 업데이트
-      templateCache = response.templates || [];
-      console.log(
-        `[Template Refresh] ✅ 템플릿 ${templateCache.length}개 로드됨`
-      );
-
-      // 3. UI 업데이트
-      populateUserDropdown(templateCache);
-      await populateAdminList(templateCache); // [FR-U1] await 추가
-    } catch (error) {
-      console.error("[Template Refresh] 오류:", error);
-    }
-  }
-
-  // FR5 (수정): 사용자 탭 드롭다운 채우기
-  function populateUserDropdown(templates) {
-    if (!thumbStyleSelect) return;
-
-    // 기존 옵션 제거 (첫 옵션 제외)
-    while (thumbStyleSelect.options.length > 0) {
-      thumbStyleSelect.remove(0);
-    }
-
-    // 기본 템플릿 옵션 추가
-    const defaultOption = document.createElement("option");
-    defaultOption.value = "";
-    defaultOption.textContent = "템플릿 선택";
-    thumbStyleSelect.appendChild(defaultOption);
-
-    // Firebase 템플릿 추가
-    templates.forEach((template) => {
-      const option = document.createElement("option");
-      option.value = template.id;
-      option.textContent = template.name || "이름 없음";
-      thumbStyleSelect.appendChild(option);
-    });
-
-    console.log(
-      `[Template Dropdown] ✅ 드롭다운에 ${templates.length}개 템플릿 추가`
-    );
-  }
-
-  // FR-A-List: 운영자 탭 템플릿 목록 채우기 (캔버스 미리보기 포함)
-  // [FR-U1] async 함수로 변환 - renderTemplateFromData가 Promise 반환
-  async function populateAdminList(templates) {
-    if (!templatePreviewGrid) return;
-
-    if (templates.length === 0) {
-      templatePreviewGrid.innerHTML =
-        '<p style="color:#888;text-align:center;padding:20px;">등록된 템플릿이 없습니다.</p>';
-      return;
-    }
-
-    // 캔버스 미리보기를 포함한 템플릿 카드 생성
-    templatePreviewGrid.innerHTML = "";
-
-    // [FR-U1] forEach 대신 for...of 사용 (await 지원)
-    for (const template of templates) {
-      // 템플릿 카드 컨테이너
-      const card = document.createElement("div");
-      card.className = "template-item";
-      card.dataset.templateId = template.id;
-      card.style.cssText =
-        "border:1px solid #ddd;border-radius:8px;padding:12px;background:#fff;margin-bottom:12px;";
-
-      // 헤더 (이름 + 삭제 버튼)
-      const header = document.createElement("div");
-      header.style.cssText =
-        "display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;";
-
-      const nameEl = document.createElement("strong");
-      nameEl.style.fontSize = "14px";
-      nameEl.textContent = template.name || "이름 없음";
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "admin-delete-template-btn";
-      deleteBtn.dataset.templateId = template.id;
-      deleteBtn.textContent = "삭제";
-      deleteBtn.style.cssText =
-        "background:#d32f2f;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;";
-
-      header.appendChild(nameEl);
-      header.appendChild(deleteBtn);
-
-      // PRD v2.4: 반응형 템플릿 하위 호환성 처리
-      // v2.4 템플릿(비율 기반)인지 v2.3 이하 템플릿(절대 픽셀)인지 감지
-      const isResponsiveTemplate = !template.width && !template.height;
-
-      // 캔버스 미리보기
-      const canvas = document.createElement("canvas");
-      const previewWidth = 280;
-
-      let canvasWidth, canvasHeight, previewHeight;
-
-      if (isResponsiveTemplate) {
-        // PRD v2.4: 반응형 템플릿 - 기본 16:9 비율로 미리보기
-        canvasWidth = 1280;
-        canvasHeight = 720;
-        previewHeight = Math.round((previewWidth * canvasHeight) / canvasWidth);
-        console.log(
-          `[Admin Preview] 반응형 템플릿 "${template.name}" - 16:9 비율로 렌더링`
-        );
-      } else {
-        // PRD v2.3 이하: 절대 픽셀 템플릿
-        canvasWidth = template.width || 600;
-        canvasHeight = template.height || 400;
-        previewHeight = Math.round((previewWidth * canvasHeight) / canvasWidth);
-        console.log(
-          `[Admin Preview] 절대 좌표 템플릿 "${template.name}" - ${canvasWidth}x${canvasHeight}`
-        );
-      }
-
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
-      canvas.style.cssText = `width:${previewWidth}px;height:${previewHeight}px;background:#f5f5f5;border:1px solid #ddd;border-radius:4px;display:block;margin:8px 0;`;
-
-      const ctx = canvas.getContext("2d");
-
-      // [FR-U1] renderTemplateFromData는 async 함수이므로 await 필요
-      try {
-        await renderTemplateFromData(ctx, template, {
-          slogan: "미리보기",
-          visualizationCue: "PREVIEW",
-        });
-      } catch (error) {
-        console.error("[Template Preview] 렌더링 오류:", error);
-        ctx.fillStyle = "#FFCCCC";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#CC0000";
-        ctx.font = "20px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("렌더링 오류", canvas.width / 2, canvas.height / 2);
-      }
-
-      // 템플릿 정보
-      const info = document.createElement("div");
-      info.style.cssText = "font-size:12px;color:#666;";
-
-      if (isResponsiveTemplate) {
-        // PRD v2.4: 반응형 템플릿 정보
-        info.innerHTML = `
-          타입: 반응형 (비율 기반)<br>
-          레이어: ${template.layers?.length || 0}개
-        `;
-      } else {
-        // PRD v2.3 이하: 절대 좌표 템플릿 정보
-        info.innerHTML = `
-          크기: ${template.width || 600} × ${template.height || 400}<br>
-          레이어: ${template.layers?.length || 0}개
-        `;
-      }
-
-      // 카드 조립
-      card.appendChild(header);
-      card.appendChild(canvas);
-      card.appendChild(info);
-      templatePreviewGrid.appendChild(card);
-    } // [FR-U1] for...of 루프 종료
-
-    // FR-A-Delete: 삭제 버튼 이벤트 바인딩
-    const deleteBtns = templatePreviewGrid.querySelectorAll(
-      ".admin-delete-template-btn"
-    );
-    deleteBtns.forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const templateId = btn.dataset.templateId;
-        const templateName =
-          btn.parentElement.querySelector("strong")?.textContent || "템플릿";
-
-        if (!confirm(`"${templateName}"을(를) 삭제하시겠습니까?`)) return;
-
-        // 삭제 요청
-        chrome.runtime.sendMessage(
-          { action: "delete_template", templateId },
-          (response) => {
-            if (response?.success) {
-              window.parent.postMessage(
-                {
-                  action: "cp_show_toast",
-                  message: `✅ "${templateName}" 삭제 완료`,
-                },
-                "*"
-              );
-              // 즉시 새로고침
-              refreshAllTemplateData();
-            } else {
-              window.parent.postMessage(
-                {
-                  action: "cp_show_toast",
-                  message: `❌ 삭제 실패: ${
-                    response?.error || "알 수 없는 오류"
-                  }`,
-                },
-                "*"
-              );
-            }
-          }
-        );
-      });
-    });
-
-    console.log(
-      `[Template Admin] ✅ 관리 목록에 ${templates.length}개 템플릿 추가`
-    );
-  }
-
-  // FR-T4-DnD (v2.2): 공통 업로드 처리 함수 - 중복 코드 제거
-  function processTemplateUpload(uploadData, defaultName = "새 템플릿") {
-    // uploadData = { base64Image: "..." } 또는 { imageUrl: "..." }
-
-    // 템플릿 이름 입력받기
-    const templateName = prompt(
-      "AI가 분석할 이 템플릿의 이름을 입력하세요:",
-      defaultName
-    );
-    if (!templateName) {
-      if (templateMessage) {
-        templateMessage.textContent = "템플릿 등록이 취소되었습니다.";
-        templateMessage.style.color = "#666";
-      }
-      return;
-    }
-
-    // 로딩 상태 표시
-    if (templateMessage) {
-      templateMessage.textContent = "🔄 AI가 이미지를 분석하는 중...";
-      templateMessage.style.color = "#1976d2";
-    }
-
-    // background.js로 데이터 전송
-    chrome.runtime.sendMessage(
-      {
-        action: "analyze_image_for_template",
-        data: { ...uploadData, templateName: templateName },
-      },
-      (response) => {
-        if (response?.success) {
-          if (templateMessage) {
-            templateMessage.textContent =
-              "✅ 템플릿이 성공적으로 등록되었습니다!";
-            templateMessage.style.color = "#2e7d32";
-          }
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: `✅ 템플릿 "${templateName}"이 등록되었습니다.`,
-            },
-            "*"
-          );
-          // FR-T3-DnD (v2.3): 등록 성공 시 즉시 새로고침
-          refreshAllTemplateData();
-        } else {
-          const errorMsg = response?.error || "알 수 없는 오류";
-          if (templateMessage) {
-            templateMessage.textContent = `❌ 템플릿 등록 실패: ${errorMsg}`;
-            templateMessage.style.color = "#d32f2f";
-          }
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: `❌ 템플릿 등록 실패: ${errorMsg}`,
-            },
-            "*"
-          );
-        }
-      }
-    );
-  }
-
-  // FR-T3-DnD (v2.2 수정): 다중 소스 드래그 앤 드롭 이벤트 바인딩
-  if (templateDropzone && templateUploader) {
-    // dragover: 드롭 허용 및 시각적 피드백
-    templateDropzone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      templateDropzone.classList.add("drag-over");
-      templateDropzone.style.borderColor = "#4285F4";
-      templateDropzone.style.background = "#f0f6ff";
-    });
-
-    // dragleave: 시각적 피드백 제거
-    templateDropzone.addEventListener("dragleave", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      templateDropzone.classList.remove("drag-over");
-      templateDropzone.style.borderColor = "#ccc";
-      templateDropzone.style.background = "#f9f9f9";
-    });
-
-    // drop: 다중 소스 처리 (로컬 파일 우선, 웹 URL 차순위)
-    templateDropzone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      templateDropzone.classList.remove("drag-over");
-      templateDropzone.style.borderColor = "#ccc";
-      templateDropzone.style.background = "#f9f9f9";
-
-      // 1순위: 로컬 파일
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-
-        // 파일 유효성 검사
-        if (!file.type.startsWith("image/")) {
-          if (templateMessage) {
-            templateMessage.textContent = "❌ 이미지 파일만 업로드 가능합니다.";
-            templateMessage.style.color = "#d32f2f";
-          }
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: "❌ 이미지 파일만 업로드 가능합니다.",
-            },
-            "*"
-          );
-          return;
-        }
-
-        // Base64 변환 후 공통 함수 호출
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          processTemplateUpload(
-            { base64Image: event.target.result },
-            file.name.replace(/\.[^/.]+$/, "")
-          );
-        };
-        reader.onerror = () => {
-          if (templateMessage) {
-            templateMessage.textContent = "❌ 파일 읽기 실패";
-            templateMessage.style.color = "#d32f2f";
-          }
-          window.parent.postMessage(
-            { action: "cp_show_toast", message: "❌ 파일 읽기 실패" },
-            "*"
-          );
-        };
-        reader.readAsDataURL(file);
-      }
-      // 2순위: 웹 이미지 URL
-      else if (e.dataTransfer.getData("text/uri-list")) {
-        const imageUrl = e.dataTransfer.getData("text/uri-list").trim();
-
-        // URL 유효성 검사 (간단한 체크)
-        if (!imageUrl.startsWith("http")) {
-          if (templateMessage) {
-            templateMessage.textContent = "❌ 유효한 이미지 URL이 아닙니다.";
-            templateMessage.style.color = "#d32f2f";
-          }
-          window.parent.postMessage(
-            {
-              action: "cp_show_toast",
-              message: "❌ 유효한 이미지 URL이 아닙니다.",
-            },
-            "*"
-          );
-          return;
-        }
-
-        // 이미지 확장자 간단 검증 (선택적)
-        const validExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-        const hasValidExt = validExtensions.some((ext) =>
-          imageUrl.toLowerCase().includes(ext)
-        );
-        if (!hasValidExt) {
-          // 경고만 하고 진행 (일부 URL은 확장자가 명확하지 않을 수 있음)
-          console.warn(
-            "⚠️ URL에 이미지 확장자가 명확하지 않습니다. 계속 진행합니다."
-          );
-        }
-
-        // URL을 직접 공통 함수로 전달 (background.js가 fetch 처리)
-        const urlFileName =
-          imageUrl.split("/").pop().split("?")[0] || "웹 이미지";
-        processTemplateUpload({ imageUrl: imageUrl }, urlFileName);
-      }
-      // 기타 (text/html 등): 무시
-      else {
-        if (templateMessage) {
-          templateMessage.textContent =
-            "❌ 이미지 파일 또는 이미지 URL을 드롭해주세요.";
-          templateMessage.style.color = "#d32f2f";
-        }
-      }
-    });
-
-    // click: 폴백 - 파일 선택 다이얼로그 열기
-    templateDropzone.addEventListener("click", () => {
-      templateUploader.click();
-    });
-
-    // change: 폴백 - 로컬 파일 선택 시 처리
-    templateUploader.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      // 파일 유효성 검사
-      if (!file.type.startsWith("image/")) {
-        if (templateMessage) {
-          templateMessage.textContent = "❌ 이미지 파일만 업로드 가능합니다.";
-          templateMessage.style.color = "#d32f2f";
-        }
-        window.parent.postMessage(
-          {
-            action: "cp_show_toast",
-            message: "❌ 이미지 파일만 업로드 가능합니다.",
-          },
-          "*"
-        );
-        return;
-      }
-
-      // Base64 변환 후 공통 함수 호출
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        processTemplateUpload(
-          { base64Image: event.target.result },
-          file.name.replace(/\.[^/.]+$/, "")
-        );
-      };
-      reader.onerror = () => {
-        if (templateMessage) {
-          templateMessage.textContent = "❌ 파일 읽기 실패";
-          templateMessage.style.color = "#d32f2f";
-        }
-        window.parent.postMessage(
-          { action: "cp_show_toast", message: "❌ 파일 읽기 실패" },
-          "*"
-        );
-      };
-      reader.readAsDataURL(file);
-
-      // 동일 파일 재업로드 가능하도록 초기화
-      e.target.value = null;
-    });
-  }
-
-  // FR5 (수정, PRD v2.3): 워크스페이스 진입 시 템플릿 데이터 초기 로드
-  refreshAllTemplateData();
 }
