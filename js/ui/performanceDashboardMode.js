@@ -38,38 +38,59 @@ export function renderPerformanceDashboard(container) {
  * Firebase에서 성과 데이터 로드
  */
 function loadPerformanceData(container) {
+  // Firebase가 있으면 직접 접근, 없으면 background.js를 통해 데이터 가져오기
   const firebase = window.firebase;
-  if (!firebase) {
-    container.querySelector("#perf-dashboard-content").innerHTML = 
-      "<div class='perf-error'>Firebase가 초기화되지 않았습니다.</div>";
-    return;
-  }
-
-  const kanbanRef = firebase.database().ref("kanban");
-  kanbanRef.once("value", (snapshot) => {
-    const allCards = snapshot.val() || {};
-    allPerformanceData = [];
-
-    // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
-    for (const status in allCards) {
-      for (const cardId in allCards[status]) {
-        const card = allCards[status][cardId];
-        if (card.publishedUrl && card.performance && !card.performance.error) {
-          allPerformanceData.push({
-            id: cardId,
-            status: status,
-            title: card.title || "제목 없음",
-            publishedUrl: card.publishedUrl,
-            performance: card.performance,
-            createdAt: card.createdAt || 0,
-            lastUpdatedAt: card.performance.lastUpdatedAt || 0,
-          });
+  
+  if (firebase) {
+    // Firebase 직접 접근
+    const kanbanRef = firebase.database().ref("kanban");
+    kanbanRef.once("value", (snapshot) => {
+      processPerformanceData(snapshot.val() || {}, container);
+    });
+  } else {
+    // background.js를 통해 데이터 가져오기
+    chrome.runtime.sendMessage({ action: "get_kanban_data" });
+    
+    // 실시간 업데이트 리스너 등록 (한 번만)
+    if (!window.performanceDashboardListenerAttached) {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.action === "kanban_data_updated") {
+          const contentEl = container.querySelector("#perf-dashboard-content");
+          if (contentEl) {
+            processPerformanceData(msg.data || {}, container);
+          }
         }
+      });
+      window.performanceDashboardListenerAttached = true;
+    }
+  }
+}
+
+/**
+ * 성과 데이터 처리
+ */
+function processPerformanceData(allCards, container) {
+  allPerformanceData = [];
+
+  // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
+  for (const status in allCards) {
+    for (const cardId in allCards[status]) {
+      const card = allCards[status][cardId];
+      if (card.publishedUrl && card.performance && !card.performance.error) {
+        allPerformanceData.push({
+          id: cardId,
+          status: status,
+          title: card.title || "제목 없음",
+          publishedUrl: card.publishedUrl,
+          performance: card.performance,
+          createdAt: card.createdAt || 0,
+          lastUpdatedAt: card.performance.lastUpdatedAt || 0,
+        });
       }
     }
+  }
 
-    renderPerformanceList(container);
-  });
+  renderPerformanceList(container);
 }
 
 /**

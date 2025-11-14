@@ -230,6 +230,14 @@ export function renderWorkspace(container, ideaData) {
   container.innerHTML = `
     <div class="workspace-container">
       <div id="main-editor-panel" class="workspace-column" style="display: flex; flex-direction: column; min-height: 0;">
+        <div id="workspace-title-header" style="padding: 12px 16px; border-bottom: 1px solid #e9ecef; background: #f8f9fa; border-radius: 8px 8px 0 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" id="workspace-title-input" value="${ideaData.title || "제목 없음"}" 
+              style="flex: 1; font-size: 16px; font-weight: 600; color: #333; border: 1px solid transparent; background: transparent; padding: 4px 8px; border-radius: 4px; outline: none;"
+              placeholder="제목을 입력하세요">
+            <button id="save-title-btn" style="padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer; display: none;">저장</button>
+          </div>
+        </div>
         ${draftActionsHtml}
         <div style="flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px;">
           <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
@@ -625,6 +633,54 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   const aiBriefingArea = resourceLibrary.querySelector("#ai-briefing-area");
   const outlineArea = resourceLibrary.querySelector("#outline-area");
   const recommendedKeywordsArea = resourceLibrary.querySelector("#recommended-keywords-area");
+  
+  // 제목 편집 기능
+  const titleInput = workspaceEl.querySelector("#workspace-title-input");
+  const saveTitleBtn = workspaceEl.querySelector("#save-title-btn");
+  if (titleInput && saveTitleBtn) {
+    let originalTitle = ideaData.title || "";
+    
+    titleInput.addEventListener("input", () => {
+      if (titleInput.value !== originalTitle) {
+        saveTitleBtn.style.display = "block";
+      } else {
+        saveTitleBtn.style.display = "none";
+      }
+    });
+    
+    titleInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        saveTitleBtn.click();
+      }
+    });
+    
+    saveTitleBtn.addEventListener("click", () => {
+      const newTitle = titleInput.value.trim() || "제목 없음";
+      chrome.runtime.sendMessage({
+        action: "update_kanban_card",
+        data: {
+          cardId: ideaData.id,
+          status: ideaData.status,
+          updates: { title: newTitle }
+        }
+      }, (response) => {
+        if (response && response.success) {
+          originalTitle = newTitle;
+          ideaData.title = newTitle;
+          saveTitleBtn.style.display = "none";
+          window.parent.postMessage({
+            action: "cp_show_toast",
+            message: "✅ 제목이 업데이트되었습니다."
+          }, "*");
+        } else {
+          window.parent.postMessage({
+            action: "cp_show_toast",
+            message: "❌ 제목 업데이트 실패"
+          }, "*");
+        }
+      });
+    });
+  }
 
   tabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -766,16 +822,30 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
   function saveCurrentDraft() {
     if (currentEditorContent !== (ideaData.draftContent || "")) {
       console.log("Saving draft...");
+      
+      // 현재 제목, 태그, 롱테일 키워드, 목차, 추천 검색어 수집
+      const currentTitle = titleInput ? titleInput.value.trim() : ideaData.title;
+      const currentTags = ideaData.tags || [];
+      const currentLongTailKeywords = ideaData.longTailKeywords || [];
+      const currentOutline = ideaData.outline || [];
+      const currentRecommendedSearches = ideaData.recommendedSearches || [];
+      
       const saveData = {
         ideaId: ideaData.id,
         status: ideaData.status,
         draft: currentEditorContent,
+        title: currentTitle,
+        tags: currentTags,
+        longTailKeywords: currentLongTailKeywords,
+        outline: currentOutline,
+        recommendedSearches: currentRecommendedSearches,
       };
       chrome.runtime.sendMessage(
         { action: "save_draft_content", data: saveData },
         (saveResponse) => {
           if (saveResponse && saveResponse.success) {
             ideaData.draftContent = currentEditorContent;
+            ideaData.title = currentTitle;
             console.log("Draft saved successfully.");
 
             // ✨ K-6: 상태 자동 이동 후 클라이언트 메모리 업데이트 및 알림

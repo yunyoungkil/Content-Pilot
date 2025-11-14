@@ -71,7 +71,16 @@ function addRealtimeUpdateListener() {
       // 워크스페이스가 열려있고 해당 아이디어 데이터가 업데이트된 경우 워크스페이스 갱신
       if (window.__cp_active_mode === "workspace" && window.__cp_workspace_idea_id) {
         const ideaId = window.__cp_workspace_idea_id;
-        const ideaData = allKanbanData.ideas?.[ideaId];
+        // 모든 상태에서 아이디어 찾기
+        let ideaData = null;
+        let foundStatus = null;
+        for (const status in allKanbanData) {
+          if (allKanbanData[status]?.[ideaId]) {
+            ideaData = allKanbanData[status][ideaId];
+            foundStatus = status;
+            break;
+          }
+        }
         if (ideaData) {
           const shadowRoot = kanbanContainer.getRootNode();
           const container = shadowRoot.querySelector("#cp-main-content");
@@ -80,7 +89,7 @@ function addRealtimeUpdateListener() {
             renderWorkspace(kanbanContainer, {
               ...ideaData,
               id: ideaId,
-              status: "ideas",
+              status: foundStatus,
             });
           }
         }
@@ -201,6 +210,37 @@ function createKanbanCard(id, data, status) {
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;
   const hasPerformance = performance && !performance.error;
+  const isCollecting = performance && performance.collecting === true;
+  
+  // 발행 완료 카드에 성과 추적 상태 및 해지 성과 태그 추가
+  if (status === "done") {
+    // 성과 추적 연결 상태 태그
+    if (data.publishedUrl) {
+      if (isCollecting) {
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag collecting">🔄 수집 중...</span>`;
+      } else if (hasPerformance) {
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag connected">✅ 추적 중</span>`;
+      } else {
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag waiting">⏳ 추적 대기</span>`;
+      }
+    } else {
+      metaInfoHtml += `<span class="kanban-card-meta performance-status-tag not-connected">❌ 미연결</span>`;
+    }
+    
+    // 해지 성과 태그 (성과 데이터가 있을 때만)
+    if (hasPerformance) {
+      const pageviews = performance.pageviews || 0;
+      const earnings = performance.estimatedEarnings || 0;
+      const avgDuration = performance.avgSessionDuration || 0;
+      
+      metaInfoHtml += `
+        <span class="kanban-card-meta performance-summary-tag" title="페이지뷰: ${pageviews.toLocaleString()}, 수익: $${earnings.toFixed(2)}, 체류: ${Math.round(avgDuration)}초">
+          📊 ${pageviews.toLocaleString()}회 / $${earnings.toFixed(2)}
+        </span>
+      `;
+    }
+  }
+  
   if (hasPerformance) {
     card.classList.add("has-performance");
     const pageviews = performance.pageviews || 0;
@@ -219,17 +259,22 @@ function createKanbanCard(id, data, status) {
   }
 
   let actionButtons = ``;
-  // K-3: 초안 삭제 버튼 제거됨
-  if (status === "done" && !data.publishedUrl) {
-    actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
-  } else if (data.publishedUrl) {
-    const earnings = hasPerformance
-      ? `$${(performance.estimatedEarnings || 0).toFixed(2)}`
-      : "대기중";
-    actionButtons += `
-      <a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>
-      ${hasPerformance ? `<button class="view-performance-detail-btn" data-card-id="${id}">📊 상세</button>` : ''}
-    `;
+  // 모든 상태에서 삭제 버튼 추가
+  actionButtons += `<button class="delete-card-btn" title="카드 삭제" data-card-id="${id}">🗑️</button>`;
+  
+  if (status === "done") {
+    if (!data.publishedUrl) {
+      actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
+    } else {
+      const earnings = hasPerformance
+        ? `$${(performance.estimatedEarnings || 0).toFixed(2)}`
+        : "대기중";
+      actionButtons += `
+        <a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>
+        <button class="change-url-btn" title="링크 변경">✏️ 변경</button>
+        ${hasPerformance ? `<button class="view-performance-detail-btn" data-card-id="${id}">📊 상세</button>` : ''}
+      `;
+    }
   }
   card.innerHTML = `
     <div class="kanban-card-body">
@@ -274,12 +319,31 @@ function addKanbanEventListeners(container) {
     const card = e.target.closest(".cp-kanban-card");
     if (!card) return;
 
-    if (e.target.closest(".track-performance-btn")) {
+    if (e.target.closest(".delete-card-btn")) {
+      e.stopPropagation();
+      const cardId = e.target.closest(".delete-card-btn").dataset.cardId;
+      const status = card.dataset.status;
+      const cardData = allKanbanData[status]?.[cardId];
+      const cardTitle = cardData?.title || "제목 없음";
+      
+      if (confirm(`"${cardTitle}" 카드를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+        chrome.runtime.sendMessage({
+          action: "delete_kanban_card",
+          data: { cardId, status }
+        }, (response) => {
+          if (response && response.success) {
+            showToast("✅ 카드가 삭제되었습니다.");
+          } else {
+            showToast("❌ 삭제 실패: " + (response?.error || "알 수 없는 오류"));
+          }
+        });
+      }
+    } else if (e.target.closest(".track-performance-btn") || e.target.closest(".change-url-btn")) {
       e.stopPropagation();
       const cardId = card.dataset.id;
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
-      showPublishUrlModal(container, cardId, status, cardData?.title || "");
+      showPublishUrlModal(container, cardId, status, cardData?.title || "", cardData?.publishedUrl || "");
     } else if (e.target.closest(".view-performance-detail-btn")) {
       e.stopPropagation();
       const cardId = e.target.closest(".view-performance-detail-btn").dataset.cardId;
@@ -371,7 +435,7 @@ function renderHeaderAndTabs(shadowRoot) {
 /**
  * 발행 URL 연결 모달을 표시하는 함수
  */
-function showPublishUrlModal(container, cardId, status, cardTitle) {
+function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl = "") {
   // 기존 모달이 있으면 제거
   const existingModal = container.querySelector(".cp-publish-url-modal-wrap");
   if (existingModal) {
@@ -381,6 +445,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
   // URL 히스토리 가져오기
   chrome.storage.local.get(["publishUrlHistory"], (result) => {
     const urlHistory = result.publishUrlHistory || [];
+    const isEditing = !!existingUrl;
 
     // 모달 생성
     const modalWrap = document.createElement("div");
@@ -389,7 +454,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
       <div class="cp-modal-backdrop"></div>
       <div class="cp-publish-url-modal">
         <div class="cp-modal-header">
-          <div class="cp-modal-title">🔗 발행 URL 연결</div>
+          <div class="cp-modal-title">${isEditing ? "✏️ 발행 URL 변경" : "🔗 발행 URL 연결"}</div>
           <button class="cp-modal-close" title="닫기">×</button>
         </div>
         <div class="cp-modal-body">
@@ -400,7 +465,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
             </label>
             <label class="form-label">
               <span>발행 URL <span class="required">*</span></span>
-              <input type="url" id="publish-url-input" class="form-input" placeholder="https://example.com/article" autocomplete="off">
+              <input type="url" id="publish-url-input" class="form-input" placeholder="https://example.com/article" value="${existingUrl}" autocomplete="off">
               <div id="url-history-list" class="url-history-list" style="display: none;"></div>
             </label>
             <div id="platform-detection" class="platform-detection" style="display: none;">
@@ -427,6 +492,11 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
     const cancelBtn = modalWrap.querySelector("#cancel-btn");
     const closeBtn = modalWrap.querySelector(".cp-modal-close");
     const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
+    
+    // 버튼 텍스트 동적 변경
+    if (isEditing) {
+      submitBtn.textContent = "변경하기";
+    }
 
     // URL 유효성 검증 및 플랫폼 감지
     function validateAndDetectPlatform(url) {
@@ -548,7 +618,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
       const newHistory = [url, ...urlHistory.filter(h => h !== url)].slice(0, 10);
       chrome.storage.local.set({ publishUrlHistory: newHistory });
 
-      // 성과 추적 시작
+      // 성과 추적 시작 (기존 URL이 있으면 변경, 없으면 새로 연결)
       chrome.runtime.sendMessage({
         action: "link_published_url",
         data: {
@@ -558,10 +628,12 @@ function showPublishUrlModal(container, cardId, status, cardTitle) {
         },
       }, (response) => {
         if (response && response.success) {
-          showToast("✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.");
+          showToast(isEditing 
+            ? "✅ 발행 URL이 변경되었습니다. 성과 추적이 다시 시작됩니다." 
+            : "✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.");
           cleanup();
         } else {
-          showToast("❌ URL 연결 실패: " + (response?.error || "알 수 없는 오류"));
+          showToast("❌ URL " + (isEditing ? "변경" : "연결") + " 실패: " + (response?.error || "알 수 없는 오류"));
         }
       });
     });

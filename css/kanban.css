@@ -5,23 +5,90 @@
   background: #e8f0fe;
   color: #1967d2;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 11px;
   border-radius: 6px;
-  padding: 2px 8px;
-  margin-left: 6px;
+  padding: 3px 8px;
   box-shadow: 0 1px 4px rgba(25, 103, 210, 0.08);
   letter-spacing: 0.02em;
   vertical-align: middle;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   border: none;
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .draft-status-count:hover,
 .delete-draft-btn:hover,
 .linked-scraps-count:hover {
   background: #d2e3fc;
   color: #174ea6;
+}
+
+/* 성과 추적 상태 태그 스타일 */
+.performance-status-tag {
+  background: #e8f0fe;
+  color: #1967d2;
+  font-weight: 600;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 3px 8px;
+  box-shadow: 0 1px 4px rgba(25, 103, 210, 0.08);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.performance-status-tag.connected {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.performance-status-tag.waiting {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.performance-status-tag.not-connected {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.performance-status-tag.collecting {
+  background: #e3f2fd;
+  color: #1976d2;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* 해지 성과 태그 스타일 */
+.performance-summary-tag {
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  color: #1b5e20;
+  font-weight: 600;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 3px 8px;
+  box-shadow: 0 1px 4px rgba(46, 125, 50, 0.15);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  cursor: help;
+  flex-shrink: 0;
 }
 
 /* --- 칸반 보드 UI 스타일 --- */
@@ -149,12 +216,14 @@
 /* 카드 상단 태그 */
 .card-top-tags {
   display: flex;
-  flex-direction: column;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
   margin-bottom: 0px;
   min-height: 20px;
+  max-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .kanban-card-tag {
@@ -192,17 +261,20 @@
 /* 카드 하단 푸터 */
 .kanban-card-footer {
   border-top: 1px solid #f1f3f5;
-  padding: 6px 12px; /* 패딩 조정 */
+  padding: 8px 12px;
   display: flex;
-  justify-content: space-between; /* 양쪽 정렬 */
-  align-items: center;
-  min-height: 28px; /* 최소 높이 확보 */
+  flex-direction: column;
+  gap: 6px;
+  min-height: auto;
 }
 
 .kanban-card-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  row-gap: 4px;
+  max-width: 100%;
 }
 
 .linked-scraps-count {
@@ -215,6 +287,9 @@
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 2px;
 }
 
 .kanban-action-btn {
@@ -255,19 +330,47 @@
 
 /* 성과 추적, 수익 링크 스타일 */
 .track-performance-btn,
-.performance-link {
-  font-size: 12px;
+.performance-link,
+.change-url-btn {
+  font-size: 11px;
   font-weight: 500;
   color: #1967d2;
   text-decoration: none;
   padding: 4px 8px;
   border-radius: 4px;
   transition: background-color 0.2s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .track-performance-btn:hover,
-.performance-link:hover {
+.performance-link:hover,
+.change-url-btn:hover {
   background-color: #e8f0fe;
+}
+
+/* 삭제 버튼 스타일 */
+.delete-card-btn {
+  font-size: 14px;
+  font-weight: 500;
+  color: #ea4335;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.delete-card-btn:hover {
+  background-color: #fce8e6;
+  opacity: 1;
 }
 
 /* 발행 URL 연결 모달 스타일 */
@@ -477,9 +580,10 @@
 
 .performance-preview {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 4px;
   flex-wrap: wrap;
+  width: 100%;
 }
 
 .perf-metric {
@@ -493,7 +597,7 @@
 }
 
 .view-performance-detail-btn {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: #1967d2;
   text-decoration: none;
@@ -504,6 +608,8 @@
   cursor: pointer;
   transition: background-color 0.2s;
   margin-left: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .view-performance-detail-btn:hover {
@@ -1163,4 +1269,322 @@
   font-weight: 600;
   color: #fff;
   white-space: nowrap;
+}
+
+/* 성과 리포트 스타일 */
+.performance-report-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+  background: #f8f9fa;
+}
+
+.perf-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.perf-report-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+}
+
+.perf-report-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.perf-control-btn.primary {
+  background: #1967d2;
+  color: #fff;
+  border-color: #1967d2;
+}
+
+.perf-control-btn.primary:hover {
+  background: #174ea6;
+  border-color: #174ea6;
+}
+
+.perf-report-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.perf-report-welcome {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.perf-report-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.perf-report-welcome h3 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  color: #333;
+}
+
+.perf-report-welcome p {
+  margin: 0 0 24px 0;
+  color: #666;
+  font-size: 16px;
+}
+
+.perf-analysis-loading {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.loading-spinner {
+  font-size: 48px;
+  margin-bottom: 16px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.perf-report-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.perf-report-section {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e5eaf0;
+}
+
+.section-title {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e5eaf0;
+}
+
+.perf-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.perf-summary-card {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.summary-label {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.summary-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+}
+
+.perf-pattern-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pattern-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+
+.pattern-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.pattern-metric .metric-label {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.pattern-metric .metric-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pattern-metric .metric-value.highlight {
+  color: #34a853;
+}
+
+.pattern-metric .metric-value.warning {
+  color: #ea4335;
+}
+
+.pattern-tags {
+  margin-top: 16px;
+}
+
+.pattern-tags h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tag.success-tag {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.tag.failure-tag {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.pattern-insights {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #1967d2;
+}
+
+.pattern-insights h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.insight-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #555;
+}
+
+.insight-text strong {
+  color: #333;
+  font-weight: 600;
+}
+
+.insight-text ul {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.insight-text li {
+  margin-bottom: 4px;
+}
+
+.perf-optimization,
+.perf-tag-strategy {
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #34a853;
+}
+
+.perf-content-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.perf-content-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e5eaf0;
+}
+
+.content-rank {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1967d2;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.content-info {
+  flex: 1;
+}
+
+.content-info h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.content-metrics {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: #666;
+}
+
+.perf-report-footer {
+  text-align: center;
+  padding: 20px;
+  color: #999;
+  font-size: 13px;
+  border-top: 1px solid #e5eaf0;
+  margin-top: 24px;
+}
+
+.perf-error {
+  text-align: center;
+  padding: 40px;
+  color: #ea4335;
+}
+
+.perf-error h3 {
+  margin: 0 0 12px 0;
+  font-size: 20px;
 }

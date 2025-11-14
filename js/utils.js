@@ -18,7 +18,7 @@ export function showToast(msg) {
   toast.style.padding = "13px 32px";
   toast.style.borderRadius = "10px";
   toast.style.boxShadow = "0 2px 12px rgba(0,0,0,0.13)";
-  toast.style.zIndex = "99999";
+  toast.style.zIndex = "2147483648"; /* 패널보다 위에 표시 */
   toast.style.opacity = "0";
   toast.style.transition = "opacity 0.3s";
   document.body.appendChild(toast);
@@ -72,7 +72,7 @@ export function showConfirmationToast(message, onConfirm) {
     padding: 16px 24px;
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-    z-index: 2147483647;
+    z-index: 2147483648; /* 패널보다 위에 표시 */
     display: flex;
     align-items: center;
     gap: 20px;

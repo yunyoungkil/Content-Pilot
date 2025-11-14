@@ -1884,6 +1884,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
 
     return true;
+  } else if (msg.action === "call_gemini") {
+    (async () => {
+      try {
+        const result = await callGeminiAPI(msg.prompt);
+        sendResponse({ success: true, text: result });
+      } catch (error) {
+        console.error("Gemini API 호출 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   } else if (msg.action === "generate_blog_ideas") {
     const { myContent, competitorContent, myAnalysisSummary } = msg.data;
 
@@ -2592,6 +2603,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
       })
       .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+
+    return true;
+  } else if (msg.action === "delete_kanban_card") {
+    const { cardId, status } = msg.data;
+    if (!cardId || !status) {
+      sendResponse({ success: false, error: "카드 ID 또는 상태가 없습니다." });
+      return true;
+    }
+
+    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    cardRef
+      .remove()
+      .then(() => {
+        console.log(`[칸반 카드 삭제] ${status}/${cardId} 삭제 완료`);
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error("[칸반 카드 삭제 실패]", error);
+        sendResponse({ success: false, error: error.message });
+      });
+
+    return true;
+  } else if (msg.action === "update_kanban_card") {
+    const { cardId, status, updates } = msg.data;
+    if (!cardId || !status || !updates) {
+      sendResponse({ success: false, error: "필수 정보가 부족합니다." });
+      return true;
+    }
+
+    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    cardRef
+      .update(updates)
+      .then(() => {
+        console.log(`[칸반 카드 업데이트] ${status}/${cardId} 업데이트 완료`);
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error("[칸반 카드 업데이트 실패]", error);
         sendResponse({ success: false, error: error.message });
       });
 
@@ -3407,6 +3458,16 @@ async function updateSinglePerformanceMetric(contentInfo) {
   try {
     console.log(`[성과 지표 수집 시작]`, logContext);
 
+    // 수집 시작 상태를 Firebase에 저장
+    await firebase
+      .database()
+      .ref(contentInfo.path)
+      .child("performance")
+      .update({
+        collecting: true,
+        collectingStartedAt: Date.now(),
+      });
+
     // 저장된 Google 인증 정보 및 채널 연동 시 설정한 ID들을 가져옵니다.
     const { googleAuthToken, myChannels } = await new Promise((resolve) =>
       chrome.storage.local.get(["googleAuthToken", "channels"], (result) => {
@@ -3424,7 +3485,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       const errorMsg = "Google 계정이 연동되지 않아 성과 지표를 수집할 수 없습니다.";
       console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
       
-      // Firebase에 에러 상태 저장
+      // Firebase에 에러 상태 저장 (수집 완료 상태 포함)
       await firebase
         .database()
         .ref(contentInfo.path)
@@ -3433,6 +3494,8 @@ async function updateSinglePerformanceMetric(contentInfo) {
           lastUpdatedAt: Date.now(),
           error: errorMsg,
           errorType: "AUTH_MISSING",
+          collecting: false,
+          collectingCompletedAt: Date.now(),
         });
       return;
     }
@@ -3451,7 +3514,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       const errorMsg = `성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId || "없음"}, AdSense: ${adSenseAccountId || "없음"})`;
       console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
       
-      // Firebase에 에러 상태 저장
+      // Firebase에 에러 상태 저장 (수집 완료 상태 포함)
       await firebase
         .database()
         .ref(contentInfo.path)
@@ -3460,6 +3523,8 @@ async function updateSinglePerformanceMetric(contentInfo) {
           lastUpdatedAt: Date.now(),
           error: errorMsg,
           errorType: "ID_MISSING",
+          collecting: false,
+          collectingCompletedAt: Date.now(),
         });
       return;
     }
@@ -3494,12 +3559,16 @@ async function updateSinglePerformanceMetric(contentInfo) {
       };
     }
 
-    // Firebase에 'performance' 자식 노드로 데이터 업데이트
+    // Firebase에 'performance' 자식 노드로 데이터 업데이트 (수집 완료 상태 포함)
     await firebase
       .database()
       .ref(contentInfo.path)
       .child("performance")
-      .update(performanceData);
+      .update({
+        ...performanceData,
+        collecting: false,
+        collectingCompletedAt: Date.now(),
+      });
 
     const duration = Date.now() - startTime;
     console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료 (${duration}ms)`, {
@@ -3519,7 +3588,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
 
     console.error(`[성과 지표 업데이트 중 오류 발생]`, errorDetails);
 
-    // Firebase에 에러 상태 저장
+    // Firebase에 에러 상태 저장 (수집 완료 상태 포함)
     try {
       await firebase
         .database()
@@ -3530,6 +3599,8 @@ async function updateSinglePerformanceMetric(contentInfo) {
           error: error.message,
           errorType: "UNEXPECTED_ERROR",
           collectionDuration: duration,
+          collecting: false,
+          collectingCompletedAt: Date.now(),
         });
     } catch (firebaseError) {
       console.error(`[Firebase 업데이트 실패]`, firebaseError);

@@ -12,6 +12,7 @@ export function renderPanelHeader() {
      { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
      { key: "kanban", label: "기획 보드", color: "#34A853" },
      { key: "performance", label: "성과 대시보드", color: "#9C27B0" },
+     { key: "report", label: "성과 리포트", color: "#FF6B6B" },
      { key: "draft", label: "초안 작성", color: "#FBBC05" },
      { key: "channel", label: "채널 연동", color: "#EA4335" },
   ];
