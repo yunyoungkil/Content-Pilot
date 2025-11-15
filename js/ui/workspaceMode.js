@@ -1996,7 +1996,9 @@ function setupImagePlaceholderListeners(workspaceEl, ideaData) {
               saveCurrentDraft();
             }, 500);
           } else {
-            alert("초안 생성에 실패했습니다: " + (response?.error || "알 수 없는 오류"));
+            const errorMessage = response?.error || "알 수 없는 오류";
+            console.error("[초안 생성 실패] 응답:", response);
+            alert(`초안 생성에 실패했습니다: ${errorMessage}`);
           }
         }
       );

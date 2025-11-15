@@ -3383,7 +3383,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                - 목록, 인용, 일반 텍스트는 읽기 편하도록 적절한 줄간격을 유지해주세요.
         `;
       // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
-      const draft = await callGeminiAPI(prompt);
+      let draft;
+      try {
+        draft = await callGeminiAPI(prompt);
+      } catch (error) {
+        console.error('[generate_draft_from_idea] Gemini API 호출 실패:', error);
+        if (sendResponse) {
+          sendResponse({ 
+            success: false, 
+            error: `Gemini API 호출 실패: ${error.message || '알 수 없는 오류'}` 
+          });
+        }
+        return;
+      }
+      
+      if (!draft) {
+        console.error('[generate_draft_from_idea] 초안이 비어있습니다.');
+        if (sendResponse) {
+          sendResponse({ 
+            success: false, 
+            error: '초안이 생성되지 않았습니다. Gemini API 응답을 확인해주세요.' 
+          });
+        }
+        return;
+      }
+      
+      if (draft.startsWith("오류:")) {
+        console.error('[generate_draft_from_idea] Gemini API 오류:', draft);
+        if (sendResponse) {
+          sendResponse({ 
+            success: false, 
+            error: draft.replace(/^오류:\s*/, '') || 'Gemini API에서 오류가 발생했습니다.' 
+          });
+        }
+        return;
+      }
+      
       if (draft && !draft.startsWith("오류:")) {
         // 생성된 초안에 가독성 포맷팅 후처리 적용
         let formattedDraft = formatDraftForReadability(draft);
@@ -3511,8 +3546,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       } else {
         // sendResponse가 이미 호출되었는지 확인
+        console.error('[generate_draft_from_idea] 초안 생성 실패:', draft);
         if (sendResponse) {
-          sendResponse({ success: false, error: draft });
+          const errorMsg = draft 
+            ? (draft.startsWith("오류:") ? draft.replace(/^오류:\s*/, '') : draft) 
+            : '초안 생성에 실패했습니다.';
+          sendResponse({ 
+            success: false, 
+            error: errorMsg || '알 수 없는 오류가 발생했습니다.' 
+          });
         }
       }
     })().catch((error) => {
