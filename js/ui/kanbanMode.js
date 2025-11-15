@@ -343,9 +343,17 @@ function createKanbanCard(id, data, status) {
       `;
     }
   }
+  // SEO 제목이 있으면 표시
+  const seoTitleHtml = data.seoTitle && data.seoTitle !== data.title
+    ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
+        <span style="color: #4285f4;">SEO:</span> ${data.seoTitle}
+      </div>`
+    : '';
+  
   card.innerHTML = `
     <div class="kanban-card-body">
       <span class="kanban-card-title">${data.title || "제목 없음"}</span>
+      ${seoTitleHtml}
       <div class="card-top-tags">${topTagsHtml}</div>
     </div>
     <div class="kanban-card-footer">

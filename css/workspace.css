@@ -137,11 +137,22 @@
   display: flex;
   border-bottom: 1px solid #f0f0f0;
   margin-bottom: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -ms-overflow-style: none;
+}
+.resource-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+.resource-tabs::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 2px;
 }
 .resource-tab-btn {
   background: none;
   border: none;
-  padding: 12px 20px 10px 20px;
+  padding: 12px 16px 10px 16px;
   font-size: 16px;
   color: #6c757d;
   cursor: pointer;
@@ -149,6 +160,8 @@
   transition: all 0.2s;
   font-weight: 600;
   letter-spacing: -0.2px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .resource-tab-btn:hover {
@@ -166,11 +179,21 @@
   overflow: hidden;
   display: none;
   flex-direction: column;
+  min-height: 0; /* flexbox에서 overflow 작동을 위해 필요 */
 }
 .resource-content-area[style*="display: block"] {
   display: flex !important;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+}
+.publish-info-area {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.publish-info-panel {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .image-gallery-grid {
   display: grid;
@@ -317,19 +340,29 @@
 
 .linked-scraps-list {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   background-color: #f1f3f5;
   border: 1.5px solid #e9ecef; /* 에디터와 동일한 실선, 색상 */
   border-radius: 0 0 6px 6px; /* 아래쪽만 둥글게, 에디터와 연결된 느낌 */
   padding: 12px;
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   transition: border-color 0.2s, background-color 0.2s;
   box-sizing: border-box;
   min-height: 48px; /* 최소 높이 보장 */
   align-items: center; /* 내용이 없을 때 중앙 정렬 */
+  scrollbar-width: thin;
+  -ms-overflow-style: none;
+}
+.linked-scraps-list::-webkit-scrollbar {
+  height: 6px;
+}
+.linked-scraps-list::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 3px;
 }
 
 /* placeholder가 있을 때만 column 방향으로 변경 */

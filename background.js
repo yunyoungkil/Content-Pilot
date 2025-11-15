@@ -3351,11 +3351,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             5. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
             6. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
             7. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
-            8. **이미지 삽입 위치 및 프롬프트**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 <img-placeholder type="main" prompt="이미지 생성 프롬프트" /> (메인 이미지 1개) 또는 <img-placeholder type="body" prompt="이미지 생성 프롬프트" /> (본문 이미지) 태그를 삽입해주세요. 
-               - 메인 이미지는 제목 바로 아래에 1개
-               - 본문 이미지는 각 섹션 사이에 3~4개 배치
-               - 각 플레이스홀더에는 해당 위치의 콘텐츠에 맞는 구체적인 이미지 생성 프롬프트를 포함해주세요 (예: "갤럭시 탭 S11 울트라를 사용하는 모습, 현대적인 사무실 배경, 고품질 제품 사진 스타일")
-            9. **참고 자료 링크 통합 방법 (매우 중요):**
+            8. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
+              - 메인 이미지는 제목 바로 아래에 1개: "[이미지 생성 프롬프트 (영어): High-quality product photo of Galaxy Tab S11 Ultra being used in a modern office setting, professional lighting, 8K resolution, photorealistic style] [이미지 생성 프롬프트 (한글): 갤럭시 탭 S11 울트라를 현대적인 사무실에서 사용하는 모습, 전문적인 조명, 고품질 제품 사진, 사실적 스타일]" 형식으로 영어와 한글 두 개를 모두 삽입
+              - 본문 이미지는 각 섹션 사이에 3~4개 배치: "[이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]" 형식으로 영어와 한글 두 개를 모두 삽입
+              - 각 프롬프트는 해당 위치의 콘텐츠에 맞는 구체적인 이미지 생성 프롬프트를 포함해주세요
+              - 태그나 특수 형식 없이 순수 텍스트로만 작성해주세요
+              - 프롬프트 작성 가이드 (Gemini 이미지 생성 가이드 참고 - https://ai.google.dev/gemini-api/docs/image-generation?hl=ko):
+                * 주제, 컨텍스트, 스타일을 명확하게 설명하세요
+                * 구체적인 키워드와 수정자를 사용하세요 (예: "high-quality", "natural lighting", "professional photography", "8K resolution")
+                * 이미지의 구도, 색상, 분위기를 묘사하세요
+                * 카메라 앵글과 조명 조건을 명시하세요 (예: "wide-angle lens", "natural light", "indoor lighting")
+                * 아트 스타일이나 사진 스타일을 지정하세요 (예: "photorealistic", "minimalism", "impressionism")
+                * 텍스트가 필요한 경우 "high-quality text rendering"을 명시하세요
+                * 반복적 수정이 가능하므로 초기 프롬프트는 핵심 요소에 집중하세요
+                * 영어 프롬프트는 상세하고 기술적으로, 한글 프롬프트는 의미를 정확히 전달하도록 작성하세요
+            10. **썸네일 정보 생성**: 초안 생성 후 다음 정보를 JSON 형식으로 반환해주세요:
+              - 썸네일 텍스트 이미지 프롬프트 (영어): 썸네일 이미지 생성을 위한 영어 프롬프트 (상세하고 기술적으로, Gemini 이미지 생성 가이드 참고)
+              - 썸네일 텍스트 이미지 프롬프트 (한글): 썸네일 이미지 생성을 위한 한글 프롬프트 (의미 전달 중심)
+              - 썸네일 문구: 썸네일에 표시할 짧은 문구 (12자 이내, 핵심 키워드)
+              형식: <썸네일정보>{"thumbnailPromptEn": "영어 프롬프트", "thumbnailPromptKo": "한글 프롬프트", "thumbnailText": "썸네일 문구"}</썸네일정보>
+              - **썸네일 문구 작성 요령 (매우 중요)**: 
+                * 심플하지만 호기심을 유발하는 문구로 작성해주세요.
+                * 단순한 키워드 나열(예: "스마트홈 컨트롤")이 아니라, 독자의 호기심을 자극하는 문구여야 합니다.
+                * 예시:
+                  - 나쁜 예: "스마트홈 컨트롤", "갤럭시 탭", "제품 소개"
+                  - 좋은 예: "집 전체를 손끝으로", "미래가 온다", "이것만 있으면 끝", "당신의 집이 스마트해진다", "한 번의 터치로 모든 것 제어"
+                * 핵심 키워드를 포함하되, 그것을 감싸는 매력적인 표현으로 작성해주세요.
+                * 12자 이내로 제한되지만, 그 안에서 최대한 임팩트 있게 작성해주세요.
+                * 질문 형식, 감탄 형식, 혜택 강조 형식 등을 활용할 수 있습니다.
+              - **썸네일 이미지 프롬프트 작성 요령**: 
+                * 커버 이미지는 글의 첫인상을 결정하는 만큼 눈에 확 들어오는 핵심 이미지를 사용해야 합니다.
+                * 전체적인 인상을 생생하게 느낄 수 있는 이미지라면 더더욱 좋습니다.
+                * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
+                * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
+                * 예: "High-quality, eye-catching cover image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style"
+            11. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
@@ -3423,6 +3453,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 생성된 초안에 가독성 포맷팅 후처리 적용
         let formattedDraft = formatDraftForReadability(draft);
         
+        // SEO 최적화된 제목 추출 (h1 태그에서)
+        let seoTitle = null;
+        const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || formattedDraft.match(/^#\s+(.+)$/m);
+        if (h1Match && h1Match[1]) {
+          seoTitle = h1Match[1].trim();
+        }
+        
         // 제목이 포함되어 있지 않으면 h1으로 추가
         const title = ideaData.title || "";
         if (title) {
@@ -3433,9 +3470,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (formattedDraft.includes('<')) {
               // HTML 형식
               formattedDraft = `<h1>${title}</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n${formattedDraft}`;
+              seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
             } else {
               // 마크다운 형식
               formattedDraft = `# ${title}\n\n---\n\n${formattedDraft}`;
+              seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
             }
           } else {
             // h1이 있지만 구분선이 없으면 추가
@@ -3446,7 +3485,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               }
               return match;
             });
+            // h1이 이미 있었지만 seoTitle이 추출되지 않았다면 다시 시도
+            if (!seoTitle) {
+              const h1MatchRetry = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || formattedDraft.match(/^#\s+(.+)$/m);
+              if (h1MatchRetry && h1MatchRetry[1]) {
+                seoTitle = h1MatchRetry[1].trim();
+              }
+            }
           }
+        }
+        
+        // seoTitle이 여전히 없으면 기본 title 사용
+        if (!seoTitle) {
+          seoTitle = title;
         }
         
         // 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
@@ -3534,6 +3585,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           .filter(t => t && t !== 'AI-추천')
           .join(', ');
         
+        // 썸네일 정보 추출 (초안에서 <썸네일정보> 태그 찾기)
+        let thumbnailInfo = null;
+        const thumbnailMatch = draft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
+        if (thumbnailMatch && thumbnailMatch[1]) {
+          try {
+            thumbnailInfo = JSON.parse(thumbnailMatch[1].trim());
+            // 초안에서 썸네일 정보 태그 제거
+            formattedDraft = formattedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
+          } catch (e) {
+            console.error('썸네일 정보 파싱 실패:', e);
+          }
+        }
+        
+        // 썸네일 정보가 없으면 기본값 생성
+        if (!thumbnailInfo) {
+          thumbnailInfo = {
+            thumbnailPromptEn: `High-quality thumbnail image for "${seoTitle || title}", modern design, professional layout, eye-catching composition, 16:9 aspect ratio`,
+            thumbnailPromptKo: `"${seoTitle || title}"에 대한 고품질 썸네일 이미지, 현대적인 디자인, 전문적인 레이아웃, 눈에 띄는 구도`,
+            thumbnailText: (seoTitle || title || '').substring(0, 12)
+          };
+        }
+        
         // sendResponse가 이미 호출되었는지 확인
         if (sendResponse) {
           sendResponse({ 
@@ -3541,7 +3614,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             draft: formattedDraft,
             permalink: permalink,
             tags: tagsForPublish,
-            seoTitle: seoTitle // SEO 최적화된 제목
+            seoTitle: seoTitle, // SEO 최적화된 제목
+            thumbnailInfo: thumbnailInfo // 썸네일 정보
           });
         }
       } else {
