@@ -209,8 +209,19 @@ function createKanbanCard(id, data, status) {
 
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;
-  const hasPerformance = performance && !performance.error;
+  // 데이터 없음(0 값)은 오류가 아님 - error 필드가 없고, collectionErrors도 없어야 함
+  const hasPerformance = performance && !performance.error && 
+    (performance.pageviews > 0 || performance.estimatedEarnings > 0 || 
+     performance.sessions > 0 || performance.avgSessionDuration > 0);
   const isCollecting = performance && performance.collecting === true;
+  // 실제 오류인지 확인: error 필드가 있거나, collectionErrors와 errorType이 모두 있는 경우
+  // 단, error 필드가 "데이터 없음" 관련 메시지면 오류가 아님
+  const hasError = performance && (
+    (performance.error && !performance.error.includes('데이터 없음') && !performance.error.includes('데이터가 없을 수 있습니다')) ||
+    (performance.collectionErrors && performance.errorType)
+  );
+  const errorType = performance?.errorType;
+  const collectionErrors = performance?.collectionErrors;
   
   // 발행 완료 카드에 성과 추적 상태 및 해지 성과 태그 추가
   if (status === "done") {
@@ -218,6 +229,39 @@ function createKanbanCard(id, data, status) {
     if (data.publishedUrl) {
       if (isCollecting) {
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag collecting">🔄 수집 중...</span>`;
+      } else if (hasError) {
+        // 에러 타입에 따른 메시지
+        let errorMessage = "❌ 수집 실패";
+        let errorTooltip = performance.error || "알 수 없는 오류";
+        
+        if (errorType === "AUTH_MISSING") {
+          errorMessage = "🔑 인증 필요";
+          errorTooltip = "Google 계정 연동이 필요합니다. 채널 연동 설정에서 연동해주세요.";
+        } else if (errorType === "ID_MISSING") {
+          errorMessage = "⚙️ 설정 필요";
+          errorTooltip = "GA4 속성 ID 또는 AdSense 계정 ID가 설정되지 않았습니다. 채널 연동 설정을 확인해주세요.";
+        } else if (errorType === "API_ERROR") {
+          errorMessage = "⚠️ API 오류";
+          // collectionErrors가 있으면 더 자세한 정보 표시
+          if (collectionErrors) {
+            const errors = [];
+            if (collectionErrors.analytics) errors.push(`GA4: ${collectionErrors.analytics}`);
+            if (collectionErrors.adsense) errors.push(`AdSense: ${collectionErrors.adsense}`);
+            errorTooltip = errors.length > 0 ? errors.join("\n") : errorTooltip;
+          } else {
+            errorTooltip = `API 호출 중 오류가 발생했습니다: ${errorTooltip}`;
+          }
+        } else if (collectionErrors && errorType) {
+          // collectionErrors와 errorType이 모두 있는 경우만 실제 오류로 처리
+          const errors = [];
+          if (collectionErrors.analytics) errors.push(`GA4: ${collectionErrors.analytics}`);
+          if (collectionErrors.adsense) errors.push(`AdSense: ${collectionErrors.adsense}`);
+          errorTooltip = errors.length > 0 ? errors.join("\n") : errorTooltip;
+          // errorType이 없으면 데이터 없음으로 처리 (오류 아님)
+        }
+        // collectionErrors만 있고 errorType이 없으면 데이터 없음으로 처리 (오류 표시하지 않음)
+        
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag error" title="${errorTooltip}">${errorMessage}</span>`;
       } else if (hasPerformance) {
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag connected">✅ 추적 중</span>`;
       } else {
@@ -239,6 +283,26 @@ function createKanbanCard(id, data, status) {
         </span>
       `;
     }
+    
+    // 데이터 수집 상태 표시 (GA4, AdSense 개별 상태)
+    // 실제 오류가 있거나 수집 중이거나 성과 데이터가 있을 때만 표시
+    if (data.publishedUrl && (hasPerformance || hasError || isCollecting)) {
+      // collectionErrors가 있어도 errorType이 없으면 데이터 없음으로 처리 (오류 아님)
+      const hasRealCollectionError = collectionErrors && errorType;
+      const gaStatus = hasPerformance && !hasRealCollectionError ? "✅" : 
+                      (hasRealCollectionError && collectionErrors?.analytics ? "❌" : "⏳");
+      const adsenseStatus = hasPerformance && !hasRealCollectionError ? "✅" : 
+                           (hasRealCollectionError && collectionErrors?.adsense ? "❌" : "⏳");
+      
+      // 수집 중이거나 실제 오류가 있을 때만 표시 (데이터 없음은 표시하지 않음)
+      if (isCollecting || hasError) {
+        metaInfoHtml += `
+          <span class="kanban-card-meta data-source-status" title="GA4: ${gaStatus === "✅" ? "정상" : gaStatus === "❌" ? "오류" : "대기"} | AdSense: ${adsenseStatus === "✅" ? "정상" : adsenseStatus === "❌" ? "오류" : "대기"}">
+            📡 ${gaStatus} GA4 ${adsenseStatus} AdSense
+          </span>
+        `;
+      }
+    }
   }
   
   if (hasPerformance) {
@@ -256,6 +320,9 @@ function createKanbanCard(id, data, status) {
       </div>
     `;
     metaInfoHtml += performancePreview;
+  } else if (hasError) {
+    // 에러가 있는 경우 카드에 에러 스타일 적용
+    card.classList.add("has-error");
   }
 
   let actionButtons = ``;

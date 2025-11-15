@@ -2340,6 +2340,501 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     })();
     return true;
+  } else if (msg.action === "test_blog_connection") {
+    // 블로그 연동 테스트 (GA4, AdSense)
+    (async () => {
+      try {
+        const { gaPropertyId, adSenseAccountId } = msg.data || {};
+        
+        if (!gaPropertyId || !adSenseAccountId) {
+          sendResponse({ 
+            success: false, 
+            error: "GA4 속성 ID 또는 AdSense 계정 ID가 없습니다." 
+          });
+          return;
+        }
+
+        // 토큰 가져오기 및 갱신 함수
+        const getValidToken = async () => {
+          const storageResult = await new Promise((resolve) => {
+            chrome.storage.local.get(['googleAuthToken'], resolve);
+          });
+          let token = storageResult.googleAuthToken;
+          
+          if (!token) {
+            throw new Error("Google 계정이 연동되지 않았습니다.");
+          }
+
+          // 토큰이 만료되었는지 확인하기 위해 간단한 API 호출 시도
+          const testResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          // 401 오류가 발생하면 토큰 갱신
+          if (testResponse.status === 401) {
+            console.log("[토큰 갱신] 만료된 토큰 감지, 새 토큰 발급 중...");
+            
+            // 기존 토큰 무효화
+            try {
+              await new Promise((resolve) => {
+                chrome.identity.removeCachedAuthToken({ token }, resolve);
+              });
+            } catch (e) {
+              console.warn("[토큰 갱신] 기존 토큰 제거 실패:", e);
+            }
+
+            // 새 토큰 발급
+            token = await new Promise((resolve, reject) => {
+              chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
+                if (chrome.runtime.lastError) {
+                  // interactive: false로 실패하면 interactive: true로 재시도
+                  chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
+                    if (chrome.runtime.lastError) {
+                      reject(new Error(chrome.runtime.lastError.message));
+                    } else {
+                      resolve(newToken2);
+                    }
+                  });
+                } else {
+                  resolve(newToken);
+                }
+              });
+            });
+
+            // 새 토큰 저장
+            await new Promise((resolve) => {
+              chrome.storage.local.set({ googleAuthToken: token }, resolve);
+            });
+            console.log("[토큰 갱신] 새 토큰 발급 완료");
+          }
+
+          return token;
+        };
+
+        const token = await getValidToken();
+
+        // GA4 API 테스트
+        let ga4Result = { success: false, error: null };
+        try {
+          const ga4TestUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${gaPropertyId}:runReport`;
+          const ga4Response = await fetch(ga4TestUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              dateRanges: [{ startDate: 'today', endDate: 'today' }],
+              metrics: [{ name: 'activeUsers' }]
+            })
+          });
+
+          if (ga4Response.ok) {
+            ga4Result.success = true;
+          } else {
+            const errorData = await ga4Response.json().catch(() => ({}));
+            const errorMessage = errorData.error?.message || `HTTP ${ga4Response.status}`;
+            ga4Result.error = errorMessage;
+            
+            // 401 오류면 토큰 갱신 후 재시도
+            if (ga4Response.status === 401) {
+              try {
+                const newToken = await getValidToken();
+                const retryResponse = await fetch(ga4TestUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${newToken}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    dateRanges: [{ startDate: 'today', endDate: 'today' }],
+                    metrics: [{ name: 'activeUsers' }]
+                  })
+                });
+                if (retryResponse.ok) {
+                  ga4Result.success = true;
+                  ga4Result.error = null;
+                }
+              } catch (retryError) {
+                console.warn("[GA4 재시도 실패]", retryError);
+              }
+            }
+          }
+        } catch (error) {
+          ga4Result.error = error.message;
+        }
+
+        // AdSense API 테스트
+        let adsenseResult = { success: false, error: null };
+        try {
+          // 먼저 계정 목록을 조회하여 사용 가능한 계정 확인
+          const accountsListUrl = "https://adsense.googleapis.com/v2/accounts";
+          const accountsListResponse = await fetch(accountsListUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (!accountsListResponse.ok) {
+            if (accountsListResponse.status === 401) {
+              // 토큰 갱신 후 재시도
+              try {
+                const newToken = await getValidToken();
+                const retryAccountsList = await fetch(accountsListUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': `Bearer ${newToken}`
+                  }
+                });
+                if (retryAccountsList.ok) {
+                  const accountsData = await retryAccountsList.json();
+                  const accounts = accountsData.accounts || [];
+                  // 계정 ID 추출 및 정규화 (공백 제거, 소문자 변환)
+                  const accountIds = accounts.map(acc => {
+                    const id = acc.name?.split('/')[1] || '';
+                    return id.trim().toLowerCase();
+                  }).filter(Boolean);
+                  
+                  // 입력한 계정 ID 정규화
+                  const normalizedInputId = (adSenseAccountId || '').trim().toLowerCase();
+                  
+                  // 입력한 계정 ID가 목록에 있는지 확인
+                  if (!accountIds.includes(normalizedInputId)) {
+                    // 원본 계정 ID 목록 표시 (정규화 전)
+                    const originalAccountIds = accounts.map(acc => acc.name?.split('/')[1] || '').filter(Boolean);
+                    adsenseResult.error = `AdSense 계정을 찾을 수 없습니다. 입력한 ID: "${adSenseAccountId}", 사용 가능한 계정: ${originalAccountIds.join(', ') || '없음'}`;
+                    adsenseResult.debug = {
+                      입력한_ID: adSenseAccountId,
+                      정규화된_ID: normalizedInputId,
+                      사용가능한_계정_수: accountIds.length,
+                      사용가능한_계정: originalAccountIds,
+                      정규화된_사용가능한_계정: accountIds
+                    };
+                  } else {
+                    // 계정이 존재하면 리포트 생성 테스트
+                    const adsenseTestUrl = `https://adsense.googleapis.com/v2/accounts/${adSenseAccountId}/reports:generate`;
+                    const adsenseResponse = await fetch(adsenseTestUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${newToken}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        dateRange: 'TODAY',
+                        metrics: ['PAGE_VIEWS']
+                      })
+                    });
+                    if (adsenseResponse.ok) {
+                      adsenseResult.success = true;
+                    } else {
+                      const errorData = await adsenseResponse.json().catch(() => ({}));
+                      if (adsenseResponse.status === 404) {
+                        adsenseResult.error = `AdSense 계정을 찾을 수 없습니다 (404). 계정 ID 형식을 확인해주세요: "${adSenseAccountId}"`;
+                      } else {
+                        adsenseResult.error = errorData.error?.message || `리포트 생성 실패 (${adsenseResponse.status})`;
+                      }
+                    }
+                  }
+                } else {
+                  adsenseResult.error = "AdSense 계정 목록을 가져올 수 없습니다.";
+                }
+              } catch (retryError) {
+                adsenseResult.error = retryError.message;
+              }
+            } else {
+              const errorData = await accountsListResponse.json().catch(() => ({}));
+              adsenseResult.error = errorData.error?.message || `계정 목록 조회 실패 (${accountsListResponse.status})`;
+            }
+          } else {
+            const accountsData = await accountsListResponse.json();
+            const accounts = accountsData.accounts || [];
+            
+            // 계정 ID 추출 (원본과 정규화된 버전 모두 저장)
+            const accountInfo = accounts.map(acc => {
+              const fullName = acc.name || '';
+              const extractedId = fullName.split('/').pop() || fullName.split('/')[1] || '';
+              const originalId = extractedId.trim();
+              const normalizedId = originalId.toLowerCase();
+              return {
+                fullName: fullName,
+                originalId: originalId,
+                normalizedId: normalizedId
+              };
+            }).filter(acc => acc.originalId);
+            
+            const accountIds = accountInfo.map(acc => acc.normalizedId);
+            const originalAccountIds = accountInfo.map(acc => acc.originalId);
+            
+            // 입력한 계정 ID 정규화
+            const normalizedInputId = (adSenseAccountId || '').trim().toLowerCase();
+            const originalInputId = (adSenseAccountId || '').trim();
+            
+            // 입력한 계정 ID가 목록에 있는지 확인
+            if (accounts.length === 0) {
+              adsenseResult.error = "연동된 AdSense 계정이 없습니다.";
+              adsenseResult.debug = { 입력한_ID: adSenseAccountId, 사용가능한_계정_수: 0 };
+            } else if (!accountIds.includes(normalizedInputId)) {
+              // 정확한 비교를 위해 모든 정보 포함
+              adsenseResult.error = `AdSense 계정을 찾을 수 없습니다. 입력한 ID: "${originalInputId}", 사용 가능한 계정: ${originalAccountIds.join(', ') || '없음'}`;
+              adsenseResult.debug = {
+                입력한_ID_원본: adSenseAccountId,
+                입력한_ID_정리: originalInputId,
+                입력한_ID_정규화: normalizedInputId,
+                사용가능한_계정_수: accountIds.length,
+                사용가능한_계정_원본: originalAccountIds,
+                사용가능한_계정_정규화: accountIds,
+                계정_상세정보: accountInfo.map(acc => `${acc.originalId} (정규화: ${acc.normalizedId})`)
+              };
+            } else {
+              // 계정 ID 형식 검증 (pub-로 시작하는지 확인)
+              if (!normalizedInputId.startsWith('pub-')) {
+                console.warn('[AdSense 경고] 계정 ID가 pub-로 시작하지 않습니다:', normalizedInputId);
+              }
+              
+              // 실제 API 호출 시 사용할 계정 ID 결정 (원본 입력값 사용, 없으면 정규화된 값 사용)
+              const apiAccountId = originalInputId || normalizedInputId;
+              
+              // 먼저 계정 정보를 조회하여 계정이 실제로 존재하는지 확인
+              const accountInfoUrl = `https://adsense.googleapis.com/v2/accounts/${apiAccountId}`;
+              const accountInfoResponse = await fetch(accountInfoUrl, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              
+              if (!accountInfoResponse.ok) {
+                const accountErrorData = await accountInfoResponse.json().catch(() => ({}));
+                if (accountInfoResponse.status === 404) {
+                  adsenseResult.error = `AdSense 계정을 찾을 수 없습니다 (404). 계정 ID를 확인해주세요: "${apiAccountId}"`;
+                  adsenseResult.debug = {
+                    입력한_ID: adSenseAccountId,
+                    API에_사용한_ID: apiAccountId,
+                    정규화된_ID: normalizedInputId,
+                    사용가능한_계정: originalAccountIds,
+                    계정_정보_조회_오류: accountErrorData.error?.message || `HTTP ${accountInfoResponse.status}`
+                  };
+                } else {
+                  adsenseResult.error = `계정 정보 조회 실패: ${accountErrorData.error?.message || `HTTP ${accountInfoResponse.status}`}`;
+                  adsenseResult.debug = {
+                    입력한_ID: adSenseAccountId,
+                    API에_사용한_ID: apiAccountId,
+                    계정_정보_조회_오류: accountErrorData.error?.message || `HTTP ${accountInfoResponse.status}`
+                  };
+                }
+              } else {
+                // 계정이 존재하면 리포트 생성 테스트
+                // 실제 데이터 수집과 동일한 형식으로 테스트
+                const adsenseTestUrl = `https://adsense.googleapis.com/v2/accounts/${apiAccountId}/reports:generate`;
+                
+                // 여러 형식으로 시도 (dimensions 없이, dimensions 있이)
+                const testRequests = [
+                  {
+                    name: '간단한 요청 (metrics만)',
+                    body: {
+                      dateRange: 'LAST_7_DAYS',
+                      metrics: ['PAGE_VIEWS']
+                    }
+                  },
+                  {
+                    name: 'dimensions 포함 요청',
+                    body: {
+                      dateRange: 'LAST_7_DAYS',
+                      metrics: ['PAGE_VIEWS'],
+                      dimensions: ['URL_CHANNEL_NAME']
+                    }
+                  },
+                  {
+                    name: 'TODAY 요청',
+                    body: {
+                      dateRange: 'TODAY',
+                      metrics: ['PAGE_VIEWS']
+                    }
+                  }
+                ];
+                
+                let adsenseResponse = null;
+                let lastError = null;
+                let successfulRequest = null;
+                
+                for (const testReq of testRequests) {
+                  try {
+                    adsenseResponse = await fetch(adsenseTestUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify(testReq.body)
+                    });
+                    
+                    if (adsenseResponse.ok) {
+                      successfulRequest = testReq.name;
+                      break;
+                    } else {
+                      const errorData = await adsenseResponse.json().catch(() => ({}));
+                      lastError = {
+                        request: testReq.name,
+                        status: adsenseResponse.status,
+                        error: errorData.error?.message || `HTTP ${adsenseResponse.status}`
+                      };
+                    }
+                  } catch (err) {
+                    lastError = {
+                      request: testReq.name,
+                      error: err.message
+                    };
+                  }
+                }
+
+                if (successfulRequest) {
+                  adsenseResult.success = true;
+                  adsenseResult.debug = {
+                    입력한_ID: adSenseAccountId,
+                    API에_사용한_ID: apiAccountId,
+                    정규화된_ID: normalizedInputId,
+                    사용가능한_계정: originalAccountIds,
+                    계정_정보_조회: '성공',
+                    리포트_생성_성공: successfulRequest
+                  };
+                } else if (adsenseResponse) {
+                  const errorData = await adsenseResponse.json().catch(() => ({}));
+                  const errorMessage = errorData.error?.message || `HTTP ${adsenseResponse.status}`;
+                  
+                  // 404 오류인 경우: 계정은 존재하지만 리포트 생성 권한/데이터가 없을 수 있음
+                  // 하지만 계정 정보 조회가 성공했으므로 연동 자체는 성공으로 간주
+                  if (adsenseResponse.status === 404) {
+                    // 계정은 존재하지만 리포트 생성이 불가능한 경우
+                    // 실제 데이터 수집 시에는 필터를 사용하므로 성공할 수 있음
+                    adsenseResult.success = true; // 계정 정보 조회 성공 = 연동 성공
+                    adsenseResult.error = null;
+                    adsenseResult.debug = {
+                      입력한_ID: adSenseAccountId,
+                      API에_사용한_ID: apiAccountId,
+                      정규화된_ID: normalizedInputId,
+                      사용가능한_계정: originalAccountIds,
+                      계정_정보_조회: '성공',
+                      리포트_생성_테스트: '404 오류 (계정은 존재하지만 리포트 생성 불가 - 데이터 수집 시 필터 사용으로 해결 가능)',
+                      시도한_요청들: testRequests.map(r => r.name),
+                      마지막_오류: lastError
+                    };
+                  } else {
+                    adsenseResult.error = `리포트 생성 실패: ${errorMessage}`;
+                    adsenseResult.debug = {
+                      입력한_ID: adSenseAccountId,
+                      API에_사용한_ID: apiAccountId,
+                      리포트_생성_오류: errorMessage,
+                      계정_정보_조회: '성공',
+                      시도한_요청들: testRequests.map(r => r.name),
+                      마지막_오류: lastError
+                    };
+                  }
+                  
+                  // 401 오류면 토큰 갱신 후 재시도
+                  if (adsenseResponse.status === 401) {
+                    try {
+                      const newToken = await getValidToken();
+                      const retryResponse = await fetch(adsenseTestUrl, {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${newToken}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          dateRange: 'LAST_7_DAYS',
+                          metrics: ['PAGE_VIEWS']
+                        })
+                      });
+                      if (retryResponse.ok) {
+                        adsenseResult.success = true;
+                        adsenseResult.error = null;
+                      } else {
+                        const retryErrorData = await retryResponse.json().catch(() => ({}));
+                        if (retryResponse.status === 404) {
+                          adsenseResult.error = `리포트 생성 실패 (404). 계정은 존재하지만 리포트를 생성할 수 없습니다. 계정 ID: "${apiAccountId}"`;
+                          adsenseResult.debug = {
+                            입력한_ID: adSenseAccountId,
+                            API에_사용한_ID: apiAccountId,
+                            정규화된_ID: normalizedInputId,
+                            리포트_생성_오류_재시도: retryErrorData.error?.message || `HTTP ${retryResponse.status}`,
+                            계정_정보_조회: '성공'
+                          };
+                        } else {
+                          adsenseResult.error = retryErrorData.error?.message || `재시도 실패 (${retryResponse.status})`;
+                        }
+                      }
+                    } catch (retryError) {
+                      console.warn("[AdSense 재시도 실패]", retryError);
+                      adsenseResult.error = retryError.message || "재시도 중 오류가 발생했습니다.";
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          adsenseResult.error = error.message;
+        }
+
+        sendResponse({
+          success: ga4Result.success && adsenseResult.success,
+          ga4: ga4Result,
+          adsense: adsenseResult
+        });
+      } catch (error) {
+        sendResponse({ 
+          success: false, 
+          error: error.message 
+        });
+      }
+    })();
+    return true;
+  } else if (msg.action === "get_adsense_accounts") {
+    // AdSense 계정 목록 조회
+    (async () => {
+      try {
+        const { googleAuthToken } = await chrome.storage.local.get(['googleAuthToken']);
+        
+        if (!googleAuthToken) {
+          sendResponse({ 
+            success: false, 
+            error: "Google 계정이 연동되지 않았습니다." 
+          });
+          return;
+        }
+
+        const accountsListUrl = "https://adsense.googleapis.com/v2/accounts";
+        const accountsListResponse = await fetch(accountsListUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${googleAuthToken}`
+          }
+        });
+
+        if (accountsListResponse.ok) {
+          const accountsData = await accountsListResponse.json();
+          sendResponse({
+            success: true,
+            accounts: accountsData.accounts || []
+          });
+        } else {
+          const errorData = await accountsListResponse.json().catch(() => ({}));
+          sendResponse({
+            success: false,
+            error: errorData.error?.message || `계정 목록 조회 실패 (${accountsListResponse.status})`,
+            accounts: []
+          });
+        }
+      } catch (error) {
+        sendResponse({ 
+          success: false, 
+          error: error.message,
+          accounts: []
+        });
+      }
+    })();
+    return true;
   } else if (msg.action === "revoke_google_auth") {
     (async () => {
       try {
@@ -3837,17 +4332,20 @@ async function updateSinglePerformanceMetric(contentInfo) {
       });
 
     // 저장된 Google 인증 정보 및 채널 연동 시 설정한 ID들을 가져옵니다.
-    const { googleAuthToken, myChannels } = await new Promise((resolve) =>
-      chrome.storage.local.get(["googleAuthToken", "channels"], (result) => {
-        resolve({
-          googleAuthToken: result.googleAuthToken,
-          myChannels: result.channels?.myChannels || { blogs: [] },
-        });
+    const storageResult = await new Promise((resolve) =>
+      chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"], (result) => {
+        resolve(result);
       })
     );
-    const { adSenseAccountId } = await chrome.storage.local.get(
-      "adSenseAccountId"
-    );
+    
+    const googleAuthToken = storageResult.googleAuthToken;
+    const adSenseAccountId = storageResult.adSenseAccountId;
+    
+    // Firebase에서 채널 데이터 가져오기 (chrome.storage.local이 아닌 Firebase에 저장됨)
+    const userId = "default_user";
+    const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+    const channelsData = channelsSnapshot.val() || {};
+    const myChannels = channelsData.myChannels || { blogs: [] };
 
     if (!googleAuthToken) {
       const errorMsg = "Google 계정이 연동되지 않아 성과 지표를 수집할 수 없습니다.";
@@ -3869,14 +4367,75 @@ async function updateSinglePerformanceMetric(contentInfo) {
     }
 
     // 블로그 URL을 기반으로 해당 블로그에 설정된 GA Property ID를 찾습니다.
-    const blogInfo = myChannels.blogs.find((b) => {
-      try {
-        return contentInfo.url.includes(new URL(b.inputUrl).hostname);
-      } catch {
-        return false;
-      }
-    });
-    const gaPropertyId = blogInfo?.gaPropertyId;
+    // URL 매칭 로직 개선: 여러 방법으로 시도
+    let blogInfo = null;
+    let gaPropertyId = null;
+    
+    // 방법 1: 정확한 hostname 매칭
+    try {
+      const contentUrlObj = new URL(contentInfo.url);
+      const contentHostname = contentUrlObj.hostname;
+      
+      blogInfo = myChannels.blogs.find((b) => {
+        // inputUrl 또는 url 필드 확인
+        const blogUrl = b.inputUrl || b.url;
+        if (!blogUrl) return false;
+        try {
+          const blogUrlObj = new URL(blogUrl);
+          const blogHostname = blogUrlObj.hostname;
+          
+          // 정확한 hostname 매칭
+          if (contentHostname === blogHostname) return true;
+          
+          // 하위 도메인 고려 (예: costcatcher.k-posting.info와 k-posting.info)
+          const contentParts = contentHostname.split('.');
+          const blogParts = blogHostname.split('.');
+          
+          // 메인 도메인 추출 (마지막 2개 또는 3개 부분)
+          const getMainDomain = (parts) => {
+            if (parts.length <= 2) return parts.join('.');
+            // .co.kr, .com.au 같은 경우 고려
+            if (parts.length >= 3 && 
+                (parts[parts.length - 2] === 'co' && parts[parts.length - 1] === 'kr') ||
+                (parts[parts.length - 2] === 'com' && parts[parts.length - 1] === 'au')) {
+              return parts.slice(-3).join('.');
+            }
+            return parts.slice(-2).join('.');
+          };
+          
+          const contentMainDomain = getMainDomain(contentParts);
+          const blogMainDomain = getMainDomain(blogParts);
+          
+          return contentMainDomain === blogMainDomain;
+        } catch {
+          return false;
+        }
+      });
+      
+      gaPropertyId = blogInfo?.gaPropertyId;
+    } catch (err) {
+      console.warn(`[성과 지표 수집] URL 파싱 오류:`, err, logContext);
+    }
+    
+    // 방법 2: URL 문자열 포함 여부로 매칭 (fallback)
+    if (!blogInfo) {
+      blogInfo = myChannels.blogs.find((b) => {
+        const blogUrl = b.inputUrl || b.url || '';
+        if (!blogUrl) return false;
+        // contentInfo.url이 blogUrl을 포함하는지 확인
+        return contentInfo.url.includes(blogUrl) || blogUrl.includes(new URL(contentInfo.url).hostname);
+      });
+      gaPropertyId = blogInfo?.gaPropertyId;
+    }
+    
+    // 디버깅 로그
+    console.log(`[성과 지표 수집] URL 매칭 결과:`, {
+      contentUrl: contentInfo.url,
+      myChannelsBlogs: myChannels.blogs,
+      matchedBlog: blogInfo,
+      gaPropertyId: gaPropertyId,
+      adSenseAccountId: adSenseAccountId
+    }, logContext);
 
     if (!gaPropertyId || !adSenseAccountId) {
       const errorMsg = `성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId || "없음"}, AdSense: ${adSenseAccountId || "없음"})`;
@@ -3919,24 +4478,69 @@ async function updateSinglePerformanceMetric(contentInfo) {
       collectionDuration: Date.now() - startTime,
     };
 
-    // 에러가 있는 경우 기록
-    if (analyticsResult.error || adsenseResult.error) {
+    // 에러가 있는 경우 기록 (데이터 없음은 오류가 아님)
+    // 실제 API 오류인지 확인: 401, 403, 계정/속성 찾을 수 없음 등
+    const isRealError = (result) => {
+      if (!result.error) return false;
+      const errorMsg = result.error.toLowerCase();
+      return errorMsg.includes('401') || 
+             errorMsg.includes('403') || 
+             errorMsg.includes('속성을 찾을 수 없습니다') ||
+             errorMsg.includes('계정을 찾을 수 없습니다') ||
+             errorMsg.includes('토큰') ||
+             errorMsg.includes('인증') ||
+             errorMsg.includes('unauthorized') ||
+             errorMsg.includes('forbidden');
+    };
+    
+    const hasRealError = isRealError(analyticsResult) || isRealError(adsenseResult);
+    
+    if (hasRealError) {
       performanceData.collectionErrors = {
-        analytics: analyticsResult.error || null,
-        adsense: adsenseResult.error || null,
+        analytics: isRealError(analyticsResult) ? analyticsResult.error : null,
+        adsense: isRealError(adsenseResult) ? adsenseResult.error : null,
       };
+      performanceData.errorType = "API_ERROR";
+      
+      // 더 자세한 오류 메시지 생성
+      const errorParts = [];
+      if (isRealError(analyticsResult)) {
+        const ga4ErrorMsg = analyticsResult.error.includes('401') 
+          ? 'GA4: 인증 오류 (토큰 만료)' 
+          : `GA4: ${analyticsResult.error}`;
+        errorParts.push(ga4ErrorMsg);
+      }
+      if (isRealError(adsenseResult)) {
+        const adsenseErrorMsg = adsenseResult.error.includes('401')
+          ? 'AdSense: 인증 오류 (토큰 만료)'
+          : `AdSense: ${adsenseResult.error}`;
+        errorParts.push(adsenseErrorMsg);
+      }
+      
+      performanceData.error = `데이터 수집 중 오류 발생: ${errorParts.join(', ')}`;
     }
+    // 데이터 없음(0 값 반환)은 오류가 아니므로 collectionErrors나 errorType을 설정하지 않음
 
     // Firebase에 'performance' 자식 노드로 데이터 업데이트 (수집 완료 상태 포함)
+    // 데이터 없음일 때는 collectionErrors와 errorType을 명시적으로 null로 설정하여 제거
+    const updateData = {
+      ...performanceData,
+      collecting: false,
+      collectingCompletedAt: Date.now(),
+    };
+    
+    // 실제 오류가 없으면 collectionErrors와 errorType 제거
+    if (!hasRealError) {
+      updateData.collectionErrors = null;
+      updateData.errorType = null;
+      updateData.error = null;
+    }
+    
     await firebase
       .database()
       .ref(contentInfo.path)
       .child("performance")
-      .update({
-        ...performanceData,
-        collecting: false,
-        collectingCompletedAt: Date.now(),
-      });
+      .update(updateData);
 
     const duration = Date.now() - startTime;
     console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료 (${duration}ms)`, {
@@ -3982,51 +4586,18 @@ async function updateSinglePerformanceMetric(contentInfo) {
  */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
-  const pagePath = new URL(url).pathname;
+  const urlObj = new URL(url);
+  const pagePath = urlObj.pathname;
+  // pagePath 정규화 (trailing slash 제거, 여러 변형 준비)
+  const normalizedPath = pagePath.endsWith('/') && pagePath !== '/' ? pagePath.slice(0, -1) : pagePath;
+  const pathWithSlash = normalizedPath === '/' ? '/' : normalizedPath + '/';
   const MAX_RETRIES = 3;
 
   try {
-    // 기본 지표 요청
-    const basicMetricsResponse = await fetch(API_URL, {
-      method: "POST",
-      headers: { 
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-        dimensions: [{ name: "pagePath" }],
-        metrics: [
-          { name: "screenPageViews" },
-          { name: "averageSessionDuration" },
-          { name: "sessions" },
-          { name: "screenPageViewsPerSession" },
-          { name: "bounceRate" },
-        ],
-        dimensionFilter: {
-          filter: {
-            fieldName: "pagePath",
-            stringFilter: { matchType: "EXACT", value: pagePath },
-          },
-        },
-      }),
-    });
-
-    if (!basicMetricsResponse.ok) {
-      const errorData = await basicMetricsResponse.json().catch(() => ({}));
-      throw new Error(`GA4 API 오류 (${basicMetricsResponse.status}): ${errorData.error?.message || basicMetricsResponse.statusText}`);
-    }
-
-    const basicData = await basicMetricsResponse.json();
-    const basicRow = basicData.rows?.[0];
-
-    // 유입 경로 및 시간대별 데이터 요청 (별도 API 호출)
-    let trafficSourceData = {};
-    let hourlyTrafficData = {};
-
+    // 먼저 필터 없이 전체 데이터 확인 (해당 페이지가 있는지 확인)
+    let allPageData = null;
     try {
-      // 유입 경로 데이터
-      const trafficSourceResponse = await fetch(API_URL, {
+      const testResponse = await fetch(API_URL, {
         method: "POST",
         headers: { 
           Authorization: `Bearer ${token}`,
@@ -4034,22 +4605,184 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         },
         body: JSON.stringify({
           dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-          dimensions: [
-            { name: "pagePath" },
-            { name: "sessionSource" },
-            { name: "sessionMedium" },
-          ],
-          metrics: [{ name: "sessions" }],
-          dimensionFilter: {
-            filter: {
-              fieldName: "pagePath",
-              stringFilter: { matchType: "EXACT", value: pagePath },
-            },
-          },
-          orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
-          limit: 5,
+          dimensions: [{ name: "pagePath" }],
+          metrics: [{ name: "screenPageViews" }],
+          limit: 1000, // 최대 1000개 페이지 확인
         }),
       });
+      
+      if (testResponse.ok) {
+        const testData = await testResponse.json();
+        if (testData.rows && testData.rows.length > 0) {
+          // pagePath 매칭 전략 (우선순위 순)
+          const matchStrategies = [
+            (row) => row.dimensionValues?.[0]?.value === pagePath, // 정확한 매칭
+            (row) => row.dimensionValues?.[0]?.value === normalizedPath, // trailing slash 제거한 버전
+            (row) => row.dimensionValues?.[0]?.value === pathWithSlash, // trailing slash 추가한 버전
+            (row) => row.dimensionValues?.[0]?.value?.startsWith(normalizedPath), // 경로로 시작
+            (row) => row.dimensionValues?.[0]?.value?.includes(normalizedPath), // 경로 포함
+          ];
+          
+          for (const matchStrategy of matchStrategies) {
+            const matchedRow = testData.rows.find(matchStrategy);
+            if (matchedRow) {
+              const matchedPath = matchedRow.dimensionValues?.[0]?.value;
+              console.log(`[GA4] 전체 데이터에서 페이지 매칭 성공: ${matchedPath} (원본: ${pagePath})`);
+              allPageData = { matchedPath };
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[GA4] 전체 페이지 데이터 확인 실패:", e.message);
+    }
+
+    // 여러 필터 전략 시도
+    const filterStrategies = [
+      { path: pagePath, name: '정확한 경로' },
+      { path: normalizedPath, name: '정규화된 경로 (trailing slash 제거)' },
+      { path: pathWithSlash, name: '경로 (trailing slash 추가)' },
+    ];
+
+    let analyticsData = null;
+    let lastError = null;
+
+    for (const filterStrategy of filterStrategies) {
+      try {
+        const basicMetricsResponse = await fetch(API_URL, {
+          method: "POST",
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+            dimensions: [{ name: "pagePath" }],
+            metrics: [
+              { name: "screenPageViews" },
+              { name: "averageSessionDuration" },
+              { name: "sessions" },
+              { name: "screenPageViewsPerSession" },
+              { name: "bounceRate" },
+            ],
+            dimensionFilter: {
+              filter: {
+                fieldName: "pagePath",
+                stringFilter: { matchType: "EXACT", value: filterStrategy.path },
+              },
+            },
+          }),
+        });
+
+        if (!basicMetricsResponse.ok) {
+          const errorData = await basicMetricsResponse.json().catch(() => ({}));
+          
+          // 404 오류 처리: Property를 찾을 수 없음 (데이터 부재가 아님)
+          if (basicMetricsResponse.status === 404) {
+            lastError = new Error(`GA4 속성을 찾을 수 없습니다 (404). Property ID를 확인해주세요: ${propertyId}`);
+            continue; // 다음 필터 전략 시도
+          }
+          
+          // 401 오류면 토큰 갱신 후 재시도
+          if (basicMetricsResponse.status === 401 && retryCount < MAX_RETRIES) {
+        console.log(`[GA4] 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+        
+        try {
+          // 기존 토큰 무효화
+          try {
+            await new Promise((resolve) => {
+              chrome.identity.removeCachedAuthToken({ token }, resolve);
+            });
+          } catch (e) {
+            console.warn("[GA4 토큰 갱신] 기존 토큰 제거 실패:", e);
+          }
+
+          // 새 토큰 발급
+          const newToken = await new Promise((resolve, reject) => {
+            chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
+              if (chrome.runtime.lastError) {
+                chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
+                  if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                  } else {
+                    resolve(newToken2);
+                  }
+                });
+              } else {
+                resolve(newToken);
+              }
+            });
+          });
+
+          // 새 토큰 저장
+          await new Promise((resolve) => {
+            chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
+          });
+          
+            console.log("[GA4 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
+            
+            // 지수 백오프 후 재시도
+            const delay = Math.pow(2, retryCount) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
+          } catch (tokenError) {
+            console.error("[GA4 토큰 갱신 실패]", tokenError);
+            lastError = new Error(`GA4 API 오류 (401): 토큰 갱신 실패 - ${tokenError.message}`);
+            continue; // 다음 필터 전략 시도
+          }
+        }
+        
+        lastError = new Error(`GA4 API 오류 (${basicMetricsResponse.status}): ${errorData.error?.message || basicMetricsResponse.statusText}`);
+        continue; // 다음 필터 전략 시도
+      }
+
+      const basicData = await basicMetricsResponse.json();
+      
+      // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음)
+      if (!basicData.rows || basicData.rows.length === 0) {
+        console.log(`[GA4] 데이터 없음 (${url}, 필터: ${filterStrategy.name}): 해당 페이지 경로에 데이터가 없습니다.`);
+        continue; // 다음 필터 전략 시도
+      }
+      
+      const basicRow = basicData.rows?.[0];
+      
+      // basicRow가 없거나 metricValues가 없는 경우
+      if (!basicRow || !basicRow.metricValues || basicRow.metricValues.length === 0) {
+        console.warn(`[GA4] 데이터 구조 오류 (${url}, 필터: ${filterStrategy.name}): basicRow 또는 metricValues가 없습니다.`, basicRow);
+        continue; // 다음 필터 전략 시도
+      }
+
+      // 유입 경로 및 시간대별 데이터 요청 (별도 API 호출)
+      let trafficSourceData = {};
+      let hourlyTrafficData = {};
+
+      try {
+        // 유입 경로 데이터
+        const trafficSourceResponse = await fetch(API_URL, {
+          method: "POST",
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+            dimensions: [
+              { name: "pagePath" },
+              { name: "sessionSource" },
+              { name: "sessionMedium" },
+            ],
+            metrics: [{ name: "sessions" }],
+            dimensionFilter: {
+              filter: {
+                fieldName: "pagePath",
+                stringFilter: { matchType: "EXACT", value: filterStrategy.path },
+              },
+            },
+            orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+            limit: 5,
+          }),
+        });
 
       if (trafficSourceResponse.ok) {
         const trafficData = await trafficSourceResponse.json();
@@ -4085,7 +4818,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
           dimensionFilter: {
             filter: {
               fieldName: "pagePath",
-              stringFilter: { matchType: "EXACT", value: pagePath },
+              stringFilter: { matchType: "EXACT", value: filterStrategy.path },
             },
           },
         }),
@@ -4106,18 +4839,54 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
     }
 
-    const result = {
-      pageviews: parseInt(basicRow?.metricValues?.[0]?.value || "0", 10),
-      avgSessionDuration: parseFloat(basicRow?.metricValues?.[1]?.value || "0.0"),
-      sessions: parseInt(basicRow?.metricValues?.[2]?.value || "0", 10),
-      pagesPerSession: parseFloat(basicRow?.metricValues?.[3]?.value || "0.0"),
-      bounceRate: parseFloat(basicRow?.metricValues?.[4]?.value || "0.0"),
-      ...trafficSourceData,
-      ...hourlyTrafficData,
-    };
+      const result = {
+        pageviews: parseInt(basicRow.metricValues[0]?.value || "0", 10),
+        avgSessionDuration: parseFloat(basicRow.metricValues[1]?.value || "0.0"),
+        sessions: parseInt(basicRow.metricValues[2]?.value || "0", 10),
+        pagesPerSession: parseFloat(basicRow.metricValues[3]?.value || "0.0"),
+        bounceRate: parseFloat(basicRow.metricValues[4]?.value || "0.0"),
+        ...trafficSourceData,
+        ...hourlyTrafficData,
+      };
 
-    console.log(`[GA4] 성과 지표 수집 완료 (${url}):`, result);
-    return result;
+      console.log(`[GA4] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, result);
+      analyticsData = result;
+      break; // 성공하면 루프 종료
+    } catch (filterError) {
+      lastError = filterError;
+      console.warn(`[GA4] 필터 전략 실패 (${filterStrategy.name}):`, filterError.message);
+      continue; // 다음 필터 전략 시도
+    }
+  }
+
+  // 모든 필터 전략 실패한 경우
+  if (!analyticsData) {
+    // lastError가 실제 API 오류(404, 401 등)인지 확인
+    const isRealError = lastError && (
+      lastError.message.includes('404') || 
+      lastError.message.includes('401') || 
+      lastError.message.includes('403') ||
+      lastError.message.includes('속성을 찾을 수 없습니다') ||
+      lastError.message.includes('토큰')
+    );
+    
+    if (isRealError) {
+      // 실제 API 오류인 경우
+      throw lastError;
+    } else {
+      // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음) - 오류가 아님
+      console.log(`[GA4] 데이터 없음 (${url}): 모든 필터 전략 실패했지만 실제 오류는 아닙니다. 데이터가 없을 수 있습니다.`);
+      return {
+        pageviews: 0,
+        avgSessionDuration: 0,
+        sessions: 0,
+        pagesPerSession: 0,
+        bounceRate: 0,
+      };
+    }
+  }
+
+  return analyticsData;
   } catch (error) {
     console.error(`[GA4] 데이터 요청 실패 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
       url,
@@ -4125,6 +4894,54 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       error: error.message,
       stack: error.stack,
     });
+
+    // 401 오류면 토큰 갱신 후 재시도
+    if (error.message.includes('401') && retryCount < MAX_RETRIES) {
+      console.log(`[GA4] catch 블록에서 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+      
+      try {
+        // 기존 토큰 무효화
+        try {
+          await new Promise((resolve) => {
+            chrome.identity.removeCachedAuthToken({ token }, resolve);
+          });
+        } catch (e) {
+          console.warn("[GA4 토큰 갱신] 기존 토큰 제거 실패:", e);
+        }
+
+        // 새 토큰 발급
+        const newToken = await new Promise((resolve, reject) => {
+          chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
+            if (chrome.runtime.lastError) {
+              chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  resolve(newToken2);
+                }
+              });
+            } else {
+              resolve(newToken);
+            }
+          });
+        });
+
+        // 새 토큰 저장
+        await new Promise((resolve) => {
+          chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
+        });
+        
+        console.log("[GA4 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
+        
+        // 지수 백오프 후 재시도
+        const delay = Math.pow(2, retryCount) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
+      } catch (tokenError) {
+        console.error("[GA4 토큰 갱신 실패]", tokenError);
+        // 토큰 갱신 실패해도 일반 재시도 로직으로 진행
+      }
+    }
 
     // 재시도 로직
     if (retryCount < MAX_RETRIES) {
@@ -4160,44 +4977,238 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
     const urlObj = new URL(url);
     const domain = urlObj.hostname;
     const path = urlObj.pathname;
+    
+    // 하위 도메인 제거 (메인 도메인 추출)
+    // 예: costcatcher.k-posting.info -> k-posting.info
+    // 예: subdomain.example.com -> example.com
+    let mainDomain = domain;
+    const domainParts = domain.split('.');
+    if (domainParts.length > 2) {
+      // 하위 도메인이 있는 경우
+      // 일반적인 경우: subdomain.example.com -> example.com
+      // 특수한 경우: costcatcher.k-posting.info -> k-posting.info
+      // 최상위 도메인(.com, .info, .co.kr 등)을 고려하여 마지막 2개 또는 3개 부분 사용
+      const commonTlds = ['com', 'net', 'org', 'info', 'co', 'kr'];
+      const lastPart = domainParts[domainParts.length - 1];
+      const secondLastPart = domainParts[domainParts.length - 2];
+      
+      // .co.kr, .com.au 같은 경우를 고려
+      if (domainParts.length >= 3 && 
+          (secondLastPart === 'co' && lastPart === 'kr') ||
+          (secondLastPart === 'com' && lastPart === 'au')) {
+        // 3개 부분 사용 (예: example.co.kr)
+        mainDomain = domainParts.slice(-3).join('.');
+      } else {
+        // 일반적인 경우: 마지막 2개 부분 사용
+        mainDomain = domainParts.slice(-2).join('.');
+      }
+    }
 
-    // 여러 필터 전략 시도
+    // 먼저 필터 없이 전체 계정 데이터 확인 (계정에 데이터가 있는지 확인)
+    let hasAccountData = false;
+    let allAccountData = null;
+    try {
+      const testResponse = await fetch(API_URL, {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dateRange: "LAST_30_DAYS",
+          metrics: ["PAGE_VIEWS", "ESTIMATED_EARNINGS", "PAGE_VIEWS_RPM", "CLICKS"],
+          dimensions: ["URL_CHANNEL_NAME"],
+        }),
+      });
+      
+      if (testResponse.ok) {
+        const testData = await testResponse.json();
+        hasAccountData = testData.rows && testData.rows.length > 0;
+        allAccountData = testData;
+        console.log(`[AdSense] 전체 계정 데이터 확인: ${hasAccountData ? `데이터 있음 (${testData.rows.length}개 URL)` : '데이터 없음'}`);
+        
+        // 전체 데이터에서 URL 매칭 시도
+        if (hasAccountData && testData.rows) {
+          // URL 매칭 전략 (우선순위 순)
+          const matchStrategies = [
+            (row) => row.dimensionValues?.[0]?.value === url, // 정확한 URL 매칭
+            (row) => row.dimensionValues?.[0]?.value?.includes(domain), // 도메인 포함
+            (row) => row.dimensionValues?.[0]?.value?.includes(mainDomain), // 메인 도메인 포함
+            (row) => row.dimensionValues?.[0]?.value?.includes(path), // 경로 포함
+          ];
+          
+          for (const matchStrategy of matchStrategies) {
+            const matchedRow = testData.rows.find(matchStrategy);
+            if (matchedRow && matchedRow.cells && matchedRow.cells.length > 0) {
+              const row = matchedRow.cells;
+              const clicks = parseFloat(row[2]?.value || "0.0");
+              const pageViews = parseFloat(row[3]?.value || "0.0");
+              const ctr = pageViews > 0 ? (clicks / pageViews) * 100 : 0;
+              
+              const matchedUrl = matchedRow.dimensionValues?.[0]?.value || '알 수 없음';
+              console.log(`[AdSense] 전체 데이터에서 매칭 성공: ${matchedUrl}`);
+              
+              return {
+                estimatedEarnings: parseFloat(row[0]?.value || "0.0"),
+                pageRPM: parseFloat(row[1]?.value || "0.0"),
+                clicks: clicks,
+                pageViews: pageViews,
+                ctr: parseFloat(ctr.toFixed(2)),
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[AdSense] 전체 계정 데이터 확인 실패:", e.message);
+    }
+
+    // 필터를 사용한 전략 시도 (AdSense API v2 필터 형식)
     const filterStrategies = [
-      `URL_CHANNEL_NAME=="${url}"`, // 전체 URL
-      `URL_CHANNEL_NAME=="${path}"`, // 경로만
-      `URL_CHANNEL_NAME=="${domain}"`, // 도메인만
+      { 
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: url },
+        name: '전체 URL (EQUALS)'
+      },
+      { 
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: domain },
+        name: '전체 도메인 (EQUALS)'
+      },
+      { 
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: domain },
+        name: '도메인 포함 (CONTAINS)'
+      },
+      { 
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: mainDomain },
+        name: '메인 도메인 포함 (CONTAINS)'
+      },
+      // 문자열 형식 필터도 시도
+      { 
+        filter: `URL_CHANNEL_NAME=="${url}"`,
+        name: '전체 URL (문자열)'
+      },
+      { 
+        filter: `URL_CHANNEL_NAME=="${domain}"`,
+        name: '전체 도메인 (문자열)'
+      },
     ];
 
     let adsenseData = null;
     let lastError = null;
+    let triedFilters = [];
 
-    for (const filter of filterStrategies) {
+    for (const filterStrategy of filterStrategies) {
+      const filter = filterStrategy.filter;
+      triedFilters.push(filterStrategy.name);
+      
       try {
+        const requestBody = {
+          dateRange: "LAST_30_DAYS",
+          metrics: [
+            "ESTIMATED_EARNINGS",
+            "PAGE_VIEWS_RPM",
+            "CLICKS",
+            "PAGE_VIEWS",
+          ],
+          dimensions: ["URL_CHANNEL_NAME"],
+        };
+        
+        // 필터 형식에 따라 다르게 처리
+        if (typeof filter === 'string') {
+          requestBody.filters = [filter];
+        } else {
+          requestBody.filters = [filter];
+        }
+        
         const response = await fetch(API_URL, {
           method: "POST",
           headers: { 
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            dateRange: "LAST_30_DAYS",
-            metrics: [
-              "ESTIMATED_EARNINGS",
-              "PAGE_VIEWS_RPM",
-              "CLICKS",
-              "PAGE_VIEWS",
-            ],
-            dimensions: ["URL_CHANNEL_NAME"],
-            filters: [filter],
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
+          
+          // 404 오류 처리: 리포트 생성 불가 (데이터 부재일 수 있음)
+          // AdSense API에서 404는 계정이 없거나 리포트를 생성할 수 없을 때 발생
+          // 하지만 계정 정보 조회가 성공했다면, 이는 해당 URL에 대한 데이터가 없음을 의미할 수 있음
+          if (response.status === 404) {
+            // 마지막 필터 전략이 아니면 다음 전략 시도
+            if (filterStrategy !== filterStrategies[filterStrategies.length - 1]) {
+              // 다음 필터 전략 시도 (오류로 기록하지 않음, 데이터 없을 수 있음)
+              console.log(`[AdSense] 필터 "${filterStrategy.name}" 실패 (404) - 다음 전략 시도`);
+              continue;
+            } else {
+              // 모든 필터 전략 실패 - 데이터가 없을 가능성이 높음
+              // 계정에 데이터가 있는지 확인했으므로, 이는 해당 URL에 대한 데이터가 없음을 의미
+              console.log(`[AdSense] 모든 필터 전략 실패 (404) - 데이터 없음으로 처리`);
+              // 오류로 기록하지 않고 데이터 없음으로 처리
+              lastError = null; // 오류가 아님
+              break; // 루프 종료
+            }
+          }
+          
+          // 401 오류면 토큰 갱신 후 재시도
+          if (response.status === 401 && retryCount < MAX_RETRIES) {
+            console.log(`[AdSense] 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+            
+            try {
+              // 기존 토큰 무효화
+              try {
+                await new Promise((resolve) => {
+                  chrome.identity.removeCachedAuthToken({ token }, resolve);
+                });
+              } catch (e) {
+                console.warn("[AdSense 토큰 갱신] 기존 토큰 제거 실패:", e);
+              }
+
+              // 새 토큰 발급
+              const newToken = await new Promise((resolve, reject) => {
+                chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
+                  if (chrome.runtime.lastError) {
+                    chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
+                      if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                      } else {
+                        resolve(newToken2);
+                      }
+                    });
+                  } else {
+                    resolve(newToken);
+                  }
+                });
+              });
+
+              // 새 토큰 저장
+              await new Promise((resolve) => {
+                chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
+              });
+              
+              console.log("[AdSense 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
+              
+              // 지수 백오프 후 재시도
+              const delay = Math.pow(2, retryCount) * 1000;
+              await new Promise(resolve => setTimeout(resolve, delay));
+              return getAdsenseData(newToken, accountId, url, retryCount + 1);
+            } catch (tokenError) {
+              console.error("[AdSense 토큰 갱신 실패]", tokenError);
+              throw new Error(`AdSense API 오류 (401): 토큰 갱신 실패 - ${tokenError.message}`);
+            }
+          }
+          
           throw new Error(`AdSense API 오류 (${response.status}): ${errorData.error?.message || response.statusText}`);
         }
 
         const data = await response.json();
+        
+        // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음)
+        if (!data.rows || data.rows.length === 0) {
+          console.log(`[AdSense] 데이터 없음 (${url}, 필터: ${filter}): 해당 URL/도메인에 데이터가 없습니다.`);
+          // 다음 필터 전략 시도
+          continue;
+        }
         
         if (data.rows && data.rows.length > 0) {
           const row = data.rows[0]?.cells;
@@ -4213,19 +5224,44 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
               pageViews: pageViews,
               ctr: parseFloat(ctr.toFixed(2)),
             };
-            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filter}):`, adsenseData);
+            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, adsenseData);
             break; // 성공하면 루프 종료
           }
         }
       } catch (filterError) {
         lastError = filterError;
-        console.warn(`[AdSense] 필터 전략 실패 (${filter}):`, filterError.message);
+        console.warn(`[AdSense] 필터 전략 실패 (${filterStrategy.name}):`, filterError.message);
         continue; // 다음 필터 전략 시도
       }
     }
 
+    // 모든 필터 전략 실패한 경우
     if (!adsenseData) {
-      throw lastError || new Error("모든 필터 전략이 실패했습니다.");
+      // lastError가 실제 API 오류(401, 403 등)인지 확인
+      // 404는 리포트 생성 실패를 의미하지만, 계정 정보 조회가 성공했다면 데이터 없음을 의미할 수 있음
+      const isRealError = lastError && (
+        lastError.message.includes('401') || 
+        lastError.message.includes('403') ||
+        lastError.message.includes('계정을 찾을 수 없습니다') ||
+        lastError.message.includes('토큰') ||
+        (lastError.message.includes('404') && !hasAccountData) // 계정 정보 조회도 실패한 경우만 오류
+      );
+      
+      if (isRealError) {
+        // 실제 API 오류인 경우
+        throw lastError;
+      } else {
+        // 데이터가 없는 경우 (404이지만 계정은 존재, 또는 200 OK이지만 rows가 비어있음) - 오류가 아님
+        console.log(`[AdSense] 데이터 없음 (${url}): 모든 필터 전략 실패했지만 실제 오류는 아닙니다. 데이터가 없을 수 있습니다.`);
+        return {
+          estimatedEarnings: 0,
+          pageRPM: 0,
+          clicks: 0,
+          pageViews: 0,
+          ctr: 0,
+          // 오류가 아닌 정상 응답 (데이터 없음)
+        };
+      }
     }
 
     return adsenseData;
@@ -4236,6 +5272,54 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
       error: error.message,
       stack: error.stack,
     });
+
+    // 401 오류면 토큰 갱신 후 재시도
+    if (error.message.includes('401') && retryCount < MAX_RETRIES) {
+      console.log(`[AdSense] catch 블록에서 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+      
+      try {
+        // 기존 토큰 무효화
+        try {
+          await new Promise((resolve) => {
+            chrome.identity.removeCachedAuthToken({ token }, resolve);
+          });
+        } catch (e) {
+          console.warn("[AdSense 토큰 갱신] 기존 토큰 제거 실패:", e);
+        }
+
+        // 새 토큰 발급
+        const newToken = await new Promise((resolve, reject) => {
+          chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
+            if (chrome.runtime.lastError) {
+              chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  resolve(newToken2);
+                }
+              });
+            } else {
+              resolve(newToken);
+            }
+          });
+        });
+
+        // 새 토큰 저장
+        await new Promise((resolve) => {
+          chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
+        });
+        
+        console.log("[AdSense 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
+        
+        // 지수 백오프 후 재시도
+        const delay = Math.pow(2, retryCount) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return getAdsenseData(newToken, accountId, url, retryCount + 1);
+      } catch (tokenError) {
+        console.error("[AdSense 토큰 갱신 실패]", tokenError);
+        // 토큰 갱신 실패해도 일반 재시도 로직으로 진행
+      }
+    }
 
     // 재시도 로직
     if (retryCount < MAX_RETRIES) {

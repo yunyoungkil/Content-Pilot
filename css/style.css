@@ -597,6 +597,21 @@
   min-height: 22px; /* 일관된 높이 유지를 위해 유지 */
   align-items: center; /* 내부 아이템을 세로 중앙 정렬 */
 }
+
+/* 대시보드 카드의 태그는 더 작게 */
+.content-card .card-tags {
+  margin-top: 4px;
+  max-height: 18px;
+  min-height: 18px;
+  gap: 3px;
+}
+
+.content-card .card-tags .tag {
+  font-size: 9px;
+  padding: 2px 5px;
+  line-height: 1.2;
+  border-radius: 3px;
+}
 /* 안내 메시지 스타일 */
 .tag-placeholder {
   font-size: 12px;
@@ -974,6 +989,145 @@
   font-size: 20px;
   cursor: pointer;
 }
+
+/* 연동 상태 표시 스타일 */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+}
+
+.connection-status.success {
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
+
+.connection-status.warning {
+  background: #fff3e0;
+  border-color: #ff9800;
+  color: #e65100;
+}
+
+.connection-status.error {
+  background: #ffebee;
+  border-color: #ef5350;
+  color: #c62828;
+}
+
+.connection-status .status-icon {
+  font-size: 16px;
+}
+
+.connection-status .status-text {
+  font-weight: 500;
+  flex: 1;
+}
+
+.connection-status .status-detail {
+  font-size: 11px;
+  opacity: 0.8;
+  margin-left: auto;
+}
+
+.test-connection-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #fff;
+  color: #5f6368;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.test-connection-btn:hover {
+  background: #f1f3f5;
+  border-color: #bdc1c6;
+}
+
+.connection-status-info {
+  margin: 12px 0;
+  padding: 12px;
+  background: #e8f0fe;
+  border-radius: 6px;
+  border-left: 3px solid #1967d2;
+}
+
+.connection-status-info .info-text {
+  margin: 0;
+  font-size: 13px;
+  color: #1967d2;
+  line-height: 1.5;
+}
+
+/* AdSense 계정 목록 관련 스타일 */
+.refresh-account-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #fff;
+  color: #5f6368;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.refresh-account-btn:hover {
+  background: #f1f3f5;
+  border-color: #bdc1c6;
+}
+
+.adsense-accounts-list {
+  margin-top: 8px;
+  padding: 8px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+.adsense-accounts-list > div:first-child {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.adsense-accounts-list > div:last-child > div {
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.adsense-accounts-list > div:last-child > div:hover {
+  background: #e8f0fe;
+}
+
+.save-account-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #34a853;
+  border-radius: 4px;
+  background: #34a853;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 4px;
+}
+
+.save-account-btn:hover {
+  background: #2d8e47;
+  border-color: #2d8e47;
+}
+
 .channel-save-btn {
   display: block;
   width: 100%;
