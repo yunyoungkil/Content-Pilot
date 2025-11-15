@@ -895,6 +895,7 @@ export function renderWorkspace(container, ideaData) {
           <button class="resource-tab-btn" data-tab="recommended-keywords" title="추천 검색어">🔍</button>
           <button class="resource-tab-btn" data-tab="all-scraps" title="모든 스크랩">📖</button>
           <button class="resource-tab-btn" data-tab="image-gallery" title="이미지 갤러리">🖼️</button>
+          <button class="resource-tab-btn" data-tab="publish-info" title="발행 정보">📝</button>
         </div>
         
         <div class="resource-content-area ai-briefing-area" id="ai-briefing-area" style="display: block;">
@@ -928,6 +929,12 @@ export function renderWorkspace(container, ideaData) {
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display: none;">
           <div class="image-gallery-grid">
             <p class="loading-images">이미지 갤러리를 불러오는 중...</p>
+          </div>
+        </div>
+        
+        <div class="resource-content-area publish-info-area" id="publish-info-area" style="display: none;">
+          <div id="publish-info-content" style="padding: 16px;">
+            <p style="color: #666; font-size: 13px; text-align: center;">초안 생성 후 발행 정보가 여기에 표시됩니다.</p>
           </div>
         </div>
       </div>
@@ -1312,10 +1319,236 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
             action: "cp_show_toast",
             message: "❌ 제목 업데이트 실패"
           }, "*");
+      }
+    });
+  });
+}
+
+/**
+ * 퍼머링크와 태그 정보를 표시하는 UI 생성
+ */
+function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
+  // 기존 퍼블리시 정보가 있으면 제거
+  const existingInfo = workspaceEl.querySelector('.publish-info-panel');
+  if (existingInfo) {
+    existingInfo.remove();
+  }
+  
+  // 채널 정보 가져오기
+  chrome.runtime.sendMessage({ action: "get_my_channels" }, (channelsResponse) => {
+    const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
+    const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
+    const channelUrl = firstChannel?.inputUrl || '';
+    
+    // 퍼머링크와 채널 URL 조합
+    const fullUrl = channelUrl && permalink 
+      ? `${channelUrl.replace(/\/$/, '')}/${permalink}`
+      : '';
+    
+    // 퍼블리시 정보 패널 생성
+    const publishInfoPanel = document.createElement('div');
+    publishInfoPanel.className = 'publish-info-panel';
+    publishInfoPanel.style.cssText = `
+      margin-top: 12px;
+      padding: 16px;
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    `;
+    
+    publishInfoPanel.innerHTML = `
+      <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 4px;">
+        📝 발행 정보
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${seoTitle ? `
+        <div>
+          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
+          <input type="text" id="seo-title-input" value="${seoTitle || ''}" 
+            readonly
+            style="width: 100%; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+          <div style="font-size: 11px; color: #666; margin-top: 4px;">아이디어 제목과 분리된 검색 최적화 제목입니다.</div>
+        </div>
+        ` : ''}
+        <div>
+          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="permalink-input" value="${permalink || ''}" 
+              readonly
+              style="flex: 1; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+            ${fullUrl ? `<button id="connect-permalink-btn" class="connect-btn" style="padding: 6px 12px; border: 1px solid #4285f4; background: #4285f4; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">🔗 연결하기</button>` : ''}
+          </div>
+          ${fullUrl ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">전체 URL: <span style="color: #1a73e8;">${fullUrl}</span></div>` : ''}
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">태그 (쉼표 구분)</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="tags-input" value="${tags || ''}" 
+              readonly
+              style="flex: 1; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+            <button id="copy-tags-btn" class="copy-btn" style="padding: 6px 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">📋 복사</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // 오른쪽 탭의 발행 정보 영역에 삽입
+    const publishInfoArea = workspaceEl.querySelector('#publish-info-content');
+    if (publishInfoArea) {
+      publishInfoArea.innerHTML = '';
+      publishInfoArea.appendChild(publishInfoPanel);
+    }
+    
+    // 연결하기 버튼 클릭 이벤트
+    const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
+    if (connectBtn && fullUrl) {
+      connectBtn.addEventListener('click', () => {
+        // 발행 완료 카드에 URL 연결
+        const cardId = ideaData.id;
+        // 현재 카드의 상태 확인
+        chrome.runtime.sendMessage({
+          action: "get_kanban_card_status",
+          data: { cardId }
+        }, (statusResponse) => {
+          const currentStatus = statusResponse?.status || "draft";
+          chrome.runtime.sendMessage({
+            action: "link_published_url",
+            data: {
+              cardId: cardId,
+              url: fullUrl,
+              status: currentStatus
+            }
+          }, (response) => {
+            if (response && response.success) {
+              window.parent.postMessage({
+                action: "cp_show_toast",
+                message: "✅ 발행 URL이 연결되었습니다."
+              }, "*");
+            } else {
+              alert("URL 연결에 실패했습니다: " + (response?.error || "알 수 없는 오류"));
+            }
+          });
+        });
+      });
+    }
+    
+    // 태그 복사 버튼 클릭 이벤트
+    const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
+    if (copyTagsBtn) {
+      copyTagsBtn.addEventListener('click', () => {
+        const tagsInput = publishInfoPanel.querySelector('#tags-input');
+        if (tagsInput && tagsInput.value) {
+          navigator.clipboard.writeText(tagsInput.value).then(() => {
+            copyTagsBtn.textContent = '✅ 복사됨';
+            setTimeout(() => {
+              copyTagsBtn.textContent = '📋 복사';
+            }, 2000);
+            window.parent.postMessage({
+              action: "cp_show_toast",
+              message: "📋 태그가 클립보드에 복사되었습니다."
+            }, "*");
+          }).catch(err => {
+            console.error('태그 복사 실패:', err);
+            alert("태그 복사에 실패했습니다.");
+          });
         }
       });
-    });
-  }
+    }
+  });
+}
+
+/**
+ * 이미지 플레이스홀더 이벤트 리스너 설정
+ */
+function setupImagePlaceholderListeners(workspaceEl, ideaData) {
+  // 에디터 iframe 내부의 플레이스홀더에 접근
+  const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+  if (!editorIframe || !editorIframe.contentWindow) return;
+  
+  // 에디터 내부 문서에 이벤트 위임
+  const editorDoc = editorIframe.contentDocument || editorIframe.contentWindow.document;
+  if (!editorDoc) return;
+  
+  // 이미지 프롬프트 추가 버튼 클릭
+  editorDoc.addEventListener('click', (e) => {
+    const addPromptBtn = e.target.closest('.add-image-prompt-btn');
+    if (addPromptBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const placeholderId = addPromptBtn.dataset.placeholderId;
+      const promptContent = editorDoc.querySelector(`.image-prompt-content[data-placeholder-id="${placeholderId}"]`);
+      if (promptContent) {
+        promptContent.style.display = 'block';
+        const textarea = promptContent.querySelector('.image-prompt-textarea');
+        if (textarea) {
+          setTimeout(() => textarea.focus(), 100);
+        }
+      }
+    }
+    
+    // 프롬프트 제거 버튼 클릭
+    const removePromptBtn = e.target.closest('.remove-prompt-btn');
+    if (removePromptBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const placeholderId = removePromptBtn.dataset.placeholderId;
+      const promptContent = editorDoc.querySelector(`.image-prompt-content[data-placeholder-id="${placeholderId}"]`);
+      if (promptContent) {
+        promptContent.style.display = 'none';
+        const textarea = promptContent.querySelector('.image-prompt-textarea');
+        if (textarea) {
+          textarea.value = '';
+        }
+      }
+    }
+    
+    // 이미지 생성 버튼 클릭
+    const generateImageBtn = e.target.closest('.generate-image-btn');
+    if (generateImageBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const placeholderId = generateImageBtn.dataset.placeholderId;
+      const textarea = editorDoc.querySelector(`.image-prompt-textarea[data-placeholder-id="${placeholderId}"]`);
+      const placeholderEl = editorDoc.querySelector(`.img-placeholder[data-placeholder-id="${placeholderId}"]`);
+      const placeholderType = placeholderEl?.dataset.placeholderType || 'body';
+      
+      if (textarea && textarea.value.trim()) {
+        const prompt = textarea.value.trim();
+        // 이미지 생성 프롬프트를 플레이스홀더에 저장
+        if (placeholderEl) {
+          placeholderEl.dataset.imagePrompt = prompt;
+          placeholderEl.style.borderColor = '#34a853';
+          placeholderEl.style.background = '#e8f5e9';
+          
+          // 프롬프트 내용 숨기기
+          const promptContent = editorDoc.querySelector(`.image-prompt-content[data-placeholder-id="${placeholderId}"]`);
+          if (promptContent) {
+            promptContent.style.display = 'none';
+          }
+          
+          // 플레이스홀더에 프롬프트 표시
+          const promptDisplay = placeholderEl.querySelector('.prompt-display') || editorDoc.createElement('div');
+          if (!promptDisplay.classList.contains('prompt-display')) {
+            promptDisplay.className = 'prompt-display';
+            promptDisplay.style.cssText = 'margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #e9ecef; border-radius: 4px; font-size: 11px; color: #666;';
+            placeholderEl.appendChild(promptDisplay);
+          }
+          promptDisplay.innerHTML = `<strong>프롬프트:</strong> ${prompt}`;
+          
+          window.parent.postMessage({
+            action: "cp_show_toast",
+            message: "✅ 이미지 생성 프롬프트가 추가되었습니다."
+          }, "*");
+        }
+      } else {
+        alert("이미지 생성 프롬프트를 입력해주세요.");
+      }
+    }
+  });
+}
 
   // 탭 전환 애니메이션을 위한 스타일 추가
   const tabStyle = document.createElement("style");
@@ -1341,7 +1574,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
       const tab = btn.dataset.tab;
       
       // 모든 영역 숨기기 (애니메이션)
-      [aiBriefingArea, outlineArea, recommendedKeywordsArea, allScrapsArea, imageGalleryArea].forEach(area => {
+      const publishInfoArea = workspaceEl.querySelector("#publish-info-area");
+      [aiBriefingArea, outlineArea, recommendedKeywordsArea, allScrapsArea, imageGalleryArea, publishInfoArea].forEach(area => {
         if (area) {
           area.style.opacity = "0";
           area.style.transform = "translateX(10px)";
@@ -1370,6 +1604,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
               updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
             }
           });
+        } else if (tab === "publish-info") {
+          targetArea = publishInfoArea;
         }
         
         if (targetArea) {
@@ -1710,9 +1946,50 @@ function addWorkspaceEventListeners(workspaceEl, ideaData) {
               return match;
             });
             
+            // 이미지 플레이스홀더 처리 (<img-placeholder type="main" /> 또는 <img-placeholder type="body" />)
+            html = html.replace(/<img-placeholder\s+type="(main|body)"\s*\/?>/gi, (match, type) => {
+              const placeholderId = `img-placeholder-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              const placeholderType = type === 'main' ? 'main' : 'body';
+              const placeholderLabel = type === 'main' ? '메인 이미지' : '본문 이미지';
+              return `<div class="img-placeholder" data-placeholder-id="${placeholderId}" data-placeholder-type="${placeholderType}" 
+                style="border: 2px dashed #4285f4; border-radius: 8px; padding: 24px; margin: 16px 0; background: #f8f9fa; text-align: center; cursor: pointer; position: relative;">
+                <div style="font-size: 14px; color: #4285f4; font-weight: 600; margin-bottom: 8px;">🖼️ ${placeholderLabel} 삽입 위치</div>
+                <div style="font-size: 12px; color: #666; margin-bottom: 12px;">클릭하여 이미지 생성 프롬프트 추가</div>
+                <button class="add-image-prompt-btn" data-placeholder-id="${placeholderId}" data-placeholder-type="${placeholderType}" 
+                  style="padding: 6px 12px; border: 1px solid #4285f4; background: #4285f4; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                  이미지 생성 프롬프트 추가
+                </button>
+                <div class="image-prompt-content" data-placeholder-id="${placeholderId}" style="display: none; margin-top: 12px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 4px;">
+                  <textarea class="image-prompt-textarea" data-placeholder-id="${placeholderId}" 
+                    placeholder="이미지 생성 프롬프트를 입력하세요..." 
+                    style="width: 100%; min-height: 60px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; resize: vertical;"></textarea>
+                  <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <button class="generate-image-btn" data-placeholder-id="${placeholderId}" 
+                      style="flex: 1; padding: 6px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                      이미지 생성
+                    </button>
+                    <button class="remove-prompt-btn" data-placeholder-id="${placeholderId}" 
+                      style="padding: 6px 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>`;
+            });
+            
             currentEditorContent = html;
             sendCommand("set-content", { html });
             sendCommand("focus");
+            
+            // 이미지 플레이스홀더 이벤트 리스너 추가
+            setTimeout(() => {
+              setupImagePlaceholderListeners(workspaceEl, ideaData);
+            }, 500);
+            
+            // 퍼머링크와 태그가 있으면 UI에 표시 (오른쪽 탭)
+            if (response.permalink || response.tags || response.seoTitle) {
+              showPublishInfo(workspaceEl, response.permalink, response.tags, response.seoTitle, ideaData);
+            }
             
             // 자동 저장
             setTimeout(() => {

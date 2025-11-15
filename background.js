@@ -1839,6 +1839,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true;
+  } else if (msg.action === "get_my_channels") {
+    const userId = "default_user";
+    firebase.database().ref(`channels/${userId}`).once("value")
+      .then((snapshot) => {
+        const rawChannelData = snapshot.val() || {};
+        sendResponse({ 
+          success: true, 
+          channels: {
+            myChannels: {
+              blogs: rawChannelData.myChannels?.blogs || [],
+              youtubes: rawChannelData.myChannels?.youtubes || []
+            }
+          }
+        });
+      })
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  } else if (msg.action === "get_kanban_card_status") {
+    const { cardId } = msg.data;
+    if (!cardId) {
+      sendResponse({ success: false, error: "cardId가 필요합니다." });
+      return true;
+    }
+    firebase.database().ref("kanban").once("value")
+      .then((snapshot) => {
+        const allCards = snapshot.val() || {};
+        for (const status in allCards) {
+          if (allCards[status] && allCards[status][cardId]) {
+            sendResponse({ success: true, status });
+            return;
+          }
+        }
+        sendResponse({ success: false, error: "카드를 찾을 수 없습니다." });
+      })
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
   } else if (msg.action === "delete_channel") {
     (async () => {
       try {
@@ -3259,8 +3299,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const prompt = `
             당신은 특정 주제에 대한 전문 작가입니다. 아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
-            ### 1. 최종 주제 (이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요)
+            ### 1. 아이디어 제목 (참고용)
             - ${ideaData.title}
+
+            ### 1-1. SEO 최적화된 실제 초안 제목 생성
+            위 아이디어 제목을 참고하여, 검색 노출에 최적화되고 독자의 체류시간을 늘릴 수 있는 실제 초안 제목을 생성해주세요.
+            - 검색 키워드를 자연스럽게 포함
+            - 클릭을 유도하는 제목
+            - 독자의 문제를 해결하거나 유용한 정보를 제공한다는 것을 명확히 표현
+            - 50자 이내로 간결하게
+            - 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요
 
             ### 2. 핵심 요약
             - ${ideaData.description || "주제에 대한 상세 설명"}
@@ -3296,13 +3344,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ${linkedScrapsText || "참고 자료 없음"}
 
             [작성 규칙]
-            1. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
-            2. '글의 구조'를 반드시 따라주세요. 각 섹션을 명확하게 구분하고, 제목과 본문을 체계적으로 작성해주세요.
-            3. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
-            4. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
-            5. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
-            6. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요.
-            7. **참고 자료 링크 통합 방법 (매우 중요):**
+            1. **제목 최적화**: SEO 최적화된 제목을 생성하고, 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요. 아이디어 제목과는 다를 수 있습니다.
+            2. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
+            3. '글의 구조'를 반드시 따라주세요. 각 섹션을 명확하게 구분하고, 제목과 본문을 체계적으로 작성해주세요.
+            4. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
+            5. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
+            6. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
+            7. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
+            8. **이미지 삽입 위치 및 프롬프트**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 <img-placeholder type="main" prompt="이미지 생성 프롬프트" /> (메인 이미지 1개) 또는 <img-placeholder type="body" prompt="이미지 생성 프롬프트" /> (본문 이미지) 태그를 삽입해주세요. 
+               - 메인 이미지는 제목 바로 아래에 1개
+               - 본문 이미지는 각 섹션 사이에 3~4개 배치
+               - 각 플레이스홀더에는 해당 위치의 콘텐츠에 맞는 구체적인 이미지 생성 프롬프트를 포함해주세요 (예: "갤럭시 탭 S11 울트라를 사용하는 모습, 현대적인 사무실 배경, 고품질 제품 사진 스타일")
+            9. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
@@ -3361,11 +3414,117 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         }
         
-        sendResponse({ success: true, draft: formattedDraft });
+        // 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
+        const generatePermalink = async (title) => {
+          if (!title) return '';
+          
+          // 기본 변환 함수 (빠른 폴백)
+          const defaultConversion = (text) => {
+            return text
+              .toLowerCase()
+              .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지 (한글 제거)
+              .replace(/\s+/g, '-') // 공백을 하이픈으로
+              .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+              .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
+              .substring(0, 100); // 최대 100자
+          };
+          
+          // 타임아웃을 포함한 Promise로 래핑
+          const translationWithTimeout = Promise.race([
+            (async () => {
+              try {
+                const translationPrompt = `다음 한국어 제목을 SEO에 최적화된 영문 URL 슬러그로 변환해주세요. 
+- 영문, 숫자, 하이픈만 사용
+- 소문자로 변환
+- 공백은 하이픈으로
+- 최대 100자
+- 검색 최적화를 고려한 키워드 포함
+
+제목: ${title}
+
+영문 슬러그만 반환해주세요 (설명 없이):`;
+                
+                const translated = await callGeminiAPI(translationPrompt);
+                if (translated && !translated.startsWith("오류:")) {
+                  return translated
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지
+                    .replace(/\s+/g, '-') // 공백을 하이픈으로
+                    .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+                    .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
+                    .substring(0, 100); // 최대 100자
+                }
+              } catch (e) {
+                console.error('퍼머링크 번역 실패:', e);
+              }
+              return null;
+            })(),
+            new Promise((resolve) => setTimeout(() => resolve(null), 5000)) // 5초 타임아웃
+          ]);
+          
+          try {
+            const translated = await translationWithTimeout;
+            if (translated) {
+              return translated;
+            }
+          } catch (e) {
+            console.error('퍼머링크 생성 중 오류:', e);
+          }
+          
+          // 번역 실패 또는 타임아웃 시 기본 변환 반환
+          return defaultConversion(title);
+        };
+        
+        // 퍼머링크 생성 (타임아웃 보호)
+        let permalink = '';
+        try {
+          permalink = await generatePermalink(seoTitle || title);
+        } catch (e) {
+          console.error('퍼머링크 생성 실패, 기본값 사용:', e);
+          // 기본 변환 사용
+          const titleForPermalink = seoTitle || title || '';
+          permalink = titleForPermalink
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .substring(0, 100);
+        }
+        
+        // 태그 생성 (쉼표 구분)
+        const tagsForPublish = tags
+          .map(t => t.replace(/^#/, ''))
+          .filter(t => t && t !== 'AI-추천')
+          .join(', ');
+        
+        // sendResponse가 이미 호출되었는지 확인
+        if (sendResponse) {
+          sendResponse({ 
+            success: true, 
+            draft: formattedDraft,
+            permalink: permalink,
+            tags: tagsForPublish,
+            seoTitle: seoTitle // SEO 최적화된 제목
+          });
+        }
       } else {
-        sendResponse({ success: false, error: draft });
+        // sendResponse가 이미 호출되었는지 확인
+        if (sendResponse) {
+          sendResponse({ success: false, error: draft });
+        }
       }
-    })();
+    })().catch((error) => {
+      // 예외 발생 시에도 응답 보장
+      console.error('[generate_draft_from_idea] 오류:', error);
+      if (sendResponse) {
+        sendResponse({ 
+          success: false, 
+          error: error.message || '초안 생성 중 오류가 발생했습니다.' 
+        });
+      }
+    });
 
     return true; // 비동기 응답을 위해 true를 반환합니다.
   } else if (msg.action === "request_search_keywords") {
