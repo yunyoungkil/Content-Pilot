@@ -652,7 +652,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 }
 // js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
-import { shortenLink } from "../utils.js";
+import { shortenLink, showToast } from "../utils.js";
 import { marked } from "marked";
 
 export function renderWorkspace(container, ideaData) {
@@ -802,8 +802,13 @@ export function renderWorkspace(container, ideaData) {
   }
   const outlineHtml =
     ideaData.outline && ideaData.outline.length > 0
-      ? ideaData.outline.map((item) => `<li>${item}</li>`).join("")
-      : "<li>추천 목차가 없습니다.</li>";
+      ? ideaData.outline.map((item, index) => `
+          <li class="outline-item" data-index="${index}">
+            <span class="outline-text">${item}</span>
+            <button class="outline-delete-btn" title="삭제">×</button>
+          </li>
+        `).join("")
+      : "<li class='outline-empty'>추천 목차가 없습니다.</li>";
 
   const KeywordsTagsHtml =
     ideaData.tags && ideaData.tags.length > 0
@@ -831,9 +836,9 @@ export function renderWorkspace(container, ideaData) {
       ? ideaData.recommendedKeywords
           .map(
             (item) =>
-              `<li><a href="https://www.google.com/search?q=${encodeURIComponent(
+              `<li><span class="recommended-keyword-item" data-keyword="${item.replace(/"/g, '&quot;')}" style="cursor: pointer; color: #4285f4; text-decoration: underline;">${item}</span> <a href="https://www.google.com/search?q=${encodeURIComponent(
                 item
-              )}" target="_blank">${item}</a></li>`
+              )}" target="_blank" style="margin-left: 8px; color: #999; text-decoration: none;">🔗</a></li>`
           )
           .join("")
       : "<li>추천 검색어가 없습니다.</li>";
@@ -910,7 +915,15 @@ export function renderWorkspace(container, ideaData) {
         
         <div class="resource-content-area outline-area" id="outline-area" style="display: none;">
           <div class="ai-briefing-content">
-            <h4>추천 목차</h4>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h4 style="margin: 0;">추천 목차</h4>
+              <button id="add-outline-item-btn" style="padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                ➕ 추가
+              </button>
+            </div>
+            <p style="font-size: 12px; color: #666; margin: 0 0 12px 0; padding: 8px; background: #f0f7ff; border-radius: 4px;">
+              💡 목차 항목을 더블클릭하면 편집할 수 있습니다. 오른쪽 끝의 × 버튼으로 삭제할 수 있습니다. 스크랩 아이디어 추가 시 불필요한 단어가 포함될 수 있으니 필요시 수정해주세요.
+            </p>
             <ul class="outline-list">
               ${outlineHtml}
             </ul>
@@ -919,7 +932,15 @@ export function renderWorkspace(container, ideaData) {
         
         <div class="resource-content-area recommended-keywords-area" id="recommended-keywords-area" style="display: none;">
           <div class="ai-briefing-content">
-            <h4>추천 검색어</h4>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h4 style="margin: 0;">추천 검색어</h4>
+              <button id="clear-scrap-filter-btn" style="display: none; padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer;">
+                필터 취소
+              </button>
+            </div>
+            <p style="font-size: 12px; color: #666; margin: 0 0 12px 0; padding: 8px; background: #f0f7ff; border-radius: 4px;">
+              💡 검색어를 클릭하면 스크랩이 필터링됩니다. 이미지 갤러리도 함께 필터링됩니다.
+            </p>
             <ul>
               ${searchesHtml}
             </ul>
@@ -927,8 +948,20 @@ export function renderWorkspace(container, ideaData) {
         </div>
         
         <div class="resource-content-area all-scraps-area" id="all-scraps-list-container" style="display: none;">
-          <div class="scrap-list all-scraps-list">
-            <p class="loading-scr랩">스크랩 목록을 불러오는 중...</p>
+          <div class="ai-briefing-content" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-shrink: 0;">
+              <h4 style="margin: 0;">모든 스크랩</h4>
+              <button id="clear-scrap-search-btn" style="display: none; padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer;">
+                검색 취소
+              </button>
+            </div>
+            <div style="margin-bottom: 12px; flex-shrink: 0;">
+              <input type="text" id="scrap-search-input" placeholder="스크랩 검색 (내용, 이미지, 링크)" 
+                style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; outline: none;">
+            </div>
+            <div class="scrap-list all-scraps-list" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;">
+              <p class="loading-scr랩">스크랩 목록을 불러오는 중...</p>
+            </div>
           </div>
         </div>
         
@@ -941,6 +974,243 @@ export function renderWorkspace(container, ideaData) {
     </div>
   `;
 
+  // 전역 필터 상태 관리
+  window.__cp_scrap_filter = {
+    keyword: null,
+    searchText: null,
+    allScraps: []
+  };
+
+  // 스크랩 필터링 함수 (전역 접근 가능)
+  window.__cp_filterScraps = function(scraps, filterKeyword = null, searchText = null) {
+    if (!filterKeyword && !searchText) {
+      return scraps;
+    }
+    
+    const keyword = filterKeyword || searchText;
+    if (!keyword) return scraps;
+    
+    const lowerKeyword = keyword.toLowerCase().trim();
+    
+    // 키워드를 단어 단위로 분리 (2글자 이상 단어만)
+    const keywordWords = lowerKeyword
+      .split(/\s+/)
+      .filter(word => word.length >= 2)
+      .filter(word => !['의', '을', '를', '이', '가', '은', '는', '에', '에서', '로', '으로', '와', '과', '와', '과'].includes(word));
+    
+    // 키워드가 너무 짧거나 단어가 없으면 전체 키워드로만 검색
+    const useWordMatch = keywordWords.length > 0;
+    
+    return scraps.filter(scrap => {
+      let matchScore = 0;
+      const scrapText = (scrap.text || '').toLowerCase();
+      const scrapUrl = (scrap.url || '').toLowerCase();
+      const scrapTags = Array.isArray(scrap.tags) ? scrap.tags.map(t => t.toLowerCase()) : [];
+      
+      // 1. 태그 매칭 (가장 높은 우선순위) - 정확도 향상
+      if (scrapTags.length > 0) {
+        if (useWordMatch) {
+          // 태그와 키워드 단어 중 정확히 일치하거나 포함 관계가 있으면 높은 점수
+          let tagMatchCount = 0;
+          keywordWords.forEach(word => {
+            const exactMatch = scrapTags.some(tag => tag === word || tag === word.replace(/^#/, ''));
+            const partialMatch = scrapTags.some(tag => {
+              const cleanTag = tag.replace(/^#/, '');
+              return cleanTag.includes(word) || word.includes(cleanTag);
+            });
+            if (exactMatch) tagMatchCount += 2; // 정확 일치 시 더 높은 점수
+            else if (partialMatch) tagMatchCount += 1;
+          });
+          if (tagMatchCount > 0) matchScore += Math.min(tagMatchCount * 5, 15); // 최대 15점
+        } else {
+          // 전체 키워드가 태그에 정확히 포함되면 높은 점수
+          const exactTagMatch = scrapTags.some(tag => {
+            const cleanTag = tag.replace(/^#/, '').toLowerCase();
+            return cleanTag === lowerKeyword || cleanTag.includes(lowerKeyword) || lowerKeyword.includes(cleanTag);
+          });
+          if (exactTagMatch) matchScore += 15;
+        }
+      }
+      
+      // 2. 내용 매칭 - 정확도 향상
+      if (scrapText) {
+        if (useWordMatch) {
+          // 키워드 단어 중 일부라도 포함되면 점수 부여 (정확도 향상)
+          const matchedWords = keywordWords.filter(word => {
+            // 단어 경계를 고려한 정확한 매칭
+            const wordRegex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+            return wordRegex.test(scrapText) || scrapText.includes(word);
+          }).length;
+          
+          if (matchedWords > 0) {
+            // 매칭된 단어 비율에 따라 점수 부여
+            const matchRatio = matchedWords / keywordWords.length;
+            matchScore += Math.round(matchedWords * 3 * matchRatio); // 매칭 비율 반영
+          }
+          // 전체 키워드가 포함되면 추가 점수
+          if (scrapText.includes(lowerKeyword)) {
+            matchScore += 8; // 점수 증가
+          }
+        } else {
+          // 단어 경계를 고려한 정확한 매칭
+          const wordRegex = new RegExp(`\\b${lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          if (wordRegex.test(scrapText)) {
+            matchScore += 8; // 정확 일치 시 더 높은 점수
+          } else if (scrapText.includes(lowerKeyword)) {
+            matchScore += 5;
+          }
+        }
+      }
+      
+      // 3. URL 매칭
+      if (scrapUrl) {
+        if (useWordMatch) {
+          const urlMatch = keywordWords.some(word => scrapUrl.includes(word));
+          if (urlMatch) matchScore += 1;
+        } else {
+          if (scrapUrl.includes(lowerKeyword)) {
+            matchScore += 1;
+          }
+        }
+      }
+      
+      // 4. 이미지 URL 매칭
+      if (scrap.image) {
+        const imageUrl = scrap.image.toLowerCase();
+        if (useWordMatch) {
+          const imageMatch = keywordWords.some(word => imageUrl.includes(word));
+          if (imageMatch) matchScore += 1;
+        } else {
+          if (imageUrl.includes(lowerKeyword)) {
+            matchScore += 1;
+          }
+        }
+      }
+      
+      if (Array.isArray(scrap.allImages)) {
+        const allImagesMatch = scrap.allImages.some(img => {
+          if (!img) return false;
+          const imgUrl = img.toLowerCase();
+          if (useWordMatch) {
+            return keywordWords.some(word => imgUrl.includes(word));
+          } else {
+            return imgUrl.includes(lowerKeyword);
+          }
+        });
+        if (allImagesMatch) matchScore += 1;
+      }
+      
+      // 점수가 2 이상이면 매칭 (정확도 향상을 위해 임계값 상향)
+      // 태그 매칭이 있으면 더 높은 점수이므로 우선 표시됨
+      return matchScore >= 2;
+    }).sort((a, b) => {
+      // 점수 순으로 정렬 (태그 매칭이 있는 것이 우선)
+      const scoreA = window.__cp_calculateMatchScore(a, lowerKeyword, keywordWords, useWordMatch);
+      const scoreB = window.__cp_calculateMatchScore(b, lowerKeyword, keywordWords, useWordMatch);
+      return scoreB - scoreA;
+    });
+  }
+  
+  // 매칭 점수 계산 함수 (전역 접근 가능)
+  window.__cp_calculateMatchScore = function(scrap, lowerKeyword, keywordWords, useWordMatch) {
+    let score = 0;
+    const scrapText = (scrap.text || '').toLowerCase();
+    const scrapTags = Array.isArray(scrap.tags) ? scrap.tags.map(t => t.toLowerCase()) : [];
+    
+    // 태그 매칭 (정확도 향상)
+    if (scrapTags.length > 0) {
+      if (useWordMatch) {
+        let tagMatchCount = 0;
+        keywordWords.forEach(word => {
+          const exactMatch = scrapTags.some(tag => tag === word || tag === word.replace(/^#/, ''));
+          const partialMatch = scrapTags.some(tag => {
+            const cleanTag = tag.replace(/^#/, '');
+            return cleanTag.includes(word) || word.includes(cleanTag);
+          });
+          if (exactMatch) tagMatchCount += 2;
+          else if (partialMatch) tagMatchCount += 1;
+        });
+        if (tagMatchCount > 0) score += Math.min(tagMatchCount * 5, 15);
+      } else {
+        const exactTagMatch = scrapTags.some(tag => {
+          const cleanTag = tag.replace(/^#/, '').toLowerCase();
+          return cleanTag === lowerKeyword || cleanTag.includes(lowerKeyword) || lowerKeyword.includes(cleanTag);
+        });
+        if (exactTagMatch) score += 15;
+      }
+    }
+    
+    // 내용 매칭 (정확도 향상)
+    if (scrapText) {
+      if (useWordMatch) {
+        const matchedWords = keywordWords.filter(word => {
+          const wordRegex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          return wordRegex.test(scrapText) || scrapText.includes(word);
+        }).length;
+        
+        if (matchedWords > 0) {
+          const matchRatio = matchedWords / keywordWords.length;
+          score += Math.round(matchedWords * 3 * matchRatio);
+        }
+        if (scrapText.includes(lowerKeyword)) score += 8;
+      } else {
+        const wordRegex = new RegExp(`\\b${lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (wordRegex.test(scrapText)) {
+          score += 8;
+        } else if (scrapText.includes(lowerKeyword)) {
+          score += 5;
+        }
+      }
+    }
+    
+    return score;
+  }
+
+  // 스크랩 리스트 업데이트 함수 (전역 접근 가능)
+  window.__cp_updateScrapList = function(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData = null) {
+    const currentIdeaData = ideaData || (window.__cp_workspace_idea_id ? 
+      (() => {
+        // 현재 워크스페이스의 ideaData 찾기
+        const container = document.querySelector("#cp-main-content");
+        if (container && container.dataset.ideaData) {
+          try {
+            return JSON.parse(container.dataset.ideaData);
+          } catch (e) {
+            return null;
+          }
+        }
+        return null;
+      })() : null);
+    
+    const linkedScraps = currentIdeaData?.linkedScraps || [];
+    
+    if (filteredScraps.length > 0) {
+      const linkedScrapsHtml = filteredScraps
+        .filter((s) => linkedScraps.includes(s.id))
+        .map((s) => createScrapCard(s, true))
+        .join("");
+
+      const allScrapsHtml = filteredScraps
+        .map((s) => createScrapCard(s, false))
+        .join("");
+
+      if (linkedScrapsHtml) {
+        linkedScrapsContainer.innerHTML = linkedScrapsHtml;
+        linkedScrapsContainer.classList.remove("empty-state");
+      } else {
+        linkedScrapsContainer.innerHTML =
+          "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+        linkedScrapsContainer.classList.add("empty-state");
+      }
+      allScrapsContainer.innerHTML = allScrapsHtml;
+    } else {
+      linkedScrapsContainer.innerHTML =
+        "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+      linkedScrapsContainer.classList.add("empty-state");
+      allScrapsContainer.innerHTML = "<p>필터링된 스크랩이 없습니다.</p>";
+    }
+  }
+
   chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
     if (response && response.success) {
       const allScrapsContainer = container.querySelector(".all-scraps-list");
@@ -950,25 +1220,16 @@ export function renderWorkspace(container, ideaData) {
 
       if (response.scraps.length > 0) {
         const allScrapsData = response.scraps;
+        window.__cp_scrap_filter.allScraps = allScrapsData;
 
-        const linkedScrapsHtml = allScrapsData
-          .filter((s) => ideaData.linkedScraps.includes(s.id))
-          .map((s) => createScrapCard(s, true))
-          .join("");
-
-        const allScrapsHtml = allScrapsData
-          .map((s) => createScrapCard(s, false))
-          .join("");
-
-        if (linkedScrapsHtml) {
-          linkedScrapsContainer.innerHTML = linkedScrapsHtml;
-          linkedScrapsContainer.classList.remove("empty-state");
-        } else {
-          linkedScrapsContainer.innerHTML =
-            "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
-          linkedScrapsContainer.classList.add("empty-state");
-        }
-        allScrapsContainer.innerHTML = allScrapsHtml;
+        // 초기 필터링 (필터가 활성화되어 있으면)
+        const filteredScraps = window.__cp_filterScraps(
+          allScrapsData, 
+          window.__cp_scrap_filter.keyword,
+          window.__cp_scrap_filter.searchText
+        );
+        
+        window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
 
         // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
         const editorIframe = container.querySelector("#quill-editor-iframe");
@@ -1049,10 +1310,17 @@ function createScrapCard(scrap, isLinked) {
   const actionButton = `<button class=\"scrap-card-delete-btn unlink-scrap-btn\" title=\"연결 해제\">
          <svg xmlns=\"http://www.w3.org/2000/svg\" height=\"18\" viewBox=\"0 -960 960 960\" width=\"18\"><path d=\"m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z\"/></svg>
        </button>`;
+  // 미리보기용 데이터 속성 추가
+  const previewText = textContent.length > 200 ? textContent.substring(0, 200) + "..." : textContent;
+  const previewImage = scrap.image || (Array.isArray(scrap.allImages) && scrap.allImages.length > 0 ? scrap.allImages[0] : "");
+  
   return `
     <div class=\"scrap-card-item\" draggable=\"true\" data-scrap-id=\"${
       scrap.id
-    }\" data-text=\"${textContent.replace(/\"/g, "&quot;")}\">
+    }\" data-text=\"${textContent.replace(/\"/g, "&quot;")}\" 
+         data-preview-text=\"${previewText.replace(/\"/g, "&quot;").replace(/\n/g, " ")}\" 
+         data-preview-image=\"${previewImage.replace(/\"/g, "&quot;")}\"
+         data-preview-url=\"${(scrap.url || "").replace(/\"/g, "&quot;")}\">
         <div class=\"scrap-card\">
             ${actionButton}
             ${
@@ -1077,6 +1345,61 @@ function createScrapCard(scrap, isLinked) {
 }
 
 function addWorkspaceEventListeners(workspaceEl, ideaData) {
+  // Firebase 실시간 업데이트 리스너 (목차 업데이트 감지) - 한 번만 등록
+  if (!window.__cp_outline_update_listener) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.action === "kanban_data_updated" && msg.data) {
+        const allCards = msg.data;
+        const currentIdeaId = window.__cp_workspace_idea_id;
+        if (!currentIdeaId) return;
+        
+        let updatedIdeaData = null;
+        let foundStatus = null;
+        
+        // 모든 상태에서 현재 아이디어 찾기
+        for (const status in allCards) {
+          if (allCards[status]?.[currentIdeaId]) {
+            updatedIdeaData = allCards[status][currentIdeaId];
+            foundStatus = status;
+            break;
+          }
+        }
+        
+        // 목차가 업데이트되었는지 확인
+        if (updatedIdeaData && updatedIdeaData.outline !== undefined) {
+          const workspaceContainer = document.querySelector(".workspace-container");
+          if (!workspaceContainer) return;
+          
+          const outlineList = workspaceContainer.querySelector(".outline-list");
+          if (outlineList) {
+            const newOutline = updatedIdeaData.outline || [];
+            
+            // 현재 표시된 목차와 비교
+            const currentItems = outlineList.querySelectorAll(".outline-item");
+            const currentOutline = Array.from(currentItems).map(item => 
+              item.querySelector(".outline-text")?.textContent.trim()
+            ).filter(Boolean);
+            
+            // 목차가 변경되었으면 UI 업데이트
+            if (JSON.stringify(currentOutline) !== JSON.stringify(newOutline)) {
+            if (newOutline && newOutline.length > 0) {
+              outlineList.innerHTML = newOutline.map((item, index) => `
+                <li class="outline-item" data-index="${index}">
+                  <span class="outline-text">${item}</span>
+                  <button class="outline-delete-btn" title="삭제">×</button>
+                </li>
+              `).join("");
+            } else {
+              outlineList.innerHTML = "<li class='outline-empty'>추천 목차가 없습니다.</li>";
+            }
+            }
+          }
+        }
+      }
+    });
+    window.__cp_outline_update_listener = true;
+  }
+
   // --- TUI Image Editor 동적 로더 (옵션) ---
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -1919,6 +2242,59 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       opacity: 1;
       transform: translateX(0);
     }
+    .outline-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .outline-item:hover {
+      background: #f5f5f5;
+      border-color: #4285f4;
+      box-shadow: 0 2px 4px rgba(66, 133, 244, 0.1);
+    }
+    .outline-item .outline-text {
+      flex: 1;
+      font-size: 14px;
+      color: #333;
+      line-height: 1.5;
+      user-select: none;
+    }
+    .outline-item .outline-delete-btn {
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      color: #999;
+      border-radius: 4px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .outline-item .outline-delete-btn:hover {
+      background: #ffebee;
+      color: #d32f2f;
+    }
+    .outline-empty {
+      padding: 12px;
+      text-align: center;
+      color: #999;
+      font-size: 13px;
+      font-style: italic;
+    }
   `;
   document.head.appendChild(tabStyle);
   
@@ -1951,14 +2327,39 @@ function setupImagePromptDisplayListeners(workspaceEl) {
           targetArea = recommendedKeywordsArea;
         } else if (tab === "all-scraps") {
           targetArea = allScrapsArea;
+          // 필터가 활성화되어 있으면 필터링된 스크랩 표시
+          if (window.__cp_scrap_filter && (window.__cp_scrap_filter.keyword || window.__cp_scrap_filter.searchText)) {
+            setTimeout(() => {
+              const allScrapsContainer = workspaceEl.querySelector(".all-scraps-list");
+              const linkedScrapsContainer = workspaceEl.querySelector(".linked-scraps-list");
+              if (allScrapsContainer && linkedScrapsContainer && window.__cp_scrap_filter.allScraps.length > 0) {
+                const filteredScraps = window.__cp_filterScraps(
+                  window.__cp_scrap_filter.allScraps,
+                  window.__cp_scrap_filter.keyword,
+                  window.__cp_scrap_filter.searchText
+                );
+                window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
+              }
+            }, 100);
+          }
         } else if (tab === "image-gallery") {
           targetArea = imageGalleryArea;
-          // 파이어베이스 전체 스크랩에서 이미지 로드
-          chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
-            if (response && response.success) {
-              updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
-            }
-          });
+          // 필터가 활성화되어 있으면 필터링된 스크랩의 이미지만 표시
+          if (window.__cp_scrap_filter && (window.__cp_scrap_filter.keyword || window.__cp_scrap_filter.searchText) && window.__cp_scrap_filter.allScraps.length > 0) {
+            const filteredScraps = window.__cp_filterScraps(
+              window.__cp_scrap_filter.allScraps,
+              window.__cp_scrap_filter.keyword,
+              window.__cp_scrap_filter.searchText
+            );
+            updateImageGalleryFromAllScraps(resourceLibrary, filteredScraps, sendCommand, ideaData);
+          } else {
+            // 필터가 없으면 전체 스크랩에서 이미지 로드
+            chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
+              if (response && response.success) {
+                updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
+              }
+            });
+          }
         } else if (tab === "publish-info") {
           targetArea = publishInfoArea;
         }
@@ -2062,7 +2463,8 @@ function setupImagePromptDisplayListeners(workspaceEl) {
         break;
 
       case "selection-changed":
-        // 선택 영역 변경 시 툴바 상태 업데이트 가능
+        // 선택 영역 변경 시 "새 아이디어로 저장" 버튼 표시/숨김
+        handleTextSelection(data.hasSelection, data.selectedText);
         break;
 
       case "editor-error":
@@ -2099,6 +2501,159 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       }
     }
   });
+
+  // ▼▼▼ [추가] 텍스트 선택 처리 함수 ▼▼▼
+  let currentSelectedText = "";
+  let saveIdeaButton = null;
+
+  function handleTextSelection(hasSelection, selectedText) {
+    currentSelectedText = selectedText || "";
+    
+    // 기존 버튼 제거
+    if (saveIdeaButton) {
+      saveIdeaButton.remove();
+      saveIdeaButton = null;
+    }
+
+    // 텍스트가 선택되었고 길이가 3자 이상일 때만 버튼 표시
+    if (hasSelection && currentSelectedText && currentSelectedText.length >= 3) {
+      // 플로팅 버튼 생성
+      saveIdeaButton = document.createElement("button");
+      saveIdeaButton.className = "save-selected-text-as-idea-btn";
+      saveIdeaButton.innerHTML = "💡 새 아이디어로 저장";
+      saveIdeaButton.style.cssText = `
+        position: fixed;
+        z-index: 2147483648;
+        padding: 10px 16px;
+        background: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
+        transition: all 0.2s;
+        pointer-events: auto;
+        white-space: nowrap;
+        display: block;
+      `;
+
+      // 버튼을 먼저 추가한 후 위치 계산
+      // Shadow DOM 환경에서도 보이도록 패널의 Shadow DOM 내부에 추가
+      // 패널에 직접 추가하여 항상 보이도록 함
+      const host = document.getElementById("content-pilot-host");
+      if (host && host.shadowRoot) {
+        // 패널에 직접 추가 (패널이 전체 화면을 덮고 있으므로 여기에 추가하면 항상 보임)
+        const panel = host.shadowRoot.querySelector("#content-pilot-panel");
+        if (panel) {
+          panel.appendChild(saveIdeaButton);
+        } else {
+          // 패널을 찾을 수 없으면 shadowRoot에 직접 추가
+          host.shadowRoot.appendChild(saveIdeaButton);
+        }
+      } else {
+        // Shadow DOM이 아닌 경우 body에 추가
+        document.body.appendChild(saveIdeaButton);
+      }
+
+      // 버튼 위치 설정 (에디터 iframe 근처)
+      // 약간의 지연을 두어 DOM이 완전히 렌더링된 후 위치 계산
+      setTimeout(() => {
+        const editorIframe = workspaceEl?.querySelector('#quill-editor-iframe');
+        if (editorIframe && saveIdeaButton && saveIdeaButton.isConnected) {
+          const rect = editorIframe.getBoundingClientRect();
+          // 에디터 iframe 오른쪽 상단에 배치
+          const buttonTop = rect.top + 10;
+          const buttonLeft = rect.right - 180; // 버튼 너비(약 160px) + 여유 공간
+          
+          saveIdeaButton.style.top = `${Math.max(buttonTop, 10)}px`;
+          saveIdeaButton.style.left = `${Math.max(buttonLeft, 10)}px`;
+          saveIdeaButton.style.transform = ''; // transform 초기화
+        } else if (saveIdeaButton && saveIdeaButton.isConnected) {
+          // 에디터를 찾을 수 없으면 화면 중앙 상단에 배치
+          saveIdeaButton.style.top = "80px";
+          saveIdeaButton.style.left = "50%";
+          saveIdeaButton.style.transform = "translateX(-50%)";
+        }
+      }, 100);
+
+      // 버튼 클릭 이벤트
+      saveIdeaButton.addEventListener("click", (e) => {
+        e.stopPropagation();
+        saveSelectedTextAsIdea(currentSelectedText);
+      });
+
+      // hover 효과 (위치 계산 후 적용)
+      const applyHoverEffects = () => {
+        if (!saveIdeaButton) return;
+        saveIdeaButton.addEventListener("mouseenter", () => {
+          const currentTransform = saveIdeaButton.style.transform || '';
+          saveIdeaButton.style.background = "#3367d6";
+          if (currentTransform.includes('translateX(-50%)')) {
+            saveIdeaButton.style.transform = "translateX(-50%) translateY(-2px)";
+          } else {
+            saveIdeaButton.style.transform = "translateY(-2px)";
+          }
+          saveIdeaButton.style.boxShadow = "0 6px 16px rgba(66, 133, 244, 0.4)";
+        });
+        saveIdeaButton.addEventListener("mouseleave", () => {
+          const currentTransform = saveIdeaButton.style.transform || '';
+          saveIdeaButton.style.background = "#4285f4";
+          if (currentTransform.includes('translateX(-50%)')) {
+            saveIdeaButton.style.transform = "translateX(-50%) translateY(0)";
+          } else {
+            saveIdeaButton.style.transform = "translateY(0)";
+          }
+          saveIdeaButton.style.boxShadow = "0 4px 12px rgba(66, 133, 244, 0.3)";
+        });
+      };
+      
+      // 위치 계산 후 hover 효과 적용
+      setTimeout(applyHoverEffects, 150);
+    }
+  }
+
+  function saveSelectedTextAsIdea(text) {
+    if (!text || text.trim().length < 3) {
+      showToast("⚠️ 최소 3자 이상의 텍스트를 선택해주세요.");
+      return;
+    }
+
+    // 텍스트를 제목으로 사용 (최대 100자)
+    const title = text.trim().substring(0, 100);
+    const description = text.trim();
+
+    const ideaData = {
+      title: title,
+      description: description,
+      tags: ["#스핀오프"],
+      createdAt: Date.now()
+    };
+
+    // background.js에 아이디어 추가 요청
+    chrome.runtime.sendMessage({
+      action: 'add_idea_to_kanban',
+      data: JSON.stringify(ideaData),
+      status: 'ideas'
+    }, (response) => {
+      if (response && response.success) {
+        showToast('✅ 새 아이디어로 저장되었습니다! 기획 보드에서 확인하세요.');
+        
+        // 버튼 제거
+        if (saveIdeaButton) {
+          saveIdeaButton.remove();
+          saveIdeaButton = null;
+        }
+        
+        // 선택 해제 (에디터에 메시지 전송)
+        sendCommand("clear-selection");
+      } else {
+        showToast('❌ 아이디어 저장에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+      }
+    });
+  }
+  // ▲▲▲ 추가 완료 ▲▲▲
 
   // 현재 초안 저장
   function saveCurrentDraft() {
@@ -2249,14 +2804,68 @@ function setupImagePromptDisplayListeners(workspaceEl) {
               }
             }
             
+            // 이미지 생성 프롬프트 파싱 및 표시 (구분선 처리 전에 먼저 처리)
+            // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
+            html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
+              const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
+                style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
+                <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
+                <div style="margin-bottom: 12px;">
+                  <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">영어 프롬프트:</div>
+                  <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptEn.trim()}</div>
+                </div>
+                <div style="margin-bottom: 12px;">
+                  <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">한글 프롬프트:</div>
+                  <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptKo.trim()}</div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                  <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}" 
+                    style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                    영어 프롬프트 사용
+                  </button>
+                  <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}" data-use-ko="true"
+                    style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                    한글 프롬프트 사용
+                  </button>
+                </div>
+              </div>`;
+            });
+            
+            // 단일 형식도 지원 (하위 호환성)
+            html = html.replace(/\[이미지 생성 프롬프트:\s*([^\]]+)\]/gi, (match, prompt) => {
+              const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
+                style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
+                <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
+                <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${prompt.trim()}</div>
+                <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt="${prompt.trim().replace(/"/g, '&quot;')}" 
+                  style="margin-top: 12px; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                  프롬프트 사용
+                </button>
+              </div>`;
+            });
+            
+            // 구분선(hr) 태그가 텍스트로 표시되지 않도록 보장
+            // 마크다운 파싱 후 hr 태그가 제대로 렌더링되도록 확인
+            html = html.replace(/<hr\s*\/?>/gi, '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">');
+            html = html.replace(/<hr\s+([^>]*?)>/gi, (match, attrs) => {
+              if (!attrs.includes('style=')) {
+                return '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">';
+              } else if (!attrs.includes('border-top')) {
+                return `<hr ${attrs.replace(/style="([^"]*)"/, 'style="$1; border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;"')}>`;
+              }
+              return match;
+            });
+            
             // 가독성 포맷팅 후처리
             // "(참고 자료 X)" 같은 번호 표기 제거 (마크다운 파싱 후)
             const textNodes = [];
             let tagIndex = 0;
             const tagPlaceholder = '__TAG_PLACEHOLDER__';
             
-            // HTML 태그를 임시로 치환하여 텍스트만 처리
-            html = html.replace(/<[^>]+>/g, (match) => {
+            // HTML 태그를 임시로 치환하여 텍스트만 처리 (hr 태그는 제외)
+            html = html.replace(/<(?![hr\s])[^>]+>/g, (match) => {
               textNodes[tagIndex] = match;
               return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
             });
@@ -2291,17 +2900,34 @@ function setupImagePromptDisplayListeners(workspaceEl) {
               return match;
             });
             
-            // mark 태그 스타일 보장
-            html = html.replace(/<mark([^>]*?)>/gi, (match, attrs) => {
+            // mark 태그 스타일 보장 (서론 전체에 배경색이 적용되지 않도록 문장 단위로만 적용)
+            // 서론 부분(h1 다음 첫 번째 문단)에서 mark 태그가 전체 문단을 감싸지 않도록 수정
+            html = html.replace(/<mark([^>]*?)>([^<]+(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>/gi, (match, attrs, content) => {
+              // 내용이 너무 길면(서론 전체일 가능성) mark 태그 제거
+              if (content.length > 200) {
+                return content;
+              }
+              // 기존 mark 태그는 유지하되 스타일 보장
               if (!attrs.includes('style=')) {
-                return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">`;
+                return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${content}</mark>`;
               } else if (!attrs.includes('background-color')) {
-                return `<mark ${attrs.replace(/style="([^"]*)"/, 'style="$1; background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;"')}>`;
+                return `<mark ${attrs.replace(/style="([^"]*)"/, 'style="$1; background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;"')}>${content}</mark>`;
+              }
+              return match;
+            });
+            
+            // 서론 부분에서 전체 문단을 감싸는 mark 태그 제거
+            // h1 다음 첫 번째 p 태그나 텍스트 블록에서 mark 제거
+            html = html.replace(/<hr[^>]*>([^<]*<mark[^>]*>([^<]*(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>[^<]*)/i, (match, afterHr, markContent) => {
+              // mark 내용이 너무 길면(서론 전체) mark 태그 제거
+              if (markContent.length > 200) {
+                return `<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${markContent}`;
               }
               return match;
             });
             
             // 이미지 생성 프롬프트 파싱 및 표시 (영어/한글 두 개)
+            // 구분선 처리 전에 이미지 프롬프트를 먼저 처리하여 구분선과 충돌 방지
             // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
             html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
               const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -2398,14 +3024,289 @@ function setupImagePromptDisplayListeners(workspaceEl) {
     });
   });
 
-  // 추천 목차 클릭 시 에디터 내 해당 위치로 스크롤 이동
+  // 목차 편집 기능
   if (outlineList) {
+    // 목차 항목 더블클릭 시 편집 모드 진입
+    outlineList.addEventListener("dblclick", (e) => {
+      const item = e.target.closest(".outline-item");
+      if (!item || item.querySelector("input")) return; // 이미 편집 중이면 무시
+      
+      const textSpan = item.querySelector(".outline-text");
+      if (!textSpan) return;
+      
+      e.stopPropagation();
+      const currentText = textSpan.textContent.trim();
+      
+      // 입력 필드로 변경
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = currentText;
+      input.style.cssText = "flex: 1; padding: 4px 8px; border: 1px solid #4285f4; border-radius: 4px; font-size: 14px; outline: none; margin-right: 8px;";
+      
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "✓";
+      saveBtn.style.cssText = "padding: 4px 8px; border: 1px solid #4285f4; background: #4285f4; color: white; border-radius: 4px; cursor: pointer; margin-right: 4px;";
+      
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "✕";
+      cancelBtn.style.cssText = "padding: 4px 8px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer; margin-right: 4px;";
+      
+      const deleteBtn = item.querySelector(".outline-delete-btn");
+      
+      textSpan.replaceWith(input);
+      item.style.display = "flex";
+      item.style.alignItems = "center";
+      item.style.gap = "0";
+      
+      // 기존 삭제 버튼 제거
+      if (deleteBtn) deleteBtn.remove();
+      item.appendChild(saveBtn);
+      item.appendChild(cancelBtn);
+      
+      input.focus();
+      input.select();
+      
+      const saveEdit = () => {
+        const newText = input.value.trim();
+        if (newText && newText !== currentText) {
+          const index = parseInt(item.dataset.index);
+          const currentOutline = [...(ideaData.outline || [])];
+          currentOutline[index] = newText;
+          saveOutlineToFirebase(currentOutline);
+        }
+        restoreOutlineItem(item, newText || currentText);
+      };
+      
+      const cancelEdit = () => {
+        restoreOutlineItem(item, currentText);
+      };
+      
+      saveBtn.addEventListener("click", saveEdit);
+      cancelBtn.addEventListener("click", cancelEdit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveEdit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancelEdit();
+        }
+      });
+    });
+
+    // 삭제 버튼 클릭
     outlineList.addEventListener("click", (e) => {
-      if (e.target.tagName === "LI") {
-        const outlineText = e.target.textContent.trim();
-        // iframe 에디터에 스크롤 명령 전송
-        sendCommand("scroll-to-text", { text: outlineText });
+      if (e.target.classList.contains("outline-delete-btn") || e.target.closest(".outline-delete-btn")) {
+        e.stopPropagation();
+        const item = e.target.closest(".outline-item");
+        if (!item || item.querySelector("input")) return; // 편집 중이면 삭제 불가
+        
+        if (confirm("이 목차 항목을 삭제하시겠습니까?")) {
+          const index = parseInt(item.dataset.index);
+          const currentOutline = [...(ideaData.outline || [])];
+          currentOutline.splice(index, 1);
+          saveOutlineToFirebase(currentOutline);
+        }
       }
+      // 목차 항목 클릭 시 에디터 내 해당 위치로 스크롤 이동 (편집 모드가 아닐 때만)
+      else if (e.target.tagName === "LI" || e.target.classList.contains("outline-text")) {
+        const item = e.target.closest(".outline-item");
+        if (item && !item.querySelector("input")) {
+          const outlineText = item.querySelector(".outline-text")?.textContent.trim();
+          if (outlineText) {
+            sendCommand("scroll-to-text", { text: outlineText });
+          }
+        }
+      }
+    });
+  }
+
+  // 목차 항목 복원 함수
+  function restoreOutlineItem(item, text) {
+    const textSpan = document.createElement("span");
+    textSpan.className = "outline-text";
+    textSpan.textContent = text;
+    
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "outline-delete-btn";
+    deleteBtn.title = "삭제";
+    deleteBtn.textContent = "×";
+    
+    item.innerHTML = "";
+    item.style.display = "";
+    item.style.alignItems = "";
+    item.style.gap = "";
+    item.appendChild(textSpan);
+    item.appendChild(deleteBtn);
+    
+    // 인덱스 재설정
+    const allItems = outlineList.querySelectorAll(".outline-item");
+    allItems.forEach((it, idx) => {
+      it.dataset.index = idx;
+    });
+  }
+
+  // 목차를 Firebase에 저장하는 함수
+  function saveOutlineToFirebase(newOutline) {
+    // 아이디어가 어느 status에 있는지 찾기
+    chrome.runtime.sendMessage({
+      action: "update_kanban_card",
+      data: {
+        cardId: ideaData.id,
+        status: ideaData.status || "ideas",
+        updates: { outline: newOutline }
+      }
+    }, (response) => {
+      if (response && response.success) {
+        // 로컬 데이터 업데이트
+        ideaData.outline = newOutline;
+        // UI 업데이트
+        updateOutlineUI(newOutline);
+        showToast("✅ 목차가 저장되었습니다.");
+      } else {
+        showToast("❌ 목차 저장에 실패했습니다: " + (response?.error || "알 수 없는 오류"));
+      }
+    });
+  }
+
+  // 목차 UI 업데이트 함수
+  function updateOutlineUI(newOutline) {
+    if (!outlineList) return;
+    
+    if (newOutline && newOutline.length > 0) {
+      outlineList.innerHTML = newOutline.map((item, index) => `
+        <li class="outline-item" data-index="${index}">
+          <span class="outline-text">${item}</span>
+          <button class="outline-delete-btn" title="삭제">×</button>
+        </li>
+      `).join("");
+    } else {
+      outlineList.innerHTML = "<li class='outline-empty'>추천 목차가 없습니다.</li>";
+    }
+  }
+
+  // 목차 항목 추가 버튼
+  const addOutlineItemBtn = workspaceEl.querySelector("#add-outline-item-btn");
+  if (addOutlineItemBtn) {
+    addOutlineItemBtn.addEventListener("click", () => {
+      const newText = prompt("새 목차 항목을 입력하세요:");
+      if (newText && newText.trim()) {
+        const currentOutline = [...(ideaData.outline || [])];
+        currentOutline.push(newText.trim());
+        saveOutlineToFirebase(currentOutline);
+      }
+    });
+  }
+
+  // 스크랩 필터링 및 이미지 갤러리 업데이트 함수
+  function applyScrapFilterAndUpdateImages(keyword = null, searchText = null) {
+    const allScrapsContainer = workspaceEl.querySelector(".all-scraps-list");
+    const linkedScrapsContainer = workspaceEl.querySelector(".linked-scraps-list");
+    const clearFilterBtn = workspaceEl.querySelector("#clear-scrap-filter-btn");
+    const clearSearchBtn = workspaceEl.querySelector("#clear-scrap-search-btn");
+    const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
+    
+    // 필터 상태 업데이트
+    window.__cp_scrap_filter.keyword = keyword;
+    window.__cp_scrap_filter.searchText = searchText;
+    
+    // 필터링된 스크랩 가져오기
+    const filteredScraps = window.__cp_filterScraps(
+      window.__cp_scrap_filter.allScraps,
+      keyword,
+      searchText
+    );
+    
+    // 스크랩 리스트 업데이트
+    if (allScrapsContainer && linkedScrapsContainer) {
+      window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
+    }
+    
+    // 필터 취소 버튼 표시/숨김
+    if (clearFilterBtn) {
+      clearFilterBtn.style.display = keyword ? "block" : "none";
+    }
+    if (clearSearchBtn) {
+      clearSearchBtn.style.display = searchText ? "block" : "none";
+    }
+    
+    // 이미지 갤러리 업데이트 (필터링된 스크랩의 이미지만 표시)
+    if (filteredScraps.length > 0) {
+      updateImageGalleryFromAllScraps(resourceLibrary, filteredScraps, sendCommand, ideaData);
+    } else {
+      const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
+      if (imageGalleryGrid) {
+        imageGalleryGrid.innerHTML = "<p style='text-align:center;color:#888;padding:20px;'>필터링된 이미지가 없습니다.</p>";
+        const imageCount = resourceLibrary.querySelector("#image-count");
+        if (imageCount) imageCount.textContent = "0개";
+      }
+    }
+  }
+
+  // 추천 검색어 클릭 이벤트
+  const recommendedKeywordsAreaForFilter = workspaceEl.querySelector("#recommended-keywords-area");
+  if (recommendedKeywordsAreaForFilter) {
+    recommendedKeywordsAreaForFilter.addEventListener("click", (e) => {
+      const keywordItem = e.target.closest(".recommended-keyword-item");
+      if (keywordItem) {
+        e.preventDefault();
+        const keyword = keywordItem.dataset.keyword;
+        // 검색어 필터는 취소하고 키워드 필터만 적용
+        const searchInput = workspaceEl.querySelector("#scrap-search-input");
+        if (searchInput) {
+          searchInput.value = "";
+          window.__cp_scrap_filter.searchText = null;
+        }
+        const clearSearchBtn = workspaceEl.querySelector("#clear-scrap-search-btn");
+        if (clearSearchBtn) clearSearchBtn.style.display = "none";
+        
+        applyScrapFilterAndUpdateImages(keyword, null);
+        showToast(`🔍 "${keyword}"로 스크랩을 필터링했습니다.`);
+      }
+    });
+  }
+
+  // 필터 취소 버튼
+  const clearFilterBtn = workspaceEl.querySelector("#clear-scrap-filter-btn");
+  if (clearFilterBtn) {
+    clearFilterBtn.addEventListener("click", () => {
+      applyScrapFilterAndUpdateImages(null, null);
+      showToast("필터가 취소되었습니다.");
+    });
+  }
+
+  // 스크랩 검색 입력 필드
+  const scrapSearchInput = workspaceEl.querySelector("#scrap-search-input");
+  if (scrapSearchInput) {
+    let searchTimeout;
+    scrapSearchInput.addEventListener("input", (e) => {
+      clearTimeout(searchTimeout);
+      const searchText = e.target.value.trim();
+      
+      searchTimeout = setTimeout(() => {
+        if (searchText) {
+          // 키워드 필터는 취소하고 검색어 필터만 적용
+          window.__cp_scrap_filter.keyword = null;
+          const clearFilterBtn = workspaceEl.querySelector("#clear-scrap-filter-btn");
+          if (clearFilterBtn) clearFilterBtn.style.display = "none";
+          
+          applyScrapFilterAndUpdateImages(null, searchText);
+        } else {
+          applyScrapFilterAndUpdateImages(null, null);
+        }
+      }, 300); // 300ms 디바운스
+    });
+  }
+
+  // 검색 취소 버튼
+  const clearSearchBtn = workspaceEl.querySelector("#clear-scrap-search-btn");
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener("click", () => {
+      if (scrapSearchInput) {
+        scrapSearchInput.value = "";
+      }
+      applyScrapFilterAndUpdateImages(null, null);
+      showToast("검색이 취소되었습니다.");
     });
   }
 
@@ -2492,51 +3393,210 @@ function setupImagePromptDisplayListeners(workspaceEl) {
     }
   });
 
-  // --- '연결된 자료' 툴팁 기능 (수정된 최종 버전) ---
+  // --- 스크랩 툴팁 기능 (연결된 자료 + 모든 스크랩) ---
   let tooltipTimeout;
   let activeTooltip = null;
 
   // 툴팁을 워크스페이스 최상단에 한 번만 생성
   const tooltip = document.createElement("div");
   tooltip.className = "scrap-tooltip";
+  tooltip.style.cssText = `
+    position: fixed;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 12px;
+    max-width: 400px;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 10000;
+    display: none;
+    font-size: 13px;
+    line-height: 1.5;
+  `;
   workspaceEl.appendChild(tooltip);
 
+  // 툴팁 표시 함수
+  function showScrapTooltip(cardItem, container) {
+    clearTimeout(tooltipTimeout);
+    
+    tooltipTimeout = setTimeout(() => {
+      const previewText = cardItem.dataset.previewText || cardItem.dataset.text;
+      const previewImage = cardItem.dataset.previewImage;
+      const previewUrl = cardItem.dataset.previewUrl;
+      
+      if (previewText || previewImage) {
+        let tooltipContent = '';
+        
+        if (previewImage) {
+          tooltipContent += `<div style="margin-bottom: 8px;"><img src="${previewImage}" style="max-width: 100%; height: auto; border-radius: 4px;" alt="미리보기" referrerpolicy="no-referrer" onerror="this.style.display='none'"></div>`;
+        }
+        
+        if (previewText) {
+          tooltipContent += `<div style="color: #333; margin-bottom: 4px;">${previewText.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        if (previewUrl) {
+          tooltipContent += `<div style="color: #666; font-size: 11px; margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px;">🔗 ${previewUrl.length > 50 ? previewUrl.substring(0, 50) + '...' : previewUrl}</div>`;
+        }
+        
+        tooltip.innerHTML = tooltipContent;
+        
+        // 툴팁 위치 계산
+        const cardRect = cardItem.getBoundingClientRect();
+        const tooltipWidth = 400;
+        const tooltipHeight = 300;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        let left = cardRect.right + 12;
+        let top = cardRect.top;
+        
+        // 오른쪽 공간이 부족하면 왼쪽에 표시
+        if (left + tooltipWidth > viewportWidth) {
+          left = cardRect.left - tooltipWidth - 12;
+        }
+        
+        // 아래쪽 공간이 부족하면 위에 표시
+        if (top + tooltipHeight > viewportHeight) {
+          top = viewportHeight - tooltipHeight - 12;
+        }
+        
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+        tooltip.style.display = 'block';
+        activeTooltip = cardItem;
+        
+        // 스크롤 방지: 툴팁 표시 시 스크롤 이벤트 일시 중지
+        tooltip.addEventListener('wheel', (e) => {
+          e.stopPropagation();
+        }, { passive: false });
+        tooltip.addEventListener('touchmove', (e) => {
+          e.stopPropagation();
+        }, { passive: false });
+      }
+    }, 300);
+  }
+
+  // 툴팁 숨기기 함수
+  function hideScrapTooltip() {
+    clearTimeout(tooltipTimeout);
+    tooltip.style.display = 'none';
+    activeTooltip = null;
+  }
+
+  // 연결된 자료 리스트 툴팁
   linkedScrapsList.addEventListener("mouseover", (e) => {
     const cardItem = e.target.closest(".scrap-card-item");
     if (cardItem) {
-      // 마우스가 다른 카드로 이동했을 때 이전 타이머 취소
-      clearTimeout(tooltipTimeout);
-
-      // 0.2초 지연 후 툴팁 표시
-      tooltipTimeout = setTimeout(() => {
-        const textContent = cardItem.dataset.text;
-        if (textContent) {
-          // 툴팁 내용 업데이트
-          tooltip.innerHTML = `<p>${textContent}</p>`;
-
-          // 툴팁 위치 계산
-          const cardRect = cardItem.getBoundingClientRect();
-          tooltip.style.left = `${cardRect.right + 12}px`;
-          tooltip.style.top = `${cardRect.top}px`;
-
-          // 툴팁 보이기
-          tooltip.classList.add("visible");
-          activeTooltip = cardItem; // 현재 툴팁이 활성화된 카드 저장
-        }
-      }, 200);
+      showScrapTooltip(cardItem, linkedScrapsList);
     }
   });
 
   linkedScrapsList.addEventListener("mouseout", (e) => {
-    // 마우스가 목록 영역을 벗어나면 타이머 취소 및 툴팁 숨기기
-    clearTimeout(tooltipTimeout);
-
-    // 마우스가 실제로 다른 요소로 이동했는지 확인 (카드 내부 요소 이동 시 툴팁이 깜빡이는 현상 방지)
     if (!linkedScrapsList.contains(e.relatedTarget)) {
-      tooltip.classList.remove("visible");
-      activeTooltip = null;
+      hideScrapTooltip();
     }
   });
+
+  // 모든 스크랩 리스트 미리보기 및 클릭 이벤트 (클릭 모달 방식)
+  const allScrapsList = workspaceEl.querySelector(".all-scraps-list");
+  if (allScrapsList) {
+    // 미리보기 모달 생성
+    const previewModal = document.createElement("div");
+    previewModal.className = "scrap-preview-modal";
+    previewModal.style.cssText = `
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 20px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      z-index: 10001;
+      font-size: 14px;
+      line-height: 1.6;
+    `;
+    workspaceEl.appendChild(previewModal);
+
+    // 모달 배경 오버레이
+    const modalOverlay = document.createElement("div");
+    modalOverlay.className = "scrap-preview-overlay";
+    modalOverlay.style.cssText = `
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 10000;
+    `;
+    workspaceEl.appendChild(modalOverlay);
+
+    function showPreviewModal(cardItem) {
+      const previewText = cardItem.dataset.previewText || cardItem.dataset.text;
+      const previewImage = cardItem.dataset.previewImage;
+      const previewUrl = cardItem.dataset.previewUrl;
+      
+      let modalContent = '<div style="position: relative;">';
+      modalContent += '<button class="close-preview-btn" style="position: absolute; top: -10px; right: -10px; width: 32px; height: 32px; border: none; background: #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 20px; line-height: 1;">×</button>';
+      
+      if (previewImage) {
+        modalContent += `<div style="margin-bottom: 16px;"><img src="${previewImage}" style="max-width: 100%; height: auto; border-radius: 8px;" alt="미리보기" referrerpolicy="no-referrer" onerror="this.style.display='none'"></div>`;
+      }
+      
+      if (previewText) {
+        modalContent += `<div style="color: #333; margin-bottom: 16px; white-space: pre-wrap;">${previewText.replace(/\n/g, '<br>')}</div>`;
+      }
+      
+      if (previewUrl) {
+        modalContent += `<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+          <a href="${previewUrl}" target="_blank" style="color: #4285f4; text-decoration: none; font-weight: 500;">🔗 원본 링크 열기</a>
+        </div>`;
+      }
+      
+      modalContent += '</div>';
+      previewModal.innerHTML = modalContent;
+      
+      modalOverlay.style.display = 'block';
+      previewModal.style.display = 'block';
+      
+      // 닫기 버튼 이벤트
+      const closeBtn = previewModal.querySelector('.close-preview-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          modalOverlay.style.display = 'none';
+          previewModal.style.display = 'none';
+        });
+      }
+      
+      // 오버레이 클릭 시 닫기
+      modalOverlay.addEventListener('click', () => {
+        modalOverlay.style.display = 'none';
+        previewModal.style.display = 'none';
+      });
+    }
+
+    // 카드 클릭 이벤트 (미리보기 모달 표시)
+    allScrapsList.addEventListener("click", (e) => {
+      // 삭제 버튼이나 다른 버튼 클릭 시 무시
+      if (e.target.closest('.scrap-card-delete-btn') || e.target.closest('.unlink-scrap-btn')) {
+        return;
+      }
+      
+      const cardItem = e.target.closest(".scrap-card-item");
+      if (cardItem && allScrapsList.contains(cardItem)) {
+        e.preventDefault();
+        e.stopPropagation();
+        showPreviewModal(cardItem);
+      }
+    });
+  }
 
   resourceLibrary.addEventListener("dragstart", (e) => {
     const cardItem = e.target.closest(".scrap-card-item");

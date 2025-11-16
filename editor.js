@@ -45,6 +45,7 @@ function initializeEditor() {
           [{ font: [] }],
           [{ align: [] }],
           ["link", "image", "video"],
+          ["divider"], // 구분선 버튼 추가
           ["tui-edit"], // TUI 편집 버튼만 남김
           ["clean"],
           ["undo", "redo"],
@@ -151,12 +152,17 @@ function initializeEditor() {
   });
 
   quillEditor.on("selection-change", function (range, oldRange, source) {
+    let selectedText = "";
+    if (range && range.length > 0) {
+      selectedText = quillEditor.getText(range.index, range.length).trim();
+    }
     window.parent.postMessage(
       {
         action: "selection-changed",
         data: {
           range,
           hasSelection: range && range.length > 0,
+          selectedText: selectedText,
         },
       },
       "*"
@@ -354,6 +360,15 @@ function initializeEditor() {
           },
           "*"
         );
+        break;
+      case "clear-selection":
+        // 선택 영역 해제
+        try {
+          const length = quillEditor.getLength();
+          quillEditor.setSelection(length, 0);
+        } catch (e) {
+          // 선택 해제 실패 시 무시
+        }
         break;
       case "apply-format":
         const range = quillEditor.getSelection();

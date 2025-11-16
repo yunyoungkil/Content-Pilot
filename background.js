@@ -2112,11 +2112,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // 성과 데이터 수집 및 분석
     (async () => {
-      const performanceAnalysis = await analyzePerformanceData();
+      const performanceData = await analyzePerformanceData();
+      const performanceAnalysis = performanceData?.analysis || null;
+      const decayContent = performanceData?.decayContent || null;
       const userFeedback = await getUserFeedbackPatterns();
       
+      // 채널 맥락 정보 구성 (트렌드 분석용)
+      const channelContext = `${myAnalysisSummary}\n\n[인기 게시물]\n${myDataSummary}`;
+      const emergingTopics = await getEmergingTopics(channelContext);
+      
+      // 콘텐츠 재활용 정보 포맷팅
+      const repurposingInfo = decayContent && decayContent.length > 0 ? `
+[재활용 후보 콘텐츠]
+과거에 높은 성과를 보였지만 시간이 지나 트래픽이 하락할 수 있는 콘텐츠들입니다. 다음 콘텐츠들을 업데이트하여 새로운 트래픽을 유입시킬 수 있습니다:
+
+${decayContent.map((item, idx) => 
+  `${idx + 1}. "${item.title}" - 과거 수익: $${item.earnings.toFixed(2)}, 페이지뷰: ${item.pageviews.toLocaleString()}, 발행 후 ${item.daysSinceCreation}일 경과`
+).join("\n")}
+
+[재활용 전략]
+- 최신 정보로 업데이트 (통계, 가격, 기능 등)
+- 새로운 섹션 추가 (FAQ, 사용자 후기, 비교 분석 등)
+- SEO 최적화 개선 (메타 설명, 키워드 밀도 등)
+- 관련 최신 트렌드나 사례 추가
+` : '';
+      
+      // 성과 데이터가 있을 때와 없을 때 프롬프트 분기
       const blogIdeasPrompt = `
-            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 아이디어 5가지를 제안해주세요.
 
             [정보 1: 내 채널의 핵심 성공 요인]
             ${myAnalysisSummary}
@@ -2130,31 +2153,71 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ${performanceAnalysis ? `
             [정보 4: 과거 발행 콘텐츠 성과 분석]
             ${performanceAnalysis}
-            
-            이 성과 데이터를 바탕으로, 수익성이 높고 트래픽을 많이 유입시킨 콘텐츠의 패턴을 학습하여 유사한 성공을 재현할 수 있는 아이디어를 우선적으로 제안해주세요.
             ` : ''}
 
             ${userFeedback ? `
             [정보 5: 사용자 선호도 패턴]
             ${userFeedback}
-            
-            사용자가 선호하는 아이디어 유형과 주제를 고려하여 제안해주세요.
             ` : ''}
 
-            [요청]
-            나의 핵심 성공 요인(정보 1)과 ${performanceAnalysis ? '과거 성과 데이터(정보 4)' : ''}${userFeedback ? ', 사용자 선호도(정보 5)' : ''}를 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
-            ${performanceAnalysis ? '특히 수익성과 트래픽 유입이 높은 콘텐츠 패턴을 참고하여 제안해주세요.' : ''}
+            ${emergingTopics ? `
+            [정보 6: 최신 트렌드 (선행성 지표)]
+            ${emergingTopics}
+            ` : ''}
+
+            ${repurposingInfo ? `
+            [정보 7: 콘텐츠 재활용 기회]
+            ${repurposingInfo}
+            ` : ''}
+
+            [핵심 원칙: 실용성 및 사용자 의도]
+            - 단순 키워드 조합이 아닌, 실제 사용자가 검색하고 공감할 만한 실용적 주제여야 합니다.
+            - 실제 행동 패턴과 동떨어진 주제 (예: '갤럭시 탭으로 생활 가전 연동')는 지양해야 합니다.
+            - 사용자가 실제로 필요로 하고, 검색 의도가 명확한 주제를 우선적으로 제안해주세요.
+
+            ${performanceAnalysis ? `
+            [요청: 성과 공식 기반 3단계 로직]
+            다음 3단계 프로세스를 따라 아이디어를 생성해주세요:
+            
+            1단계: [정보 4]에서 '성공 공식(패턴)' 도출
+            - 과거 발행 콘텐츠 중 수익성과 트래픽이 높은 콘텐츠의 공통 패턴을 분석하여 성공 공식을 도출하세요.
+            - 예: "특정 태그 조합", "특정 주제 유형", "특정 접근 방식" 등
+            
+            2단계: [정보 2, 3${emergingTopics ? ', 6' : ''}]에서 '새로운 기회(키워드)' 탐색
+            - 내 채널의 인기 게시물(정보 2)과 경쟁 채널의 인기 게시물(정보 3)을 분석하여 아직 다루지 않았거나 더 깊이 다룰 수 있는 새로운 기회를 찾으세요.
+            ${emergingTopics ? '- [정보 6: 최신 트렌드]를 활용하여 시장 선점 기회를 잡으세요. 트렌드가 확산되기 전에 콘텐츠를 발행하면 더 높은 성과를 기대할 수 있습니다.' : ''}
+            
+            3단계: '성공 공식'을 '새로운 기회'에 적용
+            - 1단계에서 도출한 성공 공식을 2단계에서 찾은 새로운 기회에 적용하여 구체적인 아이디어를 생성하세요.
+            
+            [아이디어 구성 비율]
+            총 5개 제안 시, 다음 비율로 구성해주세요:
+            ${repurposingInfo ? 
+              `- 2개: '신규[성과 공식 활용]' 아이디어 (1단계에서 도출한 성공 공식을 직접 활용한 신규 콘텐츠)
+            - 2개: '신규[전략적 탐색]' 아이디어 (새로운 기회를 탐색하여 경쟁자보다 우위를 점할 수 있는 신규 콘텐츠)
+            - 1개: '기존[재활용]' 아이디어 ([정보 7]의 재활용 후보 콘텐츠를 업데이트하여 새로운 트래픽을 유입시키는 아이디어)` :
+              `- 3개: '성과 공식 활용' 아이디어 (1단계에서 도출한 성공 공식을 직접 활용)
+            - 2개: '전략적 탐색' 아이디어 (새로운 기회를 탐색하여 경쟁자보다 우위를 점할 수 있는 아이디어)`
+            }
+            ` : `
+            [요청: 콜드 스타트 시나리오]
+            성과 데이터가 없으므로, 다음 차선책 전략을 사용해주세요:
+            - [정보 3: 경쟁 채널의 인기 게시물]과 [정보 1: 내 채널의 핵심 성공 요인]을 결합하여 아이디어를 생성하세요.
+            ${emergingTopics ? '- [정보 6: 최신 트렌드]를 활용하여 시장 선점 기회를 잡으세요.' : ''}
+            - 경쟁 채널에서 인기 있는 주제를 내 채널의 강점과 접목하여 차별화된 아이디어를 제안해주세요.
+            - 내 채널의 핵심 성공 요인을 활용하여 경쟁자보다 더 나은 가치를 제공할 수 있는 아이디어를 우선적으로 제안해주세요.
+            `}
 
             [출력 형식]
             반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
             [
               {
                 "title": "아이디어 제목",
-                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명${repurposingInfo ? ' (재활용 아이디어인 경우, 어떤 콘텐츠를 업데이트할지 명시)' : ''}"
               },
               {
                 "title": "아이디어 제목",
-                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명"
+                "description": "이 아이디어가 전략적으로 유효한 이유와 구체적인 설명${repurposingInfo ? ' (재활용 아이디어인 경우, 어떤 콘텐츠를 업데이트할지 명시)' : ''}"
               }
             ]
         `;
@@ -3007,6 +3070,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   } else if (msg.action === "add_idea_to_kanban") {
     const ideaObjectString = msg.data;
+    const targetStatus = msg.status || "ideas"; // 상태 지정 (기본값: ideas)
 
     if (!ideaObjectString) {
       sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
@@ -3019,14 +3083,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const newCard = {
         title: ideaData.title || "제목 없음",
         description: ideaData.description || "",
-        tags: ["#AI-추천", ...(ideaData.keywords || [])],
+        tags: ideaData.keywords && ideaData.keywords.length > 0 
+          ? [...(ideaData.keywords || [])] 
+          : (ideaData.tags || []), // keywords가 없으면 tags 사용, 둘 다 없으면 빈 배열
         recommendedKeywords: ideaData.recommendedSearches || [],
         outline: ideaData.outline || [],
         longTailKeywords: ideaData.longTailKeywords || [],
         createdAt: Date.now(),
       };
 
-      const newCardRef = firebase.database().ref("kanban/ideas").push();
+      // AI 추천이 아닌 수동 입력인 경우 #AI-추천 태그 제거
+      if (!ideaData.keywords || ideaData.keywords.length === 0) {
+        newCard.tags = newCard.tags.filter(tag => tag !== "#AI-추천");
+      } else {
+        // AI 추천인 경우에만 #AI-추천 태그 추가
+        if (!newCard.tags.includes("#AI-추천")) {
+          newCard.tags = ["#AI-추천", ...newCard.tags];
+        }
+      }
+
+      const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
       const newCardKey = newCardRef.key;
 
       newCardRef
@@ -3309,6 +3385,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             - 독자의 문제를 해결하거나 유용한 정보를 제공한다는 것을 명확히 표현
             - 50자 이내로 간결하게
             - 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요
+            - **중요**: 아래 목차의 첫 번째 항목은 제목이 아닙니다. 목차는 본문 구조를 위한 것이며, 제목은 별도로 생성해야 합니다.
 
             ### 2. 핵심 요약
             - ${ideaData.description || "주제에 대한 상세 설명"}
@@ -3316,16 +3393,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ### 3. 현재까지 작성된 초안 (이 내용을 바탕으로 발전시켜주세요)
             ${ideaData.currentDraft || "(비어 있음)"}
 
-            ### 4. 글의 구조 (이 목차를 반드시 따라주세요)
+            ### 4. 본문 구조 (목차 - 이 목차는 본문 섹션 제목으로만 사용하세요)
             ${(ideaData.outline || []).length > 0 
               ? ideaData.outline.map((item, idx) => `${idx + 1}. ${item}`).join("\n")
               : "목차가 제공되지 않았습니다. 논리적이고 체계적인 구조로 작성해주세요."}
             
-            [문서 구조 규칙]
-            - 문서의 메인 제목은 반드시 h1 태그(# 제목)를 사용해주세요.
-            - h1 태그 바로 아래에는 구분선(---)을 추가해주세요.
-            - 이후 본문을 작성하세요.
-            - 섹션 제목은 h2(## 제목), 하위 섹션은 h3(### 제목)를 사용해주세요.
+            [문서 구조 규칙 - 매우 중요]
+            1. **제목 (h1)**: SEO 최적화된 독립적인 제목을 생성하고, h1 태그(# 제목)로 문서의 맨 처음에 포함해주세요.
+               - 목차의 첫 번째 항목을 제목으로 사용하지 마세요.
+               - 제목은 아이디어 제목을 참고하되, SEO와 클릭률을 고려하여 새로 생성하세요.
+            
+            2. **구분선**: h1 태그 바로 아래에 구분선(---)을 추가해주세요.
+            
+            3. **서론**: 제목과 구분선 다음에 서론을 작성해주세요.
+               - 독자의 관심을 끄는 도입부
+               - 글의 목적과 핵심 내용을 간략히 소개
+            
+            4. **본문**: 서론 다음에 목차를 h2(## 제목) 섹션으로 작성해주세요.
+               - 목차의 각 항목을 h2 태그로 사용하세요.
+               - 각 섹션에 충실한 내용을 작성하세요.
+               - 하위 섹션이 필요하면 h3(### 제목)를 사용하세요.
+            
+            5. **결론**: 본문 마지막에 결론 섹션을 h2(## 결론)로 추가해주세요.
+               - 글의 핵심 내용 요약
+               - 독자에게 도움이 되는 마무리
+            
+            [작성 순서]
+            h1 제목 → 구분선(---) → 서론(일반 텍스트) → 본문(h2 섹션들) → 결론(h2)
 
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
             ${tags.length > 0 ? tags.map(t => `- ${t.replace(/^#/, "")}`).join("\n") : "없음"}
@@ -3345,16 +3439,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             [작성 규칙]
             1. **제목 최적화**: SEO 최적화된 제목을 생성하고, 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요. 아이디어 제목과는 다를 수 있습니다.
+               - **절대 금지**: 목차의 첫 번째 항목을 제목으로 사용하지 마세요. 제목은 별도로 생성해야 합니다.
+               - 제목 다음에는 서론을 작성하고, 그 다음에 목차의 첫 번째 항목부터 본문 섹션으로 작성하세요.
             2. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
-            3. '글의 구조'를 반드시 따라주세요. 각 섹션을 명확하게 구분하고, 제목과 본문을 체계적으로 작성해주세요.
+            3. **문서 구조**: 제목(h1) → 구분선(---) → 서론 → 본문(h2 섹션들, 목차 기반) → 결론(h2) 순서로 작성하세요.
+               - 목차의 각 항목은 본문의 h2 섹션 제목으로만 사용하세요.
+               - 서론과 결론은 목차에 포함되지 않으므로 별도로 작성하세요.
             4. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
             5. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
             6. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
             7. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
             8. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
-              - 메인 이미지는 제목 바로 아래에 1개: "[이미지 생성 프롬프트 (영어): High-quality product photo of Galaxy Tab S11 Ultra being used in a modern office setting, professional lighting, 8K resolution, photorealistic style] [이미지 생성 프롬프트 (한글): 갤럭시 탭 S11 울트라를 현대적인 사무실에서 사용하는 모습, 전문적인 조명, 고품질 제품 사진, 사실적 스타일]" 형식으로 영어와 한글 두 개를 모두 삽입
-              - 본문 이미지는 각 섹션 사이에 3~4개 배치: "[이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]" 형식으로 영어와 한글 두 개를 모두 삽입
-              - 각 프롬프트는 해당 위치의 콘텐츠에 맞는 구체적인 이미지 생성 프롬프트를 포함해주세요
+              - **매우 중요**: 이미지 프롬프트는 해당 위치의 콘텐츠 내용과 직접적으로 관련된 이미지여야 합니다.
+              - 메인 이미지는 제목 바로 아래, 서론 시작 전에 1개: 
+                * 해당 글의 주제와 직접 관련된 이미지 프롬프트를 작성하세요.
+                * 예시 형식: "[이미지 생성 프롬프트 (영어): High-quality photo of [글의 핵심 주제], professional lighting, 8K resolution, photorealistic style] [이미지 생성 프롬프트 (한글): [글의 핵심 주제]에 대한 고품질 사진, 전문적인 조명, 사실적 스타일]"
+              - 본문 이미지는 각 섹션 사이에 3~4개 배치: 
+                * 각 섹션의 내용과 직접 관련된 이미지 프롬프트를 작성하세요.
+                * 예: "SmartThings AI 콤보" 섹션이면 SmartThings 관련 이미지, "해결 방법" 섹션이면 해결 과정 관련 이미지
+                * 형식: "[이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]"
+              - **절대 금지**: 글의 주제와 무관한 예시 이미지(예: 갤럭시 탭, 사무실 등)를 사용하지 마세요. 반드시 해당 글의 실제 내용과 관련된 이미지만 생성하세요.
               - 태그나 특수 형식 없이 순수 텍스트로만 작성해주세요
               - 프롬프트 작성 가이드 (Gemini 이미지 생성 가이드 참고 - https://ai.google.dev/gemini-api/docs/image-generation?hl=ko):
                 * 주제, 컨텍스트, 스타일을 명확하게 설명하세요
@@ -4361,7 +4465,7 @@ async function callGeminiAPI(prompt) {
 
 /**
  * 성과 데이터를 분석하여 AI 프롬프트에 포함할 패턴을 추출합니다.
- * @returns {Promise<string|null>} 성과 분석 텍스트 또는 null
+ * @returns {Promise<{analysis: string|null, decayContent: Array|null}>} 성과 분석 텍스트와 콘텐츠 부패 정보
  */
 async function analyzePerformanceData() {
   try {
@@ -4370,11 +4474,18 @@ async function analyzePerformanceData() {
     const allCards = snapshot.val() || {};
     
     const performanceData = [];
+    const now = Date.now();
+    const DAYS_90 = 90 * 24 * 60 * 60 * 1000; // 90일을 밀리초로
+    
     for (const status in allCards) {
       for (const cardId in allCards[status]) {
         const card = allCards[status][cardId];
         if (card.performance && !card.performance.error && card.publishedUrl) {
+          const createdAt = card.createdAt || 0;
+          const daysSinceCreation = (now - createdAt) / (24 * 60 * 60 * 1000);
+          
           performanceData.push({
+            cardId: cardId,
             title: card.title || "제목 없음",
             earnings: card.performance.estimatedEarnings || 0,
             pageviews: card.performance.pageviews || 0,
@@ -4383,14 +4494,16 @@ async function analyzePerformanceData() {
             ctr: card.performance.ctr || 0,
             bounceRate: card.performance.bounceRate || 0,
             tags: card.tags || [],
-            createdAt: card.createdAt || 0,
+            createdAt: createdAt,
+            daysSinceCreation: daysSinceCreation,
+            publishedUrl: card.publishedUrl,
           });
         }
       }
     }
     
     if (performanceData.length === 0) {
-      return null;
+      return { analysis: null, decayContent: null };
     }
     
     // 성과 데이터 정렬 (수익 기준)
@@ -4422,7 +4535,26 @@ async function analyzePerformanceData() {
       .map(([tag, count]) => tag)
       .join(", ");
     
-    return `
+    // 콘텐츠 부패(Content Decay) 식별
+    // 조건: 90일 이상 된 콘텐츠 중에서 과거 성과가 높았지만 현재 트래픽이 하락 중인 콘텐츠
+    // 휴리스틱: 90일 이상 된 콘텐츠 중 평균 수익/페이지뷰보다 높았던 콘텐츠를 재활용 후보로 선정
+    const decayCandidates = performanceData
+      .filter(item => {
+        // 90일 이상 된 콘텐츠
+        const isOld = item.daysSinceCreation >= 90;
+        // 평균보다 높은 성과를 보였던 콘텐츠 (과거에 인기 있었음)
+        const hadHighPerformance = item.earnings > avgEarnings * 1.5 || item.pageviews > avgPageviews * 1.5;
+        return isOld && hadHighPerformance;
+      })
+      .sort((a, b) => {
+        // 수익과 페이지뷰를 종합하여 우선순위 결정
+        const scoreA = a.earnings * 0.6 + a.pageviews * 0.4;
+        const scoreB = b.earnings * 0.6 + b.pageviews * 0.4;
+        return scoreB - scoreA;
+      })
+      .slice(0, 5); // 상위 5개만 선정
+    
+    const analysis = `
 과거 발행 콘텐츠 성과 분석 (총 ${performanceData.length}개 콘텐츠):
 
 [평균 성과]
@@ -4444,9 +4576,21 @@ ${top5ByPageviews.map((item, idx) =>
 - 고수익 콘텐츠의 주요 태그: ${topTagsList || "없음"}
 - 평균 대비 우수한 성과를 보인 콘텐츠들은 주로 위의 태그와 주제를 다루고 있습니다.
 `;
+    
+    const decayContent = decayCandidates.length > 0 ? decayCandidates.map(item => ({
+      cardId: item.cardId,
+      title: item.title,
+      earnings: item.earnings,
+      pageviews: item.pageviews,
+      daysSinceCreation: Math.round(item.daysSinceCreation),
+      publishedUrl: item.publishedUrl,
+      tags: item.tags || []
+    })) : null;
+    
+    return { analysis, decayContent };
   } catch (error) {
     console.error("[성과 데이터 분석 실패]", error);
-    return null;
+    return { analysis: null, decayContent: null };
   }
 }
 
@@ -4548,6 +4692,65 @@ async function getUserFeedbackPatterns() {
 `;
   } catch (error) {
     console.error("[사용자 피드백 패턴 분석 실패]", error);
+    return null;
+  }
+}
+
+/**
+ * 떠오르는 트렌드 주제를 수집합니다 (선행성 지표).
+ * 향후 구글 트렌드 API, 레딧 등 커뮤니티 데이터를 활용할 수 있도록 확장 가능한 구조로 설계.
+ * @param {string} channelContext - 채널의 맥락 정보 (선택적)
+ * @returns {Promise<string|null>} 최신 트렌드 정보 텍스트 또는 null
+ */
+async function getEmergingTopics(channelContext = null) {
+  try {
+    // TODO: 향후 실제 API 연동 (구글 트렌드, 레딧 등)
+    // 현재는 AI를 활용하여 채널 맥락 기반 트렌드 추론
+    
+    // 채널 맥락이 있으면 AI로 트렌드 추론, 없으면 null 반환
+    if (!channelContext) {
+      // 채널 맥락이 없으면 기본 트렌드 추론 시도
+      // 실제 구현에서는 구글 트렌드 API 등을 활용
+      return null;
+    }
+    
+    // AI를 활용하여 채널 맥락 기반으로 최신 트렌드 추론
+    // 실제 API 연동 전까지는 이 방식 사용
+    const trendPrompt = `
+당신은 트렌드 분석 전문가입니다. 아래 채널 정보를 바탕으로 현재 떠오르는 트렌드 주제 5-7개를 제안해주세요.
+
+[채널 맥락]
+${channelContext}
+
+[요청]
+- 최근 1-3개월 내 주목받고 있는 트렌드 주제를 제안해주세요.
+- 검색량이 증가하고 있거나, 커뮤니티에서 활발히 논의되는 주제를 우선적으로 제안해주세요.
+- 채널의 주제 영역과 관련된 트렌드여야 합니다.
+
+[출력 형식]
+다음 형식으로 응답해주세요:
+- 트렌드 1: [주제명] - [간단한 설명]
+- 트렌드 2: [주제명] - [간단한 설명]
+...
+`;
+    
+    const trends = await callGeminiAPI(trendPrompt);
+    
+    if (!trends || trends.includes("오류")) {
+      return null;
+    }
+    
+    return `
+최신 트렌드 분석 (선행성 지표):
+
+${trends}
+
+[활용 가이드]
+- 위 트렌드 주제들을 '전략적 탐색' 아이디어 생성 시 활용하여 시장 선점 기회를 잡으세요.
+- 트렌드가 아직 확산되기 전에 콘텐츠를 발행하면 더 높은 성과를 기대할 수 있습니다.
+`;
+  } catch (error) {
+    console.error("[트렌드 수집 실패]", error);
     return null;
   }
 }

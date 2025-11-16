@@ -30,15 +30,24 @@ function renderKanban(container) {
       </div>
       <div id="cp-kanban-board-root">
         <div class="cp-kanban-col" data-status="ideas">
-          <h2 class="cp-kanban-col-title">💡 아이디어</h2>
+          <div class="cp-kanban-col-header">
+            <h2 class="cp-kanban-col-title">💡 아이디어</h2>
+            <button class="kanban-add-card-btn" data-status="ideas" title="카드 추가">+ 카드 추가</button>
+          </div>
           <div class="kanban-col-cards"><p class="loading-scraps">데이터 로딩 중...</p></div>
         </div>
         <div class="cp-kanban-col" data-status="in-progress">
-          <h2 class="cp-kanban-col-title">✍️ 기획/작성 중</h2>
+          <div class="cp-kanban-col-header">
+            <h2 class="cp-kanban-col-title">✍️ 기획/작성 중</h2>
+            <button class="kanban-add-card-btn" data-status="in-progress" title="카드 추가">+ 카드 추가</button>
+          </div>
           <div class="kanban-col-cards"></div>
         </div>
         <div class="cp-kanban-col" data-status="done">
-          <h2 class="cp-kanban-col-title">✅ 발행 완료</h2>
+          <div class="cp-kanban-col-header">
+            <h2 class="cp-kanban-col-title">✅ 발행 완료</h2>
+            <button class="kanban-add-card-btn" data-status="done" title="카드 추가">+ 카드 추가</button>
+          </div>
           <div class="kanban-col-cards"></div>
         </div>
       </div>
@@ -326,6 +335,8 @@ function createKanbanCard(id, data, status) {
   }
 
   let actionButtons = ``;
+  // 컨텍스트 메뉴 버튼 추가 (모든 상태에서)
+  actionButtons += `<button class="card-context-menu-btn" title="더보기" data-card-id="${id}">⋯</button>`;
   // 모든 상태에서 삭제 버튼 추가
   actionButtons += `<button class="delete-card-btn" title="카드 삭제" data-card-id="${id}">🗑️</button>`;
   
@@ -390,11 +401,30 @@ function addKanbanEventListeners(container) {
   const root = container.querySelector("#cp-kanban-board-root");
   if (!root) return;
 
+  // ▼▼▼ [추가] "+ 카드 추가" 버튼 클릭 이벤트 리스너 ▼▼▼
+  root.addEventListener("click", (e) => {
+    const addCardBtn = e.target.closest(".kanban-add-card-btn");
+    if (addCardBtn) {
+      e.stopPropagation();
+      const status = addCardBtn.dataset.status;
+      showAddCardInput(container, status, addCardBtn);
+      return;
+    }
+  });
+
   root.addEventListener("click", (e) => {
     const card = e.target.closest(".cp-kanban-card");
     if (!card) return;
 
-    if (e.target.closest(".delete-card-btn")) {
+    if (e.target.closest(".card-context-menu-btn")) {
+      e.stopPropagation();
+      const menuBtn = e.target.closest(".card-context-menu-btn");
+      const cardId = menuBtn.dataset.cardId;
+      const status = card.dataset.status;
+      const cardData = allKanbanData[status]?.[cardId];
+      showCardContextMenu(container, card, cardId, status, cardData, menuBtn);
+      return;
+    } else if (e.target.closest(".delete-card-btn")) {
       e.stopPropagation();
       const cardId = e.target.closest(".delete-card-btn").dataset.cardId;
       const status = card.dataset.status;
@@ -496,6 +526,412 @@ function addKanbanEventListeners(container) {
         action: "move_kanban_card",
         data: { cardId, originalStatus, newStatus },
       });
+    }
+  });
+}
+
+/**
+ * 카드 추가 입력 필드를 표시하는 함수 (Trello 스타일)
+ */
+function showAddCardInput(container, status, addCardBtn) {
+  // 이미 입력 필드가 열려있으면 닫기
+  const existingInput = container.querySelector('.kanban-add-card-input-wrapper');
+  if (existingInput) {
+    existingInput.remove();
+    return;
+  }
+
+  // 입력 필드 HTML 생성
+  const inputWrapper = document.createElement('div');
+  inputWrapper.className = 'kanban-add-card-input-wrapper';
+  inputWrapper.style.cssText = `
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin-top: 8px;
+  `;
+  
+  inputWrapper.innerHTML = `
+    <textarea 
+      class="kanban-add-card-input" 
+      placeholder="제목을 입력하고 Enter를 눌러 저장하세요..."
+      rows="2"
+      style="
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        font-family: inherit;
+        resize: none;
+        box-sizing: border-box;
+      "
+    ></textarea>
+    <div style="display: flex; gap: 8px; margin-top: 8px;">
+      <button class="kanban-add-card-submit-btn" style="
+        padding: 6px 12px;
+        background: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      ">추가</button>
+      <button class="kanban-add-card-cancel-btn" style="
+        padding: 6px 12px;
+        background: transparent;
+        color: #666;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+      ">취소</button>
+    </div>
+  `;
+
+  // 버튼 다음에 입력 필드 삽입
+  const column = addCardBtn.closest('.cp-kanban-col');
+  const cardsContainer = column.querySelector('.kanban-col-cards');
+  cardsContainer.insertBefore(inputWrapper, cardsContainer.firstChild);
+
+  const textarea = inputWrapper.querySelector('.kanban-add-card-input');
+  const submitBtn = inputWrapper.querySelector('.kanban-add-card-submit-btn');
+  const cancelBtn = inputWrapper.querySelector('.kanban-add-card-cancel-btn');
+
+  // 포커스 및 자동 포커스
+  textarea.focus();
+
+  // Enter 키로 제출 (Shift+Enter는 줄바꿈)
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitCard(container, status, textarea.value.trim(), inputWrapper);
+    } else if (e.key === 'Escape') {
+      inputWrapper.remove();
+    }
+  });
+
+  // 제출 버튼 클릭
+  submitBtn.addEventListener('click', () => {
+    submitCard(container, status, textarea.value.trim(), inputWrapper);
+  });
+
+  // 취소 버튼 클릭
+  cancelBtn.addEventListener('click', () => {
+    inputWrapper.remove();
+  });
+
+  // 외부 클릭 시 닫기 (이벤트 버블링 방지)
+  setTimeout(() => {
+    const closeOnOutsideClick = (e) => {
+      if (!inputWrapper.contains(e.target) && !addCardBtn.contains(e.target)) {
+        inputWrapper.remove();
+        document.removeEventListener('click', closeOnOutsideClick);
+      }
+    };
+    document.addEventListener('click', closeOnOutsideClick);
+  }, 100);
+}
+
+/**
+ * 카드를 제출하는 함수
+ */
+function submitCard(container, status, title, inputWrapper) {
+  if (!title || title.trim() === '') {
+    showToast('⚠️ 제목을 입력해주세요.');
+    return;
+  }
+
+  // 입력 필드 제거
+  inputWrapper.remove();
+
+  // 카드 데이터 생성
+  const ideaData = {
+    title: title.trim(),
+    description: '',
+    tags: [],
+    createdAt: Date.now()
+  };
+
+  // background.js에 카드 추가 요청 (상태 지정)
+  chrome.runtime.sendMessage({
+    action: 'add_idea_to_kanban',
+    data: JSON.stringify(ideaData),
+    status: status // 카드를 추가할 상태 지정
+  }, (response) => {
+    if (response && response.success) {
+      showToast('✅ 카드가 추가되었습니다.');
+      // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
+    } else {
+      showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+    }
+  });
+}
+
+/**
+ * 카드 컨텍스트 메뉴를 표시하는 함수
+ */
+function showCardContextMenu(container, card, cardId, status, cardData, menuBtn) {
+  // 기존 메뉴 제거
+  const existingMenu = container.querySelector('.card-context-menu');
+  if (existingMenu) {
+    existingMenu.remove();
+  }
+
+  // 메뉴 생성
+  const menu = document.createElement('div');
+  menu.className = 'card-context-menu';
+  menu.style.cssText = `
+    position: absolute;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    min-width: 180px;
+    padding: 4px 0;
+  `;
+
+  // 메뉴 버튼 위치 계산
+  const btnRect = menuBtn.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  menu.style.top = `${btnRect.bottom - cardRect.top + 4}px`;
+  menu.style.right = `${cardRect.right - btnRect.right}px`;
+
+  // 메뉴 항목 생성
+  const menuItems = [];
+
+  // 유사 아이디어 생성 (모든 상태에서 가능)
+  menuItems.push(`
+    <button class="context-menu-item" data-action="generate-similar-idea" style="
+      width: 100%;
+      padding: 10px 16px;
+      text-align: left;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 14px;
+      color: #333;
+      transition: background 0.2s;
+    ">
+      💡 유사 아이디어 생성
+    </button>
+  `);
+
+  // 콘텐츠 리뉴얼 제안 (발행 완료된 카드만)
+  if (status === 'done' && cardData?.publishedUrl) {
+    menuItems.push(`
+      <button class="context-menu-item" data-action="suggest-renewal" style="
+        width: 100%;
+        padding: 10px 16px;
+        text-align: left;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-size: 14px;
+        color: #333;
+        transition: background 0.2s;
+      ">
+        🔄 콘텐츠 리뉴얼 제안
+      </button>
+    `);
+  }
+
+  menu.innerHTML = menuItems.join('');
+
+  // 메뉴 항목 hover 효과
+  menu.querySelectorAll('.context-menu-item').forEach(item => {
+    item.addEventListener('mouseenter', () => {
+      item.style.background = '#f5f5f5';
+    });
+    item.addEventListener('mouseleave', () => {
+      item.style.background = 'transparent';
+    });
+  });
+
+  // 메뉴 항목 클릭 이벤트
+  menu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem) return;
+
+    e.stopPropagation();
+    const action = menuItem.dataset.action;
+
+    if (action === 'generate-similar-idea') {
+      generateSimilarIdea(cardId, status, cardData);
+    } else if (action === 'suggest-renewal') {
+      suggestContentRenewal(cardId, status, cardData);
+    }
+
+    menu.remove();
+  });
+
+  // 카드에 메뉴 추가
+  card.style.position = 'relative';
+  card.appendChild(menu);
+
+  // 외부 클릭 시 메뉴 닫기
+  setTimeout(() => {
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target) && !menuBtn.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    document.addEventListener('click', closeMenu);
+  }, 100);
+}
+
+/**
+ * 유사 아이디어 생성 함수
+ */
+function generateSimilarIdea(cardId, status, cardData) {
+  if (!cardData) {
+    showToast('❌ 카드 데이터를 찾을 수 없습니다.');
+    return;
+  }
+
+  showToast('🤖 AI가 유사 아이디어를 생성 중입니다...');
+
+  // 카드 정보를 기반으로 AI에게 유사 아이디어 생성 요청
+  const prompt = `
+당신은 블로그 콘텐츠 전략가입니다. 아래 기존 콘텐츠를 기반으로 유사하지만 차별화된 새로운 아이디어를 제안해주세요.
+
+[기존 콘텐츠]
+- 제목: ${cardData.title || '제목 없음'}
+- 설명: ${cardData.description || '설명 없음'}
+- 태그: ${(cardData.tags || []).join(', ') || '없음'}
+
+[요청]
+- 기존 콘텐츠와 유사한 주제이지만 다른 각도나 접근 방식으로 차별화된 아이디어 3개를 제안해주세요.
+- 스핀오프, 후속편, 심화 버전 등 다양한 형태로 제안 가능합니다.
+
+[출력 형식]
+반드시 다음 JSON 배열 형식으로만 응답해주세요:
+[
+  {
+    "title": "아이디어 제목",
+    "description": "이 아이디어가 기존 콘텐츠와 어떻게 차별화되는지 설명"
+  }
+]
+`;
+
+  chrome.runtime.sendMessage({
+    action: 'call_gemini',
+    prompt: prompt
+  }, (response) => {
+    if (response && response.text && !response.text.includes('오류')) {
+      try {
+        // JSON 파싱
+        let ideasText = response.text.trim();
+        if (ideasText.startsWith('```json')) {
+          ideasText = ideasText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        } else if (ideasText.startsWith('```')) {
+          ideasText = ideasText.replace(/```\n?/g, '').trim();
+        }
+        const ideas = JSON.parse(ideasText);
+
+        if (Array.isArray(ideas) && ideas.length > 0) {
+          // 첫 번째 아이디어를 자동으로 추가
+          const firstIdea = ideas[0];
+          const ideaData = {
+            title: firstIdea.title || '유사 아이디어',
+            description: firstIdea.description || '',
+            keywords: [...(cardData.tags || []), '#유사-아이디어'],
+            createdAt: Date.now()
+          };
+
+          chrome.runtime.sendMessage({
+            action: 'add_idea_to_kanban',
+            data: JSON.stringify(ideaData),
+            status: 'ideas'
+          }, (addResponse) => {
+            if (addResponse && addResponse.success) {
+              showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
+            } else {
+              showToast('❌ 아이디어 추가에 실패했습니다.');
+            }
+          });
+        } else {
+          showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
+        }
+      } catch (e) {
+        console.error('아이디어 파싱 오류:', e);
+        showToast('❌ AI 응답을 파싱하는 중 오류가 발생했습니다.');
+      }
+    } else {
+      showToast('❌ AI 아이디어 생성에 실패했습니다.');
+    }
+  });
+}
+
+/**
+ * 콘텐츠 리뉴얼 제안 함수
+ */
+function suggestContentRenewal(cardId, status, cardData) {
+  if (!cardData || !cardData.publishedUrl) {
+    showToast('❌ 발행된 콘텐츠가 아닙니다.');
+    return;
+  }
+
+  showToast('🤖 AI가 리뉴얼 제안을 생성 중입니다...');
+
+  const performance = cardData.performance || {};
+  const prompt = `
+당신은 콘텐츠 최적화 전문가입니다. 아래 기존 콘텐츠를 분석하여 리뉴얼 제안을 해주세요.
+
+[기존 콘텐츠]
+- 제목: ${cardData.title || '제목 없음'}
+- 설명: ${cardData.description || '설명 없음'}
+- 발행 URL: ${cardData.publishedUrl}
+${performance.pageviews ? `- 페이지뷰: ${performance.pageviews.toLocaleString()}회` : ''}
+${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.toFixed(2)}` : ''}
+
+[요청]
+이 콘텐츠를 업데이트하여 새로운 트래픽을 유입시킬 수 있는 리뉴얼 방안을 제안해주세요.
+- 최신 정보로 업데이트할 부분
+- 추가할 수 있는 새로운 섹션
+- SEO 개선 방안
+- 사용자 경험 개선 제안
+
+[출력 형식]
+다음 형식으로 응답해주세요:
+**리뉴얼 제안:**
+
+1. [제안 항목 1]
+   - 구체적인 개선 방안 설명
+
+2. [제안 항목 2]
+   - 구체적인 개선 방안 설명
+`;
+
+  chrome.runtime.sendMessage({
+    action: 'call_gemini',
+    prompt: prompt
+  }, (response) => {
+    if (response && response.text && !response.text.includes('오류')) {
+      // 리뉴얼 제안을 새 아이디어로 저장
+      const ideaData = {
+        title: `[리뉴얼] ${cardData.title || '제목 없음'}`,
+        description: `원본: ${cardData.publishedUrl}\n\n${response.text}`,
+        keywords: [...(cardData.tags || []), '#리뉴얼-제안'],
+        createdAt: Date.now()
+      };
+
+      chrome.runtime.sendMessage({
+        action: 'add_idea_to_kanban',
+        data: JSON.stringify(ideaData),
+        status: 'ideas'
+      }, (addResponse) => {
+        if (addResponse && addResponse.success) {
+          showToast('✅ 리뉴얼 제안이 아이디어로 저장되었습니다!');
+        } else {
+          showToast('❌ 리뉴얼 제안 저장에 실패했습니다.');
+        }
+      });
+    } else {
+      showToast('❌ 리뉴얼 제안 생성에 실패했습니다.');
     }
   });
 }

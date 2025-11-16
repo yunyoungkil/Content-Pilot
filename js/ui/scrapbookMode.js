@@ -1,5 +1,7 @@
 // js/ui/scrapbookMode.js (필터링 로직 분리)
 import { shortenLink, showConfirmationToast } from "../utils.js";
+import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js";
+import { renderPanelHeader } from "./header.js";
 
 let selectedScrapId = null;
 let allScraps = [];
@@ -304,6 +306,9 @@ function renderDetailView(scrapId, container) {
                 <div class="scrapbook-detail-title">${detailTitle}</div>
                 <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
                 <p class="scrapbook-detail-desc">${detailText}</p>
+                <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin-top: 16px; padding: 10px 16px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
+                    💡 아이디어로 전환
+                </button>
             </div>
             <div class="scrapbook-detail-images-card" style="flex: 1; min-width: 300px; max-width: 420px; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08); padding: 20px;">
                 <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px;">이미지 (${allImageUrls.length}개)</div>
@@ -440,6 +445,69 @@ function renderDetailView(scrapId, container) {
         });
       });
     });
+    
+    // ▼▼▼ [추가] 아이디어로 전환 버튼 이벤트 리스너 ▼▼▼
+    const convertToIdeaBtn = detailContainer.querySelector('.scrap-to-idea-btn');
+    if (convertToIdeaBtn) {
+      convertToIdeaBtn.addEventListener('click', () => {
+        const scrapId = convertToIdeaBtn.dataset.scrapId;
+        const scrap = allScraps.find(s => s.id === scrapId);
+        
+        if (!scrap) {
+          showConfirmationToast('스크랩을 찾을 수 없습니다.', null);
+          return;
+        }
+        
+        // 스크랩 데이터를 아이디어 형식으로 변환
+        const ideaTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim().substring(0, 100) : '제목 없음';
+        const ideaDescription = scrap.text || '';
+        const ideaTags = scrap.tags && Array.isArray(scrap.tags) ? [...scrap.tags, '#스크랩-전환'] : ['#스크랩-전환'];
+        
+        const ideaData = {
+          title: ideaTitle,
+          description: ideaDescription,
+          keywords: ideaTags.filter(tag => tag !== '#스크랩-전환'), // 스크랩 태그는 keywords로
+          sourceUrl: scrap.url || '', // 출처 URL 저장
+          sourceScrapId: scrapId // 원본 스크랩 ID 저장 (나중에 연결 가능)
+        };
+        
+        // background.js에 아이디어 추가 요청
+        chrome.runtime.sendMessage({
+          action: 'add_idea_to_kanban',
+          data: JSON.stringify(ideaData)
+        }, (response) => {
+          if (response && response.success) {
+            showConfirmationToast('✅ 아이디어로 전환되었습니다! 기획 보드에서 확인하세요.', null);
+            
+            // 기획 보드로 이동 (선택적)
+            const host = document.getElementById("content-pilot-host");
+            if (host && host.shadowRoot) {
+              const mainArea = host.shadowRoot.querySelector('#cp-main-area');
+              if (mainArea) {
+                // kanban 모드로 전환
+                window.__cp_active_mode = 'kanban';
+                renderKanban(mainArea);
+                addKanbanEventListeners(mainArea);
+                
+                // 헤더도 업데이트
+                renderPanelHeader(host.shadowRoot);
+              }
+            }
+          } else {
+            showConfirmationToast('❌ 아이디어 전환에 실패했습니다: ' + (response?.error || '알 수 없는 오류'), null);
+          }
+        });
+      });
+      
+      // 버튼 hover 효과
+      convertToIdeaBtn.addEventListener('mouseenter', () => {
+        convertToIdeaBtn.style.background = '#3367d6';
+      });
+      convertToIdeaBtn.addEventListener('mouseleave', () => {
+        convertToIdeaBtn.style.background = '#4285f4';
+      });
+    }
+    // ▲▲▲ 추가 완료 ▲▲▲
 }
 
 // background.js로부터 실시간 업데이트 수신 (이제 Shadow DOM 내부를 찾도록 수정)

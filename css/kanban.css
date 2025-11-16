@@ -197,14 +197,41 @@
   gap: 12px;
 }
 
+.cp-kanban-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #dee2e6;
+  flex-shrink: 0;
+}
+
 .cp-kanban-col-title {
   font-weight: 700;
   font-size: 16px;
   color: #333;
   margin: 0;
-  padding: 14px 16px;
-  border-bottom: 1px solid #dee2e6;
+  flex: 1;
+}
+
+.kanban-add-card-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
   flex-shrink: 0;
+}
+
+.kanban-add-card-btn:hover {
+  background: #f8f9fa;
+  border-color: #4285f4;
+  color: #4285f4;
 }
 
 .kanban-col-cards {
