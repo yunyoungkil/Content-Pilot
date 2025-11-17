@@ -561,6 +561,92 @@ async function generateAndSendKeywords(data, sender) {
  * 아이디어에 대한 AI 브리핑 데이터를 생성하는 함수
  * outline, recommendedKeywords, longTailKeywords를 생성합니다.
  */
+/**
+ * 아이디어 카드를 생성하고 Firebase에 저장하는 헬퍼 함수
+ * @param {Object} ideaData - 아이디어 데이터 객체
+ * @param {string} targetStatus - 저장할 상태 ('ideas', 'in-progress', 'done')
+ * @returns {Promise<{success: boolean, firebaseKey?: string, error?: string}>}
+ */
+async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas') {
+  try {
+    // origin 및 tags 판별
+    let origin = ideaData.origin || null;
+    let tags = ideaData.keywords || ideaData.tags || [];
+
+    // keywords와 tags 병합
+    if (ideaData.keywords && ideaData.tags) {
+      tags = [...(ideaData.tags || []), ...(ideaData.keywords || [])];
+    } else if (ideaData.keywords) {
+      tags = [...(ideaData.keywords || [])];
+    } else if (ideaData.tags) {
+      tags = [...(ideaData.tags || [])];
+    }
+
+    // origin이 없는 경우 판별
+    if (!origin) {
+      if (ideaData.keywords && ideaData.keywords.length > 0) {
+        origin = { type: "ai_generated" };
+      } else {
+        origin = { type: "manual_entry" }; // kanbanMode.js의 수동 추가
+      }
+    }
+
+    // 태그 처리 로직
+    if (origin.type === "ai_generated") {
+      if (!tags.includes("#AI-추천")) tags.push("#AI-추천");
+    } else {
+      tags = tags.filter(t => t !== '#AI-추천');
+    }
+
+    // 포스팅 기반 아이디어는 AI 추천 태그 제거
+    if (origin.type === 'my_post' || origin.type === 'competitor_post' || origin.type === 'my_post_renewal') {
+      tags = tags.filter(t => t !== '#AI-추천');
+    }
+
+    // 태그 중복 제거
+    tags = [...new Set(tags)];
+
+    const workspaceKeywords = tags.filter(t => t !== '#AI-추천');
+
+    // Firebase 저장 객체 생성
+    const newCard = {
+      title: ideaData.title || "제목 없음",
+      description: ideaData.description || "",
+      createdAt: ideaData.createdAt || Date.now(),
+      tags: tags,
+      origin: origin,
+      workspace: { // PRD v1.0 모델
+        keywords: workspaceKeywords,
+        outline: ideaData.outline || [],
+        draft: ideaData.draft_content || "", // '포스팅' 추가 시 본문이 여기로 옴
+        linkedScraps: {}
+      },
+      // 기존 필드 호환
+      recommendedKeywords: ideaData.recommendedSearches || [],
+      longTailKeywords: ideaData.longTailKeywords || []
+    };
+
+    // Firebase에 저장
+    const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
+    const newCardKey = newCardRef.key;
+    await newCardRef.set(newCard);
+
+    // AI 브리핑 자동 생성 (필요한 경우에만)
+    // 'ai_generated' 또는 'manual_entry'일 때만 자동 생성
+    // 'my_post_renewal'은 자동화된 리뉴얼이므로 브리핑 생성 안 함
+    if ((origin.type === 'ai_generated' || origin.type === 'manual_entry') && newCard.title) {
+      generateIdeaBriefing(newCardKey, newCard.title, newCard.description)
+        .catch((error) => console.error("브리핑 데이터 생성 실패:", error));
+    }
+
+    return { success: true, firebaseKey: newCardKey };
+
+  } catch (e) {
+    console.error("createAndSaveNewIdea 함수 오류:", e);
+    return { success: false, error: e.message };
+  }
+}
+
 async function generateIdeaBriefing(cardId, title, description, options = {}) {
   const cardRef = firebase.database().ref(`kanban/ideas/${cardId}`);
   const {
@@ -3069,95 +3155,25 @@ ${decayContent.map((item, idx) =>
 
     return true;
   } else if (msg.action === "add_idea_to_kanban") {
-    const ideaObjectString = msg.data;
-    const targetStatus = msg.status || "ideas"; // 상태 지정 (기본값: ideas)
+    (async () => {
+      try {
+        const ideaObjectString = msg.data;
+        const targetStatus = msg.status || "ideas";
 
-    if (!ideaObjectString) {
-      sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
-      return true;
-    }
-
-    try {
-      const ideaData = JSON.parse(ideaObjectString);
-
-      // origin 필드와 keywords 필드를 기반으로 출처 판별 통합 로직
-      let origin = ideaData.origin || null;
-      let tags = ideaData.tags || [];
-      
-      // keywords가 있으면 tags에 병합
-      if (ideaData.keywords) {
-        tags = [...tags, ...ideaData.keywords];
-      }
-
-      // origin이 없는 경우 판별
-      if (!origin) {
-        if (ideaData.keywords && ideaData.keywords.length > 0) {
-          // keywords가 있으면 AI 생성 아이디어
-          origin = { type: 'ai_generated' };
-        } else {
-          // keywords도 없으면 수동 입력 (kanbanMode.js에서 수동 추가)
-          origin = { type: 'manual_entry' };
+        if (!ideaObjectString) {
+          sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
+          return;
         }
+
+        const ideaData = JSON.parse(ideaObjectString);
+        const response = await createAndSaveNewIdea(ideaData, targetStatus); // 분리된 헬퍼 호출
+        sendResponse(response);
+      } catch (e) {
+        console.error("add_idea_to_kanban 파싱 오류:", e, "데이터:", msg.data);
+        sendResponse({ success: false, error: "아이디어 데이터 파싱 실패" });
       }
-
-      // 태그 처리 로직
-      if (origin.type === 'ai_generated' && !tags.includes('#AI-추천')) {
-        tags.push('#AI-추천');
-      }
-      
-      // 포스팅 기반 아이디어는 AI 추천 태그 제거
-      if (origin.type === 'my_post' || origin.type === 'competitor_post') {
-        tags = tags.filter(t => t !== '#AI-추천');
-      }
-
-      // 태그 중복 제거
-      tags = [...new Set(tags)];
-
-      const newCard = {
-        title: ideaData.title || "제목 없음",
-        description: ideaData.description || "",
-        tags: tags,
-        recommendedKeywords: ideaData.recommendedSearches || [],
-        outline: ideaData.outline || [],
-        longTailKeywords: ideaData.longTailKeywords || [],
-        origin: origin,
-        createdAt: Date.now(),
-      };
-
-      const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
-      const newCardKey = newCardRef.key;
-
-      newCardRef
-        .set(newCard)
-        .then(() => {
-          sendResponse({ success: true, firebaseKey: newCardKey });
-          
-          // 아이디어 저장 후 브리핑 데이터 자동 생성 (비동기, 응답 대기하지 않음)
-          if (newCard.title && newCard.description) {
-            generateIdeaBriefing(newCardKey, newCard.title, newCard.description)
-              .catch((error) => {
-                console.error("브리핑 데이터 생성 실패:", error);
-              });
-          }
-        })
-        .catch((e) => {
-          sendResponse({ success: false, error: e.message });
-        });
-    } catch (e) {
-      // 여기서 파싱 에러가 발생하면, 프론트엔드에서 데이터가 잘못 전달된 것입니다.
-      console.error(
-        "add_idea_to_kanban 파싱 오류:",
-        e,
-        "전달받은 문자열:",
-        ideaObjectString
-      );
-      sendResponse({
-        success: false,
-        error: "아이디어 데이터 파싱에 실패했습니다.",
-      });
-    }
-
-    return true;
+    })();
+    return true; // 비동기 응답
   } else if (msg.action === "generate_idea_briefing") {
     const { cardId, title, description, generateOutline, generateMainKeywords, generateKeywords, generateLongTail } = msg.data;
     if (!cardId || !title) {
@@ -4782,6 +4798,71 @@ ${trends}
 /**
  * 발행된 모든 콘텐츠의 성과 지표를 업데이트합니다.
  */
+/**
+ * 성과 분석 기반으로 재활용 후보를 찾아 자동으로 아이디어를 생성하는 함수
+ */
+async function runAutomatedRenewalChecks() {
+  console.log("[자동 재활용] 성과 분석 기반 재활용 후보 탐색 시작...");
+  
+  try {
+    // 1. 재활용 후보 데이터 가져오기
+    const { decayContent } = await analyzePerformanceData();
+
+    if (!decayContent || decayContent.length === 0) {
+      console.log("[자동 재활용] 재활용 후보가 없습니다.");
+      return;
+    }
+
+    // 2. 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
+    const ideasSnap = await firebase.database().ref("kanban/ideas").once("value");
+    const ideas = ideasSnap.val() || {};
+    const existingRenewalCards = Object.values(ideas).filter(
+      idea => idea.origin?.type === 'my_post_renewal'
+    );
+
+    let createdCount = 0;
+    for (const post of decayContent) {
+      // 3. 중복 검사: 원본 카드 ID로 이미 생성된 자동 제안이 있는지 확인
+      const alreadyExists = existingRenewalCards.some(
+        idea => idea.origin?.originalCardId === post.cardId
+      );
+
+      if (alreadyExists) {
+        console.log(`[자동 재활용] 건너뛰기: "${post.title}" (이미 제안됨)`);
+        continue;
+      }
+
+      // 4. '아이디어 카드' 객체 생성
+      const ideaData = {
+        title: `[자동 리뉴얼] ${post.title}`,
+        description: `[자동 리뉴얼 제안]\n- 원본 성과: $${post.earnings.toFixed(2)}, ${post.pageviews.toLocaleString()} PV\n- 발행 후: ${Math.round(post.daysSinceCreation)}일 경과\n- 원본 URL: ${post.publishedUrl}`,
+        tags: [...(post.tags || []), "#리뉴얼-제안"],
+        createdAt: Date.now(),
+        origin: {
+          type: "my_post_renewal", // 자동화된 리뉴얼 타입
+          postUrl: post.publishedUrl,
+          originalCardId: post.cardId // 중복 검사를 위한 원본 카드 ID
+        }
+      };
+
+      // 5. 1단계에서 만든 헬퍼 함수로 카드 생성
+      console.log(`[자동 재활용] 아이디어 생성: "${ideaData.title}"`);
+      const result = await createAndSaveNewIdea(ideaData, 'ideas');
+      
+      if (result.success) {
+        createdCount++;
+        console.log(`[자동 재활용] 아이디어 생성 완료: "${ideaData.title}" (ID: ${result.firebaseKey})`);
+      } else {
+        console.error(`[자동 재활용] 아이디어 생성 실패: "${ideaData.title}" - ${result.error}`);
+      }
+    }
+
+    console.log(`[자동 재활용] 완료: ${createdCount}개의 재활용 아이디어가 생성되었습니다.`);
+  } catch (error) {
+    console.error("[자동 재활용] 오류 발생:", error);
+  }
+}
+
 async function updateAllPerformanceMetrics() {
   const kanbanRef = firebase.database().ref("kanban");
   const snapshot = await kanbanRef.once("value");
@@ -4804,6 +4885,9 @@ async function updateAllPerformanceMetrics() {
   }
   await Promise.all(promises);
   console.log("모든 콘텐츠의 성과 지표 업데이트 완료.");
+
+  // 성과 업데이트가 끝난 직후, 재활용 자동화 로직 실행
+  await runAutomatedRenewalChecks();
 }
 
 /**
@@ -5840,3 +5924,4 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
     };
   }
 }
+

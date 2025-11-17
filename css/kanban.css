@@ -326,6 +326,34 @@
   min-height: auto;
 }
 
+/* 자동 리뉴얼 제안 태그 스타일 */
+.kanban-card-meta.auto-renewal {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 4px 10px;
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  animation: subtle-glow 2s ease-in-out infinite;
+  cursor: help;
+}
+
+@keyframes subtle-glow {
+  0%, 100% {
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+  }
+  50% {
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+  }
+}
+
 .kanban-card-meta {
   display: flex;
   align-items: center;

@@ -209,8 +209,16 @@ function createKanbanCard(id, data, status) {
     : 0;
   let metaInfoHtml = "";
   
-  // 출처 정보 표시
-  if (data.origin && data.origin.type) {
+  // ▼▼▼ [신규 추가] 자동화 카드 식별 로직 ▼▼▼
+  if (data.origin && data.origin.type === 'my_post_renewal') {
+    metaInfoHtml += `<span class="kanban-card-meta origin-tag auto-renewal" title="시스템이 성과 하락을 감지하여 리뉴얼을 제안했습니다.">
+                        🔄 자동 리뉴얼 제안
+                     </span>`;
+  }
+  // ▲▲▲ [신규 추가] ▲▲▲
+  
+  // 출처 정보 표시 (my_post_renewal 제외)
+  if (data.origin && data.origin.type && data.origin.type !== 'my_post_renewal') {
     let originIcon = '';
     let originText = '';
     
