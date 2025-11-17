@@ -208,6 +208,35 @@ function createKanbanCard(id, data, status) {
     ? Object.keys(data.linkedScraps).length
     : 0;
   let metaInfoHtml = "";
+  
+  // 출처 정보 표시
+  if (data.origin && data.origin.type) {
+    let originIcon = '';
+    let originText = '';
+    
+    switch (data.origin.type) {
+      case 'my_post':
+        originIcon = '🔄';
+        originText = '내 글 리뉴얼';
+        break;
+      case 'competitor_post':
+        originIcon = '🎯';
+        originText = `출처: ${data.origin.channelName || '경쟁사'}`;
+        break;
+      case 'ai_generated':
+        // AI-추천 태그가 이미 있으므로 중복 표시 안 함 (또는 🤖 아이콘만 추가)
+        // originIcon = '🤖';
+        break;
+      case 'manual_entry':
+        // 수동 입력은 아무것도 표시 안 함
+        break;
+    }
+    
+    if (originIcon || originText) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag ${data.origin.type}">${originIcon} ${originText}</span>`;
+    }
+  }
+  
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }

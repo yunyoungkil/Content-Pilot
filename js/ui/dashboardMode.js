@@ -1,6 +1,7 @@
 // js/ui/dashboardMode.js (아이디어 목록 초기화 기능 추가)
 
 import { marked } from 'marked';
+import { showToast } from '../utils.js';
 
 // --- 전역 변수 및 캐시 관련 함수 (이전과 동일) ---
 let cachedData = null;
@@ -183,7 +184,13 @@ function createContentCard(item, type) {
             ${videoIcon}
         `;
     }
-    const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}">댓글 분석 💡</button>` : '';
+    const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}" title="댓글 분석">💡</button>` : '';
+    const postObjectString = JSON.stringify(item).replace(/'/g, "&#39;");
+    const addToKanbanButton = `<button class="add-post-to-kanban-btn" data-post-object='${postObjectString}' data-channel-type="${type}" title="${type === 'myChannels' ? '리뉴얼 아이디어로 추가' : '벤치마킹 아이디어로 추가'}">
+        <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
+            <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
+        </svg>
+    </button>`;
     return `
         <a href="${link}" target="_blank" class="content-card">
             <div class="card-thumbnail">
@@ -198,6 +205,7 @@ function createContentCard(item, type) {
                     ${metricsSpans}
                 </div>
             </div>
+            ${addToKanbanButton}
             ${commentAnalysisButton}
         </a>
     `;
@@ -528,6 +536,44 @@ function addDashboardEventListeners(container) {
                         
                     });
                 });
+            });
+            return;
+        }
+
+        if (target.closest('.add-post-to-kanban-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const button = target.closest('.add-post-to-kanban-btn');
+            const post = JSON.parse(button.dataset.postObject);
+            const channelType = button.dataset.channelType;
+            const channelName = cachedData?.metas[post.sourceId]?.title || '알 수 없는 채널';
+            
+            const ideaForKanban = {
+                title: channelType === "myChannels" ? `[리뉴얼] ${post.title}` : `[벤치마킹] ${post.title}`,
+                description: post.cleanText || post.description || "",
+                keywords: post.tags || [],
+                origin: {
+                    type: channelType === "myChannels" ? "my_post" : "competitor_post",
+                    channelName: channelName,
+                    postUrl: post.fullLink || post.link
+                }
+            };
+
+            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: JSON.stringify(ideaForKanban) }, (response) => {
+                if (response && response.success) {
+                    showToast(`"${post.title}"이(가) 기획 보드에 추가되었습니다.`, 'success');
+                    button.disabled = true;
+                    button.style.opacity = '0.5';
+                    button.style.cursor = 'not-allowed';
+                    // SVG를 체크 아이콘으로 변경
+                    button.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
+                            <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
+                        </svg>
+                    `;
+                } else {
+                    alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
+                }
             });
             return;
         }

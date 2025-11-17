@@ -3080,27 +3080,49 @@ ${decayContent.map((item, idx) =>
     try {
       const ideaData = JSON.parse(ideaObjectString);
 
+      // origin 필드와 keywords 필드를 기반으로 출처 판별 통합 로직
+      let origin = ideaData.origin || null;
+      let tags = ideaData.tags || [];
+      
+      // keywords가 있으면 tags에 병합
+      if (ideaData.keywords) {
+        tags = [...tags, ...ideaData.keywords];
+      }
+
+      // origin이 없는 경우 판별
+      if (!origin) {
+        if (ideaData.keywords && ideaData.keywords.length > 0) {
+          // keywords가 있으면 AI 생성 아이디어
+          origin = { type: 'ai_generated' };
+        } else {
+          // keywords도 없으면 수동 입력 (kanbanMode.js에서 수동 추가)
+          origin = { type: 'manual_entry' };
+        }
+      }
+
+      // 태그 처리 로직
+      if (origin.type === 'ai_generated' && !tags.includes('#AI-추천')) {
+        tags.push('#AI-추천');
+      }
+      
+      // 포스팅 기반 아이디어는 AI 추천 태그 제거
+      if (origin.type === 'my_post' || origin.type === 'competitor_post') {
+        tags = tags.filter(t => t !== '#AI-추천');
+      }
+
+      // 태그 중복 제거
+      tags = [...new Set(tags)];
+
       const newCard = {
         title: ideaData.title || "제목 없음",
         description: ideaData.description || "",
-        tags: ideaData.keywords && ideaData.keywords.length > 0 
-          ? [...(ideaData.keywords || [])] 
-          : (ideaData.tags || []), // keywords가 없으면 tags 사용, 둘 다 없으면 빈 배열
+        tags: tags,
         recommendedKeywords: ideaData.recommendedSearches || [],
         outline: ideaData.outline || [],
         longTailKeywords: ideaData.longTailKeywords || [],
+        origin: origin,
         createdAt: Date.now(),
       };
-
-      // AI 추천이 아닌 수동 입력인 경우 #AI-추천 태그 제거
-      if (!ideaData.keywords || ideaData.keywords.length === 0) {
-        newCard.tags = newCard.tags.filter(tag => tag !== "#AI-추천");
-      } else {
-        // AI 추천인 경우에만 #AI-추천 태그 추가
-        if (!newCard.tags.includes("#AI-추천")) {
-          newCard.tags = ["#AI-추천", ...newCard.tags];
-        }
-      }
 
       const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
       const newCardKey = newCardRef.key;
