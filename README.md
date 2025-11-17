@@ -1,19 +1,44 @@
 # Content Pilot ✈️
 
-**Content Pilot**은 웹 서핑 중 발견하는 중요한 정보와 아이디어를 손쉽게 수집하고 관리할 수 있도록 도와주는 강력한 웹 콘텐츠 큐레이션 확장 프로그램입니다. 모듈화된 JavaScript 코드와 Webpack 빌드 시스템, 그리고 최신 Manifest V3 아키텍처를 통해 체계적으로 개발되었습니다.
+**Content Pilot**은 웹 콘텐츠 큐레이션부터 AI 기반 콘텐츠 기획, 작성, 성과 추적까지 전 과정을 지원하는 통합 콘텐츠 관리 플랫폼입니다. 모듈화된 JavaScript 코드와 Webpack 빌드 시스템, 그리고 최신 Manifest V3 아키텍처를 통해 체계적으로 개발되었습니다.
 
 ## 📖 프로젝트 개요
 
-웹페이지의 텍스트, 이미지 등 원하는 모든 요소를 클릭 한 번으로 스크랩하고, Firebase와 연동하여 실시간으로 데이터를 관리할 수 있습니다. 사용자의 편의성을 위해 직관적인 하이라이터 기능과 세련된 UI를 제공합니다.
+웹 서핑 중 발견한 정보를 수집하고, AI의 도움을 받아 콘텐츠를 기획하고 작성하며, 발행 후 성과를 추적하는 완전한 콘텐츠 생명주기를 한 곳에서 관리할 수 있습니다. Firebase와 Google Analytics, AdSense를 연동하여 데이터 기반의 콘텐츠 전략을 수립할 수 있습니다.
 
 ## ✨ 주요 기능
 
+### 1. 콘텐츠 수집 및 관리
 - **지능형 하이라이터**: `Alt` 키로 켜고 끄는 토글(Toggle) 모드를 통해, 스크랩할 요소를 명확하게 하이라이트합니다.
 - **원클릭 요소 스크랩**: 하이라이트된 웹페이지의 모든 요소를 클릭 한 번으로 손쉽게 스크랩할 수 있습니다.
-- **실시간 동기화**: 모든 스크랩 데이터는 Firebase Realtime Database에 저장되어 실시간으로 동기화됩니다.
-- **스크랩 관리**: 메인 패널의 스크랩북 모드에서 수집한 콘텐츠 목록을 확인하고, 개별 삭제 버튼으로 불필요한 스크랩을 관리할 수 있습니다.
 - **안정적인 데이터 수집**: Manifest V3의 **Offscreen Document**를 활용하여, 네이버 블로그의 아이프레임 구조나 지연 로딩(Lazy Loading) 이미지도 안정적으로 분석하고 수집합니다.
-- **확장형 모듈 UI**: 최소화 시 화면 하단에 깔끔한 '독(Dock)' 형태의 UI를 제공하며, 스크랩 시에는 부드럽게 펼쳐지는 미리보기 패널로 즉각적인 피드백을 줍니다.
+- **스크랩북 관리**: 수집한 콘텐츠를 체계적으로 관리하고, 아이디어로 전환할 수 있습니다.
+- **이미지 갤러리**: 모든 스크랩에서 이미지를 자동으로 추출하여 갤러리로 관리하고, 에디터에 드래그앤드롭으로 삽입할 수 있습니다.
+
+### 2. AI 기반 콘텐츠 기획
+- **칸반 보드 기반 아이디어 관리**: 아이디어를 상태별(아이디어 → 진행 중 → 완료)로 관리하고, 드래그앤드롭으로 상태를 변경할 수 있습니다.
+- **AI 아이디어 제안**: 성과 데이터와 사용자 피드백을 기반으로 맞춤형 아이디어를 제안합니다.
+- **AI 브리핑 자동 생성**: 아이디어 저장 시 추천 목차, 추천 검색어, 주요 키워드, 롱테일 키워드를 자동으로 생성합니다.
+- **콘텐츠 재활용 제안**: 기존 콘텐츠의 성과를 분석하여 업데이트가 필요한 콘텐츠를 제안합니다.
+
+### 3. 통합 워크스페이스
+- **통합 에디터**: Rich Text Editor를 활용한 전문적인 콘텐츠 작성 환경
+- **AI 초안 자동 생성**: 브리핑 데이터를 기반으로 초안을 자동 생성합니다.
+- **리소스 통합 관리**: AI 브리핑, 추천 목차, 추천 검색어, 모든 스크랩, 이미지 갤러리를 탭으로 관리합니다.
+- **실시간 동기화**: Firebase를 통한 실시간 데이터 동기화
+
+### 4. 성과 추적 및 분석
+- **Google Analytics 4 (GA4) 연동**: 페이지뷰, 세션 수, 체류 시간, 이탈률, 유입 경로 등 상세한 분석 데이터 수집
+- **Google AdSense 연동**: 수익, RPM, 클릭률 등 수익화 데이터 수집
+- **자동 업데이트**: 6시간마다 자동으로 성과 데이터를 업데이트합니다.
+- **성과 시각화**: 기획 보드 카드에 성과 지표 표시, 시간대별 추이 차트, 상위 콘텐츠 비교 차트 제공
+- **성과 대시보드**: 모든 발행 콘텐츠의 성과를 한눈에 비교하고 분석할 수 있습니다.
+- **성과 리포트**: AI 기반 성과 분석 및 개선 제안을 제공합니다.
+
+### 5. 채널 연동
+- **다중 채널 관리**: 여러 블로그/채널을 추가하고 각각 다른 GA4 속성과 연결할 수 있습니다.
+- **Google OAuth 인증**: Google 계정으로 로그인하여 GA4와 AdSense 데이터에 접근합니다.
+- **연동 상태 모니터링**: 각 채널의 연동 상태를 실시간으로 확인하고 테스트할 수 있습니다.
 
 ## 🛠️ 기술 스택
 
@@ -21,6 +46,9 @@
 - **Build System**: Webpack, Babel
 - **Backend & Database**: Firebase (Realtime Database)
 - **Platform**: Chrome Extension (Manifest V3 with Offscreen Document)
+- **Editor**: Quill Rich Text Editor
+- **API Integration**: Google Analytics 4 API, Google AdSense API
+- **Authentication**: Google OAuth 2.0
 
 ## 🚀 설치 및 개발 환경 설정
 
@@ -100,28 +128,47 @@
 ```bash
 
 Content-Pilot/
-├── 📄 manifest.json
-├── 📄 background.js
-├── 📄 content.js
-├── 📄 offscreen.html
-├── 📄 offscreen.js
-├── 📄 webpack.config.js
-├── 📄 package.json
-├── 📁 js/
-│   ├── 📁 core/
-│   │   └── 📜 highlighter.js
-│   └── 📁 ui/
-│       ├── 📜 panel.js
-│       ├── 📜 dashboardMode.js
-│       └── 📜 ... (기타 UI 파일)
-├── 📁 css/
-│   └── 📜 style.css
-├── 📁 dist/
-│   └── 📜 bundle.js
-├── 📁 images/
-│   └── 📜 icon-48.png
-└── 📁 lib/
-└── 📜 firebase-*.js
+├── 📄 manifest.json              # 확장 프로그램 설정 파일
+├── 📄 background.js               # 서비스 워커 (Firebase, API 호출)
+├── 📄 content.js                  # Webpack 진입점
+├── 📄 offscreen.html              # Offscreen Document HTML
+├── 📄 offscreen.js                # DOM 분석 전용 스크립트
+├── 📄 webpack.config.js           # Webpack 빌드 설정
+├── 📄 package.json                # 프로젝트 의존성 관리
+├── 📁 js/                         # 소스 코드
+│   ├── 📁 core/                   # 핵심 로직
+│   │   ├── 📜 highlighter.js     # 하이라이터 기능
+│   │   └── 📜 scrapbook.js       # 스크랩북 관리
+│   ├── 📁 ui/                     # UI 모드별 컴포넌트
+│   │   ├── 📜 panel.js            # 메인 패널 관리
+│   │   ├── 📜 header.js           # 헤더 및 탭
+│   │   ├── 📜 dashboardMode.js   # 대시보드 모드
+│   │   ├── 📜 scrapbookMode.js   # 스크랩북 모드
+│   │   ├── 📜 kanbanMode.js      # 기획 보드 모드
+│   │   ├── 📜 workspaceMode.js  # 워크스페이스 모드
+│   │   ├── 📜 channelMode.js     # 채널 연동 모드
+│   │   ├── 📜 performanceDashboardMode.js  # 성과 대시보드
+│   │   └── 📜 performanceReportMode.js     # 성과 리포트
+│   ├── 📁 utils/                  # 유틸리티 함수
+│   │   ├── 📜 editor-markdown-auto.js
+│   │   └── 📜 markdownToQuill.js
+│   ├── 📜 main.js                 # 메인 진입점
+│   ├── 📜 state.js                # 전역 상태 관리
+│   └── 📜 constants.js            # 상수 정의
+├── 📁 css/                        # 스타일시트
+│   ├── 📜 style.css              # 기본 스타일
+│   ├── 📜 kanban.css             # 칸반 보드 스타일
+│   └── 📜 workspace.css          # 워크스페이스 스타일
+├── 📁 dist/                       # 빌드 결과물
+│   └── 📜 bundle.js               # Webpack 번들
+├── 📁 images/                     # 이미지 리소스
+│   └── 📜 icon-*.png             # 확장 프로그램 아이콘
+├── 📁 lib/                        # 외부 라이브러리
+│   ├── 📜 firebase-*.js          # Firebase SDK
+│   ├── 📜 quill.js               # Quill 에디터
+│   └── 📜 ... (기타 라이브러리)
+└── 📁 docs/                       # 문서
+    └── 📜 성과-데이터-시각화-사용-패턴.md
 
 ```
 
@@ -129,9 +176,9 @@ Content-Pilot/
 
 #### 최상위 파일
 
-- **`manifest.json`**: 확장 프로그램의 **설계도**입니다. 이름, 버전, 권한(`offscreen` 포함), 실행할 스크립트(`background.js`, `content.js`) 등 모든 기본 정보를 정의합니다.
+- **`manifest.json`**: 확장 프로그램의 **설계도**입니다. 이름, 버전, 권한(`offscreen`, `identity` 포함), 실행할 스크립트(`background.js`, `content.js`), OAuth 설정 등 모든 기본 정보를 정의합니다.
 
-- **`background.js`**: 확장 프로그램의 **중앙 관제탑** (서비스 워커)입니다. Firebase와의 통신, 데이터 수집(RSS, YouTube API 호출), AI API 연동 등 보이지 않는 곳에서 모든 핵심 로직을 처리합니다. DOM 분석이 필요할 때는 `offscreen.html`을 호출하여 작업을 위임합니다.
+- **`background.js`**: 확장 프로그램의 **중앙 관제탑** (서비스 워커)입니다. Firebase와의 통신, Google Analytics/AdSense API 호출, AI API 연동, 성과 데이터 수집 등 보이지 않는 곳에서 모든 핵심 로직을 처리합니다. DOM 분석이 필요할 때는 `offscreen.html`을 호출하여 작업을 위임합니다.
 
 - **`content.js`**: 실제 웹페이지에 삽입되는 **현장 요원**입니다. `js/` 폴더의 모든 UI 및 핵심 로직 모듈을 가져와(`import`) 실행하는 Webpack 번들의 시작점입니다. 페이지 UI를 그리고 사용자의 상호작용(하이라이트, 클릭)을 직접 처리합니다.
 
@@ -139,21 +186,78 @@ Content-Pilot/
 
 - **`webpack.config.js`**: Webpack 빌더의 **설정 파일**입니다. `content.js`를 시작점으로 `js/` 폴더의 여러 JavaScript 파일들을 어떻게 하나의 최종 결과물(`dist/bundle.js`)로 합칠지 정의합니다.
 
-- **`package.json`**: 프로젝트의 **정보 파일**입니다. 프로젝트의 이름, 버전과 함께 `webpack`, `babel` 등 개발에 필요한 도구(패키지)들의 목록을 관리합니다.
+- **`package.json`**: 프로젝트의 **정보 파일**입니다. 프로젝트의 이름, 버전과 함께 `webpack`, `babel`, `quill` 등 개발에 필요한 도구(패키지)들의 목록을 관리합니다.
 
 #### 디렉토리
 
 - **`/js`**: 애플리케이션의 핵심 JavaScript 소스 코드들이 모여있는 곳입니다. `content.js`가 이 폴더의 모듈들을 가져와 사용합니다.
 
-  - **`/js/core`**: 스크랩 하이라이터와 같이 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
-  - **`/js/ui`**: 메인 패널, 대시보드, 스크랩북 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
+  - **`/js/core`**: 스크랩 하이라이터, 스크랩북 관리 등 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
+  - **`/js/ui`**: 메인 패널, 대시보드, 기획 보드, 워크스페이스, 성과 대시보드 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
+  - **`/js/utils`**: 에디터 변환, 마크다운 처리 등 유틸리티 함수들이 위치합니다.
 
-- **`/css`**: UI 스타일을 정의하는 CSS 파일(`style.css`)이 위치합니다.
+- **`/css`**: UI 스타일을 정의하는 CSS 파일들이 위치합니다.
+  - `style.css`: 기본 스타일
+  - `kanban.css`: 칸반 보드 전용 스타일
+  - `workspace.css`: 워크스페이스 전용 스타일
 
 - **`/dist`**: Webpack이 소스 코드들을 하나로 합쳐서 만들어낸 **빌드 결과물**이 저장되는 폴더입니다.
 
   - `bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
 
-- **`/images`**: 확장 프로그램 아이콘 등 이미지 파일들을 보관합니다.
+- **`/images`**: 확장 프로그램 아이콘 및 UI 이미지 파일들을 보관합니다.
 
-- **`/lib`**: Firebase SDK처럼 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
+- **`/lib`**: Firebase SDK, Quill 에디터, TUI Image Editor 등 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
+
+- **`/docs`**: 프로젝트 문서 및 사용 가이드가 위치합니다.
+
+## 🎯 주요 모드 및 기능
+
+Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 단계를 지원합니다:
+
+### 1. 대시보드 (Dashboard)
+- 전체 아이디어 및 성과 개요
+- AI 아이디어 제안 기능
+- 내 채널 및 경쟁사 채널 관리
+- 빠른 아이디어 생성 및 관리
+
+### 2. 스크랩북 (Scrapbook)
+- 웹에서 수집한 모든 스크랩 관리
+- 스크랩에서 아이디어로 전환 기능
+- 스크랩 검색 및 필터링
+- 이미지 자동 추출 및 관리
+
+### 3. 기획 보드 (Kanban Board)
+- 칸반 보드 기반 아이디어 관리
+- 상태별 관리 (아이디어 → 진행 중 → 완료)
+- 드래그앤드롭으로 상태 변경
+- 성과 지표 표시 (수익, 페이지뷰, 체류 시간)
+- 발행 URL 연결 및 성과 추적
+- 카드 클릭 시 워크스페이스로 이동
+
+### 4. 워크스페이스 (Workspace)
+- 통합 콘텐츠 작성 환경
+- Rich Text Editor를 활용한 전문적인 에디터
+- AI 브리핑, 추천 목차, 추천 검색어 탭
+- 모든 스크랩 및 이미지 갤러리 통합
+- AI 초안 자동 생성
+- 실시간 자동 저장
+
+### 5. 성과 대시보드 (Performance Dashboard)
+- 모든 발행 콘텐츠의 성과 한눈에 보기
+- 상위 5개 콘텐츠 비교 차트
+- 성과 순위 정렬 (수익, 페이지뷰, 최근 업데이트 순)
+- 통계 요약 (총 수익, 총 페이지뷰, 총 세션)
+
+### 6. 성과 리포트 (Performance Report)
+- AI 기반 성과 분석 리포트
+- 성공 요인 및 개선점 제안
+- 상위/하위 성과 콘텐츠 분석
+- 성과 패턴 분석 및 인사이트 제공
+
+### 7. 채널 연동 (Channel Integration)
+- Google 계정 OAuth 인증
+- 다중 블로그/채널 관리
+- GA4 속성 연결 및 테스트
+- AdSense 계정 연동
+- 연동 상태 모니터링
