@@ -609,22 +609,25 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas') {
     const workspaceKeywords = tags.filter(t => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
+    // ▼▼▼ [중요] PRD v1.0에 따라 workspace 객체는 반드시 생성되어야 합니다.
+    // workspaceMode.js가 cardData.workspace.keywords 등을 접근하므로 필수입니다. ▼▼▼
     const newCard = {
       title: ideaData.title || "제목 없음",
       description: ideaData.description || "",
       createdAt: ideaData.createdAt || Date.now(),
       tags: tags,
       origin: origin,
-      workspace: { // PRD v1.0 모델
-        keywords: workspaceKeywords,
-        outline: ideaData.outline || [],
-        draft: ideaData.draft_content || "", // '포스팅' 추가 시 본문이 여기로 옴
-        linkedScraps: {}
+      workspace: { // PRD v1.0 모델 - workspaceMode.js에서 필수로 사용
+        keywords: workspaceKeywords || [],
+        outline: ideaData.outline || ideaData.workspace?.outline || [],
+        draft: ideaData.draft_content || ideaData.draft || ideaData.workspace?.draft || "",
+        linkedScraps: ideaData.workspace?.linkedScraps || {}
       },
       // 기존 필드 호환
       recommendedKeywords: ideaData.recommendedSearches || [],
       longTailKeywords: ideaData.longTailKeywords || []
     };
+    // ▲▲▲ workspace 객체 생성 완료 ▲▲▲
 
     // Firebase에 저장
     const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
@@ -5925,3 +5928,82 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
   }
 }
 
+// background.js 파일 하단에 추가
+
+/**
+ * [테스트 전용 함수 - V2]
+ * '재활용 자동화' 기능의 분석 및 생성 로직을 직접 테스트합니다.
+ * (V1의 문제: updateAllPerformanceMetrics가 mock 데이터를 덮어쓰는 문제 해결)
+ */
+async function runAutomatedRenewalTestV2() {
+  console.log("=============== 🧪 테스트 시작 V2: 자동 리뉴얼 ===============");
+  
+  const MOCK_CARD_ID = "test-card-renewal-002"; // 새 ID로 구분
+  const MOCK_CARD_PATH = `kanban/done/${MOCK_CARD_ID}`;
+  
+  // ▼▼▼ [수정] "테스트" 단어를 추가하여 실제 생성될 제목과 일치시킴 ▼▼▼
+  const MOCK_IDEA_TITLE = `[자동 리뉴얼] V2 테스트: 90일 경과 고성과 포스트`;
+  // ▲▲▲ [수정 완료] ▲▲▲
+
+  // --- 사전 준비: 기존 테스트 데이터 삭제 ---
+  await firebase.database().ref(MOCK_CARD_PATH).remove();
+  const ideasSnap = await firebase.database().ref("kanban/ideas").once("value");
+  const ideas = ideasSnap.val() || {};
+  for (const ideaId in ideas) {
+    // 이제 이 로직이 정상적으로 작동하여 이전 테스트 카드를 삭제함
+    if (ideas[ideaId].title === MOCK_IDEA_TITLE) {
+      await firebase.database().ref(`kanban/ideas/${ideaId}`).remove();
+    }
+  }
+  console.log("테스트 V2: 기존 데이터 정리 완료.");
+
+  // --- 1. 가짜 데이터(Mock Data) 입력 ---
+  // 91일 전, 고성과 Mock 카드 생성
+  const mockCardData = {
+    title: "V2 테스트: 90일 경과 고성과 포스트", // [중요] 이 제목이 MOCK_IDEA_TITLE에 반영되어야 함
+    publishedUrl: "https://example.com/test-post-002",
+    performanceTracked: true,
+    createdAt: Date.now() - (91 * 24 * 60 * 60 * 1000), // 91일 전
+    tags: ["#테스트", "#성과좋음"],
+    performance: {
+      estimatedEarnings: 120.50, // 평균(가정)보다 높음
+      pageviews: 15000,          // 평균(가정)보다 높음
+      error: null, // [중요] 에러가 없음
+      lastUpdatedAt: Date.now()
+    },
+    origin: { type: "manual_entry" }
+  };
+
+  await firebase.database().ref(MOCK_CARD_PATH).set(mockCardData);
+  console.log("테스트 V2: 1. Mock 데이터 입력 완료.", MOCK_CARD_PATH);
+
+  // --- 2. 자동화 기능 *직접* 트리거 ---
+  // [!! 변경점 !!]
+  // updateAllPerformanceMetrics() 대신, analyze 로직이 포함된
+  // runAutomatedRenewalChecks()를 직접 호출합니다.
+  console.log("테스트 V2: 2. runAutomatedRenewalChecks() 강제 실행...");
+  await runAutomatedRenewalChecks(); //
+  console.log("테스트 V2: 2. 자동화 로직 실행 완료.");
+
+  // --- 3. 결과 검증 ---
+  console.log("테스트 V2: 3. 결과 검증 시작...");
+  
+  await new Promise(resolve => setTimeout(resolve, 3000)); // Firebase 전파 대기
+
+  const newIdeasSnap = await firebase.database().ref("kanban/ideas").once("value");
+  const newIdeas = newIdeasSnap.val() || {};
+  
+  const foundIdea = Object.values(newIdeas).find(
+    idea => idea.title === MOCK_IDEA_TITLE &&
+            idea.origin?.type === "my_post_renewal" &&
+            idea.origin?.originalCardId === MOCK_CARD_ID
+  );
+
+  if (foundIdea) {
+    console.log("✅ 테스트 성공 V2! '아이디어' 탭에 자동 리뉴얼 카드가 생성되었습니다.");
+  } else {
+    console.error("❌ 테스트 실패 V2. '아이디어' 탭에서 자동 리뉴얼 카드를 찾을 수 없습니다.");
+  }
+
+  console.log("=============== 🧪 테스트 종료 V2 ===============");
+}

@@ -656,6 +656,34 @@ import { shortenLink, showToast } from "../utils.js";
 import { marked } from "marked";
 
 export function renderWorkspace(container, ideaData) {
+  // ▼▼▼ [수정] workspace 객체가 없으면 PRD v1.0에 맞게 기본값으로 생성 ▼▼▼
+  if (!ideaData.workspace || typeof ideaData.workspace !== 'object') {
+    // 기존 필드에서 데이터를 가져와서 workspace 객체로 마이그레이션
+    ideaData.workspace = {
+      keywords: ideaData.keywords || ideaData.workspace?.keywords || [],
+      outline: ideaData.outline || ideaData.workspace?.outline || [],
+      draft: ideaData.draft || ideaData.draftContent || ideaData.workspace?.draft || "",
+      linkedScraps: ideaData.linkedScraps || ideaData.workspace?.linkedScraps || {}
+    };
+    
+    // 기존 필드도 유지 (하위 호환성)
+    if (!ideaData.outline && ideaData.workspace.outline) {
+      ideaData.outline = ideaData.workspace.outline;
+    }
+    if (!ideaData.draftContent && ideaData.workspace.draft) {
+      ideaData.draftContent = ideaData.workspace.draft;
+    }
+  } else {
+    // workspace 객체가 있으면 기존 필드와 동기화 (하위 호환성)
+    if (!ideaData.outline && ideaData.workspace.outline) {
+      ideaData.outline = ideaData.workspace.outline;
+    }
+    if (!ideaData.draftContent && ideaData.workspace.draft) {
+      ideaData.draftContent = ideaData.workspace.draft;
+    }
+  }
+  // ▲▲▲ 수정 완료 ▲▲▲
+  
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps)
     ? ideaData.linkedScraps
     : ideaData.linkedScraps

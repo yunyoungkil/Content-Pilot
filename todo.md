@@ -77,6 +77,20 @@
 
 ## ✅ 최근 완료된 작업
 
+### workspace 객체 누락 버그 수정
+- [x] workspaceMode.js의 renderWorkspace 함수에 방어 코드 추가
+  - [x] ideaData.workspace가 없거나 유효하지 않을 때 PRD v1.0에 맞게 기본값으로 생성
+  - [x] 기존 필드(ideaData.outline, ideaData.draftContent 등)가 있으면 workspace 객체로 마이그레이션
+  - [x] 하위 호환성 유지 (기존 필드와 workspace 객체 동기화)
+- [x] background.js의 createAndSaveNewIdea 함수 보강
+  - [x] workspace 객체 생성 로직 명확화 및 주석 추가
+  - [x] workspace 객체가 항상 생성되도록 방어 코드 보강
+  - [x] 기존 데이터가 있으면 병합하도록 처리
+- [x] 버그 해결
+  - [x] 대시보드에서 아이디어 추가 시 workspace 객체가 생성되지 않던 문제 해결
+  - [x] 기존 데이터에 workspace가 없어도 workspaceMode.js가 정상 작동하도록 수정
+  - [x] cardData.workspace.keywords 접근 시 오류 방지
+
 ### 대시보드 포스팅 아이디어 추가 기능
 - [x] 대시보드 포스팅 카드에 "💡 아이디어로 추가" 버튼 추가
   - [x] '내 채널' 및 '경쟁 채널' 포스팅 카드에 버튼 추가
