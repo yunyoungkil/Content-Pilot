@@ -656,33 +656,24 @@ import { shortenLink, showToast } from "../utils.js";
 import { marked } from "marked";
 
 export function renderWorkspace(container, ideaData) {
-  // ▼▼▼ [수정] workspace 객체가 없으면 PRD v1.0에 맞게 기본값으로 생성 ▼▼▼
-  if (!ideaData.workspace || typeof ideaData.workspace !== 'object') {
-    // 기존 필드에서 데이터를 가져와서 workspace 객체로 마이그레이션
-    ideaData.workspace = {
-      keywords: ideaData.keywords || ideaData.workspace?.keywords || [],
-      outline: ideaData.outline || ideaData.workspace?.outline || [],
-      draft: ideaData.draft || ideaData.draftContent || ideaData.workspace?.draft || "",
-      linkedScraps: ideaData.linkedScraps || ideaData.workspace?.linkedScraps || {}
-    };
-    
-    // 기존 필드도 유지 (하위 호환성)
-    if (!ideaData.outline && ideaData.workspace.outline) {
-      ideaData.outline = ideaData.workspace.outline;
-    }
-    if (!ideaData.draftContent && ideaData.workspace.draft) {
-      ideaData.draftContent = ideaData.workspace.draft;
-    }
-  } else {
-    // workspace 객체가 있으면 기존 필드와 동기화 (하위 호환성)
-    if (!ideaData.outline && ideaData.workspace.outline) {
-      ideaData.outline = ideaData.workspace.outline;
-    }
-    if (!ideaData.draftContent && ideaData.workspace.draft) {
-      ideaData.draftContent = ideaData.workspace.draft;
-    }
+  // ▼▼▼ [오류 수정] 방어 코드 추가 ▼▼▼
+  // 1. workspace 객체 자체를 안전하게 초기화
+  ideaData.workspace = ideaData.workspace || {};
+  
+  // 2. PRD(v1.0)에 명시된 하위 속성들을 초기화
+  ideaData.workspace.keywords = ideaData.workspace.keywords || [];
+  ideaData.workspace.outline = ideaData.workspace.outline || [];
+  ideaData.workspace.draft = ideaData.workspace.draft || "";
+  ideaData.workspace.linkedScraps = ideaData.workspace.linkedScraps || {};
+  // ▲▲▲ [수정 완료] ▲▲▲
+  
+  // 하위 호환성: 기존 필드와 동기화
+  if (!ideaData.outline && ideaData.workspace.outline) {
+    ideaData.outline = ideaData.workspace.outline;
   }
-  // ▲▲▲ 수정 완료 ▲▲▲
+  if (!ideaData.draftContent && ideaData.workspace.draft) {
+    ideaData.draftContent = ideaData.workspace.draft;
+  }
   
   ideaData.linkedScraps = Array.isArray(ideaData.linkedScraps)
     ? ideaData.linkedScraps
@@ -699,8 +690,13 @@ export function renderWorkspace(container, ideaData) {
   // 브리핑 생성 진행률 표시 영역
   let briefingProgressEl = null;
   const createProgressIndicator = () => {
-    const aiBriefingArea = workspaceEl.querySelector("#ai-briefing-area");
+    // ▼▼▼ [오류 수정] workspaceEl이 아직 정의되지 않았을 수 있으므로 container에서 직접 찾기 ▼▼▼
+    // workspaceEl은 HTML 렌더링 후에 정의되므로, container에서 직접 찾습니다.
+    const workspaceContainer = container.querySelector(".workspace-container");
+    if (!workspaceContainer) return null;
+    const aiBriefingArea = workspaceContainer.querySelector("#ai-briefing-area");
     if (!aiBriefingArea) return null;
+    // ▲▲▲ [수정 완료] ▲▲▲
     
     const existing = aiBriefingArea.querySelector(".briefing-progress-indicator");
     if (existing) return existing;
@@ -762,13 +758,10 @@ export function renderWorkspace(container, ideaData) {
   });
   
   // 각 필드가 없으면 개별적으로 생성 요청
+  // ▼▼▼ [수정] createProgressIndicator 호출을 HTML 렌더링 이후로 이동 ▼▼▼
+  // 브리핑 생성 요청은 즉시 보내되, 진행률 표시는 HTML 렌더링 후에 표시
   if (ideaData.title && ideaData.description) {
     if (needsOutline || needsMainKeywords || needsKeywords || needsLongTail) {
-      briefingProgressEl = createProgressIndicator();
-      if (briefingProgressEl) {
-        briefingProgressEl.style.display = "block";
-      }
-      
       chrome.runtime.sendMessage({
         action: "generate_idea_briefing",
         data: {
@@ -787,19 +780,28 @@ export function renderWorkspace(container, ideaData) {
           console.log("브리핑 데이터 생성 요청 완료");
         } else if (response && response.error) {
           console.error("브리핑 데이터 생성 실패:", response.error);
-          if (briefingProgressEl) {
-            briefingProgressEl.querySelector(".progress-text").textContent = `오류: ${response.error}`;
-            briefingProgressEl.querySelector(".progress-text").style.color = "#ea4335";
-            setTimeout(() => {
-              if (briefingProgressEl) {
-                briefingProgressEl.style.display = "none";
+          // HTML 렌더링 후에 오류 표시 (workspaceEl이 정의된 후)
+          setTimeout(() => {
+            const workspaceContainer = container.querySelector(".workspace-container");
+            if (workspaceContainer) {
+              const aiBriefingArea = workspaceContainer.querySelector("#ai-briefing-area");
+              if (aiBriefingArea) {
+                const progressEl = aiBriefingArea.querySelector(".briefing-progress-indicator");
+                if (progressEl) {
+                  progressEl.querySelector(".progress-text").textContent = `오류: ${response.error}`;
+                  progressEl.querySelector(".progress-text").style.color = "#ea4335";
+                  setTimeout(() => {
+                    progressEl.style.display = "none";
+                  }, 3000);
+                }
               }
-            }, 3000);
-          }
+            }
+          }, 100);
         }
       });
     }
   }
+  // ▲▲▲ [수정 완료] ▲▲▲
 
   // --- 에디터 draft 저장 메시지 수신 및 background로 전달 ---
   window.__cp_workspace_idea_id = ideaData.id;
@@ -1286,6 +1288,18 @@ export function renderWorkspace(container, ideaData) {
   });
 
   const workspaceEl = container.querySelector(".workspace-container");
+  
+  // ▼▼▼ [수정] HTML 렌더링 후 진행률 표시 초기화 ▼▼▼
+  // 브리핑 생성이 필요한 경우 진행률 표시를 표시
+  if (workspaceEl && ideaData.title && ideaData.description) {
+    if (needsOutline || needsMainKeywords || needsKeywords || needsLongTail) {
+      briefingProgressEl = createProgressIndicator();
+      if (briefingProgressEl) {
+        briefingProgressEl.style.display = "block";
+      }
+    }
+  }
+  // ▲▲▲ [수정 완료] ▲▲▲
   
   // 워크스페이스 로드 시 발행 정보 복원 (addWorkspaceEventListeners 내부에서도 처리)
   addWorkspaceEventListeners(
@@ -2656,6 +2670,8 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       title: title,
       description: description,
       tags: ["#스핀오프"],
+      keywords: ["#스핀오프"], // 브리핑 자동 생성을 위해 keywords 추가
+      origin: { type: "ai_generated" }, // 스핀오프 아이디어도 브리핑 생성
       createdAt: Date.now()
     };
 

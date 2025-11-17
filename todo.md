@@ -79,17 +79,64 @@
 
 ### workspace 객체 누락 버그 수정
 - [x] workspaceMode.js의 renderWorkspace 함수에 방어 코드 추가
-  - [x] ideaData.workspace가 없거나 유효하지 않을 때 PRD v1.0에 맞게 기본값으로 생성
-  - [x] 기존 필드(ideaData.outline, ideaData.draftContent 등)가 있으면 workspace 객체로 마이그레이션
-  - [x] 하위 호환성 유지 (기존 필드와 workspace 객체 동기화)
+  - [x] ideaData.workspace 객체 자체를 안전하게 초기화 (없으면 빈 객체로 생성)
+  - [x] PRD v1.0에 명시된 하위 속성들(keywords, outline, draft, linkedScraps) 기본값 할당
+  - [x] 기존 필드(ideaData.outline, ideaData.draftContent 등)와 workspace 객체 동기화 (하위 호환성)
+  - [x] 간단하고 명확한 방어 코드로 리팩토링
+- [x] kanbanMode.js에 2차 안전 장치 추가
+  - [x] 카드 클릭 핸들러에서 renderWorkspace 호출 전 workspace 객체 보장
+  - [x] 실시간 업데이트 리스너에서도 workspace 객체 보장
+  - [x] renderWorkspace로 넘기기 전에 데이터 구조를 한 번 더 검증
 - [x] background.js의 createAndSaveNewIdea 함수 보강
   - [x] workspace 객체 생성 로직 명확화 및 주석 추가
   - [x] workspace 객체가 항상 생성되도록 방어 코드 보강
   - [x] 기존 데이터가 있으면 병합하도록 처리
+- [x] createProgressIndicator 오류 수정
+  - [x] workspaceEl이 정의되기 전에 querySelector 호출하던 문제 해결
+  - [x] createProgressIndicator가 container에서 직접 요소를 찾도록 수정
+  - [x] HTML 렌더링 전에 createProgressIndicator 호출하던 문제 해결
+  - [x] 브리핑 생성 요청은 즉시 보내되, 진행률 표시는 HTML 렌더링 후에 표시하도록 수정
+- [x] AI 브리핑 자동 생성 조건 수정
+  - [x] background.js의 createAndSaveNewIdea 함수에서 브리핑 생성 조건 변경
+  - [x] 'manual_entry'를 제외한 모든 아이디어 타입에 대해 브리핑 자동 생성
+  - [x] ai_generated, my_post, competitor_post, my_post_renewal 등 모든 경우에 브리핑 생성
+  - [x] 아이디어 생성 즉시 모든 데이터(브리핑)가 보이도록 개선
+  - [x] 모든 아이디어 추가 경로 확인 및 검증
+    - [x] dashboardMode.js - 포스팅 아이디어 추가 (origin 명시) ✅
+    - [x] scrapbookMode.js - 스크랩에서 아이디어로 전환 (keywords 있음) ✅
+    - [x] kanbanMode.js submitCard - 수동 카드 추가 (manual_entry, 의도된 동작) ✅
+    - [x] kanbanMode.js generateSimilarIdea - 유사 아이디어 생성 (keywords 있음) ✅
+    - [x] kanbanMode.js suggestContentRenewal - 리뉴얼 제안 (keywords 있음) ✅
+    - [x] workspaceMode.js saveSelectedTextAsIdea - 스핀오프 아이디어 (origin 명시 추가) ✅
+- [x] 아이디어 카드 출처 라벨 명확화
+  - [x] 모든 origin 타입에 대해 명확한 라벨 정의
+    - [x] my_post: 🔄 내 글 리뉴얼
+    - [x] competitor_post: 🎯 출처: [채널명]
+    - [x] my_post_renewal: 🔄 자동 리뉴얼 제안
+    - [x] ai_generated: 🤖 AI 생성
+    - [x] manual_entry: ✏️ 수동 입력
+  - [x] origin이 없을 때 태그 기반 출처 추론
+    - [x] #스크랩-전환: 📎 스크랩 전환
+    - [x] #스핀오프: 💡 스핀오프
+    - [x] #유사-아이디어: 🔄 유사 아이디어
+    - [x] #리뉴얼-제안: 🔄 리뉴얼 제안
+    - [x] #AI-추천: 🤖 AI 추천
+  - [x] 모든 라벨에 title 속성 추가 (툴팁으로 상세 정보 표시)
+- [x] 대시보드 AI 아이디어 제안 브리핑 자동 생성 수정
+  - [x] dashboardMode.js에서 AI 아이디어 추가 시 origin 필드 명시적으로 설정
+  - [x] origin이 없으면 ai_generated로 설정하여 브리핑 자동 생성되도록 수정
+  - [x] keywords나 tags가 없으면 #AI-추천 태그 추가
+- [x] AI 아이디어 제안 삭제 후 상태 동기화 문제 해결
+  - [x] 칸반 보드에서 카드 삭제 시 chrome.storage.local의 addedIdeas에서도 제거
+  - [x] 대시보드 초기화 시 Firebase와 동기화하여 실제로 존재하는 아이디어만 표시
+  - [x] background.js에 get_all_kanban_data 액션 추가 (Firebase 데이터 직접 반환)
+  - [x] 삭제된 아이디어는 "추가됨" 상태로 표시되지 않도록 수정
 - [x] 버그 해결
   - [x] 대시보드에서 아이디어 추가 시 workspace 객체가 생성되지 않던 문제 해결
   - [x] 기존 데이터에 workspace가 없어도 workspaceMode.js가 정상 작동하도록 수정
-  - [x] cardData.workspace.keywords 접근 시 오류 방지
+  - [x] cardData.workspace.keywords 접근 시 undefined 오류 방지
+  - [x] 프론트엔드 UI가 예기치 않은 데이터 구조에 대응하여 멈추지 않도록 안정성 강화
+  - [x] Cannot read properties of undefined (reading 'querySelector') 오류 해결
 
 ### 대시보드 포스팅 아이디어 추가 기능
 - [x] 대시보드 포스팅 카드에 "💡 아이디어로 추가" 버튼 추가

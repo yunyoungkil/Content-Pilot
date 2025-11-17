@@ -33,29 +33,82 @@ function initDashboardMode(container) {
             }
         }
         if (cache.addedIdeas && cache.addedIdeas.length > 0) {
-            const recentlyAddedPanel = container.querySelector('#recently-added-panel');
-            const recentlyAddedList = container.querySelector('#recently-added-list');
-            if (recentlyAddedPanel && recentlyAddedList) {
-                const placeholder = recentlyAddedList.querySelector('.recent-add-placeholder');
-                recentlyAddedPanel.style.display = 'block';
-                if (placeholder) placeholder.remove();
-                recentlyAddedList.innerHTML = '';
-                cache.addedIdeas.forEach(idea => {
-                    const newItem = document.createElement('li');
-                    newItem.dataset.firebaseKey = idea.firebaseKey;
-                    newItem.dataset.ideaIndex = idea.ideaIndex;
-                    newItem.innerHTML = `<span>${idea.title}</span><button class="undo-add-btn">실행 취소</button>`;
-                    recentlyAddedList.prepend(newItem);
-                    const ideaCard = container.querySelector(`.ai-idea-card[data-idea-index="${idea.ideaIndex}"]`);
-                    if (ideaCard) {
-                        const button = ideaCard.querySelector('.add-to-kanban-btn');
-                        if (button) {
-                            button.disabled = true;
-                            button.textContent = '✅ 추가됨';
+            // ▼▼▼ [수정] Firebase와 동기화하여 실제로 존재하는 아이디어만 표시 ▼▼▼
+            // Firebase에서 모든 칸반 데이터를 가져와서 실제로 존재하는 아이디어만 필터링
+            chrome.runtime.sendMessage({ action: 'get_all_kanban_data' }, (kanbanResponse) => {
+                if (kanbanResponse && kanbanResponse.success && kanbanResponse.data) {
+                    // 모든 상태의 칸반 데이터에서 firebaseKey 수집
+                    const existingKeys = new Set();
+                    const allKanbanData = kanbanResponse.data;
+                    for (const status in allKanbanData) {
+                        if (allKanbanData[status]) {
+                            Object.keys(allKanbanData[status]).forEach(key => existingKeys.add(key));
                         }
                     }
-                });
-            }
+                    
+                    // 실제로 존재하는 아이디어만 필터링
+                    const validIdeas = cache.addedIdeas.filter(idea => existingKeys.has(idea.firebaseKey));
+                    
+                    // 캐시 업데이트 (삭제된 아이디어 제거)
+                    if (validIdeas.length !== cache.addedIdeas.length) {
+                        cache.addedIdeas = validIdeas;
+                        chrome.storage.local.set({ [CACHE_KEY]: cache });
+                    }
+                    
+                    // 유효한 아이디어만 표시
+                    if (validIdeas.length > 0) {
+                        const recentlyAddedPanel = container.querySelector('#recently-added-panel');
+                        const recentlyAddedList = container.querySelector('#recently-added-list');
+                        if (recentlyAddedPanel && recentlyAddedList) {
+                            const placeholder = recentlyAddedList.querySelector('.recent-add-placeholder');
+                            recentlyAddedPanel.style.display = 'block';
+                            if (placeholder) placeholder.remove();
+                            recentlyAddedList.innerHTML = '';
+                            validIdeas.forEach(idea => {
+                                const newItem = document.createElement('li');
+                                newItem.dataset.firebaseKey = idea.firebaseKey;
+                                newItem.dataset.ideaIndex = idea.ideaIndex;
+                                newItem.innerHTML = `<span>${idea.title}</span><button class="undo-add-btn">실행 취소</button>`;
+                                recentlyAddedList.prepend(newItem);
+                                const ideaCard = container.querySelector(`.ai-idea-card[data-idea-index="${idea.ideaIndex}"]`);
+                                if (ideaCard) {
+                                    const button = ideaCard.querySelector('.add-to-kanban-btn');
+                                    if (button) {
+                                        button.disabled = true;
+                                        button.textContent = '✅ 추가됨';
+                                    }
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    // Firebase 조회 실패 시 기존 로직 사용 (하위 호환성)
+                    const recentlyAddedPanel = container.querySelector('#recently-added-panel');
+                    const recentlyAddedList = container.querySelector('#recently-added-list');
+                    if (recentlyAddedPanel && recentlyAddedList) {
+                        const placeholder = recentlyAddedList.querySelector('.recent-add-placeholder');
+                        recentlyAddedPanel.style.display = 'block';
+                        if (placeholder) placeholder.remove();
+                        recentlyAddedList.innerHTML = '';
+                        cache.addedIdeas.forEach(idea => {
+                            const newItem = document.createElement('li');
+                            newItem.dataset.firebaseKey = idea.firebaseKey;
+                            newItem.dataset.ideaIndex = idea.ideaIndex;
+                            newItem.innerHTML = `<span>${idea.title}</span><button class="undo-add-btn">실행 취소</button>`;
+                            recentlyAddedList.prepend(newItem);
+                            const ideaCard = container.querySelector(`.ai-idea-card[data-idea-index="${idea.ideaIndex}"]`);
+                            if (ideaCard) {
+                                const button = ideaCard.querySelector('.add-to-kanban-btn');
+                                if (button) {
+                                    button.disabled = true;
+                                    button.textContent = '✅ 추가됨';
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+            // ▲▲▲ [수정 완료] ▲▲▲
         }
     });
 }
@@ -583,7 +636,19 @@ function addDashboardEventListeners(container) {
             const ideaObjectString = ideaCard.dataset.ideaObject;
             const ideaIndex = ideaCard.dataset.ideaIndex;
 
-            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: ideaObjectString }, (response) => {
+            // ▼▼▼ [수정] AI 아이디어 제안에 origin 필드 추가 ▼▼▼
+            // AI 아이디어 제안은 ai_generated로 분류하여 브리핑 자동 생성되도록 함
+            let ideaData = JSON.parse(ideaObjectString);
+            if (!ideaData.origin) {
+                ideaData.origin = { type: "ai_generated" };
+            }
+            if (!ideaData.keywords && !ideaData.tags) {
+                ideaData.keywords = ["#AI-추천"];
+            }
+            const modifiedIdeaString = JSON.stringify(ideaData);
+            // ▲▲▲ [수정 완료] ▲▲▲
+
+            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: modifiedIdeaString }, (response) => {
                 if (response && response.success) {
                     const ideaTitle = JSON.parse(ideaObjectString).title;
                     const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };

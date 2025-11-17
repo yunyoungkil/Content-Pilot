@@ -95,11 +95,22 @@ function addRealtimeUpdateListener() {
           const container = shadowRoot.querySelector("#cp-main-content");
           if (container) {
             renderHeaderAndTabs(shadowRoot);
-            renderWorkspace(kanbanContainer, {
+            // ▼▼▼ [수정] 기본값 할당 ▼▼▼
+            // renderWorkspace로 넘기기 전에 데이터 구조를 한 번 더 보장합니다.
+            const ideaDataForWorkspace = {
               ...ideaData,
               id: ideaId,
               status: foundStatus,
-            });
+              // workspace 객체가 없으면(null/undefined) 빈 값으로 초기화
+              workspace: ideaData.workspace || { 
+                keywords: [], 
+                outline: [], 
+                draft: "", 
+                linkedScraps: {} 
+              } 
+            };
+            // ▲▲▲ [수정 완료] ▲▲▲
+            renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
           }
         }
       }
@@ -209,18 +220,12 @@ function createKanbanCard(id, data, status) {
     : 0;
   let metaInfoHtml = "";
   
-  // ▼▼▼ [신규 추가] 자동화 카드 식별 로직 ▼▼▼
-  if (data.origin && data.origin.type === 'my_post_renewal') {
-    metaInfoHtml += `<span class="kanban-card-meta origin-tag auto-renewal" title="시스템이 성과 하락을 감지하여 리뉴얼을 제안했습니다.">
-                        🔄 자동 리뉴얼 제안
-                     </span>`;
-  }
-  // ▲▲▲ [신규 추가] ▲▲▲
-  
-  // 출처 정보 표시 (my_post_renewal 제외)
-  if (data.origin && data.origin.type && data.origin.type !== 'my_post_renewal') {
+  // ▼▼▼ [수정] 모든 아이디어 카드의 출처 라벨을 명확히 정의 ▼▼▼
+  // 출처 정보 표시 (모든 origin 타입에 대해 명확한 라벨 정의)
+  if (data.origin && data.origin.type) {
     let originIcon = '';
     let originText = '';
+    let originClass = data.origin.type;
     
     switch (data.origin.type) {
       case 'my_post':
@@ -231,19 +236,44 @@ function createKanbanCard(id, data, status) {
         originIcon = '🎯';
         originText = `출처: ${data.origin.channelName || '경쟁사'}`;
         break;
+      case 'my_post_renewal':
+        originIcon = '🔄';
+        originText = '자동 리뉴얼 제안';
+        break;
       case 'ai_generated':
-        // AI-추천 태그가 이미 있으므로 중복 표시 안 함 (또는 🤖 아이콘만 추가)
-        // originIcon = '🤖';
+        originIcon = '🤖';
+        originText = 'AI 생성';
         break;
       case 'manual_entry':
-        // 수동 입력은 아무것도 표시 안 함
+        originIcon = '✏️';
+        originText = '수동 입력';
+        break;
+      default:
+        // 알 수 없는 타입
+        originIcon = '📌';
+        originText = `출처: ${data.origin.type}`;
         break;
     }
     
     if (originIcon || originText) {
-      metaInfoHtml += `<span class="kanban-card-meta origin-tag ${data.origin.type}">${originIcon} ${originText}</span>`;
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag ${originClass}" title="아이디어 출처: ${originText}">${originIcon} ${originText}</span>`;
+    }
+  } else {
+    // origin이 없지만 태그로 출처를 추론할 수 있는 경우
+    const tags = data.tags || [];
+    if (tags.includes('#스크랩-전환')) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag scrap-converted" title="스크랩에서 전환된 아이디어">📎 스크랩 전환</span>`;
+    } else if (tags.includes('#스핀오프')) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag spin-off" title="워크스페이스에서 생성된 스핀오프 아이디어">💡 스핀오프</span>`;
+    } else if (tags.includes('#유사-아이디어')) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag similar-idea" title="AI가 생성한 유사 아이디어">🔄 유사 아이디어</span>`;
+    } else if (tags.includes('#리뉴얼-제안')) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag renewal-suggestion" title="AI가 제안한 리뉴얼 아이디어">🔄 리뉴얼 제안</span>`;
+    } else if (tags.includes('#AI-추천')) {
+      metaInfoHtml += `<span class="kanban-card-meta origin-tag ai-recommended" title="AI가 추천한 아이디어">🤖 AI 추천</span>`;
     }
   }
+  // ▲▲▲ [수정 완료] ▲▲▲
   
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
@@ -475,6 +505,27 @@ function addKanbanEventListeners(container) {
         }, (response) => {
           if (response && response.success) {
             showToast("✅ 카드가 삭제되었습니다.");
+            
+            // ▼▼▼ [수정] 대시보드의 addedIdeas에서도 제거 ▼▼▼
+            // 모든 캐시 키를 확인하여 해당 firebaseKey를 가진 아이디어 제거
+            chrome.storage.local.get(null, (allStorage) => {
+              const updates = {};
+              for (const key in allStorage) {
+                if (key.startsWith('analysisCache_')) {
+                  const cache = allStorage[key];
+                  if (cache && cache.addedIdeas && Array.isArray(cache.addedIdeas)) {
+                    const filteredIdeas = cache.addedIdeas.filter(idea => idea.firebaseKey !== cardId);
+                    if (filteredIdeas.length !== cache.addedIdeas.length) {
+                      updates[key] = { ...cache, addedIdeas: filteredIdeas };
+                    }
+                  }
+                }
+              }
+              if (Object.keys(updates).length > 0) {
+                chrome.storage.local.set(updates);
+              }
+            });
+            // ▲▲▲ [수정 완료] ▲▲▲
           } else {
             showToast("❌ 삭제 실패: " + (response?.error || "알 수 없는 오류"));
           }
@@ -504,11 +555,23 @@ function addKanbanEventListeners(container) {
         const shadowRoot = container.getRootNode();
         renderHeaderAndTabs(shadowRoot);
 
-        renderWorkspace(kanbanContainer, {
+        // ▼▼▼ [수정] 기본값 할당 ▼▼▼
+        // renderWorkspace로 넘기기 전에 데이터 구조를 한 번 더 보장합니다.
+        const ideaDataForWorkspace = {
           ...cardData,
           id: cardId,
           status: status,
-        });
+          // workspace 객체가 없으면(null/undefined) 빈 값으로 초기화
+          workspace: cardData.workspace || { 
+            keywords: [], 
+            outline: [], 
+            draft: "", 
+            linkedScraps: {} 
+          } 
+        };
+        // ▲▲▲ [수정 완료] ▲▲▲
+
+        renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
       }
     }
   });

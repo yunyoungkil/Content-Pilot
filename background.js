@@ -634,10 +634,10 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas') {
     const newCardKey = newCardRef.key;
     await newCardRef.set(newCard);
 
-    // AI 브리핑 자동 생성 (필요한 경우에만)
-    // 'ai_generated' 또는 'manual_entry'일 때만 자동 생성
-    // 'my_post_renewal'은 자동화된 리뉴얼이므로 브리핑 생성 안 함
-    if ((origin.type === 'ai_generated' || origin.type === 'manual_entry') && newCard.title) {
+    // AI 브리핑 자동 생성
+    // 'manual_entry'를 제외한 모든 아이디어는 생성 즉시 AI 브리핑을 실행
+    // (ai_generated, my_post, competitor_post, my_post_renewal 등 모든 경우)
+    if (origin.type !== 'manual_entry' && newCard.title) {
       generateIdeaBriefing(newCardKey, newCard.title, newCard.description)
         .catch((error) => console.error("브리핑 데이터 생성 실패:", error));
     }
@@ -3108,6 +3108,19 @@ ${decayContent.map((item, idx) =>
       console.log("Firebase 칸반 데이터 실시간 리스너를 활성화했습니다.");
     }
     return true; // 비동기 응답을 위해 true 반환
+  } else if (msg.action === "get_all_kanban_data") {
+    // ▼▼▼ [신규 추가] 모든 칸반 데이터를 직접 반환하는 액션 ▼▼▼
+    firebase
+      .database()
+      .ref("kanban")
+      .once("value", (snapshot) => {
+        sendResponse({ success: true, data: snapshot.val() || {} });
+      })
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // 비동기 응답을 위해 true 반환
+    // ▲▲▲ [신규 추가] ▲▲▲
   } else if (msg.action === "move_kanban_card") {
     const { cardId, originalStatus, newStatus } = msg.data;
     const originalRef = firebase
