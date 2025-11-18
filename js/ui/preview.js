@@ -44,11 +44,17 @@ const imageElement = scrapData.image
     </div>`;
 
 // 2. 최종 HTML 조합
+// [신규] 저장된 채널 정보 표시
+const channelIndicator = scrapData.channelId 
+  ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">📂 현재 채널에 저장됨</div>`
+  : `<div style="font-size: 11px; color: #999; margin-top: 2px;">🌐 공용 스크랩으로 저장됨</div>`;
+
 card.innerHTML = `
   ${imageElement}
   <div style="display: flex; flex-direction: column; overflow: hidden;">
     <div style="font-weight: 600; font-size: 15px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${scrapData.text ? scrapData.text.substring(0, 30) : '제목 없음'}</div>
     <div style="font-size: 13px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${new URL(scrapData.url).hostname}</div>
+    ${channelIndicator}
   </div>
 `;
 

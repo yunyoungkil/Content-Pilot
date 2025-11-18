@@ -445,6 +445,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* 글로벌 채널 선택기 스타일 */
+.channel-select:hover {
+  background-color: #e8f0fe !important;
+  border-color: #1a73e8 !important;
+  color: #1a73e8 !important;
+}
+
+.channel-select:focus {
+  outline: none !important;
+  border-color: #1a73e8 !important;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2) !important;
+}
 #cp-scrap-detail {
   flex: 1;
   background: #fff;

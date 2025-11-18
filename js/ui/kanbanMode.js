@@ -2,7 +2,7 @@
 
 import { renderWorkspace } from "./workspaceMode.js";
 import { showToast } from "../utils.js";
-import { renderPanelHeader } from "./header.js";
+import { renderPanelHeader, renderHeaderAndTabs } from "./header.js";
 
 let allKanbanData = {};
 let currentlyDragging = { cardId: null, originalStatus: null };
@@ -121,16 +121,20 @@ function addRealtimeUpdateListener() {
 /**
  * 전체 칸반 UI를 데이터에 따라 다시 그리는 함수
  */
-function updateKanbanUI(allCards) {
+async function updateKanbanUI(allCards) {
   if (!kanbanContainer) return;
   const rootEl = kanbanContainer.querySelector("#cp-kanban-board-root");
   if (!rootEl) return;
+
+  // [신규] 현재 활성 채널 ID 가져오기
+  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
   // 각 컬럼의 카드 목록을 비움
   rootEl
     .querySelectorAll(".kanban-col-cards")
     .forEach((col) => (col.innerHTML = ""));
 
+  // 데이터가 없거나 채널이 선택되지 않았을 때 처리
   if (!allCards || Object.keys(allCards).length === 0) {
     const ideasCol = rootEl.querySelector(
       '[data-status="ideas"] .kanban-col-cards'
@@ -146,7 +150,19 @@ function updateKanbanUI(allCards) {
       `.cp-kanban-col[data-status="${status}"] .kanban-col-cards`
     );
     if (colContainer) {
-      renderCardsInColumn(colContainer, status, allCards[status] || {});
+      // [수정] 채널 ID로 데이터 필터링
+      const rawCards = allCards[status] || {};
+      const filteredCards = {};
+
+      for (const [cardId, cardData] of Object.entries(rawCards)) {
+        // 1. channelId가 일치하는 카드
+        // 2. 또는 channelId가 없는 카드 (구버전 데이터 호환용, 마이그레이션 전까지 표시)
+        if (!cardData.channelId || cardData.channelId === activeChannelId) {
+          filteredCards[cardId] = cardData;
+        }
+      }
+
+      renderCardsInColumn(colContainer, status, filteredCards);
     }
   }
 }
@@ -754,18 +770,24 @@ function submitCard(container, status, title, inputWrapper) {
     createdAt: Date.now()
   };
 
-  // background.js에 카드 추가 요청 (상태 지정)
-  chrome.runtime.sendMessage({
-    action: 'add_idea_to_kanban',
-    data: JSON.stringify(ideaData),
-    status: status // 카드를 추가할 상태 지정
-  }, (response) => {
-    if (response && response.success) {
-      showToast('✅ 카드가 추가되었습니다.');
-      // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
-    } else {
-      showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
-    }
+  // [수정] 활성 채널 ID를 가져와서 함께 전송
+  chrome.storage.local.get("activeChannelId", (res) => {
+    const activeChannelId = res.activeChannelId || null;
+
+    // background.js에 카드 추가 요청 (상태 지정)
+    chrome.runtime.sendMessage({
+      action: 'add_idea_to_kanban',
+      data: JSON.stringify(ideaData),
+      status: status, // 카드를 추가할 상태 지정
+      channelId: activeChannelId // 👈 추가됨
+    }, (response) => {
+      if (response && response.success) {
+        showToast('✅ 카드가 추가되었습니다.');
+        // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
+      } else {
+        showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+      }
+    });
   });
 }
 
@@ -942,16 +964,22 @@ function generateSimilarIdea(cardId, status, cardData) {
             createdAt: Date.now()
           };
 
-          chrome.runtime.sendMessage({
-            action: 'add_idea_to_kanban',
-            data: JSON.stringify(ideaData),
-            status: 'ideas'
-          }, (addResponse) => {
-            if (addResponse && addResponse.success) {
-              showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
-            } else {
-              showToast('❌ 아이디어 추가에 실패했습니다.');
-            }
+          // [수정] 활성 채널 ID를 가져와서 함께 전송
+          chrome.storage.local.get("activeChannelId", (res) => {
+            const activeChannelId = res.activeChannelId || null;
+
+            chrome.runtime.sendMessage({
+              action: 'add_idea_to_kanban',
+              data: JSON.stringify(ideaData),
+              status: 'ideas',
+              channelId: activeChannelId // 👈 추가됨
+            }, (addResponse) => {
+              if (addResponse && addResponse.success) {
+                showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
+              } else {
+                showToast('❌ 아이디어 추가에 실패했습니다.');
+              }
+            });
           });
         } else {
           showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
@@ -1019,16 +1047,22 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
         createdAt: Date.now()
       };
 
-      chrome.runtime.sendMessage({
-        action: 'add_idea_to_kanban',
-        data: JSON.stringify(ideaData),
-        status: 'ideas'
-      }, (addResponse) => {
-        if (addResponse && addResponse.success) {
-          showToast('✅ 리뉴얼 제안이 아이디어로 저장되었습니다!');
+      // [수정] 활성 채널 ID를 가져와서 함께 전송
+      chrome.storage.local.get("activeChannelId", (res) => {
+        const activeChannelId = res.activeChannelId || null;
+
+        chrome.runtime.sendMessage({
+          action: 'add_idea_to_kanban',
+          data: JSON.stringify(ideaData),
+          status: 'ideas',
+          channelId: activeChannelId // 👈 추가됨
+        }, (addResponse) => {
+          if (addResponse && addResponse.success) {
+            showToast('✅ 리뉴얼 제안이 아이디어로 저장되었습니다!');
         } else {
           showToast('❌ 리뉴얼 제안 저장에 실패했습니다.');
         }
+      });
       });
     } else {
       showToast('❌ 리뉴얼 제안 생성에 실패했습니다.');
@@ -1036,12 +1070,7 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
   });
 }
 
-function renderHeaderAndTabs(shadowRoot) {
-  const headerArea = shadowRoot.querySelector("#cp-header-area");
-  if (headerArea) {
-    headerArea.innerHTML = renderPanelHeader();
-  }
-}
+// renderHeaderAndTabs는 header.js에서 import하여 사용
 
 /**
  * 발행 URL 연결 모달을 표시하는 함수

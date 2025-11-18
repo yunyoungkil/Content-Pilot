@@ -430,10 +430,18 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
               }, (response) => {
                 if (response && response.success) {
                   // 이미지 갤러리 새로고침
-                  chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
-                    if (response && response.success) {
-                      updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
-                    }
+                  // [수정] 활성 채널 ID를 가져와서 함께 전송
+                  chrome.storage.local.get("activeChannelId", (res) => {
+                    const activeChannelId = res.activeChannelId || null;
+
+                    chrome.runtime.sendMessage({ 
+                      action: "get_all_scraps",
+                      channelId: activeChannelId // 👈 추가됨
+                    }, (response) => {
+                      if (response && response.success) {
+                        updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
+                      }
+                    });
                   });
                 } else {
                   alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
@@ -1248,50 +1256,58 @@ export function renderWorkspace(container, ideaData) {
     }
   }
 
-  chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
-    if (response && response.success) {
-      const allScrapsContainer = container.querySelector(".all-scraps-list");
-      const linkedScrapsContainer = container.querySelector(
-        ".linked-scraps-list"
-      );
+  // [수정] 활성 채널 ID를 가져와서 함께 전송
+  chrome.storage.local.get("activeChannelId", (res) => {
+    const activeChannelId = res.activeChannelId || null;
 
-      if (response.scraps.length > 0) {
-        const allScrapsData = response.scraps;
-        window.__cp_scrap_filter.allScraps = allScrapsData;
-
-        // 초기 필터링 (필터가 활성화되어 있으면)
-        const filteredScraps = window.__cp_filterScraps(
-          allScrapsData, 
-          window.__cp_scrap_filter.keyword,
-          window.__cp_scrap_filter.searchText
+    chrome.runtime.sendMessage({ 
+      action: "get_all_scraps",
+      channelId: activeChannelId // 👈 추가됨
+    }, (response) => {
+      if (response && response.success) {
+        const allScrapsContainer = container.querySelector(".all-scraps-list");
+        const linkedScrapsContainer = container.querySelector(
+          ".linked-scraps-list"
         );
-        
-        window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
 
-        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
-        const editorIframe = container.querySelector("#quill-editor-iframe");
-        if (editorIframe && editorIframe.contentWindow) {
-          editorIframe.contentWindow.postMessage(
-            { action: "adjust-editor-height" },
-            "*"
-          );
-        }
-      } else {
-        linkedScrapsContainer.innerHTML =
-          "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
-        linkedScrapsContainer.classList.add("empty-state");
-        allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
+        if (response.scraps.length > 0) {
+          const allScrapsData = response.scraps;
+          window.__cp_scrap_filter.allScraps = allScrapsData;
 
-        // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
-        const editorIframe = container.querySelector("#quill-editor-iframe");
-        if (editorIframe && editorIframe.contentWindow) {
-          editorIframe.contentWindow.postMessage(
-            { action: "adjust-editor-height" },
-            "*"
+          // 초기 필터링 (필터가 활성화되어 있으면)
+          const filteredScraps = window.__cp_filterScraps(
+            allScrapsData, 
+            window.__cp_scrap_filter.keyword,
+            window.__cp_scrap_filter.searchText
           );
+          
+          window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
+
+          // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
+          const editorIframe = container.querySelector("#quill-editor-iframe");
+          if (editorIframe && editorIframe.contentWindow) {
+            editorIframe.contentWindow.postMessage(
+              { action: "adjust-editor-height" },
+              "*"
+            );
+          }
+        } else {
+          linkedScrapsContainer.innerHTML =
+            "<p>스크랩을 이곳으로 끌어다 놓아 아이디어에 연결하세요.</p>";
+          linkedScrapsContainer.classList.add("empty-state");
+          allScrapsContainer.innerHTML = "<p>자료 보관함이 비어있습니다.</p>";
+
+          // 연결된 자료가 변경될 때 에디터 높이 재조정 메시지 전송
+          const editorIframe = container.querySelector("#quill-editor-iframe");
+          if (editorIframe && editorIframe.contentWindow) {
+            editorIframe.contentWindow.postMessage(
+              { action: "adjust-editor-height" },
+              "*"
+            );
+          }
         }
       }
-    }
+    });
   });
 
   const workspaceEl = container.querySelector(".workspace-container");
@@ -2403,10 +2419,18 @@ function setupImagePromptDisplayListeners(workspaceEl) {
             updateImageGalleryFromAllScraps(resourceLibrary, filteredScraps, sendCommand, ideaData);
           } else {
             // 필터가 없으면 전체 스크랩에서 이미지 로드
-            chrome.runtime.sendMessage({ action: "get_all_scraps" }, (response) => {
-              if (response && response.success) {
-                updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
-              }
+            // [수정] 활성 채널 ID를 가져와서 함께 전송
+            chrome.storage.local.get("activeChannelId", (res) => {
+              const activeChannelId = res.activeChannelId || null;
+
+              chrome.runtime.sendMessage({ 
+                action: "get_all_scraps",
+                channelId: activeChannelId // 👈 추가됨
+              }, (response) => {
+                if (response && response.success) {
+                  updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
+                }
+              });
             });
           }
         } else if (tab === "publish-info") {
@@ -2685,11 +2709,16 @@ function setupImagePromptDisplayListeners(workspaceEl) {
     };
 
     // background.js에 아이디어 추가 요청
-    chrome.runtime.sendMessage({
-      action: 'add_idea_to_kanban',
-      data: JSON.stringify(ideaData),
-      status: 'ideas'
-    }, (response) => {
+    // [수정] 활성 채널 ID를 가져와서 함께 전송
+    chrome.storage.local.get("activeChannelId", (res) => {
+      const activeChannelId = res.activeChannelId || null;
+
+      chrome.runtime.sendMessage({
+        action: 'add_idea_to_kanban',
+        data: JSON.stringify(ideaData),
+        status: 'ideas',
+        channelId: activeChannelId // 👈 추가됨
+      }, (response) => {
       if (response && response.success) {
         showToast('✅ 새 아이디어로 저장되었습니다! 기획 보드에서 확인하세요.');
         
@@ -2704,6 +2733,7 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       } else {
         showToast('❌ 아이디어 저장에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
       }
+    });
     });
   }
   // ▲▲▲ 추가 완료 ▲▲▲
@@ -2792,76 +2822,83 @@ function setupImagePromptDisplayListeners(workspaceEl) {
 
     // 1. '연결된 자료' 목록에서 스크랩 텍스트와 URL을 모두 수집합니다.
     // 실제 스크랩 데이터에서 URL을 가져오기 위해 Firebase에서 다시 조회
-    chrome.runtime.sendMessage({ action: "get_all_scraps" }, (scrapsResponse) => {
-      if (!scrapsResponse || !scrapsResponse.success) {
-        alert("스크랩 데이터를 불러올 수 없습니다.");
-        generateDraftBtn.textContent = originalText;
-        generateDraftBtn.disabled = false;
-        if (loadingOverlay.parentElement) loadingOverlay.remove();
-        return;
-      }
-      
-      const allScraps = scrapsResponse.scraps || [];
-      const linkedScrapsContent = Array.from(
-        linkedScrapsList.querySelectorAll(".scrap-card-item")
-      ).map((cardItem) => {
-        const scrapId = cardItem.dataset.scrapId;
-        const scrap = allScraps.find(s => s.id === scrapId);
-        return {
-          text: cardItem.dataset.text || scrap?.text || "",
-          url: scrap?.url || "",
-          title: scrap?.text?.substring(0, 50) || "참고 자료"
-        };
-      });
-      
-      // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
-      const payload = {
-        ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
-        currentDraft: currentEditorContent, // 현재 에디터에 작성된 내용
-        linkedScrapsContent: linkedScrapsContent, // 연결된 자료의 텍스트와 URL 목록
-      };
+    // [수정] 활성 채널 ID를 가져와서 함께 전송
+    chrome.storage.local.get("activeChannelId", (res) => {
+      const activeChannelId = res.activeChannelId || null;
 
-      // 3. 통합된 데이터를 background.js로 전송합니다.
-      chrome.runtime.sendMessage(
-        { action: "generate_draft_from_idea", data: payload },
-        (response) => {
+      chrome.runtime.sendMessage({ 
+        action: "get_all_scraps",
+        channelId: activeChannelId // 👈 추가됨
+      }, (scrapsResponse) => {
+        if (!scrapsResponse || !scrapsResponse.success) {
+          alert("스크랩 데이터를 불러올 수 없습니다.");
           generateDraftBtn.textContent = originalText;
           generateDraftBtn.disabled = false;
           if (loadingOverlay.parentElement) loadingOverlay.remove();
-          
-          if (response && response.success) {
-            // iframe 에디터에 생성된 초안 설정 (Markdown → HTML 변환 지원)
-            const isLikelyMarkdown =
-              /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s/m.test(
-                response.draft || ""
-              );
-            let html = isLikelyMarkdown
-              ? marked.parse(response.draft)
-              : response.draft;
+          return;
+        }
+        
+        const allScraps = scrapsResponse.scraps || [];
+        const linkedScrapsContent = Array.from(
+          linkedScrapsList.querySelectorAll(".scrap-card-item")
+        ).map((cardItem) => {
+          const scrapId = cardItem.dataset.scrapId;
+          const scrap = allScraps.find(s => s.id === scrapId);
+          return {
+            text: cardItem.dataset.text || scrap?.text || "",
+            url: scrap?.url || "",
+            title: scrap?.text?.substring(0, 50) || "참고 자료"
+          };
+        });
+        
+        // 2. AI에게 보낼 모든 데이터를 하나의 객체로 통합합니다.
+        const payload = {
+          ...ideaData, // title, description, tags, outline, keywords 등 모든 아이디어 데이터
+          currentDraft: currentEditorContent, // 현재 에디터에 작성된 내용
+          linkedScrapsContent: linkedScrapsContent, // 연결된 자료의 텍스트와 URL 목록
+        };
+
+        // 3. 통합된 데이터를 background.js로 전송합니다.
+        chrome.runtime.sendMessage(
+          { action: "generate_draft_from_idea", data: payload },
+          (response) => {
+            generateDraftBtn.textContent = originalText;
+            generateDraftBtn.disabled = false;
+            if (loadingOverlay.parentElement) loadingOverlay.remove();
             
-            // 제목이 포함되어 있지 않으면 h1으로 추가 (이중 체크)
-            const title = ideaData.title || "";
-            if (title) {
-              const hasH1 = /<h1[^>]*>|<h1>/i.test(html);
-              if (!hasH1) {
-                html = `<h1>${title}</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n${html}`;
-              } else {
-                // h1이 있지만 구분선이 없으면 추가
-                html = html.replace(/<\/h1>([^<]*?)(?=<[^/]|$)/gi, (match, afterH1) => {
-                  const hasHr = /<hr|<hr\s|---/.test(afterH1);
-                  if (!hasHr) {
-                    return `</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${afterH1}`;
-                  }
-                  return match;
-                });
+            if (response && response.success) {
+              // iframe 에디터에 생성된 초안 설정 (Markdown → HTML 변환 지원)
+              const isLikelyMarkdown =
+                /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s/m.test(
+                  response.draft || ""
+                );
+              let html = isLikelyMarkdown
+                ? marked.parse(response.draft)
+                : response.draft;
+              
+              // 제목이 포함되어 있지 않으면 h1으로 추가 (이중 체크)
+              const title = ideaData.title || "";
+              if (title) {
+                const hasH1 = /<h1[^>]*>|<h1>/i.test(html);
+                if (!hasH1) {
+                  html = `<h1>${title}</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n${html}`;
+                } else {
+                  // h1이 있지만 구분선이 없으면 추가
+                  html = html.replace(/<\/h1>([^<]*?)(?=<[^/]|$)/gi, (match, afterH1) => {
+                    const hasHr = /<hr|<hr\s|---/.test(afterH1);
+                    if (!hasHr) {
+                      return `</h1>\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${afterH1}`;
+                    }
+                    return match;
+                  });
+                }
               }
-            }
-            
-            // 이미지 생성 프롬프트 파싱 및 표시 (구분선 처리 전에 먼저 처리)
-            // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
-            html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
-              const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
+              
+              // 이미지 생성 프롬프트 파싱 및 표시 (구분선 처리 전에 먼저 처리)
+              // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
+              html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
+                const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
                 style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
                 <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
                 <div style="margin-bottom: 12px;">
@@ -2895,187 +2932,187 @@ function setupImagePromptDisplayListeners(workspaceEl) {
                 <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt="${prompt.trim().replace(/"/g, '&quot;')}" 
                   style="margin-top: 12px; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
                   프롬프트 사용
-                </button>
+                </div>
               </div>`;
-            });
-            
-            // 구분선(hr) 태그가 텍스트로 표시되지 않도록 보장
-            // 마크다운 파싱 후 hr 태그가 제대로 렌더링되도록 확인
-            html = html.replace(/<hr\s*\/?>/gi, '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">');
-            html = html.replace(/<hr\s+([^>]*?)>/gi, (match, attrs) => {
-              if (!attrs.includes('style=')) {
-                return '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">';
-              } else if (!attrs.includes('border-top')) {
-                return `<hr ${attrs.replace(/style="([^"]*)"/, 'style="$1; border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;"')}>`;
-              }
-              return match;
-            });
-            
-            // 가독성 포맷팅 후처리
-            // "(참고 자료 X)" 같은 번호 표기 제거 (마크다운 파싱 후)
-            const textNodes = [];
-            let tagIndex = 0;
-            const tagPlaceholder = '__TAG_PLACEHOLDER__';
-            
-            // HTML 태그를 임시로 치환하여 텍스트만 처리 (hr 태그는 제외)
-            html = html.replace(/<(?![hr\s])[^>]+>/g, (match) => {
-              textNodes[tagIndex] = match;
-              return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
-            });
-            
-            // 텍스트에서 참고 자료 번호 표기 제거
-            html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
-            html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
-            html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
-            html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
-            html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
-            html = html.replace(/참고\s*자료\s*\d+/gi, '');
-            // 문장 중간에 있는 경우 처리
-            html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
-            html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
-            // 빈 괄호 제거
-            html = html.replace(/\(\s*\)/g, '');
-            // 연속된 공백 정리 (줄바꿈은 유지)
-            html = html.replace(/[ \t]{2,}/g, ' ');
-            
-            // 태그 복원
-            html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
-              return textNodes[parseInt(index)] || match;
-            });
-            
-            // 링크 밑줄 제거 (이미 background.js에서 처리되었지만, 추가 보장)
-            html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
-              if (!attrs.includes('style=')) {
-                return `<a ${attrs} style="text-decoration: none; color: #1a73e8;">`;
-              } else if (!attrs.includes('text-decoration')) {
-                return `<a ${attrs.replace(/style="([^"]*)"/, 'style="$1; text-decoration: none; color: #1a73e8;"')}>`;
-              }
-              return match;
-            });
-            
-            // mark 태그 스타일 보장 (서론 전체에 배경색이 적용되지 않도록 문장 단위로만 적용)
-            // 서론 부분(h1 다음 첫 번째 문단)에서 mark 태그가 전체 문단을 감싸지 않도록 수정
-            html = html.replace(/<mark([^>]*?)>([^<]+(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>/gi, (match, attrs, content) => {
-              // 내용이 너무 길면(서론 전체일 가능성) mark 태그 제거
-              if (content.length > 200) {
-                return content;
-              }
-              // 기존 mark 태그는 유지하되 스타일 보장
-              if (!attrs.includes('style=')) {
-                return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${content}</mark>`;
-              } else if (!attrs.includes('background-color')) {
-                return `<mark ${attrs.replace(/style="([^"]*)"/, 'style="$1; background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;"')}>${content}</mark>`;
-              }
-              return match;
-            });
-            
-            // 서론 부분에서 전체 문단을 감싸는 mark 태그 제거
-            // h1 다음 첫 번째 p 태그나 텍스트 블록에서 mark 제거
-            html = html.replace(/<hr[^>]*>([^<]*<mark[^>]*>([^<]*(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>[^<]*)/i, (match, afterHr, markContent) => {
-              // mark 내용이 너무 길면(서론 전체) mark 태그 제거
-              if (markContent.length > 200) {
-                return `<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${markContent}`;
-              }
-              return match;
-            });
-            
-            // 이미지 생성 프롬프트 파싱 및 표시 (영어/한글 두 개)
-            // 구분선 처리 전에 이미지 프롬프트를 먼저 처리하여 구분선과 충돌 방지
-            // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
-            html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
-              const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
-                style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
-                <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
-                <div style="margin-bottom: 12px;">
-                  <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">영어 프롬프트:</div>
-                  <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptEn.trim()}</div>
-                </div>
-                <div style="margin-bottom: 12px;">
-                  <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">한글 프롬프트:</div>
-                  <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptKo.trim()}</div>
-                </div>
-                <div style="display: flex; gap: 8px; margin-top: 12px;">
-                  <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}" 
-                    style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                    영어 프롬프트 사용
+              });
+              
+              // 구분선(hr) 태그가 텍스트로 표시되지 않도록 보장
+              // 마크다운 파싱 후 hr 태그가 제대로 렌더링되도록 확인
+              html = html.replace(/<hr\s*\/?>/gi, '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">');
+              html = html.replace(/<hr\s+([^>]*?)>/gi, (match, attrs) => {
+                if (!attrs.includes('style=')) {
+                  return '<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">';
+                } else if (!attrs.includes('border-top')) {
+                  return `<hr ${attrs.replace(/style="([^"]*)"/, 'style="$1; border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;"')}>`;
+                }
+                return match;
+              });
+              
+              // 가독성 포맷팅 후처리
+              // "(참고 자료 X)" 같은 번호 표기 제거 (마크다운 파싱 후)
+              const textNodes = [];
+              let tagIndex = 0;
+              const tagPlaceholder = '__TAG_PLACEHOLDER__';
+              
+              // HTML 태그를 임시로 치환하여 텍스트만 처리 (hr 태그는 제외)
+              html = html.replace(/<(?![hr\s])[^>]+>/g, (match) => {
+                textNodes[tagIndex] = match;
+                return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
+              });
+              
+              // 텍스트에서 참고 자료 번호 표기 제거
+              html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+              html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
+              html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
+              html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
+              html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
+              html = html.replace(/참고\s*자료\s*\d+/gi, '');
+              // 문장 중간에 있는 경우 처리
+              html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
+              html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
+              // 빈 괄호 제거
+              html = html.replace(/\(\s*\)/g, '');
+              // 연속된 공백 정리 (줄바꿈은 유지)
+              html = html.replace(/[ \t]{2,}/g, ' ');
+              
+              // 태그 복원
+              html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
+                return textNodes[parseInt(index)] || match;
+              });
+              
+              // 링크 밑줄 제거 (이미 background.js에서 처리되었지만, 추가 보장)
+              html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
+                if (!attrs.includes('style=')) {
+                  return `<a ${attrs} style="text-decoration: none; color: #1a73e8;">`;
+                } else if (!attrs.includes('text-decoration')) {
+                  return `<a ${attrs.replace(/style="([^"]*)"/, 'style="$1; text-decoration: none; color: #1a73e8;"')}>`;
+                }
+                return match;
+              });
+              
+              // mark 태그 스타일 보장 (서론 전체에 배경색이 적용되지 않도록 문장 단위로만 적용)
+              // 서론 부분(h1 다음 첫 번째 문단)에서 mark 태그가 전체 문단을 감싸지 않도록 수정
+              html = html.replace(/<mark([^>]*?)>([^<]+(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>/gi, (match, attrs, content) => {
+                // 내용이 너무 길면(서론 전체일 가능성) mark 태그 제거
+                if (content.length > 200) {
+                  return content;
+                }
+                // 기존 mark 태그는 유지하되 스타일 보장
+                if (!attrs.includes('style=')) {
+                  return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${content}</mark>`;
+                } else if (!attrs.includes('background-color')) {
+                  return `<mark ${attrs.replace(/style="([^"]*)"/, 'style="$1; background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;"')}>${content}</mark>`;
+                }
+                return match;
+              });
+              
+              // 서론 부분에서 전체 문단을 감싸는 mark 태그 제거
+              // h1 다음 첫 번째 p 태그나 텍스트 블록에서 mark 제거
+              html = html.replace(/<hr[^>]*>([^<]*<mark[^>]*>([^<]*(?:<[^>]+>[^<]*<\/[^>]+>[^<]*)*)<\/mark>[^<]*)/i, (match, afterHr, markContent) => {
+                // mark 내용이 너무 길면(서론 전체) mark 태그 제거
+                if (markContent.length > 200) {
+                  return `<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">${markContent}`;
+                }
+                return match;
+              });
+              
+              // 이미지 생성 프롬프트 파싱 및 표시 (영어/한글 두 개)
+              // 구분선 처리 전에 이미지 프롬프트를 먼저 처리하여 구분선과 충돌 방지
+              // 형식: [이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]
+              html = html.replace(/\[이미지 생성 프롬프트\s*\(영어\):\s*([^\]]+)\]\s*\[이미지 생성 프롬프트\s*\(한글\):\s*([^\]]+)\]/gi, (match, promptEn, promptKo) => {
+                const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                return `<div class="image-prompt-display" data-prompt-id="${placeholderId}"
+                  style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
+                  <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
+                  <div style="margin-bottom: 12px;">
+                    <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">영어 프롬프트:</div>
+                    <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptEn.trim()}</div>
+                  </div>
+                  <div style="margin-bottom: 12px;">
+                    <div style="font-size: 11px; color: #666; margin-bottom: 4px; font-weight: 600;">한글 프롬프트:</div>
+                    <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${promptKo.trim()}</div>
+                  </div>
+                  <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}"
+                      style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                      영어 프롬프트 사용
+                    </button>
+                    <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}" data-use-ko="true"
+                      style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                      한글 프롬프트 사용
+                    </button>
+                  </div>
+                </div>`;
+              });
+              
+              // 단일 형식도 지원 (하위 호환성)
+              html = html.replace(/\[이미지 생성 프롬프트:\s*([^\]]+)\]/gi, (match, prompt) => {
+                const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                return `<div class="image-prompt-display" data-prompt-id="${placeholderId}"
+                  style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
+                  <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
+                  <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${prompt.trim()}</div>
+                  <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${prompt.trim().replace(/"/g, '&quot;')}"
+                    style="width: 100%; margin-top: 12px; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                    프롬프트 사용
                   </button>
-                  <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${promptEn.trim().replace(/"/g, '&quot;')}" data-prompt-ko="${promptKo.trim().replace(/"/g, '&quot;')}" data-use-ko="true"
-                    style="flex: 1; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                    한글 프롬프트 사용
-                  </button>
-                </div>
-              </div>`;
-            });
-            
-            // 단일 형식도 지원 (하위 호환성)
-            html = html.replace(/\[이미지 생성 프롬프트:\s*([^\]]+)\]/gi, (match, prompt) => {
-              const placeholderId = `img-prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              return `<div class="image-prompt-display" data-prompt-id="${placeholderId}" 
-                style="border: 2px solid #4285f4; border-radius: 8px; padding: 16px; margin: 16px 0; background: #f0f7ff;">
-                <div style="font-size: 13px; color: #4285f4; font-weight: 600; margin-bottom: 12px;">🖼️ 이미지 생성 프롬프트</div>
-                <div style="padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; color: #333; white-space: pre-wrap; word-break: break-word;">${prompt.trim()}</div>
-                <button class="use-prompt-btn" data-prompt-id="${placeholderId}" data-prompt-en="${prompt.trim().replace(/"/g, '&quot;')}" 
-                  style="width: 100%; margin-top: 12px; padding: 8px 12px; border: 1px solid #34a853; background: #34a853; color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                  프롬프트 사용
-                </button>
-              </div>`;
-            });
-            
-            currentEditorContent = html;
-            sendCommand("set-content", { html });
-            sendCommand("focus");
-            
-            // 이미지 플레이스홀더 이벤트 리스너 추가
-            setTimeout(() => {
-              setupImagePlaceholderListeners(workspaceEl, ideaData);
-              setupImagePromptDisplayListeners(workspaceEl);
-            }, 500);
-            
-            // 썸네일 정보를 ideaData에 저장
-            if (response.thumbnailInfo) {
-              ideaData.thumbnailInfo = response.thumbnailInfo;
-            }
-            
-            // 퍼머링크와 태그가 있으면 UI에 표시 (오른쪽 탭)
-            if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo) {
-              showPublishInfo(workspaceEl, response.permalink, response.tags, response.seoTitle, ideaData);
-            }
-            
-            // SEO 제목과 썸네일 정보를 아이디어 카드에 저장
-            if (ideaData && ideaData.id) {
-              const updates = {};
-              if (response.seoTitle) {
-                updates.seoTitle = response.seoTitle;
-              }
+                </div>`;
+              });
+              
+              currentEditorContent = html;
+              sendCommand("set-content", { html });
+              sendCommand("focus");
+              
+              // 이미지 플레이스홀더 이벤트 리스너 추가
+              setTimeout(() => {
+                setupImagePlaceholderListeners(workspaceEl, ideaData);
+                setupImagePromptDisplayListeners(workspaceEl);
+              }, 500);
+              
+              // 썸네일 정보를 ideaData에 저장
               if (response.thumbnailInfo) {
-                updates.thumbnailInfo = response.thumbnailInfo;
+                ideaData.thumbnailInfo = response.thumbnailInfo;
               }
-              if (Object.keys(updates).length > 0) {
-                chrome.runtime.sendMessage({
-                  action: "update_kanban_card",
-                  data: {
-                    cardId: ideaData.id,
-                    status: ideaData.status || "ideas",
-                    updates: updates
-                  }
-                });
+              
+              // 퍼머링크와 태그가 있으면 UI에 표시 (오른쪽 탭)
+              if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo) {
+                showPublishInfo(workspaceEl, response.permalink, response.tags, response.seoTitle, ideaData);
               }
+              
+              // SEO 제목과 썸네일 정보를 아이디어 카드에 저장
+              if (ideaData && ideaData.id) {
+                const updates = {};
+                if (response.seoTitle) {
+                  updates.seoTitle = response.seoTitle;
+                }
+                if (response.thumbnailInfo) {
+                  updates.thumbnailInfo = response.thumbnailInfo;
+                }
+                if (Object.keys(updates).length > 0) {
+                  chrome.runtime.sendMessage({
+                    action: "update_kanban_card",
+                    data: {
+                      cardId: ideaData.id,
+                      status: ideaData.status || "ideas",
+                      updates: updates
+                    }
+                  });
+                }
+              }
+              
+              // 자동 저장
+              setTimeout(() => {
+                saveCurrentDraft();
+              }, 500);
+            } else {
+              const errorMessage = response?.error || "알 수 없는 오류";
+              console.error("[초안 생성 실패] 응답:", response);
+              alert(`초안 생성에 실패했습니다: ${errorMessage}`);
             }
-            
-            // 자동 저장
-            setTimeout(() => {
-              saveCurrentDraft();
-            }, 500);
-          } else {
-            const errorMessage = response?.error || "알 수 없는 오류";
-            console.error("[초안 생성 실패] 응답:", response);
-            alert(`초안 생성에 실패했습니다: ${errorMessage}`);
           }
-        }
-      );
+        );
+      });
     });
-  });
 
   // 목차 편집 기능
   if (outlineList) {
@@ -4001,6 +4038,4 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       }
     });
   }
-
-
 }

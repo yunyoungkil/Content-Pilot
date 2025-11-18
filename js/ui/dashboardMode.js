@@ -311,56 +311,84 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
         controlsContainer.innerHTML = '';
     }
 }
-function updateDashboardUI(container) {
+async function updateDashboardUI(container) {
     if (!cachedData) return;
-    ['myChannels', 'competitorChannels'].forEach(type => {
-        const colElement = container.querySelector(`#${type.replace('Channels', '-channels-col')}`);
-        if (!colElement) return;
-        const filterStatusContainer = colElement.querySelector('.filter-status-container');
-        if (filterStatusContainer) {
-            if (activeTagFilter) {
-                filterStatusContainer.innerHTML = `
-                    <div class="active-filter-chip">
-                        <span>현재 필터: #${activeTagFilter}</span>
-                        <button class="clear-filter-btn">×</button>
-                    </div>
-                `;
-            } else {
-                // 필터가 없으면 안내 문구를 표시합니다.
-                filterStatusContainer.innerHTML = `<span class="filter-placeholder">태그 클릭 시 필터가 여기에 표시됩니다.</span>`;
+
+    // [신규] 활성 채널 ID 가져오기
+    const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+
+    // 1. 내 채널 설정 ('myChannels')
+    const myCol = container.querySelector('#my-channels-col');
+    if (myCol) {
+        // 기존 드롭다운 제어 UI 숨김/제거
+        const controlsWrapper = myCol.querySelector('#myChannels-controls');
+        if (controlsWrapper) controlsWrapper.style.display = 'none'; // 드롭다운 숨김
+
+        const contentListElement = myCol.querySelector('#myChannels-content-list');
+        const controlsContainer = myCol.querySelector('.top5-controls-container'); // 페이징 컨트롤 등
+
+        // 활성 채널 찾기 (API URL 매칭 또는 ID 매칭)
+        // cachedData.channels.myChannels.blogs 배열에서 찾음
+        const myBlogs = cachedData.channels.myChannels?.blogs || [];
+        const currentChannel = myBlogs.find(blog => {
+            const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+            return id === activeChannelId;
+        });
+
+        if (currentChannel) {
+            // 헤더에 현재 채널명 표시
+            const headerEl = myCol.querySelector('.dashboard-col-header h2');
+            if (headerEl) {
+                headerEl.textContent = `🚀 ${currentChannel.inputUrl || '내 채널'}`;
             }
-        }
-        const platformTabs = colElement.querySelector(`.platform-tabs[data-type="${type}"]`);
-        const controlsWrapper = colElement.querySelector(`#${type}-controls`);
-        const selectElement = colElement.querySelector(`#${type}-select`);
-        const contentListElement = colElement.querySelector(`#${type}-content-list`);
-        const controlsContainer = colElement.querySelector('.top5-controls-container');
-        if (!platformTabs || !controlsWrapper || !selectElement || !contentListElement || !controlsContainer) return;
-        if (type === 'myChannels') {
-            const analyzeButtons = colElement.querySelector('#myChannels-analyze-buttons');
-            if (analyzeButtons) analyzeButtons.style.display = 'flex';
-        }
-        const selectedPlatform = platformTabs.querySelector('.active').dataset.platform;
-        const platformKey = selectedPlatform === 'blog' ? 'blogs' : 'youtubes';
-        let channelObjects = cachedData.channels[type]?.[platformKey] || [];
-        if (!Array.isArray(channelObjects) && typeof channelObjects === 'object') {
-            channelObjects = Object.values(channelObjects);
-        }
-        if (channelObjects.length > 0) {
-            controlsWrapper.style.display = 'flex';
-            const currentSelection = selectElement.value;
-            selectElement.innerHTML = channelObjects.map(channel => {
-                const id = selectedPlatform === 'blog' ? btoa(channel.apiUrl).replace(/=/g, '') : channel.apiUrl;
-                const title = cachedData.metas[id]?.title || channel.inputUrl;
-                return `<option value="${id}" ${id === currentSelection ? 'selected' : ''}>${title}</option>`;
-            }).join('');
-            renderPaginatedContent(contentListElement, controlsContainer, selectElement.value, cachedData.content, type, selectedPlatform);
+            
+            // 데이터 렌더링
+            const sourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
+            renderPaginatedContent(contentListElement, controlsContainer, sourceId, cachedData.content, 'myChannels', 'blog');
         } else {
-            controlsWrapper.style.display = 'none';
-            contentListElement.innerHTML = `<p class="loading-placeholder">연동된 ${selectedPlatform === 'blog' ? '블로그' : '유튜브'} 채널이 없습니다.</p>`;
-            controlsContainer.innerHTML = '';
+            contentListElement.innerHTML = `<p class="loading-placeholder">선택된 채널 데이터를 찾을 수 없습니다.<br>글로벌 채널 선택기를 확인해주세요.</p>`;
         }
-    });
+    }
+
+    // 2. 경쟁 채널 설정 ('competitorChannels')
+    const compCol = container.querySelector('#competitor-channels-col');
+    if (compCol) {
+        const controlsWrapper = compCol.querySelector('#competitorChannels-controls');
+        if (controlsWrapper) controlsWrapper.style.display = 'none'; // 드롭다운 숨김
+        
+        const contentListElement = compCol.querySelector('#competitorChannels-content-list');
+        // 경쟁사는 여러 개일 수 있으므로 리스트 형태로 보여주거나, 합쳐서 보여줘야 함
+        // 여기서는 "내 채널에 소속된 모든 경쟁사"의 데이터를 합쳐서 보여주는 방식으로 구현
+        
+        const myBlogs = cachedData.channels.myChannels?.blogs || [];
+        const currentChannel = myBlogs.find(blog => {
+            const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+            return id === activeChannelId;
+        });
+
+        if (currentChannel && currentChannel.competitors && currentChannel.competitors.length > 0) {
+            // 경쟁사들의 sourceId 목록 추출
+            const compSourceIds = currentChannel.competitors.map(c => btoa(c.apiUrl).replace(/=/g, ""));
+            
+            // cachedData.content에서 해당 경쟁사들의 데이터만 필터링
+            const compContent = cachedData.content.filter(item => compSourceIds.includes(item.sourceId));
+            
+            // (임시) renderPaginatedContent는 단일 sourceId만 처리하므로, 
+            // 여기서는 커스텀 렌더링을 하거나 첫 번째 경쟁사만 보여주는 방식을 선택해야 함.
+            // V2에서는 '통합 리스트' 렌더링 함수가 필요하지만, 일단 간단히 목록을 렌더링
+            
+            if (compContent.length > 0) {
+                contentListElement.innerHTML = `<div class="content-list">${compContent.slice(0, 5).map(item => createContentCard(item, 'competitorChannels')).join('')}</div>`;
+            } else {
+                 contentListElement.innerHTML = `<p class="loading-placeholder">경쟁사 데이터가 아직 수집되지 않았습니다.</p>`;
+            }
+
+        } else {
+            contentListElement.innerHTML = `<p class="loading-placeholder">등록된 경쟁 채널이 없습니다.<br>채널 관리에서 경쟁사를 추가하세요.</p>`;
+        }
+    }
+
+    // 태그 필터 상태 표시 (기존 로직 유지)
     container.querySelectorAll('.card-tags .tag').forEach(tagEl => {
         if (activeTagFilter && tagEl.textContent.replace('#', '') === activeTagFilter) {
             tagEl.classList.add('active');
@@ -381,12 +409,9 @@ function renderDashboard(container) {
                       <div class="platform-tab active" data-platform="blog">블로그</div>
                       <div class="platform-tab" data-platform="youtube">유튜브</div>
                   </div>
-                  <div class="dashboard-controls" id="myChannels-controls" style="display: none;">
-                      <select id="myChannels-select" class="channel-selector"></select>
-                      <div class="sub-controls-wrapper">
-                          <div class="filter-status-container"></div>
-                          <div class="top5-controls-container"></div>
-                      </div>
+                  <div class="dashboard-controls" id="myChannels-controls" style="display: none;"></div>
+                  <div class="sub-controls-wrapper">
+                      <div class="top5-controls-container"></div>
                   </div>
                   <div id="myChannels-content-list" class="content-list-area"><p class="loading-placeholder">채널 정보를 불러오는 중...</p></div>
               </div>
@@ -398,13 +423,7 @@ function renderDashboard(container) {
                       <div class="platform-tab active" data-platform="blog">블로그</div>
                       <div class="platform-tab" data-platform="youtube">유튜브</div>
                   </div>
-                  <div class="dashboard-controls" id="competitorChannels-controls" style="display: none;">
-                      <select id="competitorChannels-select" class="channel-selector"></select>
-                      <div class="sub-controls-wrapper">
-                          <div class="filter-status-container"></div>
-                          <div class="top5-controls-container"></div>
-                      </div>
-                  </div>
+                  <div class="dashboard-controls" id="competitorChannels-controls" style="display: none;"></div>
                   <div id="competitorChannels-content-list" class="content-list-area"></div>
               </div>
               <div class="ai-section-wrapper">
@@ -547,47 +566,39 @@ function addDashboardEventListeners(container) {
         };
 
         if (target.closest('#unified-analyze-btn')) {
-            const myCol = container.querySelector('#my-channels-col');
-            const competitorCol = container.querySelector('#competitor-channels-col');
-            const platform = myCol.querySelector('.platform-tab.active').dataset.platform;
-            const myChannelId = myCol.querySelector('.channel-selector').value;
-            const myChannelName = myCol.querySelector('.channel-selector option:checked').textContent;
-            const competitorChannelId = competitorCol.querySelector('.channel-selector').value;
-            
-            if (!myChannelId || !competitorChannelId) {
-                alert("분석을 위해 '내 채널'과 '경쟁 채널'을 모두 선택해주세요.");
-                return;
-            }
-
-            const myAnalysisAction = platform === 'blog' ? 'analyze_my_blog' : 'analyze_my_channel';
-            const contentFilter = item => platform === 'blog' ? !item.videoId : !!item.videoId;
-            const myContent = cachedData.content.filter(item => item.sourceId === myChannelId && contentFilter(item));
-
-            if (myContent.length === 0) {
-                alert("성과 분석을 위해 내 채널에 데이터가 필요합니다.");
-                return;
-            }
-            
-            const myAnalysisContentEl = container.querySelector('#my-analysis-content');
-            
-            handleAnalysis(myAnalysisAction, { channelName: myChannelName, channelContent: myContent }, true, myAnalysisContentEl, () => {
-                const competitorContent = cachedData.content.filter(item => item.sourceId === competitorChannelId && contentFilter(item));
-                if (competitorContent.length === 0) {
-                    alert("경쟁 비교 분석을 위해 경쟁 채널에 데이터가 필요합니다.");
+            // [수정] 복잡한 데이터 수집 로직 제거 -> activeChannelId만 전송
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const activeChannelId = res.activeChannelId;
+                
+                if (!activeChannelId) {
+                    alert("분석할 채널이 선택되지 않았습니다. 상단의 글로벌 채널 선택기를 확인해주세요.");
                     return;
                 }
-                const competitorAnalysisAction = platform === 'blog' ? 'generate_blog_ideas' : 'generate_content_ideas';
-                
-                chrome.storage.local.get(CACHE_KEY, (result) => {
-                    const myAnalysisSummary = result[CACHE_KEY]?.myAnalysisSummary;
-                    const analysisData = { myContent, competitorContent, myAnalysisSummary };
-                    const competitorAnalysisContentEl = container.querySelector('#competitor-analysis-content');
-                    
-                    container.querySelector('#competitor-analysis-section').style.display = 'block';
 
-                    handleAnalysis(competitorAnalysisAction, analysisData, false, competitorAnalysisContentEl, () => {
+                // UI 업데이트 (로딩 표시)
+                const myAnalysisContentEl = container.querySelector('#my-analysis-content');
+                const competitorAnalysisContentEl = container.querySelector('#competitor-analysis-content');
+                
+                myAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder">AI가 현재 채널의 성과를 분석 중입니다... 📈</p>`;
+                container.querySelector('#competitor-analysis-section').style.display = 'block';
+                competitorAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder">경쟁 채널 데이터를 수집하고 있습니다...</p>`;
+
+                // 백그라운드에 분석 요청 (채널 ID만 전달)
+                chrome.runtime.sendMessage({ 
+                    action: 'generate_blog_ideas',
+                    activeChannelId: activeChannelId 
+                }, (response) => {
+                    if (response && response.success) {
+                        // 1. 성과 분석 결과 렌더링
+                        renderAnalysisResult(myAnalysisContentEl, response.analysis, true);
                         
-                    });
+                        // 2. 아이디어 제안 결과 렌더링
+                        renderAnalysisResult(competitorAnalysisContentEl, response.ideas, false);
+                    } else {
+                        const errorMsg = response?.error || "알 수 없는 오류";
+                        myAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder error">분석 실패: ${errorMsg}</p>`;
+                        competitorAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder error">분석 실패</p>`;
+                    }
                 });
             });
             return;
@@ -612,21 +623,30 @@ function addDashboardEventListeners(container) {
                 }
             };
 
-            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: JSON.stringify(ideaForKanban) }, (response) => {
-                if (response && response.success) {
-                    showToast(`"${post.title}"이(가) 기획 보드에 추가되었습니다.`, 'success');
-                    button.disabled = true;
-                    button.style.opacity = '0.5';
-                    button.style.cursor = 'not-allowed';
-                    // SVG를 체크 아이콘으로 변경
-                    button.innerHTML = `
-                        <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
-                            <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
-                        </svg>
-                    `;
-                } else {
-                    alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
-                }
+            // [수정] 현재 활성 채널 ID를 가져와서 함께 전송
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const channelId = res.activeChannelId || null;
+
+                chrome.runtime.sendMessage({ 
+                    action: 'add_idea_to_kanban', 
+                    data: JSON.stringify(ideaForKanban),
+                    channelId: channelId // 👈 추가됨
+                }, (response) => {
+                    if (response && response.success) {
+                        showToast(`"${post.title}"이(가) 기획 보드에 추가되었습니다.`, 'success');
+                        button.disabled = true;
+                        button.style.opacity = '0.5';
+                        button.style.cursor = 'not-allowed';
+                        // SVG를 체크 아이콘으로 변경
+                        button.innerHTML = `
+                            <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
+                                <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
+                            </svg>
+                        `;
+                    } else {
+                        alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
+                    }
+                });
             });
             return;
         }
@@ -648,7 +668,15 @@ function addDashboardEventListeners(container) {
             const modifiedIdeaString = JSON.stringify(ideaData);
             // ▲▲▲ [수정 완료] ▲▲▲
 
-            chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', data: modifiedIdeaString }, (response) => {
+            // [수정] 현재 활성 채널 ID를 가져와서 함께 전송
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const channelId = res.activeChannelId || null;
+
+                chrome.runtime.sendMessage({ 
+                    action: 'add_idea_to_kanban', 
+                    data: modifiedIdeaString,
+                    channelId: channelId // 👈 추가됨 (AI 아이디어는 현재 활성 채널에 귀속)
+                }, (response) => {
                 if (response && response.success) {
                     const ideaTitle = JSON.parse(ideaObjectString).title;
                     const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };
@@ -689,6 +717,7 @@ function addDashboardEventListeners(container) {
                 } else {
                     alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
                 }
+                });
             });
             return;
         }

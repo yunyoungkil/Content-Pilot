@@ -567,7 +567,7 @@ async function generateAndSendKeywords(data, sender) {
  * @param {string} targetStatus - 저장할 상태 ('ideas', 'in-progress', 'done')
  * @returns {Promise<{success: boolean, firebaseKey?: string, error?: string}>}
  */
-async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas') {
+async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', channelId = null) {
   try {
     // origin 및 tags 판별
     let origin = ideaData.origin || null;
@@ -615,6 +615,7 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas') {
       title: ideaData.title || "제목 없음",
       description: ideaData.description || "",
       createdAt: ideaData.createdAt || Date.now(),
+      channelId: channelId, // 👈 핵심: 채널 ID 저장 (없으면 null = 공용/미지정)
       tags: tags,
       origin: origin,
       workspace: { // PRD v1.0 모델 - workspaceMode.js에서 필수로 사용
@@ -988,11 +989,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 스크랩 및 자료 관리
   if (msg.action === "scrap_element" && msg.data) {
     (async () => {
+      // [신규] 현재 활성 채널 ID 가져오기
+      const storage = await chrome.storage.local.get("activeChannelId");
+      const activeChannelId = storage.activeChannelId || null;
+
       const tags = await extractKeywords(msg.data.text);
       let scrapPayload = {
         ...msg.data,
         timestamp: Date.now(),
         tags: tags || null,
+        channelId: activeChannelId, // 👈 핵심: 현재 작업 중인 채널 ID 저장
       };
 
       // images 배열을 allImages로 변환 (기존 allImages가 있으면 병합)
@@ -1034,13 +1040,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   } else if (msg.action === "cp_get_firebase_scraps") {
+    const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
+
     firebase
       .database()
       .ref("scraps")
       .once("value", (snapshot) => {
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-        sendResponse({ data: arr });
+
+        // [수정] 필터링 로직 적용
+        const filteredScraps = arr.filter(scrap => {
+          return scrap.channelId === undefined || // 구버전 데이터 호환
+                 scrap.channelId === null ||      // 공용 스크랩
+                 scrap.channelId === targetChannelId; // 전용 스크랩
+        });
+
+        sendResponse({ data: filteredScraps });
       });
     return true;
   } else if (msg.action === "delete_scrap") {
@@ -1101,6 +1117,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     
     return true;
   } else if (msg.action === "get_all_scraps") {
+    const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
+
     firebase
       .database()
       .ref("scraps")
@@ -1108,9 +1126,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
 
+        // [수정] 필터링 로직 적용
+        // 1. channelId가 없는 경우 (구버전 데이터) -> 일단 포함 (나중에 마이그레이션으로 해결)
+        // 2. channelId가 null인 경우 (공용 데이터) -> 포함
+        // 3. channelId가 현재 활성 채널과 일치하는 경우 -> 포함
+        const filteredScraps = arr.filter(scrap => {
+          return scrap.channelId === undefined || // 구버전 데이터 호환
+                 scrap.channelId === null ||      // 공용 스크랩
+                 scrap.channelId === targetChannelId; // 전용 스크랩
+        });
+
         sendResponse({
           success: true,
-          scraps: arr.sort((a, b) => b.timestamp - a.timestamp),
+          scraps: filteredScraps.sort((a, b) => b.timestamp - a.timestamp),
         });
       });
     return true;
@@ -1773,114 +1801,66 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // 채널 및 설정
   else if (msg.action === "save_channels_and_key") {
-    const { youtubeApiKey, geminiApiKey, ...newChannelData } = msg.data;
+    const { youtubeApiKey, geminiApiKey, myChannels } = msg.data; // competitorChannels 제거됨
     const userId = "default_user";
 
     (async () => {
       try {
-        // 1. 기존 채널 목록을 가져와 삭제된 채널이 있는지 확인하고 데이터를 정리합니다.
-        const channelsRef = firebase.database().ref(`channels/${userId}`);
-        const oldChannelsSnap = await channelsRef.once("value");
-        const oldChannels = oldChannelsSnap.val();
+        // 1. 새로운 채널 데이터를 API URL로 변환하고 정리합니다.
+        const resolvedMyChannels = [];
 
-        if (oldChannels) {
-          const oldUrls = new Set();
-          ["myChannels", "competitorChannels"].forEach((type) => {
-            ["blogs", "youtubes"].forEach((platform) => {
-              (oldChannels[type]?.[platform] || []).forEach((c) =>
-                oldUrls.add(c.inputUrl)
-              );
-            });
-          });
+        if (myChannels && myChannels.blogs && Array.isArray(myChannels.blogs)) {
+          for (const blog of myChannels.blogs) {
+            // 1-1. 내 채널 URL 처리
+            const inputUrl = blog.url.trim();
+            const apiUrl = await resolveBlogUrl(inputUrl);
+            
+            // 1-2. 해당 채널에 속한 경쟁 채널 처리 (Nested)
+            const resolvedCompetitors = [];
+            if (blog.competitors && Array.isArray(blog.competitors)) {
+              for (const compUrl of blog.competitors) {
+                const compInputUrl = compUrl.trim();
+                const compApiUrl = await resolveBlogUrl(compInputUrl);
+                if (compApiUrl) {
+                  resolvedCompetitors.push({
+                    inputUrl: compInputUrl,
+                    apiUrl: compApiUrl
+                  });
+                }
+              }
+            }
 
-          const newUrls = new Set();
-          // 'myChannels'의 블로그 데이터 구조가 다르므로 별도 처리합니다.
-          (newChannelData.myChannels?.blogs || []).forEach((b) =>
-            newUrls.add(b.url)
-          );
-          (newChannelData.myChannels?.youtubes || []).forEach((y) =>
-            newUrls.add(y)
-          );
-          (newChannelData.competitorChannels?.blogs || []).forEach((b) =>
-            newUrls.add(b)
-          );
-          (newChannelData.competitorChannels?.youtubes || []).forEach((y) =>
-            newUrls.add(y)
-          );
-
-          const deletedUrls = [...oldUrls].filter((url) => !newUrls.has(url));
-          for (const url of deletedUrls) {
-            // await deleteChannelData(url); // deleteChannelData 함수가 정의되어 있다고 가정
+            if (apiUrl) {
+              resolvedMyChannels.push({
+                inputUrl: inputUrl,
+                apiUrl: apiUrl,
+                gaPropertyId: blog.gaPropertyId || null,
+                adSenseAccountId: blog.adSenseAccountId || null, // AdSense ID 추가
+                competitors: resolvedCompetitors // 경쟁 채널 목록 포함
+              });
+            }
           }
         }
 
-        // 2. 새로운 채널 데이터를 API URL로 변환하고 정리합니다.
-        const resolvedChannels = {
-          myChannels: { blogs: [], youtubes: [] },
-          competitorChannels: { blogs: [], youtubes: [] },
-        };
-
-        // '내 채널' 블로그 처리 (객체 배열)
-        if (newChannelData.myChannels?.blogs) {
-          const blogPromises = newChannelData.myChannels.blogs.map(
-            async (blog) => ({
-              inputUrl: blog.url.trim(),
-              apiUrl: await resolveBlogUrl(blog.url.trim()),
-              gaPropertyId: blog.gaPropertyId || null,
-            })
-          );
-          resolvedChannels.myChannels.blogs = (
-            await Promise.all(blogPromises)
-          ).filter((c) => c.apiUrl);
-        }
-
-        // '경쟁 채널' 블로그 처리 (문자열 배열)
-        if (newChannelData.competitorChannels?.blogs) {
-          const blogPromises = newChannelData.competitorChannels.blogs.map(
-            async (url) => ({
-              inputUrl: url.trim(),
-              apiUrl: await resolveBlogUrl(url.trim()),
-              gaPropertyId: null,
-            })
-          );
-          resolvedChannels.competitorChannels.blogs = (
-            await Promise.all(blogPromises)
-          ).filter((c) => c.apiUrl);
-        }
-
-        // 유튜브 채널 처리 (문자열 배열)
-        for (const type of ["myChannels", "competitorChannels"]) {
-          if (newChannelData[type]?.youtubes) {
-            const youtubePromises = newChannelData[type].youtubes.map(
-              async (url) => ({
-                inputUrl: url.trim(),
-                apiUrl: await resolveYoutubeUrl(url.trim(), youtubeApiKey),
-              })
-            );
-            resolvedChannels[type].youtubes = (
-              await Promise.all(youtubePromises)
-            ).filter((c) => c.apiUrl);
-          }
-        }
-
-        // 3. 최종적으로 API 키와 정리된 채널 데이터를 저장합니다.
+        // 2. 최종적으로 API 키와 정리된 채널 데이터를 저장합니다.
+        // competitorChannels 키는 더 이상 사용하지 않습니다.
         await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
-        await channelsRef.set(resolvedChannels);
+        await firebase.database().ref(`channels/${userId}`).set({
+          myChannels: { blogs: resolvedMyChannels }
+          // competitorChannels 필드 삭제
+        });
 
         sendResponse({
           success: true,
-          message:
-            "채널 정보가 저장되었습니다. 백그라운드에서 데이터 수집을 시작합니다.",
+          message: "채널 정보가 저장되었습니다. (채널 중심 아키텍처 적용됨)",
         });
 
-        // 4. 백그라운드에서 데이터 수집 및 UI 새로고침 신호를 보냅니다.
+        // 3. 데이터 수집 및 UI 새로고침
         fetchAllChannelData().then(() => {
           chrome.tabs.query({}, (tabs) => {
             tabs.forEach((tab) => {
               if (tab.id) {
-                chrome.tabs
-                  .sendMessage(tab.id, { action: "cp_data_refreshed" })
-                  .catch((e) => {});
+                chrome.tabs.sendMessage(tab.id, { action: "cp_data_refreshed" }).catch(() => {});
               }
             });
           });
@@ -1899,26 +1879,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ])
       .then(([storage, snapshot]) => {
         const rawChannelData = snapshot.val() || {};
-
-        const channelDataForUI = {
-          myChannels: {
-            blogs: rawChannelData.myChannels?.blogs || [], // 객체 배열 전체를 전달
-            youtubes: (rawChannelData.myChannels?.youtubes || []).map(
-              (c) => c.inputUrl
-            ),
-          },
-          competitorChannels: {
-            blogs: (rawChannelData.competitorChannels?.blogs || []).map(
-              (c) => c.inputUrl
-            ),
-            youtubes: (rawChannelData.competitorChannels?.youtubes || []).map(
-              (c) => c.inputUrl
-            ),
-          },
-        };
-
+        
+        // 'myChannels.blogs' 배열을 그대로 전달 (competitors가 포함되어 있음)
+        const myBlogs = rawChannelData.myChannels?.blogs || [];
         const responseData = {
-          ...channelDataForUI,
+          myChannels: {
+            blogs: myBlogs, 
+            // 유튜브는 추후 동일한 방식으로 마이그레이션 필요 (현재는 블로그 우선)
+            youtubes: rawChannelData.myChannels?.youtubes || [] 
+          },
+          // competitorChannels 전역 필드는 더 이상 반환하지 않음 (하위 호환성 위해 빈 배열 둘 수 있음)
+          competitorChannels: { blogs: [], youtubes: [] }, 
           youtubeApiKey: storage.youtubeApiKey,
           geminiApiKey: storage.geminiApiKey,
         };
@@ -2185,33 +2156,85 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   } else if (msg.action === "generate_blog_ideas") {
-    const { myContent, competitorContent, myAnalysisSummary } = msg.data;
-
-    const myDataSummary = myContent
-      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
-      .join("\n");
-
-    const competitorDataSummary = competitorContent
-      .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
-      .join("\n");
-
-    // 성과 데이터 수집 및 분석
+    const { activeChannelId } = msg;
+    
     (async () => {
-      const performanceData = await analyzePerformanceData();
-      const performanceAnalysis = performanceData?.analysis || null;
-      const decayContent = performanceData?.decayContent || null;
-      const userFeedback = await getUserFeedbackPatterns();
-      
-      // 채널 맥락 정보 구성 (트렌드 분석용)
-      const channelContext = `${myAnalysisSummary}\n\n[인기 게시물]\n${myDataSummary}`;
-      const emergingTopics = await getEmergingTopics(channelContext);
-      
-      // 콘텐츠 재활용 정보 포맷팅
-      const repurposingInfo = decayContent && decayContent.length > 0 ? `
+      try {
+        if (!activeChannelId) throw new Error("채널 ID가 전달되지 않았습니다.");
+
+        // 1. 채널 정보 가져오기 (경쟁사 목록 확인용)
+        const userId = "default_user";
+        const channelsSnap = await firebase.database().ref(`channels/${userId}/myChannels/blogs`).once("value");
+        const myChannels = channelsSnap.val() || [];
+        
+        // ID 또는 API URL로 채널 찾기
+        const currentChannel = myChannels.find(blog => {
+          const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+          return id === activeChannelId;
+        });
+
+        if (!currentChannel) throw new Error("채널 정보를 찾을 수 없습니다.");
+
+        const channelName = currentChannel.inputUrl || "내 블로그";
+        const competitorUrls = (currentChannel.competitors || []).map(c => c.inputUrl || c);
+
+        // 2. 콘텐츠 데이터 가져오기 (내 콘텐츠 & 경쟁사 콘텐츠)
+        const contentSnap = await firebase.database().ref("channel_content").once("value");
+        const allContent = contentSnap.val() || {};
+        const blogs = Object.values(allContent.blogs || {}).filter(item => item !== null);
+        
+        // 2-1. 내 콘텐츠 필터링
+        // sourceId는 보통 btoa(apiUrl) 형태임. activeChannelId와 일치하는지 확인.
+        const myContent = blogs.filter(item => item.sourceId === activeChannelId);
+
+        // 2-2. 경쟁사 콘텐츠 필터링
+        // 경쟁사 URL(inputUrl)을 기반으로 sourceId를 유추하거나 매칭해야 함.
+        // 가장 정확한 방법은 item.fullLink나 item.sourceId를 경쟁사 목록과 비교하는 것.
+        const competitorContent = blogs.filter(item => {
+          // 내 채널이 아니면서, 경쟁사 URL 목록에 포함되는지 확인 (도메인 등으로)
+          if (item.sourceId === activeChannelId) return false;
+          
+          // 경쟁사 URL 중 하나라도 item.fullLink에 포함되면 경쟁사 콘텐츠로 간주
+          return competitorUrls.some(compUrl => {
+            if (!compUrl || !item.fullLink) return false;
+            try {
+              const compUrlObj = new URL(compUrl);
+              const itemUrlObj = new URL(item.fullLink);
+              // 도메인 매칭 (정확한 매칭)
+              return compUrlObj.hostname === itemUrlObj.hostname;
+            } catch (e) {
+              // URL 파싱 실패 시 문자열 포함 여부로 판단
+              return item.fullLink.includes(compUrl);
+            }
+          });
+        });
+
+        // 3. 데이터 요약 생성 (기존 로직 활용)
+        const myDataSummary = myContent
+          .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+          .slice(0, 10)
+          .map((item) => ` - ${item.title} (댓글: ${item.commentCount || 0}, 좋아요: ${item.likeCount || 0})`)
+          .join("\n");
+
+        const competitorDataSummary = competitorContent
+          .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0))
+          .slice(0, 10)
+          .map((item) => ` - ${item.title} (출처: ${(item.fullLink || '').substring(0, 50)}...)`)
+          .join("\n");
+
+        // 4. 성과 분석 실행 (채널 ID 전달!)
+        const performanceData = await analyzePerformanceData(activeChannelId);
+        const performanceAnalysis = performanceData?.analysis || null;
+        const decayContent = performanceData?.decayContent || null;
+        const userFeedback = await getUserFeedbackPatterns();
+        
+        // 5. 채널 맥락 정보 구성 (트렌드 분석용)
+        const myAnalysisSummary = `현재 채널: ${channelName}\n분석된 내 글 수: ${myContent.length}개`;
+        const channelContext = `${myAnalysisSummary}\n\n[인기 게시물]\n${myDataSummary}`;
+        const emergingTopics = await getEmergingTopics(channelContext);
+        
+        // 콘텐츠 재활용 정보 포맷팅
+        const repurposingInfo = decayContent && decayContent.length > 0 ? `
 [재활용 후보 콘텐츠]
 과거에 높은 성과를 보였지만 시간이 지나 트래픽이 하락할 수 있는 콘텐츠들입니다. 다음 콘텐츠들을 업데이트하여 새로운 트래픽을 유입시킬 수 있습니다:
 
@@ -2224,10 +2247,10 @@ ${decayContent.map((item, idx) =>
 - 새로운 섹션 추가 (FAQ, 사용자 후기, 비교 분석 등)
 - SEO 최적화 개선 (메타 설명, 키워드 밀도 등)
 - 관련 최신 트렌드나 사례 추가
-` : '';
-      
-      // 성과 데이터가 있을 때와 없을 때 프롬프트 분기
-      const blogIdeasPrompt = `
+        ` : '';
+        
+        // 성과 데이터가 있을 때와 없을 때 프롬프트 분기
+        const blogIdeasPrompt = `
             당신은 최고의 블로그 콘텐츠 전략가입니다. 아래 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 아이디어 5가지를 제안해주세요.
 
             [정보 1: 내 채널의 핵심 성공 요인]
@@ -2311,8 +2334,20 @@ ${decayContent.map((item, idx) =>
             ]
         `;
 
-      const ideasResult = await callGeminiAPI(blogIdeasPrompt);
-      sendResponse({ success: true, ideas: ideasResult });
+        // 6. Gemini 호출 및 응답
+        const ideasResult = await callGeminiAPI(blogIdeasPrompt);
+        
+        // 분석 결과(성과 분석 텍스트)와 아이디어 결과(JSON)를 함께 반환
+        sendResponse({ 
+          success: true, 
+          analysis: performanceAnalysis || "성과 데이터가 부족하여 분석을 건너뛰었습니다.", // UI '성과 분석 결과' 영역용
+          ideas: ideasResult // UI 'AI 아이디어 제안' 영역용
+        });
+
+      } catch (error) {
+        console.error("AI 아이디어 생성 실패:", error);
+        sendResponse({ success: false, error: error.message });
+      }
     })();
 
     return true;
@@ -3175,6 +3210,8 @@ ${decayContent.map((item, idx) =>
       try {
         const ideaObjectString = msg.data;
         const targetStatus = msg.status || "ideas";
+        // [수정] 메시지에 포함된 channelId를 전달
+        const channelId = msg.channelId || null;
 
         if (!ideaObjectString) {
           sendResponse({ success: false, error: "아이디어 내용이 없습니다." });
@@ -3182,7 +3219,7 @@ ${decayContent.map((item, idx) =>
         }
 
         const ideaData = JSON.parse(ideaObjectString);
-        const response = await createAndSaveNewIdea(ideaData, targetStatus); // 분리된 헬퍼 호출
+        const response = await createAndSaveNewIdea(ideaData, targetStatus, channelId); // channelId 전달
         sendResponse(response);
       } catch (e) {
         console.error("add_idea_to_kanban 파싱 오류:", e, "데이터:", msg.data);
@@ -4143,17 +4180,37 @@ async function fetchAllChannelData() {
   }
 
   const promises = [];
-  ["myChannels", "competitorChannels"].forEach((type) => {
-    if (channels[type]) {
-      // 각 fetch 함수 호출을 promises 배열에 추가합니다.
-      channels[type].blogs?.forEach((channel) =>
-        promises.push(fetchRssFeed(channel.apiUrl, type))
-      );
-      channels[type].youtubes?.forEach((channel) =>
-        promises.push(fetchYoutubeChannel(channel.apiUrl, type))
-      );
-    }
-  });
+  
+  // 내 채널 수집
+  if (channels.myChannels) {
+    // 내 채널 블로그
+    channels.myChannels.blogs?.forEach((channel) =>
+      promises.push(fetchRssFeed(channel.apiUrl, "myChannels"))
+    );
+    // 내 채널 유튜브
+    channels.myChannels.youtubes?.forEach((channel) =>
+      promises.push(fetchYoutubeChannel(channel.apiUrl, "myChannels"))
+    );
+    
+    // 경쟁 채널 수집 (각 내 채널의 competitors에서)
+    channels.myChannels.blogs?.forEach((myChannel) => {
+      if (myChannel.competitors && Array.isArray(myChannel.competitors)) {
+        myChannel.competitors.forEach((competitor) =>
+          promises.push(fetchRssFeed(competitor.apiUrl, "competitorChannels"))
+        );
+      }
+    });
+  }
+  
+  // 하위 호환성: 구버전 전역 competitorChannels도 처리 (마이그레이션 전용)
+  if (channels.competitorChannels) {
+    channels.competitorChannels.blogs?.forEach((channel) =>
+      promises.push(fetchRssFeed(channel.apiUrl, "competitorChannels"))
+    );
+    channels.competitorChannels.youtubes?.forEach((channel) =>
+      promises.push(fetchYoutubeChannel(channel.apiUrl, "competitorChannels"))
+    );
+  }
 
   // 모든 데이터 수집 작업이 끝날 때까지 기다립니다.
   await Promise.all(promises);
@@ -4530,11 +4587,17 @@ async function callGeminiAPI(prompt) {
 // ▼▼▼ [추가] AI 재학습 및 진화를 위한 함수들 ▼▼▼
 
 /**
- * 성과 데이터를 분석하여 AI 프롬프트에 포함할 패턴을 추출합니다.
+ * [수정] 특정 채널의 성과 데이터를 분석합니다.
+ * @param {string} targetChannelId - 분석할 채널 ID (null이면 전체 채널 분석)
  * @returns {Promise<{analysis: string|null, decayContent: Array|null}>} 성과 분석 텍스트와 콘텐츠 부패 정보
  */
-async function analyzePerformanceData() {
+async function analyzePerformanceData(targetChannelId = null) {
   try {
+    if (!targetChannelId) {
+      // targetChannelId가 없으면 기존 동작 유지 (전체 채널 분석)
+      // 하위 호환성을 위해 유지
+    }
+
     const kanbanRef = firebase.database().ref("kanban");
     const snapshot = await kanbanRef.once("value");
     const allCards = snapshot.val() || {};
@@ -4546,7 +4609,15 @@ async function analyzePerformanceData() {
     for (const status in allCards) {
       for (const cardId in allCards[status]) {
         const card = allCards[status][cardId];
+        
+        // [핵심 수정] 채널 ID가 일치하는 카드만 필터링
+        // (구버전 데이터 호환을 위해 channelId가 없는 경우도 포함할지 정책 결정 필요. 여기선 엄격하게 필터링)
         if (card.performance && !card.performance.error && card.publishedUrl) {
+          // targetChannelId가 제공된 경우, 채널 ID 필터링 적용
+          if (targetChannelId !== null && card.channelId !== targetChannelId) {
+            continue; // 이 카드는 건너뛰기
+          }
+          
           const createdAt = card.createdAt || 0;
           const daysSinceCreation = (now - createdAt) / (24 * 60 * 60 * 1000);
           
@@ -6267,14 +6338,26 @@ async function runFullSystemDiagnosis() {
       const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
       const channelsData = channelsSnapshot.val() || {};
       
-      // 구버전 competitors 배열 구조 확인
-      const hasOldStructure = channelsData.competitors && Array.isArray(channelsData.competitors);
+      // 구버전 전역 competitorChannels 구조 확인
+      const hasOldGlobalCompetitors = channelsData.competitorChannels && 
+        (channelsData.competitorChannels.blogs?.length > 0 || 
+         channelsData.competitorChannels.youtubes?.length > 0);
       
-      if (hasOldStructure) {
-        sendDiagnosticLog("data_structure", "warn", "구버전 데이터 구조 감지 (competitors 배열)");
-        diagnosisResults.warnings.push("구버전 데이터 구조");
+      // 새 구조 확인: myChannels.blogs 내부에 competitors 배열이 있는지
+      const myBlogs = channelsData.myChannels?.blogs || [];
+      const hasNewStructure = myBlogs.some(blog => blog.competitors && Array.isArray(blog.competitors));
+      
+      if (hasOldGlobalCompetitors) {
+        sendDiagnosticLog("data_structure", "warn", 
+          "구버전 데이터 구조 감지 (전역 competitorChannels 필드 존재) - 마이그레이션 권장");
+        diagnosisResults.warnings.push("구버전 데이터 구조 (전역 competitorChannels)");
+      } else if (myBlogs.length > 0 && !hasNewStructure) {
+        sendDiagnosticLog("data_structure", "warn", 
+          "채널 중심 아키텍처 구조가 완전히 적용되지 않음 (competitors 배열 누락 가능)");
+        diagnosisResults.warnings.push("데이터 구조 불완전");
       } else {
-        sendDiagnosticLog("data_structure", "pass", "채널 데이터 구조 정상");
+        sendDiagnosticLog("data_structure", "pass", 
+          `채널 데이터 구조 정상 (채널 중심 아키텍처: ${myBlogs.length}개 채널, ${myBlogs.filter(b => b.competitors?.length > 0).length}개에 경쟁사 포함)`);
       }
     } catch (e) {
       sendDiagnosticLog("data_structure", "fail", `구조 확인 오류: ${e.message}`);
@@ -6598,3 +6681,93 @@ async function runFullSystemDiagnosis() {
     return diagnosisResults;
   }
 }
+
+// ▼▼▼ [6단계] 데이터 마이그레이션 및 신규 사용자 처리 ▼▼▼
+
+/**
+ * [신규] 데이터 마이그레이션 함수 (기존 수동 스크립트의 정식 버전)
+ * channelId가 없는 기존 데이터를 안전하게 마이그레이션합니다.
+ */
+async function runDataMigration() {
+  console.log("🚀 [Migration] 데이터 마이그레이션 시작...");
+  const db = firebase.database();
+  const userId = "default_user";
+
+  try {
+    // 1-1. 내 채널 목록 확인
+    const channelsSnap = await db.ref(`channels/${userId}/myChannels/blogs`).once("value");
+    const myBlogs = channelsSnap.val() || [];
+    
+    // 채널이 하나도 없으면 마이그레이션 불가능 (공용으로 처리하거나 중단)
+    // 여기서는 channelId: null (공용)로 두는 것이 안전함
+    if (myBlogs.length === 0) {
+      console.log("[Migration] 등록된 채널이 없어 마이그레이션을 건너뜁니다.");
+      return;
+    }
+
+    // 1-2. 타겟 채널 결정
+    // 채널이 딱 1개라면 그 채널로 몰아주고, 2개 이상이면 '공용(null)'으로 둠 (안전한 선택)
+    let targetChannelId = null;
+    if (myBlogs.length === 1) {
+      const blog = myBlogs[0];
+      targetChannelId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : null);
+      console.log(`[Migration] 단일 채널 감지. 타겟 ID: ${targetChannelId}`);
+    } else {
+      console.log("[Migration] 다중 채널 감지. 기존 데이터는 '공용'으로 유지합니다.");
+    }
+
+    let updatedCount = 0;
+
+    // 1-3. 칸반 데이터 마이그레이션
+    const kanbanSnap = await db.ref("kanban").once("value");
+    const kanban = kanbanSnap.val() || {};
+    
+    for (const status in kanban) {
+      for (const id in kanban[status]) {
+        // channelId가 없는 고아 데이터만 처리
+        if (kanban[status][id].channelId === undefined) {
+          await db.ref(`kanban/${status}/${id}`).update({ channelId: targetChannelId });
+          updatedCount++;
+        }
+      }
+    }
+
+    // 1-4. 스크랩 데이터 마이그레이션
+    const scrapsSnap = await db.ref("scraps").once("value");
+    const scraps = scrapsSnap.val() || {};
+
+    for (const id in scraps) {
+      if (scraps[id].channelId === undefined) {
+        // 스크랩은 기본적으로 '공용(null)'이 안전하지만, 단일 채널 사용자면 귀속시킴
+        await db.ref(`scraps/${id}`).update({ channelId: targetChannelId }); 
+        updatedCount++;
+      }
+    }
+
+    console.log(`✅ [Migration] 완료: 총 ${updatedCount}개 데이터 처리됨`);
+  
+  } catch (error) {
+    console.error("❌ [Migration] 오류 발생:", error);
+  }
+}
+
+// [수정] onInstalled 리스너 (알람 등록 + 마이그레이션 실행)
+chrome.runtime.onInstalled.addListener((details) => {
+  console.log("Content Pilot 설치/업데이트됨:", details.reason);
+
+  // 2-1. 기본 설정 초기화
+  chrome.storage.local.set({
+    isScrapingActive: false,
+    highlightToggleState: false,
+  });
+
+  // 2-2. 알람 재등록 (기존 로직)
+  chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
+  chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
+
+  // 2-3. [신규] 업데이트 시 마이그레이션 실행
+  if (details.reason === "update" || details.reason === "install") {
+    // 비동기로 실행 (설치 과정 차단 안 함)
+    runDataMigration();
+  }
+});

@@ -1,7 +1,7 @@
 // js/ui/panel.js (워크스페이스 연동 로직 최종 적용)
 
 import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "./dashboardMode.js";
-import { renderPanelHeader } from "./header.js";
+import { renderPanelHeader, renderHeaderAndTabs, addHeaderEventListeners } from "./header.js";
 import { renderScrapbook } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
 import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js"; 
@@ -93,8 +93,83 @@ export function createAndShowPanel() {
     renderHeaderAndTabs(shadowRoot);
     addEventListenersToPanel(shadowRoot); 
 
-    renderDashboard(mainArea); 
-    addDashboardEventListeners(mainArea);
+    // [수정] 초기 로드 로직 (온보딩 체크)
+    chrome.storage.local.get("activeChannelId", (res) => {
+      // 1. 활성 채널 ID가 있으면 -> 대시보드로 정상 진입
+      if (res.activeChannelId) {
+        renderDashboard(mainArea); 
+        addDashboardEventListeners(mainArea);
+        
+        // 헤더 이벤트 리스너 초기화 (채널 선택기 등)
+        import("./header.js").then(module => {
+          module.addHeaderEventListeners(shadowRoot);
+        });
+        return;
+      }
+
+      // 2. 활성 채널 ID가 없으면 -> 채널 목록 확인 (비동기)
+      chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+        const myBlogs = response?.data?.myChannels?.blogs || [];
+
+        if (myBlogs.length > 0) {
+          // 2-A. 채널은 있는데 선택이 안 된 경우 -> 첫 번째 채널 자동 선택 후 대시보드 이동
+          const firstId = myBlogs[0].id || (myBlogs[0].apiUrl ? btoa(myBlogs[0].apiUrl).replace(/=/g, "") : "");
+          chrome.storage.local.set({ activeChannelId: firstId }, () => {
+            // 헤더의 선택기 UI도 갱신해야 하므로 새로고침 메시지 전송 등 필요할 수 있음
+            // 여기서는 일단 대시보드로 이동
+            renderDashboard(mainArea); 
+            addDashboardEventListeners(mainArea);
+            
+            // 헤더 이벤트 리스너 초기화 (채널 선택기 등)
+            import("./header.js").then(module => {
+              module.addHeaderEventListeners(shadowRoot);
+            });
+          });
+        } else {
+          // 2-B. 채널이 하나도 없는 '찐' 신규 사용자 -> '채널 관리' 화면 강제 표시
+          console.log("[Panel] 신규 사용자 감지: 채널 관리 화면으로 이동");
+          
+          // 탭 UI 선택 해제
+          const navItems = shadowRoot.querySelectorAll(".cp-mode-tab");
+          navItems.forEach(item => item.classList.remove("active"));
+          
+          // 채널 모드 로드 및 안내 메시지 표시
+          renderChannelMode(mainArea);
+          // (선택) 안내 토스트 메시지 띄우기
+          // showToast("👋 환영합니다! 먼저 '채널 추가'를 진행해주세요."); 
+        }
+      });
+    });
+
+    // [신규] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === "local" && changes.activeChannelId) {
+        console.log("[Panel] 채널 변경 감지, 현재 탭 새로고침");
+        
+        // 현재 활성화된 탭 찾기
+        const activeTabBtn = shadowRoot.querySelector(".cp-mode-tab.active");
+        if (activeTabBtn) {
+          const tabName = activeTabBtn.dataset.key;
+          
+          // 탭별 새로고침 로직
+          if (tabName === "kanban") {
+            // 칸반은 데이터 다시 그리기만 호출 (전체 리로드 불필요)
+            chrome.runtime.sendMessage({ action: "get_kanban_data" });
+          } else if (tabName === "dashboard") {
+            // 대시보드 새로고침
+            import("./dashboardMode.js").then(module => {
+              module.renderDashboard(mainArea);
+              module.addDashboardEventListeners(mainArea);
+            });
+          } else if (tabName === "scrapbook") {
+            // 스크랩북 새로고침
+            import("./scrapbookMode.js").then(module => {
+              module.renderScrapbook(mainArea);
+            });
+          }
+        }
+      }
+    });
   }
 
   chrome.storage.local.set({ 
@@ -139,12 +214,7 @@ export function restorePanelAfterScrap(wasVisible) {
 }
 
 
-function renderHeaderAndTabs(shadowRoot) {
-    const headerArea = shadowRoot.querySelector("#cp-header-area");
-    if (headerArea) {
-        headerArea.innerHTML = renderPanelHeader();
-    }
-}
+// renderHeaderAndTabs는 header.js에서 import하여 사용
 
 
 function addEventListenersToPanel(shadowRoot) {
@@ -224,8 +294,6 @@ function addEventListenersToPanel(shadowRoot) {
                 renderPerformanceDashboard(mainArea);
             } else if (activeKey === 'report') {
                 renderPerformanceReport(mainArea);
-            } else if (activeKey === 'channel') {
-                renderChannelMode(mainArea);
             } else {
                 mainArea.innerHTML = `<h1 style="text-align:center; margin-top: 50px;">${tab.textContent} 모드는 구현 예정입니다.</h1>`;
             }

@@ -14,7 +14,7 @@ export function renderPanelHeader() {
      { key: "performance", label: "성과 대시보드", color: "#9C27B0" },
      { key: "report", label: "성과 리포트", color: "#FF6B6B" },
      { key: "draft", label: "초안 작성", color: "#FBBC05" },
-     { key: "channel", label: "채널 연동", color: "#EA4335" },
+     // 채널 연동 탭 제거됨 - 헤더의 글로벌 선택기로 대체
   ];
 
   return `
@@ -22,6 +22,13 @@ export function renderPanelHeader() {
       <div style="display:flex;align-items:center;gap:10px;">
         <img src="${iconUrl}" alt="Content Pilot" style="height:26px;width:26px;">
         <span style="font-size:18px;font-weight:700;color:#222;letter-spacing:0.5px;">Content Pilot</span>
+      </div>
+      <div style="flex:1;display:flex;justify-content:center;padding:0 16px;">
+        <div class="global-channel-wrapper" style="position:relative;min-width:200px;max-width:300px;width:100%;">
+          <select id="global-channel-selector" class="channel-select" title="작업할 채널 선택" style="width:100%;padding:6px 32px 6px 12px;font-size:14px;border:1px solid #dadce0;border-radius:18px;background-color:#f8f9fa;color:#3c4043;cursor:pointer;appearance:none;background-image:url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%235F6368%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');background-repeat:no-repeat;background-position:right 12px center;background-size:10px;transition:all 0.2s;">
+            <option value="" disabled selected>채널 로딩 중...</option>
+          </select>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:2px;">
         <button id="cp-panel-fullscreen-exit" class="cp-panel-icon-btn">
@@ -45,6 +52,7 @@ export function renderPanelHeader() {
             isLayoutMode ? "#1976d2" : "#888"
           };user-select:none;">레이아웃</span>
         </label>
+        <button id="open-diagnostics-btn" class="cp-panel-icon-btn" title="시스템 진단" style="font-size:18px;padding:4px;border-radius:50%;transition:background 0.2s;">🛠️</button>
         <div style="position:relative;">
           <button id="cp-settings-btn" class="cp-panel-icon-btn" title="설정">
             <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-160q-33 0-56.5-23.5T400-240q0-33 23.5-56.5T480-320q33 0 56.5 23.5T560-240q0 33-23.5 56.5T480-160Zm0-240q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm0-240q-33 0-56.5-23.5T400-720q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720q0 33-23.5 56.5T480-640Z"/></svg>
@@ -80,4 +88,141 @@ export function renderPanelHeader() {
     </div>
     `}
   `;
+}
+
+// 헤더 이벤트 리스너 추가 함수
+export function addHeaderEventListeners(shadowRoot) {
+  // 글로벌 채널 선택기 초기화
+  initGlobalChannelSelector(shadowRoot);
+  
+  // 시스템 진단 버튼
+  const diagBtn = shadowRoot.querySelector("#open-diagnostics-btn");
+  if (diagBtn) {
+    diagBtn.addEventListener("click", () => {
+      const mainArea = shadowRoot.querySelector("#cp-main-area");
+      if (mainArea) {
+        window.__cp_active_mode = 'admin';
+        renderHeaderAndTabs(shadowRoot);
+        import("./adminMode.js").then(module => module.renderAdminMode(mainArea));
+      }
+    });
+  }
+}
+
+// 글로벌 채널 선택기 초기화
+async function initGlobalChannelSelector(shadowRoot) {
+  const selector = shadowRoot.querySelector("#global-channel-selector");
+  if (!selector) return;
+
+  // 1. 저장된 활성 채널 ID 가져오기
+  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+
+  // 2. 채널 목록 가져오기
+  chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+    if (response && response.success) {
+      const myBlogs = response.data.myChannels?.blogs || [];
+      
+      // 옵션 초기화
+      selector.innerHTML = "";
+
+      if (myBlogs.length === 0) {
+        // 채널이 없을 때
+        const option = document.createElement("option");
+        option.value = "__MANAGE__";
+        option.textContent = "👉 채널을 추가해주세요"; // 문구 변경
+        selector.appendChild(option);
+        selector.style.borderColor = "#ea4335"; // 빨간색 테두리로 강조
+        // openChannelManager(); // panel.js에서 처리하므로 여기선 생략 가능
+      } else {
+        // 채널 목록 추가
+        let foundActive = false;
+        myBlogs.forEach(blog => {
+          const option = document.createElement("option");
+          // ID가 없으면 API URL을 ID로 사용 (마이그레이션 호환)
+          const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+          option.value = id;
+          option.textContent = `📺 ${blog.inputUrl || blog.url}`;
+          selector.appendChild(option);
+
+          if (id === activeChannelId) foundActive = true;
+        });
+
+        // 저장된 채널이 유효하면 선택, 아니면 첫 번째 자동 선택
+        if (foundActive) {
+          selector.value = activeChannelId;
+        } else if (selector.options.length > 0) {
+          selector.value = selector.options[0].value;
+          // 변경된 첫 번째 채널을 자동 저장
+          chrome.storage.local.set({ activeChannelId: selector.value });
+        }
+
+        // 구분선 및 관리 메뉴 추가
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "──────────";
+        selector.appendChild(separator);
+
+        const manageOption = document.createElement("option");
+        manageOption.value = "__MANAGE__";
+        manageOption.textContent = "⚙️ 채널 관리...";
+        selector.appendChild(manageOption);
+      }
+    }
+  });
+
+  // 3. 변경 이벤트 리스너
+  selector.addEventListener("change", (e) => {
+    const selectedValue = e.target.value;
+
+    if (selectedValue === "__MANAGE__") {
+      // '채널 관리' 선택 시
+      openChannelManager(shadowRoot);
+      
+      // UI 상으로는 다시 원래 채널(또는 첫번째)로 돌려놓기 (UX)
+      chrome.storage.local.get("activeChannelId", (res) => {
+        if (res.activeChannelId) {
+          // 목록에 해당 ID가 있는지 확인 후 복구
+          const exists = Array.from(selector.options).some(opt => opt.value === res.activeChannelId);
+          if (exists) selector.value = res.activeChannelId;
+        }
+      });
+    } else {
+      // 일반 채널 선택 시 -> 상태 저장 및 새로고침
+      chrome.storage.local.set({ activeChannelId: selectedValue }, () => {
+        console.log(`[Global] 활성 채널 변경됨: ${selectedValue}`);
+        
+        // 현재 탭 새로고침 (패널 전체에 변경 알림)
+        const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
+        if (activeTab) {
+          // 약간의 지연 후 리로드 (storage 저장 보장)
+          setTimeout(() => activeTab.click(), 50);
+        }
+      });
+    }
+  });
+}
+
+// 채널 관리 화면으로 전환하는 헬퍼
+function openChannelManager(shadowRoot) {
+  const mainArea = shadowRoot.querySelector("#cp-main-area");
+  if (mainArea) {
+    // 탭 스타일 초기화
+    shadowRoot.querySelectorAll(".cp-mode-tab").forEach(btn => btn.classList.remove("active"));
+    
+    // 채널 관리 UI 렌더링
+    window.__cp_active_mode = 'channel';
+    import("./channelMode.js").then(module => {
+      module.renderChannelMode(mainArea);
+      renderHeaderAndTabs(shadowRoot);
+    });
+  }
+}
+
+// renderHeaderAndTabs 함수 (panel.js에서 사용)
+export function renderHeaderAndTabs(shadowRoot) {
+  const headerArea = shadowRoot.querySelector("#cp-header-area");
+  if (headerArea) {
+    headerArea.innerHTML = renderPanelHeader();
+    addHeaderEventListeners(shadowRoot);
+  }
 }

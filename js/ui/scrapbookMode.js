@@ -38,14 +38,22 @@ export function renderScrapbook(container) {
 }
 
 function requestScrapsAndRender(container) {
-    chrome.runtime.sendMessage({ action: "cp_get_firebase_scraps" }, (response) => {
-        if (response && response.data) {
-            allScraps = response.data.sort((a, b) => b.timestamp - a.timestamp);
-            renderScrapList(allScraps, container);
-        } else {
-            const listContainer = container.querySelector('.scrapbook-list-cards');
-            if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
-        }
+    // [수정] 활성 채널 ID를 가져와서 함께 전송
+    chrome.storage.local.get("activeChannelId", (res) => {
+        const activeChannelId = res.activeChannelId || null;
+
+        chrome.runtime.sendMessage({ 
+            action: "cp_get_firebase_scraps",
+            channelId: activeChannelId // 👈 추가됨
+        }, (response) => {
+            if (response && response.data) {
+                allScraps = response.data.sort((a, b) => b.timestamp - a.timestamp);
+                renderScrapList(allScraps, container);
+            } else {
+                const listContainer = container.querySelector('.scrapbook-list-cards');
+                if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
+            }
+        });
     });
 }
 
@@ -472,30 +480,36 @@ function renderDetailView(scrapId, container) {
         };
         
         // background.js에 아이디어 추가 요청
-        chrome.runtime.sendMessage({
-          action: 'add_idea_to_kanban',
-          data: JSON.stringify(ideaData)
-        }, (response) => {
-          if (response && response.success) {
-            showConfirmationToast('✅ 아이디어로 전환되었습니다! 기획 보드에서 확인하세요.', null);
-            
-            // 기획 보드로 이동 (선택적)
-            const host = document.getElementById("content-pilot-host");
-            if (host && host.shadowRoot) {
-              const mainArea = host.shadowRoot.querySelector('#cp-main-area');
-              if (mainArea) {
-                // kanban 모드로 전환
-                window.__cp_active_mode = 'kanban';
-                renderKanban(mainArea);
-                addKanbanEventListeners(mainArea);
-                
-                // 헤더도 업데이트
-                renderPanelHeader(host.shadowRoot);
+        // [수정] 활성 채널 ID를 가져와서 함께 전송
+        chrome.storage.local.get("activeChannelId", (res) => {
+          const activeChannelId = res.activeChannelId || null;
+
+          chrome.runtime.sendMessage({
+            action: 'add_idea_to_kanban',
+            data: JSON.stringify(ideaData),
+            channelId: activeChannelId // 👈 추가됨
+          }, (response) => {
+            if (response && response.success) {
+              showConfirmationToast('✅ 아이디어로 전환되었습니다! 기획 보드에서 확인하세요.', null);
+              
+              // 기획 보드로 이동 (선택적)
+              const host = document.getElementById("content-pilot-host");
+              if (host && host.shadowRoot) {
+                const mainArea = host.shadowRoot.querySelector('#cp-main-area');
+                if (mainArea) {
+                  // kanban 모드로 전환
+                  window.__cp_active_mode = 'kanban';
+                  renderKanban(mainArea);
+                  addKanbanEventListeners(mainArea);
+                  
+                  // 헤더도 업데이트
+                  renderPanelHeader(host.shadowRoot);
+                }
               }
+            } else {
+              showConfirmationToast('❌ 아이디어 전환에 실패했습니다: ' + (response?.error || '알 수 없는 오류'), null);
             }
-          } else {
-            showConfirmationToast('❌ 아이디어 전환에 실패했습니다: ' + (response?.error || '알 수 없는 오류'), null);
-          }
+          });
         });
       });
       
