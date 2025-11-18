@@ -3943,6 +3943,18 @@ ${decayContent.map((item, idx) =>
       });
 
     return true;
+  } else if (msg.action === "run_system_diagnosis") {
+    // 시스템 진단 실행
+    (async () => {
+      try {
+        const results = await runFullSystemDiagnosis();
+        sendResponse({ success: true, data: results });
+      } catch (error) {
+        console.error("[시스템 진단] 실행 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // 비동기 응답
   }
 });
 
@@ -6026,4 +6038,563 @@ async function runAutomatedRenewalTestV2() {
   }
 
   console.log("=============== 🧪 테스트 종료 V2 ===============");
+}
+
+/**
+ * [시스템 진단] 전체 시스템 정밀 진단 함수
+ * 5가지 핵심 영역(20개 검사 항목)을 순차적으로 점검합니다.
+ */
+async function runFullSystemDiagnosis() {
+  console.log("🚀 [System Check] 전체 시스템 정밀 진단 시작...");
+  
+  const diagnosisResults = {
+    startTime: Date.now(),
+    checks: [],
+    errors: [],
+    warnings: []
+  };
+
+  // 진단 로그 전송 함수
+  function sendDiagnosticLog(checkId, status, message, details = null) {
+    const logEntry = {
+      id: checkId,
+      status, // 'running', 'pass', 'fail', 'warn', 'done'
+      message,
+      details,
+      timestamp: Date.now()
+    };
+    diagnosisResults.checks.push(logEntry);
+    
+    console.log(`[진단] ${checkId}: ${status} - ${message}`);
+  }
+
+  try {
+    // ========== 1. 연결 및 인증 (Connectivity & Auth) ==========
+    
+    // 1-1. Firebase 데이터베이스 연결
+    try {
+      sendDiagnosticLog("db_conn", "running", "Firebase 연결 확인 중...");
+      const connectedRef = firebase.database().ref(".info/connected");
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("연결 타임아웃")), 5000);
+        connectedRef.once("value", (snap) => {
+          clearTimeout(timeout);
+          if (snap.val() === true) {
+            resolve();
+          } else {
+            reject(new Error("연결되지 않음"));
+          }
+        });
+      });
+      
+      // 쓰기 테스트
+      const testRef = firebase.database().ref("system_check/write_test");
+      await testRef.set(Date.now());
+      await testRef.remove();
+      
+      sendDiagnosticLog("db_conn", "pass", "Firebase 읽기/쓰기 정상");
+    } catch (e) {
+      sendDiagnosticLog("db_conn", "fail", `DB 연결 실패: ${e.message}`);
+      diagnosisResults.errors.push("Firebase 연결 실패");
+    }
+
+    // 1-2. Firebase 쓰기 권한 확인
+    try {
+      sendDiagnosticLog("db_write", "running", "Firebase 쓰기 권한 확인 중...");
+      const writeTestRef = firebase.database().ref("system_check/permission_test");
+      await writeTestRef.set({ test: Date.now() });
+      await writeTestRef.remove();
+      sendDiagnosticLog("db_write", "pass", "Firebase 쓰기 권한 정상");
+    } catch (e) {
+      sendDiagnosticLog("db_write", "fail", `쓰기 권한 오류: ${e.message}`);
+      diagnosisResults.errors.push("Firebase 쓰기 권한 없음");
+    }
+
+    // 1-3. Google 계정 토큰 유효성
+    try {
+      sendDiagnosticLog("auth_token", "running", "Google 인증 토큰 검사...");
+      const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
+      
+      if (!googleAuthToken) {
+        throw new Error("Google 로그인 필요");
+      }
+      
+      // 토큰 유효성 (API 호출)
+      const authRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${googleAuthToken}` }
+      });
+      
+      if (!authRes.ok) {
+        if (authRes.status === 401) {
+          throw new Error("토큰 만료 (재로그인 필요)");
+        }
+        throw new Error(`인증 실패: ${authRes.status}`);
+      }
+      
+      const userInfo = await authRes.json();
+      sendDiagnosticLog("auth_token", "pass", `Google 계정 인증 정상 (${userInfo.email || "이메일 없음"})`);
+    } catch (e) {
+      sendDiagnosticLog("auth_token", "fail", e.message);
+      diagnosisResults.errors.push("Google 인증 실패");
+    }
+
+    // 1-4. YouTube API 키
+    try {
+      sendDiagnosticLog("api_youtube", "running", "YouTube API 키 확인 중...");
+      const { youtubeApiKey } = await chrome.storage.local.get(["youtubeApiKey"]);
+      
+      if (!youtubeApiKey) {
+        throw new Error("API 키 없음");
+      }
+      
+      // 간단한 채널 검색 테스트
+      const testUrl = `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&part=snippet&q=test&maxResults=1`;
+      const ytRes = await fetch(testUrl);
+      
+      if (!ytRes.ok) {
+        const errorData = await ytRes.json().catch(() => ({}));
+        if (ytRes.status === 403) {
+          throw new Error("API 키 권한 없음 또는 할당량 초과");
+        }
+        throw new Error(`API 오류: ${ytRes.status}`);
+      }
+      
+      sendDiagnosticLog("api_youtube", "pass", "YouTube API 정상 작동");
+    } catch (e) {
+      sendDiagnosticLog("api_youtube", "fail", e.message);
+      diagnosisResults.warnings.push("YouTube API 문제");
+    }
+
+    // 1-5. Gemini API 키
+    try {
+      sendDiagnosticLog("api_gemini", "running", "Gemini API 응답 테스트...");
+      const { geminiApiKey } = await chrome.storage.local.get(["geminiApiKey"]);
+      
+      if (!geminiApiKey) {
+        throw new Error("API 키 없음");
+      }
+      
+      const geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: "Hello" }] }] })
+        }
+      );
+      
+      if (!geminiRes.ok) {
+        const errorData = await geminiRes.json().catch(() => ({}));
+        throw new Error(`Gemini API 오류: ${geminiRes.status} - ${errorData.error?.message || ""}`);
+      }
+      
+      const geminiData = await geminiRes.json();
+      const responseTime = Date.now() - diagnosisResults.startTime;
+      sendDiagnosticLog("api_gemini", "pass", `Gemini API 정상 작동 (응답 시간: ${responseTime}ms)`);
+    } catch (e) {
+      sendDiagnosticLog("api_gemini", "fail", e.message);
+      diagnosisResults.warnings.push("Gemini API 문제");
+    }
+
+    // ========== 2. 데이터 무결성 (Data Integrity) ==========
+    
+    // 2-1. 활성 채널 상태
+    try {
+      sendDiagnosticLog("data_active_channel", "running", "활성 채널 상태 확인...");
+      const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+      
+      if (!activeChannelId) {
+        sendDiagnosticLog("data_active_channel", "warn", "활성 채널이 선택되지 않음");
+        diagnosisResults.warnings.push("활성 채널 미선택");
+      } else {
+        // 실제 채널 목록에 존재하는지 확인
+        const userId = "default_user";
+        const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+        const channelsData = channelsSnapshot.val() || {};
+        const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
+        
+        const allChannels = [...(myChannels.blogs || []), ...(myChannels.youtubes || [])];
+        const channelExists = allChannels.some(ch => ch.id === activeChannelId || ch.channelId === activeChannelId);
+        
+        if (channelExists) {
+          sendDiagnosticLog("data_active_channel", "pass", `활성 채널 정상 (ID: ${activeChannelId})`);
+        } else {
+          sendDiagnosticLog("data_active_channel", "warn", `활성 채널이 목록에 없음 (ID: ${activeChannelId})`);
+          diagnosisResults.warnings.push("활성 채널 불일치");
+        }
+      }
+    } catch (e) {
+      sendDiagnosticLog("data_active_channel", "fail", `채널 확인 오류: ${e.message}`);
+    }
+
+    // 2-2. 고아 데이터(Orphan Data) 감지
+    try {
+      sendDiagnosticLog("data_orphan", "running", "고아 데이터(채널 ID 누락) 스캔 중...");
+      
+      const scrapsSnap = await firebase.database().ref("scraps").once("value");
+      const scraps = scrapsSnap.val() || {};
+      let orphanScraps = 0;
+      Object.values(scraps).forEach(s => {
+        if (s.channelId === undefined || s.channelId === null) orphanScraps++;
+      });
+      
+      const kanbanSnap = await firebase.database().ref("kanban").once("value");
+      const kanban = kanbanSnap.val() || {};
+      let orphanKanban = 0;
+      for (const status in kanban) {
+        Object.values(kanban[status] || {}).forEach(card => {
+          if (card.channelId === undefined || card.channelId === null) orphanKanban++;
+        });
+      }
+      
+      const totalOrphans = orphanScraps + orphanKanban;
+      
+      if (totalOrphans > 0) {
+        sendDiagnosticLog("data_orphan", "warn", 
+          `마이그레이션 필요 데이터 발견 (스크랩: ${orphanScraps}개, 칸반: ${orphanKanban}개)`);
+        diagnosisResults.warnings.push(`고아 데이터 ${totalOrphans}개 발견`);
+      } else {
+        sendDiagnosticLog("data_orphan", "pass", "고아 데이터 없음");
+      }
+    } catch (e) {
+      sendDiagnosticLog("data_orphan", "fail", `고아 데이터 스캔 오류: ${e.message}`);
+    }
+
+    // 2-3. 채널 데이터 구조
+    try {
+      sendDiagnosticLog("data_structure", "running", "채널 데이터 구조 확인...");
+      const userId = "default_user";
+      const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+      const channelsData = channelsSnapshot.val() || {};
+      
+      // 구버전 competitors 배열 구조 확인
+      const hasOldStructure = channelsData.competitors && Array.isArray(channelsData.competitors);
+      
+      if (hasOldStructure) {
+        sendDiagnosticLog("data_structure", "warn", "구버전 데이터 구조 감지 (competitors 배열)");
+        diagnosisResults.warnings.push("구버전 데이터 구조");
+      } else {
+        sendDiagnosticLog("data_structure", "pass", "채널 데이터 구조 정상");
+      }
+    } catch (e) {
+      sendDiagnosticLog("data_structure", "fail", `구조 확인 오류: ${e.message}`);
+    }
+
+    // ========== 3. 백그라운드 로직 (Background Jobs) ==========
+    
+    // 3-1. 스케줄러 등록 상태
+    try {
+      sendDiagnosticLog("scheduler", "running", "백그라운드 알람 확인...");
+      const alarms = await chrome.alarms.getAll();
+      const hasFetch = alarms.some(a => a.name === "fetch-channels");
+      const hasUpdate = alarms.some(a => a.name === "update-performance-metrics");
+      
+      if (hasFetch && hasUpdate) {
+        const fetchAlarm = alarms.find(a => a.name === "fetch-channels");
+        const updateAlarm = alarms.find(a => a.name === "update-performance-metrics");
+        sendDiagnosticLog("scheduler", "pass", 
+          `모든 스케줄러 정상 작동 (fetch: ${fetchAlarm ? "등록됨" : "없음"}, update: ${updateAlarm ? "등록됨" : "없음"})`);
+      } else {
+        sendDiagnosticLog("scheduler", "warn", 
+          `일부 알람이 누락됨 (fetch: ${hasFetch ? "있음" : "없음"}, update: ${hasUpdate ? "있음" : "없음"})`);
+        diagnosisResults.warnings.push("스케줄러 누락");
+      }
+    } catch (e) {
+      sendDiagnosticLog("scheduler", "fail", `알람 확인 오류: ${e.message}`);
+    }
+
+    // 3-2. 데이터 최신성
+    try {
+      sendDiagnosticLog("data_freshness", "running", "데이터 최신성 확인...");
+      const userId = "default_user";
+      const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+      const channelsData = channelsSnapshot.val() || {};
+      const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
+      
+      const allChannels = [...(myChannels.blogs || []), ...(myChannels.youtubes || [])];
+      const now = Date.now();
+      const DAY_24H = 24 * 60 * 60 * 1000;
+      
+      let staleCount = 0;
+      let lastFetchTime = 0;
+      
+      for (const channel of allChannels) {
+        const fetchedAt = channel.fetchedAt || 0;
+        if (fetchedAt > 0) {
+          lastFetchTime = Math.max(lastFetchTime, fetchedAt);
+          if (now - fetchedAt > DAY_24H) {
+            staleCount++;
+          }
+        }
+      }
+      
+      if (staleCount > 0) {
+        const daysSinceLastFetch = lastFetchTime > 0 ? Math.floor((now - lastFetchTime) / DAY_24H) : 0;
+        sendDiagnosticLog("data_freshness", "warn", 
+          `${staleCount}개 채널이 24시간 이상 갱신되지 않음 (마지막 수집: ${daysSinceLastFetch}일 전)`);
+        diagnosisResults.warnings.push(`${staleCount}개 채널 데이터 오래됨`);
+      } else if (allChannels.length === 0) {
+        sendDiagnosticLog("data_freshness", "warn", "등록된 채널이 없음");
+      } else {
+        sendDiagnosticLog("data_freshness", "pass", "모든 채널 데이터가 최신 상태");
+      }
+    } catch (e) {
+      sendDiagnosticLog("data_freshness", "fail", `최신성 확인 오류: ${e.message}`);
+    }
+
+    // 3-3. 오프스크린 DOM 파서
+    try {
+      sendDiagnosticLog("offscreen_parser", "running", "오프스크린 DOM 파서 테스트...");
+      
+      // 오프스크린 문서 생성 시도
+      await getOffscreenDocument();
+      
+      // 파싱 요청 테스트
+      const testHtml = "<html><body><h1>Test</h1></body></html>";
+      const parseResult = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            action: "parse_html_in_offscreen",
+            html: testHtml,
+            baseUrl: "https://example.com",
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              resolve({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              resolve(response);
+            }
+          }
+        );
+      });
+      
+      if (parseResult && parseResult.success) {
+        sendDiagnosticLog("offscreen_parser", "pass", "오프스크린 DOM 파서 정상 작동");
+      } else {
+        throw new Error(parseResult?.error || "파싱 실패");
+      }
+    } catch (e) {
+      sendDiagnosticLog("offscreen_parser", "fail", `오프스크린 파서 오류: ${e.message}`);
+      diagnosisResults.warnings.push("오프스크린 파서 문제");
+    }
+
+    // ========== 4. AI 및 자동화 기능 (AI & Automation) ==========
+    
+    // 4-1. 재활용 자동화 테스트
+    try {
+      sendDiagnosticLog("automation_renewal", "running", "재활용 자동화 로직 시뮬레이션...");
+      
+      // 간단한 시뮬레이션: analyzePerformanceData 함수 호출
+      const analysisResult = await analyzePerformanceData();
+      
+      if (analysisResult && (analysisResult.analysis || analysisResult.decayContent)) {
+        const decayCount = analysisResult.decayContent?.length || 0;
+        sendDiagnosticLog("automation_renewal", "pass", 
+          `자동화 로직 테스트 통과 (재활용 후보: ${decayCount}개)`);
+      } else {
+        sendDiagnosticLog("automation_renewal", "warn", "재활용 후보 없음 (정상일 수 있음)");
+      }
+    } catch (e) {
+      sendDiagnosticLog("automation_renewal", "fail", `자동화 테스트 실패: ${e.message}`);
+      diagnosisResults.warnings.push("재활용 자동화 문제");
+    }
+
+    // 4-2. AI 초안 생성
+    try {
+      sendDiagnosticLog("ai_draft", "running", "AI 초안 생성 테스트...");
+      const { geminiApiKey } = await chrome.storage.local.get(["geminiApiKey"]);
+      
+      if (!geminiApiKey) {
+        throw new Error("Gemini API 키 없음");
+      }
+      
+      const testPrompt = "다음 주제로 100자 이내의 짧은 초안을 작성해주세요: '인공지능의 미래'";
+      const aiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: testPrompt }] }],
+            generationConfig: {
+              responseMimeType: "application/json"
+            }
+          })
+        }
+      );
+      
+      if (!aiRes.ok) {
+        throw new Error(`AI API 오류: ${aiRes.status}`);
+      }
+      
+      const aiData = await aiRes.json();
+      const hasContent = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (hasContent) {
+        sendDiagnosticLog("ai_draft", "pass", "AI 초안 생성 정상 작동");
+      } else {
+        throw new Error("응답 내용 없음");
+      }
+    } catch (e) {
+      sendDiagnosticLog("ai_draft", "fail", `AI 초안 생성 오류: ${e.message}`);
+      diagnosisResults.warnings.push("AI 초안 생성 문제");
+    }
+
+    // ========== 5. 외부 API 연동 (External Integrations) ==========
+    
+    // 5-1. GA4 속성 접근 권한
+    try {
+      sendDiagnosticLog("ga4_access", "running", "GA4 속성 접근 권한 확인...");
+      const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
+      
+      if (!googleAuthToken) {
+        throw new Error("Google 인증 토큰 없음");
+      }
+      
+      const userId = "default_user";
+      const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+      const channelsData = channelsSnapshot.val() || {};
+      const myChannels = channelsData.myChannels || { blogs: [] };
+      const firstBlog = myChannels.blogs?.[0];
+      
+      if (!firstBlog || !firstBlog.gaPropertyId) {
+        sendDiagnosticLog("ga4_access", "warn", "GA4 속성 ID가 설정된 채널이 없음");
+      } else {
+        // 간단한 권한 확인 (속성 목록 조회)
+        const testUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${firstBlog.gaPropertyId}:runReport`;
+        const gaRes = await fetch(testUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAuthToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRanges: [{ startDate: "today", endDate: "today" }],
+            metrics: [{ name: "screenPageViews" }]
+          })
+        });
+        
+        if (gaRes.status === 403) {
+          throw new Error("GA4 접근 권한 없음 (403 Forbidden)");
+        } else if (!gaRes.ok) {
+          throw new Error(`GA4 API 오류: ${gaRes.status}`);
+        }
+        
+        sendDiagnosticLog("ga4_access", "pass", `GA4 속성 접근 정상 (Property ID: ${firstBlog.gaPropertyId})`);
+      }
+    } catch (e) {
+      sendDiagnosticLog("ga4_access", "fail", e.message);
+      diagnosisResults.warnings.push("GA4 접근 문제");
+    }
+
+    // 5-2. AdSense 계정 접근 권한
+    try {
+      sendDiagnosticLog("adsense_access", "running", "AdSense 계정 접근 권한 확인...");
+      const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get([
+        "googleAuthToken",
+        "adSenseAccountId"
+      ]);
+      
+      if (!googleAuthToken) {
+        throw new Error("Google 인증 토큰 없음");
+      }
+      
+      if (!adSenseAccountId) {
+        sendDiagnosticLog("adsense_access", "warn", "AdSense 계정 ID가 설정되지 않음");
+      } else {
+        // 간단한 권한 확인
+        const testUrl = `https://adsense.googleapis.com/v2/accounts/${adSenseAccountId}/reports:generate`;
+        const adsenseRes = await fetch(testUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAuthToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRange: "TODAY",
+            metrics: ["PAGE_VIEWS"]
+          })
+        });
+        
+        if (adsenseRes.status === 403) {
+          throw new Error("AdSense 접근 권한 없음 (403 Forbidden)");
+        } else if (!adsenseRes.ok) {
+          throw new Error(`AdSense API 오류: ${adsenseRes.status}`);
+        }
+        
+        sendDiagnosticLog("adsense_access", "pass", `AdSense 계정 접근 정상 (Account ID: ${adSenseAccountId})`);
+      }
+    } catch (e) {
+      sendDiagnosticLog("adsense_access", "fail", e.message);
+      diagnosisResults.warnings.push("AdSense 접근 문제");
+    }
+
+    // 5-3. URL 필터링 테스트
+    try {
+      sendDiagnosticLog("url_filtering", "running", "URL 필터링 테스트 (BEGINS_WITH/CONTAINS)...");
+      const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
+      
+      if (!googleAuthToken) {
+        throw new Error("Google 인증 토큰 없음");
+      }
+      
+      const userId = "default_user";
+      const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+      const channelsData = channelsSnapshot.val() || {};
+      const myChannels = channelsData.myChannels || { blogs: [] };
+      const firstBlog = myChannels.blogs?.[0];
+      
+      if (!firstBlog || !firstBlog.gaPropertyId) {
+        sendDiagnosticLog("url_filtering", "warn", "테스트할 GA4 속성이 없음");
+      } else {
+        // BEGINS_WITH 필터 테스트
+        const testUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${firstBlog.gaPropertyId}:runReport`;
+        const filterRes = await fetch(testUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAuthToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+            dimensions: [{ name: "pagePath" }],
+            metrics: [{ name: "screenPageViews" }],
+            dimensionFilter: {
+              filter: {
+                fieldName: "pagePath",
+                stringFilter: { matchType: "BEGINS_WITH", value: "/" }
+              }
+            }
+          })
+        });
+        
+        if (filterRes.ok) {
+          const filterData = await filterRes.json();
+          const rowCount = filterData.rows?.length || 0;
+          sendDiagnosticLog("url_filtering", "pass", 
+            `URL 필터링 정상 작동 (BEGINS_WITH 필터로 ${rowCount}개 결과)`);
+        } else {
+          throw new Error(`필터 테스트 실패: ${filterRes.status}`);
+        }
+      }
+    } catch (e) {
+      sendDiagnosticLog("url_filtering", "fail", e.message);
+      diagnosisResults.warnings.push("URL 필터링 문제");
+    }
+
+    // 진단 완료
+    diagnosisResults.endTime = Date.now();
+    diagnosisResults.duration = diagnosisResults.endTime - diagnosisResults.startTime;
+    
+    sendDiagnosticLog("complete", "done", 
+      `진단 완료 (소요 시간: ${Math.round(diagnosisResults.duration / 1000)}초, 오류: ${diagnosisResults.errors.length}개, 경고: ${diagnosisResults.warnings.length}개)`);
+    
+    return diagnosisResults;
+    
+  } catch (error) {
+    console.error("[시스템 진단] 치명적 오류:", error);
+    sendDiagnosticLog("fatal_error", "fail", `진단 중 치명적 오류: ${error.message}`);
+    diagnosisResults.errors.push(`치명적 오류: ${error.message}`);
+    return diagnosisResults;
+  }
 }

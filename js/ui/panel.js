@@ -7,7 +7,8 @@ import { renderChannelMode } from "./channelMode.js";
 import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js"; 
 import { renderWorkspace } from "./workspaceMode.js";
 import { renderPerformanceDashboard } from "./performanceDashboardMode.js";
-import { renderPerformanceReport } from "./performanceReportMode.js"; 
+import { renderPerformanceReport } from "./performanceReportMode.js";
+import { renderAdminMode } from "./adminMode.js"; 
 
 
 export function isPanelVisible() {
@@ -80,6 +81,7 @@ export function createAndShowPanel() {
     mainArea.id = 'cp-main-area';
     mainArea.style.flex = '1';
     mainArea.style.minHeight = '0';
+    mainArea.style.overflowY = 'auto';
 
     panelContent.appendChild(headerArea);
     panelContent.appendChild(mainArea);
@@ -171,6 +173,36 @@ function addEventListenersToPanel(shadowRoot) {
         if (target.closest("#cp-panel-fullscreen-exit")) {
             minimizePanelToCard();
             return;
+        }
+
+        // 설정 메뉴 토글
+        if (target.closest("#cp-settings-btn")) {
+            const menu = shadowRoot.querySelector("#cp-settings-menu");
+            if (menu) {
+                menu.style.display = menu.style.display === "none" ? "block" : "none";
+            }
+            return;
+        }
+
+        // 설정 메뉴 항목 클릭
+        const menuItem = target.closest('.cp-settings-menu-item');
+        if (menuItem) {
+            const action = menuItem.dataset.action;
+            const menu = shadowRoot.querySelector("#cp-settings-menu");
+            if (menu) menu.style.display = "none";
+            
+            if (action === "diagnosis") {
+                window.__cp_active_mode = 'admin';
+                renderHeaderAndTabs(shadowRoot);
+                renderAdminMode(mainArea);
+            }
+            return;
+        }
+
+        // 설정 메뉴 외부 클릭 시 닫기
+        if (!target.closest("#cp-settings-btn") && !target.closest("#cp-settings-menu")) {
+            const menu = shadowRoot.querySelector("#cp-settings-menu");
+            if (menu) menu.style.display = "none";
         }
 
         const tab = target.closest('.cp-mode-tab');

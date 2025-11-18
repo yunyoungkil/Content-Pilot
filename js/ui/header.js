@@ -45,6 +45,17 @@ export function renderPanelHeader() {
             isLayoutMode ? "#1976d2" : "#888"
           };user-select:none;">레이아웃</span>
         </label>
+        <div style="position:relative;">
+          <button id="cp-settings-btn" class="cp-panel-icon-btn" title="설정">
+            <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-160q-33 0-56.5-23.5T400-240q0-33 23.5-56.5T480-320q33 0 56.5 23.5T560-240q0 33-23.5 56.5T480-160Zm0-240q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm0-240q-33 0-56.5-23.5T400-720q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720q0 33-23.5 56.5T480-640Z"/></svg>
+          </button>
+          <div id="cp-settings-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:#fff;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:200px;z-index:1000;overflow:hidden;">
+            <button class="cp-settings-menu-item" data-action="diagnosis" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#333;display:flex;align-items:center;gap:8px;transition:background 0.2s;">
+              <span>🛠️</span>
+              <span>시스템 진단</span>
+            </button>
+          </div>
+        </div>
         <button id="cp-panel-close" class="cp-panel-icon-btn">
           <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
         </button>
