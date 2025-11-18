@@ -382,12 +382,18 @@ function initializeEditor() {
         }
         break;
       case "insert-text":
+        // ▼▼▼ [오류 수정] data가 undefined일 수 있으므로 방어 코드 추가 ▼▼▼
+        if (!data || !data.text) {
+          console.error("insert-text: data 또는 data.text가 없습니다.", { action, data });
+          break;
+        }
         const currentRange = quillEditor.getSelection() || {
           index: quillEditor.getLength(),
           length: 0,
         };
         quillEditor.insertText(currentRange.index, data.text);
         quillEditor.setSelection(currentRange.index + data.text.length);
+        // ▲▲▲ [수정 완료] ▲▲▲
         break;
       case "insert-image":
         const imageRange = quillEditor.getSelection() || {

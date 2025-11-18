@@ -131,6 +131,21 @@
   - [x] 대시보드 초기화 시 Firebase와 동기화하여 실제로 존재하는 아이디어만 표시
   - [x] background.js에 get_all_kanban_data 액션 추가 (Firebase 데이터 직접 반환)
   - [x] 삭제된 아이디어는 "추가됨" 상태로 표시되지 않도록 수정
+- [x] 워크스페이스 추천 검색어 및 스크랩 필터 기능 개선
+  - [x] 추천 검색어 클릭 시 스크랩 필터링 기능 삭제
+  - [x] 추천 검색어 클릭 시 에디터에 검색어 추가하는 기능으로 변경
+  - [x] '모든 스크랩' 탭에 "초안 필터" 버튼 추가
+  - [x] 스크랩 초안 필터 버튼에 로직 연결
+    - [x] getDraftContentForScrapFilter 함수 추가 (초안 내용 가져오기)
+    - [x] calculateScrapRelevance 함수 추가 (스크랩 관련성 계산)
+    - [x] 초안 필터 토글 기능 구현 (이미지 갤러리와 동일한 방식)
+    - [x] 필터링된 스크랩을 관련성 점수 순으로 정렬하여 표시
+- [x] 에디터 및 메시지 핸들러 오류 수정
+  - [x] editor.js의 insert-text 핸들러에 data 방어 코드 추가
+  - [x] workspaceMode.js의 postMessage 메시지 형식 수정 (data 객체로 감싸기)
+  - [x] editor-error 핸들러에 data 방어 코드 추가
+  - [x] response.error 직접 접근을 response?.error로 수정
+  - [x] Cannot read properties of undefined 오류 방지
 - [x] 버그 해결
   - [x] 대시보드에서 아이디어 추가 시 workspace 객체가 생성되지 않던 문제 해결
   - [x] 기존 데이터에 workspace가 없어도 workspaceMode.js가 정상 작동하도록 수정

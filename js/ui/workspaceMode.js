@@ -788,7 +788,7 @@ export function renderWorkspace(container, ideaData) {
               if (aiBriefingArea) {
                 const progressEl = aiBriefingArea.querySelector(".briefing-progress-indicator");
                 if (progressEl) {
-                  progressEl.querySelector(".progress-text").textContent = `오류: ${response.error}`;
+                  progressEl.querySelector(".progress-text").textContent = `오류: ${response?.error || "알 수 없는 오류"}`;
                   progressEl.querySelector(".progress-text").style.color = "#ea4335";
                   setTimeout(() => {
                     progressEl.style.display = "none";
@@ -969,7 +969,7 @@ export function renderWorkspace(container, ideaData) {
               </button>
             </div>
             <p style="font-size: 12px; color: #666; margin: 0 0 12px 0; padding: 8px; background: #f0f7ff; border-radius: 4px;">
-              💡 검색어를 클릭하면 스크랩이 필터링됩니다. 이미지 갤러리도 함께 필터링됩니다.
+              💡 검색어를 클릭하면 에디터에 추가됩니다.
             </p>
             <ul>
               ${searchesHtml}
@@ -981,9 +981,16 @@ export function renderWorkspace(container, ideaData) {
           <div class="ai-briefing-content" style="display: flex; flex-direction: column; height: 100%; overflow: hidden;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-shrink: 0;">
               <h4 style="margin: 0;">모든 스크랩</h4>
-              <button id="clear-scrap-search-btn" style="display: none; padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer;">
-                검색 취소
-              </button>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="scrap-filter-by-draft-btn" title="초안 내용에 맞는 스크랩만 보기" 
+                  style="padding: 6px 12px; border: 1px solid #dadce0; background: #fff; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 4px;">
+                  <span>📝</span>
+                  <span>초안 필터</span>
+                </button>
+                <button id="clear-scrap-search-btn" style="display: none; padding: 4px 12px; font-size: 12px; border: 1px solid #dadce0; background: #fff; border-radius: 4px; cursor: pointer;">
+                  검색 취소
+                </button>
+              </div>
             </div>
             <div style="margin-bottom: 12px; flex-shrink: 0;">
               <input type="text" id="scrap-search-input" placeholder="스크랩 검색 (내용, 이미지, 링크)" 
@@ -2510,7 +2517,9 @@ function setupImagePromptDisplayListeners(workspaceEl) {
         break;
 
       case "editor-error":
-        console.error("Editor error:", data.error);
+        // ▼▼▼ [오류 수정] data가 undefined일 수 있으므로 방어 코드 추가 ▼▼▼
+        console.error("Editor error:", data?.error || "알 수 없는 오류");
+        // ▲▲▲ [수정 완료] ▲▲▲
         break;
       case "cp_open_tui_editor": {
         // 수신 필드 호환: imageUrl 우선, 과거 imgSrc도 지원
@@ -3287,7 +3296,8 @@ function setupImagePromptDisplayListeners(workspaceEl) {
     }
   }
 
-  // 추천 검색어 클릭 이벤트
+  // ▼▼▼ [수정] 추천 검색어 클릭 시 에디터에 추가 ▼▼▼
+  // 추천 검색어 클릭 이벤트 (스크랩 필터링 기능 삭제, 에디터 추가로 변경)
   const recommendedKeywordsAreaForFilter = workspaceEl.querySelector("#recommended-keywords-area");
   if (recommendedKeywordsAreaForFilter) {
     recommendedKeywordsAreaForFilter.addEventListener("click", (e) => {
@@ -3295,21 +3305,193 @@ function setupImagePromptDisplayListeners(workspaceEl) {
       if (keywordItem) {
         e.preventDefault();
         const keyword = keywordItem.dataset.keyword;
-        // 검색어 필터는 취소하고 키워드 필터만 적용
-        const searchInput = workspaceEl.querySelector("#scrap-search-input");
-        if (searchInput) {
-          searchInput.value = "";
-          window.__cp_scrap_filter.searchText = null;
-        }
-        const clearSearchBtn = workspaceEl.querySelector("#clear-scrap-search-btn");
-        if (clearSearchBtn) clearSearchBtn.style.display = "none";
         
-        applyScrapFilterAndUpdateImages(keyword, null);
-        showToast(`🔍 "${keyword}"로 스크랩을 필터링했습니다.`);
+        // 에디터에 검색어 추가
+        const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+        if (editorIframe && editorIframe.contentWindow) {
+          // sendCommand 함수를 사용하거나 올바른 메시지 형식으로 전송
+          editorIframe.contentWindow.postMessage(
+            { action: "insert-text", data: { text: ` ${keyword} ` } },
+            "*"
+          );
+          showToast(`✅ "${keyword}"이(가) 에디터에 추가되었습니다.`);
+        } else {
+          showToast("❌ 에디터를 찾을 수 없습니다.");
+        }
       }
     });
   }
+  // ▲▲▲ [수정 완료] ▲▲▲
 
+  // ▼▼▼ [신규 추가] 스크랩 초안 필터 버튼 로직 ▼▼▼
+  // 초안 내용 가져오기 함수 (이미지 갤러리와 동일한 로직)
+  function getDraftContentForScrapFilter() {
+    return new Promise((resolve) => {
+      // 1. 먼저 ideaData에서 draftContent 확인
+      if (ideaData && ideaData.draftContent) {
+        // HTML에서 텍스트 추출
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = ideaData.draftContent;
+        const text = tempDiv.textContent || tempDiv.innerText || '';
+        if (text && text.length >= 10) {
+          resolve(text);
+          return;
+        }
+      }
+      
+      // 2. 에디터에서 내용 가져오기
+      const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+      if (!editorIframe || !editorIframe.contentWindow) {
+        resolve("");
+        return;
+      }
+      
+      // 메시지 리스너 설정 (고유한 식별자 사용)
+      const messageId = `draft-content-scrap-${Date.now()}-${Math.random()}`;
+      const messageHandler = (event) => {
+        if (event.source !== editorIframe.contentWindow) return;
+        const { action, data, requestId } = event.data;
+        
+        if (action === "content-response" && requestId === messageId && data) {
+          window.removeEventListener("message", messageHandler);
+          const html = data.html || "";
+          // HTML에서 텍스트 추출
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = html;
+          const text = tempDiv.textContent || tempDiv.innerText || '';
+          resolve(text);
+        }
+      };
+      
+      window.addEventListener("message", messageHandler);
+      
+      // 에디터에 내용 요청 (고유 ID 포함)
+      editorIframe.contentWindow.postMessage({ 
+        action: "get-content",
+        requestId: messageId
+      }, "*");
+      
+      // 타임아웃 (5초 후 실패 처리)
+      setTimeout(() => {
+        window.removeEventListener("message", messageHandler);
+        resolve("");
+      }, 5000);
+    });
+  }
+  
+  // 스크랩 초안 필터 토글 함수
+  let isScrapDraftFilterActive = false;
+  const scrapFilterByDraftBtn = workspaceEl.querySelector("#scrap-filter-by-draft-btn");
+  
+  async function toggleScrapDraftFilter() {
+    if (!scrapFilterByDraftBtn) return;
+    
+    if (!isScrapDraftFilterActive) {
+      // 필터 활성화
+      scrapFilterByDraftBtn.style.background = "#e8f0fe";
+      scrapFilterByDraftBtn.style.borderColor = "#1a73e8";
+      scrapFilterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터 ON";
+      
+      // 초안 내용 가져오기
+      const draftText = await getDraftContentForScrapFilter();
+      
+      if (!draftText || draftText.length < 10) {
+        alert("초안 내용이 없거나 너무 짧습니다. 초안을 작성한 후 다시 시도해주세요.");
+        scrapFilterByDraftBtn.style.background = "#fff";
+        scrapFilterByDraftBtn.style.borderColor = "#dadce0";
+        scrapFilterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터";
+        return;
+      }
+      
+      isScrapDraftFilterActive = true;
+      
+      // 스크랩 관련성 계산 함수 (이미지 갤러리와 유사한 로직)
+      function calculateScrapRelevance(scrap, draftText) {
+        if (!draftText || draftText.length < 10) return 0;
+        
+        const draftWords = draftText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        if (draftWords.length === 0) return 0;
+        
+        let score = 0;
+        const scrapText = (scrap.text || '').toLowerCase();
+        const scrapUrl = (scrap.url || '').toLowerCase();
+        const scrapTags = Array.isArray(scrap.tags) ? scrap.tags.map(t => t.toLowerCase()) : [];
+        
+        // 태그 매칭
+        if (scrapTags.length > 0) {
+          draftWords.forEach(word => {
+            const tagMatch = scrapTags.some(tag => {
+              const cleanTag = tag.replace(/^#/, '');
+              return cleanTag === word || cleanTag.includes(word) || word.includes(cleanTag);
+            });
+            if (tagMatch) score += 2;
+          });
+        }
+        
+        // 텍스트 매칭
+        draftWords.forEach(word => {
+          if (scrapText.includes(word)) {
+            score += 1;
+          }
+        });
+        
+        // URL 매칭
+        if (scrapUrl) {
+          try {
+            const urlDomain = new URL(scrapUrl).hostname;
+            if (urlDomain && draftText.toLowerCase().includes(urlDomain.split(".")[0])) {
+              score += 0.5;
+            }
+          } catch (e) {
+            // URL 파싱 실패 시 무시
+          }
+        }
+        
+        // 정규화된 점수 (0-1 사이)
+        return Math.min(score / Math.max(draftWords.length, 1), 1);
+      }
+      
+      // 모든 스크랩 필터링
+      const allScraps = window.__cp_scrap_filter?.allScraps || [];
+      const filteredScraps = allScraps
+        .map(scrap => ({
+          ...scrap,
+          relevance: calculateScrapRelevance(scrap, draftText)
+        }))
+        .filter(scrap => scrap.relevance > 0) // 관련성 점수가 0보다 큰 것만
+        .sort((a, b) => b.relevance - a.relevance); // 관련성 높은 순으로 정렬
+      
+      // 스크랩 목록 업데이트
+      const allScrapsContainer = workspaceEl.querySelector(".all-scraps-list");
+      const linkedScrapsContainer = workspaceEl.querySelector(".linked-scraps-list");
+      if (allScrapsContainer && linkedScrapsContainer) {
+        window.__cp_updateScrapList(filteredScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
+        showToast(`📝 초안 필터: ${filteredScraps.length}개의 관련 스크랩을 찾았습니다.`);
+      }
+    } else {
+      // 필터 비활성화
+      scrapFilterByDraftBtn.style.background = "#fff";
+      scrapFilterByDraftBtn.style.borderColor = "#dadce0";
+      scrapFilterByDraftBtn.querySelector("span:last-child").textContent = "초안 필터";
+      isScrapDraftFilterActive = false;
+      
+      // 모든 스크랩 다시 표시
+      const allScraps = window.__cp_scrap_filter?.allScraps || [];
+      const allScrapsContainer = workspaceEl.querySelector(".all-scraps-list");
+      const linkedScrapsContainer = workspaceEl.querySelector(".linked-scraps-list");
+      if (allScrapsContainer && linkedScrapsContainer) {
+        window.__cp_updateScrapList(allScraps, allScrapsContainer, linkedScrapsContainer, ideaData);
+        showToast("필터가 취소되었습니다.");
+      }
+    }
+  }
+  
+  // 스크랩 초안 필터 버튼 이벤트
+  if (scrapFilterByDraftBtn) {
+    scrapFilterByDraftBtn.addEventListener("click", toggleScrapDraftFilter);
+  }
+  // ▲▲▲ [신규 추가] ▲▲▲
+  
   // 필터 취소 버튼
   const clearFilterBtn = workspaceEl.querySelector("#clear-scrap-filter-btn");
   if (clearFilterBtn) {
@@ -3430,7 +3612,7 @@ function setupImagePromptDisplayListeners(workspaceEl) {
         } else {
           alert(
             "스크랩 연결 해제에 실패했습니다: " +
-              (response.error || "알 수 없는 오류")
+              (response?.error || "알 수 없는 오류")
           );
         }
       });
@@ -3744,7 +3926,7 @@ function setupImagePromptDisplayListeners(workspaceEl) {
         } else {
           alert(
             "스크랩 연결에 실패했습니다: " +
-              (response.error || "알 수 없는 오류")
+              (response?.error || "알 수 없는 오류")
           );
         }
       });

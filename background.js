@@ -5269,7 +5269,8 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
             dimensionFilter: {
               filter: {
                 fieldName: "pagePath",
-                stringFilter: { matchType: "EXACT", value: filterStrategy.path },
+                // "정확히 일치" 대신 "다음으로 시작"을 사용
+                stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
               },
             },
           }),
@@ -5631,10 +5632,11 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
         if (hasAccountData && testData.rows) {
           // URL 매칭 전략 (우선순위 순)
           const matchStrategies = [
-            (row) => row.dimensionValues?.[0]?.value === url, // 정확한 URL 매칭
-            (row) => row.dimensionValues?.[0]?.value?.includes(domain), // 도메인 포함
-            (row) => row.dimensionValues?.[0]?.value?.includes(mainDomain), // 메인 도메인 포함
-            (row) => row.dimensionValues?.[0]?.value?.includes(path), // 경로 포함
+            (row) => row.dimensionValues?.[0]?.value === url, // 1. 정확한 URL 매칭
+            (row) => row.dimensionValues?.[0]?.value?.startsWith(url), // 2. (신규) URL로 시작 (파라미터 무시)
+            (row) => row.dimensionValues?.[0]?.value?.startsWith(path), // 3. (신규) 경로로 시작
+            (row) => row.dimensionValues?.[0]?.value?.includes(domain), // 4. 도메인 포함
+            (row) => row.dimensionValues?.[0]?.value?.includes(mainDomain), // 5. 메인 도메인 포함
           ];
           
           for (const matchStrategy of matchStrategies) {
@@ -5665,6 +5667,11 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 
     // 필터를 사용한 전략 시도 (AdSense API v2 필터 형식)
     const filterStrategies = [
+      { 
+        // [신규 추가] URL 경로(path)를 '포함'하는 모든 데이터 (가장 유연함)
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: path },
+        name: '경로 포함 (CONTAINS)'
+      },
       { 
         filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: url },
         name: '전체 URL (EQUALS)'
