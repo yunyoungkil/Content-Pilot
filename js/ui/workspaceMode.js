@@ -3113,6 +3113,7 @@ function setupImagePromptDisplayListeners(workspaceEl) {
         );
       });
     });
+    });
 
   // 목차 편집 기능
   if (outlineList) {
