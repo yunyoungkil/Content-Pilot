@@ -131,6 +131,15 @@ export function renderChannelMode(container) {
     .competitor-item input { flex: 1; }
     .competitor-delete-btn { padding: 8px; color: #999; cursor: pointer; background: none; border: none; font-size: 18px; }
     .competitor-delete-btn:hover { color: #d32f2f; }
+    
+    /* 채널 상세 설정 모달 좌우 여백 추가 */
+    #channel-detail-modal .cp-modal-body {
+      padding: 24px;
+    }
+    #channel-detail-modal .cp-modal {
+      max-width: min(90vw, 700px);
+      margin: 0 auto;
+    }
   `;
   container.appendChild(style);
 

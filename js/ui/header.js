@@ -191,11 +191,41 @@ async function initGlobalChannelSelector(shadowRoot) {
       chrome.storage.local.set({ activeChannelId: selectedValue }, () => {
         console.log(`[Global] 활성 채널 변경됨: ${selectedValue}`);
         
-        // 현재 탭 새로고침 (패널 전체에 변경 알림)
+        // 현재 탭 새로고침 (직접 함수 호출)
+        const mainArea = shadowRoot.querySelector("#cp-main-area");
+        if (!mainArea) return;
+        
         const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
         if (activeTab) {
+          const tabName = activeTab.dataset.key;
+          
           // 약간의 지연 후 리로드 (storage 저장 보장)
-          setTimeout(() => activeTab.click(), 50);
+          setTimeout(() => {
+            // 탭별 새로고침 로직
+            if (tabName === "dashboard") {
+              import("./dashboardMode.js").then(module => {
+                module.renderDashboard(mainArea);
+                module.addDashboardEventListeners(mainArea);
+              });
+            } else if (tabName === "scrapbook") {
+              import("./scrapbookMode.js").then(module => {
+                module.renderScrapbook(mainArea);
+              });
+            } else if (tabName === "kanban") {
+              import("./kanbanMode.js").then(module => {
+                module.renderKanban(mainArea);
+                module.addKanbanEventListeners(mainArea);
+              });
+            } else if (tabName === "performance") {
+              import("./performanceDashboardMode.js").then(module => {
+                module.renderPerformanceDashboard(mainArea);
+              });
+            } else if (tabName === "report") {
+              import("./performanceReportMode.js").then(module => {
+                module.renderPerformanceReport(mainArea);
+              });
+            }
+          }, 100);
         }
       });
     }

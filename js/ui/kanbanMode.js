@@ -134,7 +134,48 @@ async function updateKanbanUI(allCards) {
     .querySelectorAll(".kanban-col-cards")
     .forEach((col) => (col.innerHTML = ""));
 
-  // 데이터가 없거나 채널이 선택되지 않았을 때 처리
+  // 채널이 선택되지 않았을 때 온보딩 메시지 표시
+  if (!activeChannelId) {
+    const ideasCol = rootEl.querySelector(
+      '[data-status="ideas"] .kanban-col-cards'
+    );
+    if (ideasCol) {
+      ideasCol.innerHTML = `
+        <div style="text-align: center; padding: 40px 20px; background: #f8f9fa; border-radius: 8px; margin: 20px;">
+          <div style="font-size: 48px; margin-bottom: 16px;">📺</div>
+          <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #333; font-weight: 600;">
+            채널을 선택해주세요
+          </h3>
+          <p style="margin: 0 0 16px 0; font-size: 14px; color: #666; line-height: 1.5;">
+            상단의 <strong>글로벌 채널 선택기</strong>에서 채널을 선택하거나<br>
+            <strong>'⚙️ 채널 관리'</strong>에서 새 채널을 추가해주세요.
+          </p>
+          <button id="kanban-onboarding-manage-btn" style="padding: 10px 20px; background: #2d8cf0; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">
+            채널 관리로 이동
+          </button>
+        </div>
+      `;
+      
+      // 채널 관리 버튼 이벤트
+      const manageBtn = ideasCol.querySelector("#kanban-onboarding-manage-btn");
+      if (manageBtn) {
+        manageBtn.addEventListener("click", () => {
+          const shadowRoot = kanbanContainer.getRootNode();
+          const header = shadowRoot.querySelector("#cp-header-area");
+          if (header) {
+            const channelSelector = shadowRoot.querySelector("#global-channel-selector");
+            if (channelSelector) {
+              channelSelector.value = "__MANAGE__";
+              channelSelector.dispatchEvent(new Event("change"));
+            }
+          }
+        });
+      }
+    }
+    return;
+  }
+
+  // 데이터가 없을 때 처리
   if (!allCards || Object.keys(allCards).length === 0) {
     const ideasCol = rootEl.querySelector(
       '[data-status="ideas"] .kanban-col-cards'
@@ -155,9 +196,12 @@ async function updateKanbanUI(allCards) {
       const filteredCards = {};
 
       for (const [cardId, cardData] of Object.entries(rawCards)) {
-        // 1. channelId가 일치하는 카드
-        // 2. 또는 channelId가 없는 카드 (구버전 데이터 호환용, 마이그레이션 전까지 표시)
-        if (!cardData.channelId || cardData.channelId === activeChannelId) {
+        // [수정] 채널 ID 필터링 로직
+        // 1. channelId가 현재 활성 채널과 일치하는 카드 표시
+        // 2. channelId가 undefined인 경우 (구버전 데이터)는 일단 포함 (마이그레이션 전까지 호환성 유지)
+        // 3. channelId가 null인 경우는 제외 (칸반은 채널별로 관리)
+        if (cardData.channelId === activeChannelId || 
+            (cardData.channelId === undefined && activeChannelId)) {
           filteredCards[cardId] = cardData;
         }
       }
@@ -480,6 +524,15 @@ function addKanbanEventListeners(container) {
       }
     });
   }
+
+  // [신규] 채널 변경 감지 -> 칸반 UI 새로고침
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.activeChannelId) {
+      console.log("[Kanban] 채널 변경 감지, 데이터 다시 로드 및 UI 새로고침");
+      // 채널이 변경되면 항상 데이터를 다시 로드하여 최신 상태 보장
+      chrome.runtime.sendMessage({ action: "get_kanban_data" });
+    }
+  });
 
   const root = container.querySelector("#cp-kanban-board-root");
   if (!root) return;

@@ -352,6 +352,17 @@ function initializeEditor() {
         }
         break;
       case "get-content":
+        // 요청 ID가 있으면 응답 메시지 전송
+        if (data && data.requestId) {
+          window.parent.postMessage(
+            {
+              action: "content-response",
+              requestId: data.requestId,
+              data: { html: quillEditor.root.innerHTML }
+            },
+            "*"
+          );
+        }
         // 이미지 삽입 등 외부 요청 시 현재 내용 저장
         window.parent.postMessage(
           {

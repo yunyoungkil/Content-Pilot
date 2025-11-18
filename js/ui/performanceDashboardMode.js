@@ -44,8 +44,8 @@ function loadPerformanceData(container) {
   if (firebase) {
     // Firebase 직접 접근
     const kanbanRef = firebase.database().ref("kanban");
-    kanbanRef.once("value", (snapshot) => {
-      processPerformanceData(snapshot.val() || {}, container);
+    kanbanRef.once("value", async (snapshot) => {
+      await processPerformanceData(snapshot.val() || {}, container);
     });
   } else {
     // background.js를 통해 데이터 가져오기
@@ -53,11 +53,11 @@ function loadPerformanceData(container) {
     
     // 실시간 업데이트 리스너 등록 (한 번만)
     if (!window.performanceDashboardListenerAttached) {
-      chrome.runtime.onMessage.addListener((msg) => {
+      chrome.runtime.onMessage.addListener(async (msg) => {
         if (msg.action === "kanban_data_updated") {
           const contentEl = container.querySelector("#perf-dashboard-content");
           if (contentEl) {
-            processPerformanceData(msg.data || {}, container);
+            await processPerformanceData(msg.data || {}, container);
           }
         }
       });
@@ -69,13 +69,25 @@ function loadPerformanceData(container) {
 /**
  * 성과 데이터 처리
  */
-function processPerformanceData(allCards, container) {
+async function processPerformanceData(allCards, container) {
   allPerformanceData = [];
+
+  // [신규] 현재 활성 채널 ID 가져오기
+  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
   // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
   for (const status in allCards) {
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
+      
+      // [신규] 채널 필터링: 현재 활성 채널과 일치하는 카드만 포함
+      if (activeChannelId && card.channelId !== activeChannelId) {
+        // channelId가 undefined인 구버전 데이터는 일단 포함 (호환성)
+        if (card.channelId !== undefined) {
+          continue;
+        }
+      }
+      
       if (card.publishedUrl && card.performance && !card.performance.error) {
         allPerformanceData.push({
           id: cardId,
@@ -286,5 +298,13 @@ function addPerformanceDashboardEventListeners(container) {
       loadPerformanceData(container);
     });
   }
+
+  // [신규] 채널 변경 감지 -> 성과 대시보드 새로고침
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.activeChannelId) {
+      console.log("[Performance Dashboard] 채널 변경 감지, 데이터 다시 로드");
+      loadPerformanceData(container);
+    }
+  });
 }
 

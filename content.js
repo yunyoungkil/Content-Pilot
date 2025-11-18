@@ -1,5 +1,16 @@
 // content.js (수정 완료된 최종 버전)
 
+// [CSP Fix] webpack publicPath를 Chrome Extension URL로 설정
+// 동적 import로 생성된 청크 파일이 올바른 경로에서 로드되도록 함
+// webpack이 이 변수를 인식하도록 파일 최상단에 배치
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+  // eslint-disable-next-line no-undef
+  if (typeof __webpack_public_path__ !== 'undefined') {
+    // eslint-disable-next-line no-undef
+    __webpack_public_path__ = chrome.runtime.getURL('dist/');
+  }
+}
+
 import { setupHighlighter } from "./js/core/highlighter.js";
 import { createAndShowPanel, isPanelVisible } from "./js/ui/panel.js";
 import { showRecentScrapPreview } from "./js/ui/preview.js";

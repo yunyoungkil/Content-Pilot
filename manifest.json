@@ -67,7 +67,8 @@
         "lib/tui-color-picker.min.css",
         "lib/tui-code-snippet.js",
         "tui-editor.html",
-        "tui-editor.js"
+        "tui-editor.js",
+        "dist/*.bundle.js"
       ],
       "matches": ["<all_urls>"]
     }

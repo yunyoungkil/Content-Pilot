@@ -93,8 +93,15 @@ export function createAndShowPanel() {
     renderHeaderAndTabs(shadowRoot);
     addEventListenersToPanel(shadowRoot); 
 
-    // [수정] 초기 로드 로직 (온보딩 체크)
-    chrome.storage.local.get("activeChannelId", (res) => {
+    // [수정] 초기 로드 로직 (온보딩 체크 + 마이그레이션 확인)
+    chrome.storage.local.get(["activeChannelId", "migration_completed"], (res) => {
+      // 0. 마이그레이션 필요 여부 확인 (일회성)
+      if (!res.migration_completed) {
+        import("./migrationModal.js").then(module => {
+          module.checkAndShowMigrationModal(shadowRoot);
+        });
+      }
+
       // 1. 활성 채널 ID가 있으면 -> 대시보드로 정상 진입
       if (res.activeChannelId) {
         renderDashboard(mainArea); 
@@ -115,8 +122,6 @@ export function createAndShowPanel() {
           // 2-A. 채널은 있는데 선택이 안 된 경우 -> 첫 번째 채널 자동 선택 후 대시보드 이동
           const firstId = myBlogs[0].id || (myBlogs[0].apiUrl ? btoa(myBlogs[0].apiUrl).replace(/=/g, "") : "");
           chrome.storage.local.set({ activeChannelId: firstId }, () => {
-            // 헤더의 선택기 UI도 갱신해야 하므로 새로고침 메시지 전송 등 필요할 수 있음
-            // 여기서는 일단 대시보드로 이동
             renderDashboard(mainArea); 
             addDashboardEventListeners(mainArea);
             
@@ -133,10 +138,9 @@ export function createAndShowPanel() {
           const navItems = shadowRoot.querySelectorAll(".cp-mode-tab");
           navItems.forEach(item => item.classList.remove("active"));
           
-          // 채널 모드 로드 및 안내 메시지 표시
+          // 채널 모드 로드 및 온보딩 메시지 표시
           renderChannelMode(mainArea);
-          // (선택) 안내 토스트 메시지 띄우기
-          // showToast("👋 환영합니다! 먼저 '채널 추가'를 진행해주세요."); 
+          showOnboardingMessage(mainArea);
         }
       });
     });
@@ -146,15 +150,25 @@ export function createAndShowPanel() {
       if (namespace === "local" && changes.activeChannelId) {
         console.log("[Panel] 채널 변경 감지, 현재 탭 새로고침");
         
+        // mainArea 참조 다시 가져오기 (Shadow DOM 내부)
+        const host = document.getElementById("content-pilot-host");
+        if (!host || !host.shadowRoot) return;
+        
+        const mainArea = host.shadowRoot.querySelector("#cp-main-area");
+        if (!mainArea) return;
+        
         // 현재 활성화된 탭 찾기
-        const activeTabBtn = shadowRoot.querySelector(".cp-mode-tab.active");
+        const activeTabBtn = host.shadowRoot.querySelector(".cp-mode-tab.active");
         if (activeTabBtn) {
           const tabName = activeTabBtn.dataset.key;
           
           // 탭별 새로고침 로직
           if (tabName === "kanban") {
-            // 칸반은 데이터 다시 그리기만 호출 (전체 리로드 불필요)
-            chrome.runtime.sendMessage({ action: "get_kanban_data" });
+            // 칸반은 전체 리로드
+            import("./kanbanMode.js").then(module => {
+              module.renderKanban(mainArea);
+              module.addKanbanEventListeners(mainArea);
+            });
           } else if (tabName === "dashboard") {
             // 대시보드 새로고침
             import("./dashboardMode.js").then(module => {
@@ -166,6 +180,28 @@ export function createAndShowPanel() {
             import("./scrapbookMode.js").then(module => {
               module.renderScrapbook(mainArea);
             });
+          } else if (tabName === "performance") {
+            // 성과 대시보드 새로고침
+            import("./performanceDashboardMode.js").then(module => {
+              module.renderPerformanceDashboard(mainArea);
+            });
+          } else if (tabName === "report") {
+            // 성과 리포트 새로고침
+            import("./performanceReportMode.js").then(module => {
+              module.renderPerformanceReport(mainArea);
+            });
+          } else if (tabName === "workspace") {
+            // 워크스페이스는 현재 아이디어에 따라 스크랩 목록만 새로고침
+            const currentIdeaId = mainArea.querySelector('.cp-workspace-container')?.dataset.ideaId;
+            if (currentIdeaId) {
+              chrome.runtime.sendMessage({ action: "get_idea_data", ideaId: currentIdeaId }, (response) => {
+                if (response && response.success) {
+                  import("./workspaceMode.js").then(module => {
+                    module.updateWorkspaceScraps(mainArea, response.data);
+                  });
+                }
+              });
+            }
           }
         }
       }
@@ -343,4 +379,39 @@ function showCardFloatingButton() {
 
   container.appendChild(cardBtn);
   document.body.appendChild(container);
+}
+
+// 신규 사용자 온보딩 메시지 표시
+function showOnboardingMessage(container) {
+  const onboardingBanner = document.createElement("div");
+  onboardingBanner.style.cssText = `
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px 24px;
+    border-radius: 8px;
+    margin: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  `;
+  onboardingBanner.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="font-size: 48px;">👋</div>
+      <div style="flex: 1;">
+        <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600;">
+          Content Pilot에 오신 것을 환영합니다!
+        </h3>
+        <p style="margin: 0; font-size: 14px; opacity: 0.95; line-height: 1.5;">
+          먼저 <strong>'+ 채널 추가'</strong> 버튼을 클릭하여 블로그 채널을 등록해주세요.<br>
+          채널을 등록하면 콘텐츠 아이디어 관리와 성과 추적을 시작할 수 있습니다.
+        </p>
+      </div>
+    </div>
+  `;
+  
+  // 채널 설정 컨테이너의 맨 위에 삽입
+  const channelContainer = container.querySelector(".channel-settings-container");
+  if (channelContainer) {
+    channelContainer.insertBefore(onboardingBanner, channelContainer.firstChild);
+  } else {
+    container.insertBefore(onboardingBanner, container.firstChild);
+  }
 }

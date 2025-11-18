@@ -35,6 +35,14 @@ export function renderScrapbook(container) {
   keywordInput.addEventListener('keyup', () => {
       renderScrapList(allScraps, container); // 키워드 입력 시에도 전체 목록을 다시 렌더링하여 필터링
   });
+
+  // [신규] 채널 변경 감지 -> 스크랩북 새로고침
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.activeChannelId) {
+      console.log("[Scrapbook] 채널 변경 감지, 스크랩 목록 새로고침");
+      requestScrapsAndRender(container);
+    }
+  });
 }
 
 function requestScrapsAndRender(container) {

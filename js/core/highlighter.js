@@ -105,56 +105,58 @@ export function setupHighlighter() {
             images,
           };
 
-          // [PRD v3.2] Extension context 무효화 안전 처리
-          try {
-            chrome.runtime.sendMessage(
-              { action: "scrap_element", data: scrapData },
-              (response) => {
-                if (chrome.runtime.lastError) {
-                  console.error(
-                    "[Highlighter] Chrome runtime error:",
-                    chrome.runtime.lastError
-                  );
-                  window.top.postMessage(
-                    {
-                      action: "cp_show_toast",
-                      data: {
-                        message:
-                          "❌ 확장 프로그램 오류. 페이지를 새로고침하세요.",
-                      },
-                    },
-                    "*"
-                  );
-                  return;
+          // [신규] 스크랩 저장 전 모달 표시 (최상위 프레임에서만)
+          if (window.self === window.top) {
+            // 현재 활성 채널 정보 가져오기
+            chrome.storage.local.get("activeChannelId", (storage) => {
+              const activeChannelId = storage.activeChannelId || null;
+              
+              // 채널 이름 가져오기
+              chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+                let activeChannelName = null;
+                if (response && response.success && activeChannelId) {
+                  const myBlogs = response.data?.myChannels?.blogs || [];
+                  const currentChannel = myBlogs.find(blog => {
+                    const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+                    return id === activeChannelId;
+                  });
+                  activeChannelName = currentChannel?.inputUrl || currentChannel?.url || null;
                 }
-
-                const messageAction =
-                  response && response.success
-                    ? "cp_show_preview"
-                    : "cp_show_toast";
-                const messageData =
-                  response && response.success
-                    ? scrapData
-                    : { message: "❌ 스크랩 실패" };
-                window.top.postMessage(
-                  { action: messageAction, data: messageData },
-                  "*"
-                );
-              }
-            );
-          } catch (error) {
-            console.error("[Highlighter] Failed to send message:", error);
-            if (error.message.includes("Extension context invalidated")) {
-              window.top.postMessage(
-                {
-                  action: "cp_show_toast",
-                  data: {
-                    message:
-                      "⚠️ 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침하세요.",
-                  },
-                },
-                "*"
+                
+                // 모달 표시 (동적 import)
+                import("../ui/scrapSaveModal.js").then(module => {
+                  module.showScrapSaveModal(scrapData, activeChannelId, activeChannelName);
+                }).catch(err => {
+                  console.error("[Highlighter] Failed to load scrap save modal:", err);
+                  // 모달 로드 실패 시 기본 동작 (공용 스크랩으로 저장)
+                  chrome.runtime.sendMessage({
+                    action: "scrap_element",
+                    data: scrapData,
+                    channelId: null
+                  });
+                });
+              });
+            });
+          } else {
+            // iframe 내부에서는 모달을 표시할 수 없으므로 기본 동작 (공용 스크랩으로 저장)
+            try {
+              chrome.runtime.sendMessage(
+                { action: "scrap_element", data: scrapData, channelId: null },
+                (response) => {
+                  if (chrome.runtime.lastError) {
+                    console.error("[Highlighter] Chrome runtime error:", chrome.runtime.lastError);
+                    return;
+                  }
+                  if (response && response.success) {
+                    window.top.postMessage(
+                      { action: "cp_show_preview", data: { ...scrapData, channelId: null } },
+                      "*"
+                    );
+                  }
+                }
               );
+            } catch (error) {
+              console.error("[Highlighter] Failed to send message:", error);
             }
           }
 

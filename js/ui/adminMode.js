@@ -296,13 +296,142 @@ function addAdminEventListeners(container) {
       "auth_token": "로그인 다시 하기",
       "api_youtube": "API 키 설정",
       "api_gemini": "API 키 설정",
+      "data_active_channel": "자동 수정",
       "data_orphan": "마이그레이션 실행",
+      "data_structure": "구조 확인",
       "scheduler": "알람 재등록",
       "ga4_access": "권한 확인",
       "adsense_access": "권한 확인",
     };
     return fixActions[checkId] || "해결하기";
   }
+
+  function handleAutoFix(checkId) {
+    const checkItem = container.querySelector(`#check-item-${checkId}`);
+    const fixBtn = checkItem?.querySelector(".fix-btn");
+    const icon = checkItem?.querySelector(".check-status-icon");
+    
+    if (!fixBtn) return;
+    
+    fixBtn.disabled = true;
+    fixBtn.textContent = "처리 중...";
+    icon.textContent = "🔄";
+    
+    if (checkId === "data_active_channel") {
+      // 활성 채널 불일치 수정
+      chrome.runtime.sendMessage({ action: "fix_active_channel_mismatch" }, (response) => {
+        if (response && response.success) {
+          addLog("success", response.message || "활성 채널이 수정되었습니다.");
+          icon.textContent = "✅";
+          fixBtn.style.display = "none";
+          // 진단 다시 실행하여 상태 확인
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ action: "run_system_diagnosis" }, (diagResponse) => {
+              if (diagResponse && diagResponse.success && diagResponse.data) {
+                const check = diagResponse.data.checks?.find(c => c.id === checkId);
+                if (check) handleDiagnosticLog(check);
+              }
+            });
+          }, 1000);
+        } else {
+          addLog("error", response?.error || "수정 실패");
+          icon.textContent = "⚠️";
+          fixBtn.disabled = false;
+          fixBtn.textContent = getFixButtonText(checkId);
+        }
+      });
+    } else if (checkId === "data_orphan") {
+      // 데이터 마이그레이션 실행
+      chrome.runtime.sendMessage({ action: "run_data_migration" }, (response) => {
+        if (response && response.success) {
+          addLog("success", response.message || "데이터 마이그레이션이 완료되었습니다.");
+          icon.textContent = "✅";
+          fixBtn.style.display = "none";
+          // 진단 다시 실행하여 상태 확인
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ action: "run_system_diagnosis" }, (diagResponse) => {
+              if (diagResponse && diagResponse.success && diagResponse.data) {
+                const check = diagResponse.data.checks?.find(c => c.id === checkId);
+                if (check) handleDiagnosticLog(check);
+              }
+            });
+          }, 1000);
+        } else {
+          addLog("error", response?.error || "마이그레이션 실패");
+          icon.textContent = "⚠️";
+          fixBtn.disabled = false;
+          fixBtn.textContent = getFixButtonText(checkId);
+        }
+      });
+    } else if (checkId === "data_structure") {
+      // 채널 데이터 구조 수정
+      chrome.runtime.sendMessage({ action: "fix_channel_structure" }, (response) => {
+        if (response && response.success) {
+          addLog("success", response.message || "채널 데이터 구조가 수정되었습니다.");
+          icon.textContent = "✅";
+          fixBtn.style.display = "none";
+          // 진단 다시 실행하여 상태 확인
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ action: "run_system_diagnosis" }, (diagResponse) => {
+              if (diagResponse && diagResponse.success && diagResponse.data) {
+                const check = diagResponse.data.checks?.find(c => c.id === checkId);
+                if (check) handleDiagnosticLog(check);
+              }
+            });
+          }, 1000);
+        } else {
+          addLog("error", response?.error || "구조 수정 실패");
+          icon.textContent = "⚠️";
+          fixBtn.disabled = false;
+          fixBtn.textContent = getFixButtonText(checkId);
+        }
+      });
+    } else if (checkId === "adsense_access" || checkId === "ga4_access") {
+      // AdSense/GA4 접근 권한 확인
+      chrome.runtime.sendMessage({ action: "test_adsense_ga4_access", checkId }, (response) => {
+        if (response && response.success) {
+          addLog("success", response.message || "접근 권한이 정상입니다.");
+          icon.textContent = "✅";
+          // 진단 다시 실행하여 상태 확인
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ action: "run_system_diagnosis" }, (diagResponse) => {
+              if (diagResponse && diagResponse.success && diagResponse.data) {
+                const check = diagResponse.data.checks?.find(c => c.id === checkId);
+                if (check) handleDiagnosticLog(check);
+              }
+            });
+          }, 1000);
+        } else {
+          addLog("warn", response?.message || response?.error || "접근 권한 확인 실패");
+          addLog("info", "채널 설정에서 Google 로그인을 다시 시도해주세요.");
+          icon.textContent = "⚠️";
+        }
+        fixBtn.disabled = false;
+        fixBtn.textContent = getFixButtonText(checkId);
+      });
+    } else {
+      fixBtn.disabled = false;
+      fixBtn.textContent = getFixButtonText(checkId);
+      addLog("info", `${checkId} 항목은 수동으로 해결해야 합니다.`);
+    }
+  }
+
+  // 경고/실패 항목에 자동 수정 버튼 연결
+  container.addEventListener("click", (e) => {
+    if (e.target.classList.contains("fix-btn")) {
+      const checkItem = e.target.closest(".check-item");
+      if (checkItem) {
+        const checkId = checkItem.dataset.checkId;
+        if (checkId === "data_active_channel" || 
+            checkId === "data_orphan" || 
+            checkId === "data_structure" ||
+            checkId === "adsense_access" ||
+            checkId === "ga4_access") {
+          handleAutoFix(checkId);
+        }
+      }
+    }
+  });
 
   function escapeHtml(text) {
     const div = document.createElement("div");
