@@ -1,51 +1,7 @@
-// 썸네일 생성 기능 제거됨
+// js/ui/workspaceMode.js (수정 완료된 최종 버전)
 
-// 이미지 갤러리 렌더링 및 에디터 삽입 이벤트
-function updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
-  const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
-  if (!imageGalleryGrid) return;
-  const imageUrls = renderImageGallery(linkedScrapsData);
-  if (imageUrls.length === 0) {
-    imageGalleryGrid.innerHTML =
-      "<p>이미지 자료가 없습니다.<br>스크랩 객체에 image/allImages 필드가 포함되어 있는지 확인하세요.</p>";
-    return;
-  }
-  imageGalleryGrid.innerHTML = imageUrls
-    .map(
-      (url) => `
-      <div class="gallery-thumb-wrap">
-        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
-      </div>
-    `
-    )
-    .join("");
-  imageGalleryGrid.querySelectorAll(".gallery-thumb").forEach((img) => {
-    img.addEventListener("click", () => {
-      sendCommand("insert-image", { url: img.src });
-      sendCommand("focus");
-    });
-  });
-}
-
-// 이미지 데이터 집계 함수: 연결된 스크랩에서 image/allImages 필드 파싱, 중복 제거
-function renderImageGallery(linkedScrapsData) {
-  const imageSet = new Set();
-  linkedScrapsData.forEach((scrap) => {
-    if (scrap.image) imageSet.add(scrap.image);
-    if (Array.isArray(scrap.allImages)) {
-      scrap.allImages.forEach((url) => imageSet.add(url));
-    }
-  });
-  let result = Array.from(imageSet);
-  // 테스트: 이미지가 하나도 없으면 예시 이미지 추가
-  if (result.length === 0) {
-    result = [
-      "https://dummyimage.com/240x160/4285f4/fff.png&text=No+Image",
-      "https://dummyimage.com/240x160/1a73e8/fff.png&text=Sample+Image",
-    ];
-  }
-  return result;
-}
+import { shortenLink, showToast } from "../utils.js";
+import { marked } from "marked";
 
 // 파이어베이스 전체 스크랩과 캔버스 데이터에서 이미지 갤러리 업데이트
 function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand, ideaData = null) {
@@ -658,10 +614,6 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
     renderImages(allImages);
   });
 }
-// js/ui/workspaceMode.js (수정 완료된 최종 버전)
-
-import { shortenLink, showToast } from "../utils.js";
-import { marked } from "marked";
 
 export function renderWorkspace(container, ideaData) {
   // ▼▼▼ [오류 수정] 방어 코드 추가 ▼▼▼

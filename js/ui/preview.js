@@ -1,6 +1,6 @@
 // js/ui/preview.js
 
-import { shortenLink } from "../utils.js";
+import { shortenLink, showToast } from "../utils.js";
 
 // 최근 스크랩 미리보기 카드를 화면에 보여주는 함수
 export function showRecentScrapPreview(scrapData) {
@@ -75,25 +75,4 @@ card.innerHTML = `
   }, 3000);
 }
 
-// 토스트 메시지를 보여주는 함수
-export function showToast(msg) {
-  let toast = document.getElementById("cp-toast-modal");
-  if (toast) toast.remove();
-  
-  toast = document.createElement("div");
-  toast.id = "cp-toast-modal";
-  toast.textContent = msg;
-  toast.style.cssText = `
-    position: fixed; left: 50%; top: 60px; transform: translateX(-50%);
-    background: rgba(34,34,34,0.97); color: #fff; font-size: 15px; font-weight: 600;
-    padding: 13px 32px; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.13);
-    z-index: 2147483648; opacity: 0; transition: opacity 0.3s;
-  `;
-  document.body.appendChild(toast);
-
-  setTimeout(() => { toast.style.opacity = "1"; }, 10);
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    setTimeout(() => { toast.remove(); }, 350);
-  }, 1500);
-}
+// showToast는 utils.js에서 import하여 사용

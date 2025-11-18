@@ -1,7 +1,7 @@
 // js/ui/scrapbookMode.js (필터링 로직 분리)
 import { shortenLink, showConfirmationToast } from "../utils.js";
 import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js";
-import { renderPanelHeader } from "./header.js";
+import { renderHeaderAndTabs } from "./header.js";
 
 let selectedScrapId = null;
 let allScraps = [];
@@ -503,7 +503,7 @@ function renderDetailView(scrapId, container) {
                   addKanbanEventListeners(mainArea);
                   
                   // 헤더도 업데이트
-                  renderPanelHeader(host.shadowRoot);
+                  renderHeaderAndTabs(host.shadowRoot);
                 }
               }
             } else {

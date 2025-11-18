@@ -2,7 +2,8 @@
 
 import { setupHighlighter } from "./js/core/highlighter.js";
 import { createAndShowPanel, isPanelVisible } from "./js/ui/panel.js";
-import { showRecentScrapPreview, showToast } from "./js/ui/preview.js";
+import { showRecentScrapPreview } from "./js/ui/preview.js";
+import { showToast } from "./js/utils.js";
 import { renderDashboard } from "./js/ui/dashboardMode.js";
 
 // [PRD v3.2] Extension context 무효화 감지 및 자동 페이지 새로고침

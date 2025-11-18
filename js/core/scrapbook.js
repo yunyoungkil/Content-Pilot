@@ -1,7 +1,3 @@
 // js/core/scrapbook.js
-import { showToast, shortenLink } from "../utils.js";
-import { filterAndSortScraps } from "../core/scrapbook.js";
-
-let selectedScrapId = null;
-let allScraps = [];
+// 이 파일은 현재 사용되지 않습니다. 필요한 경우 여기에 공통 스크랩 관련 함수를 추가할 수 있습니다.
 
