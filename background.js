@@ -1078,76 +1078,90 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       // ▲▲▲ [보완 끝] ▲▲▲
 
-      const tags = await extractKeywords(msg.data.text);
-      let scrapPayload = {
-        ...msg.data,
-        timestamp: Date.now(),
-        tags: tags || null,
-        channelId: userSelectedChannelId, // 👈 핵심: 사용자 선택에 따른 channelId (null = 공용 스크랩)
-        // [보완] 프리뷰 UI를 위해 채널 이름도 데이터에 포함 (저장은 안 해도 됨)
-        _channelName: activeChannelName
-      };
+      try {
+        const tags = await extractKeywords(msg.data.text);
+        let scrapPayload = {
+          ...msg.data,
+          timestamp: Date.now(),
+          tags: tags || null,
+          channelId: userSelectedChannelId, // 👈 핵심: 사용자 선택에 따른 channelId (null = 공용 스크랩)
+          // [보완] 프리뷰 UI를 위해 채널 이름도 데이터에 포함 (저장은 안 해도 됨)
+          _channelName: activeChannelName
+        };
 
-      // images 배열을 allImages로 변환 (기존 allImages가 있으면 병합)
-      if (Array.isArray(msg.data.images) && msg.data.images.length > 0) {
-        const existingAllImages = scrapPayload.allImages || [];
-        // 중복 제거하면서 병합
-        const mergedImages = [...new Set([...existingAllImages, ...msg.data.images])];
-        scrapPayload.allImages = mergedImages.length > 0 ? mergedImages : null;
-        // images 필드는 제거 (allImages로 통합)
-        delete scrapPayload.images;
-      } else if (scrapPayload.images) {
-        // images가 배열이 아니면 제거
-        delete scrapPayload.images;
+        // images 배열을 allImages로 변환 (기존 allImages가 있으면 병합)
+        if (Array.isArray(msg.data.images) && msg.data.images.length > 0) {
+          const existingAllImages = scrapPayload.allImages || [];
+          // 중복 제거하면서 병합
+          const mergedImages = [...new Set([...existingAllImages, ...msg.data.images])];
+          scrapPayload.allImages = mergedImages.length > 0 ? mergedImages : null;
+          // images 필드는 제거 (allImages로 통합)
+          delete scrapPayload.images;
+        } else if (scrapPayload.images) {
+          // images가 배열이 아니면 제거
+          delete scrapPayload.images;
+        }
+
+        const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
+        
+        // 저장용 데이터에서 임시 필드(_channelName) 분리 (DB에는 저장 안 함)
+        const { _channelName, ...dataToSave } = cleanedScrapPayload;
+
+        const scrapRef = firebase.database().ref("scraps").push();
+        scrapRef
+          .set(dataToSave)
+          .then(() => {
+            // 응답 전송 (비동기 응답을 위해)
+            sendResponse({ success: true, scrapData: dataToSave });
+            
+            if (sender.tab?.id) {
+              // 프리뷰에는 채널 이름을 포함해서 전송
+              const previewData = { ...dataToSave, channelName: _channelName };
+              chrome.tabs.sendMessage(
+                sender.tab.id,
+                { action: "cp_show_preview", data: previewData },
+                { frameId: 0 }
+              );
+            }
+          })
+          .catch((err) => {
+            console.error("[Scrap] 저장 실패:", err);
+            sendResponse({ success: false, error: err.message });
+            
+            if (sender.tab?.id) {
+              chrome.tabs.sendMessage(
+                sender.tab.id,
+                { action: "cp_show_toast", message: "❌ 스크랩 실패" },
+                { frameId: 0 }
+              );
+            }
+          });
+      } catch (error) {
+        // [CSP/에러 처리] 모든 예외 경로에서 sendResponse 호출 보장
+        console.error("[Scrap] 처리 중 오류:", error);
+        sendResponse({ success: false, error: error.message || "스크랩 처리 중 오류가 발생했습니다." });
+        
+        if (sender.tab?.id) {
+          chrome.tabs.sendMessage(
+            sender.tab.id,
+            { action: "cp_show_toast", message: "❌ 스크랩 처리 실패" },
+            { frameId: 0 }
+          );
+        }
       }
-
-      const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
-      
-      // 저장용 데이터에서 임시 필드(_channelName) 분리 (DB에는 저장 안 함)
-      const { _channelName, ...dataToSave } = cleanedScrapPayload;
-
-      const scrapRef = firebase.database().ref("scraps").push();
-      scrapRef
-        .set(dataToSave)
-        .then(() => {
-          // 응답 전송 (비동기 응답을 위해)
-          sendResponse({ success: true, scrapData: dataToSave });
-          
-          if (sender.tab?.id) {
-            // 프리뷰에는 채널 이름을 포함해서 전송
-            const previewData = { ...dataToSave, channelName: _channelName };
-            chrome.tabs.sendMessage(
-              sender.tab.id,
-              { action: "cp_show_preview", data: previewData },
-              { frameId: 0 }
-            );
-          }
-        })
-        .catch((err) => {
-          console.error("[Scrap] 저장 실패:", err);
-          sendResponse({ success: false, error: err.message });
-          
-          if (sender.tab?.id) {
-            chrome.tabs.sendMessage(
-              sender.tab.id,
-              { action: "cp_show_toast", message: "❌ 스크랩 실패" },
-              { frameId: 0 }
-            );
-          }
-        });
     })();
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "toggle_scrap_sharing") {
     // [체크리스트 1] 스크랩 공유 토글 핸들러
     (async () => {
-      const { scrapId, currentChannelId } = msg;
-      
-      if (!scrapId) {
-        sendResponse({ success: false, error: "스크랩 ID가 필요합니다." });
-        return;
-      }
-      
       try {
+        const { scrapId, currentChannelId } = msg;
+        
+        if (!scrapId) {
+          sendResponse({ success: false, error: "스크랩 ID가 필요합니다." });
+          return;
+        }
+        
         const scrapRef = firebase.database().ref(`scraps/${scrapId}`);
         const scrapSnap = await scrapRef.once("value");
         const scrapData = scrapSnap.val();
@@ -1183,8 +1197,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           message: newChannelId === null ? "공용 스크랩으로 변경되었습니다." : "전용 스크랩으로 변경되었습니다."
         });
       } catch (error) {
+        // [에러 처리] 모든 예외 경로에서 sendResponse 호출 보장
         console.error("[Scrap] 공유 토글 실패:", error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({ success: false, error: error.message || "공유 토글 처리 중 오류가 발생했습니다." });
       }
     })();
     return true;

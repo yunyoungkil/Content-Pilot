@@ -392,12 +392,11 @@ function createScrapCard(scrap, isLinked) {
   const previewImage = scrap.image || (Array.isArray(scrap.allImages) && scrap.allImages.length > 0 ? scrap.allImages[0] : "");
 
   // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
+  // [CSP 준수] 인라인 이벤트 핸들러 제거, CSS :hover 사용
   const isDedicated = scrap.channelId !== null && scrap.channelId !== undefined;
-  const toggleBtn = `<button class="scrap-share-toggle-btn" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
-    style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; background: ${isDedicated ? '#e3f2fd' : '#f1f8e9'}; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
-    title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}"
-    onmouseover="this.style.background='${isDedicated ? '#bbdefb' : '#dcedc8'}'; this.style.transform='scale(1.1)'"
-    onmouseout="this.style.background='${isDedicated ? '#e3f2fd' : '#f1f8e9'}'; this.style.transform='scale(1)'">
+  const toggleBtn = `<button class="scrap-share-toggle-btn ${isDedicated ? 'scrap-toggle-dedicated' : 'scrap-toggle-public'}" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
+    style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
+    title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}">
     ${isDedicated ? '🔒' : '🌐'}
   </button>`;
   
@@ -1111,7 +1110,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                         const isNowDedicated = response.newChannelId !== null;
                         btn.innerHTML = isNowDedicated ? "🔒" : "🌐";
                         btn.title = isNowDedicated ? "공용으로 변경" : "전용으로 변경";
-                        btn.style.background = isNowDedicated ? "#e3f2fd" : "#f1f8e9";
+                        // [CSP 준수] 클래스로 스타일 변경
+                        btn.classList.remove("scrap-toggle-dedicated", "scrap-toggle-public");
+                        btn.classList.add(isNowDedicated ? "scrap-toggle-dedicated" : "scrap-toggle-public");
                         btn.dataset.currentChannelId = response.newChannelId || "";
                         
                         // 배지 제거됨 (토글 버튼만 사용)

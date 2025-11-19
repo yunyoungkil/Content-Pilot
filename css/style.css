@@ -198,6 +198,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* [CSP 준수] 스크랩 공유 토글 버튼 스타일 */
+.scrap-share-toggle-btn {
+  background: #f1f8e9; /* 공용 기본 색상 */
+}
+
+.scrap-share-toggle-btn.scrap-toggle-dedicated {
+  background: #e3f2fd; /* 전용 기본 색상 */
+}
+
+.scrap-share-toggle-btn.scrap-toggle-public:hover {
+  background: #dcedc8 !important; /* 공용 호버 색상 */
+  transform: scale(1.1);
+}
+
+.scrap-share-toggle-btn.scrap-toggle-dedicated:hover {
+  background: #bbdefb !important; /* 전용 호버 색상 */
+  transform: scale(1.1);
+}
 .scrap-card-snippet {
   font-size: 13px;
   color: #666;
