@@ -3584,7 +3584,22 @@ ${decayContent.map((item, idx) =>
       });
       
       // 마크다운 형식의 구분선을 HTML로 변환 (기존 구분선은 유지)
-      html = html.replace(/\n\s*---\s*\n/gi, '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n');
+      // 단, mark 태그 안에 있는 것은 제외
+      html = html.replace(/\n\s*---\s*\n/gi, (match, offset, string) => {
+        // mark 태그 안에 있는지 확인
+        const beforeMatch = string.substring(0, offset);
+        const lastMarkOpen = beforeMatch.lastIndexOf('<mark');
+        const lastMarkClose = beforeMatch.lastIndexOf('</mark>');
+        // 마지막 <mark>가 </mark>보다 뒤에 있으면 mark 태그 안에 있음
+        if (lastMarkOpen > lastMarkClose) {
+          return match; // 변환하지 않음
+        }
+        return '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n';
+      });
+      
+      // 잘못된 mark 태그 안의 hr 태그 제거 (<<mark ... >hr ... > 형식)
+      html = html.replace(/<mark[^>]*>\s*<hr[^>]*>/gi, '<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">');
+      html = html.replace(/<\/mark>\s*<hr[^>]*>/gi, '</mark>');
       
       // "(참고 자료 X)" 같은 번호 표기 제거
       // 마크다운 형식이면 HTML로 변환 후 처리 (클라이언트에서 처리하도록 남겨둠)
@@ -3608,16 +3623,16 @@ ${decayContent.map((item, idx) =>
         html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
         html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
         html = html.replace(/참고\s*자료\s*\d+/gi, '');
-        // 문장 중간에 있는 경우 처리 (앞뒤 공백 정리)
-        html = html.replace(/\s*\(참고\s*자료\s*\d+\)\s*/gi, ' ');
-        html = html.replace(/\s*\[참고\s*자료\s*\d+\]\s*/gi, ' ');
+        // 문장 중간에 있는 경우 처리 (앞뒤 공백 정리, 줄바꿈은 보존)
+        html = html.replace(/[ \t]*\(참고\s*자료\s*\d+\)[ \t]*/gi, ' ');
+        html = html.replace(/[ \t]*\[참고\s*자료\s*\d+\][ \t]*/gi, ' ');
         // 빈 괄호 제거
-        html = html.replace(/\(\s*\)/g, '');
+        html = html.replace(/\([ \t]*\)/g, '');
         // 연속된 공백을 하나로 (줄바꿈은 유지)
         html = html.replace(/[ \t]{2,}/g, ' ');
-        // 마침표 앞 공백 정리
-        html = html.replace(/\s+\./g, '.');
-        html = html.replace(/\.\s+\./g, '.');
+        // 마침표 앞 공백 정리 (줄바꿈은 보존)
+        html = html.replace(/[ \t]+\./g, '.');
+        html = html.replace(/\.[ \t]+\./g, '.');
         
         // 태그 복원
         html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
@@ -3634,15 +3649,32 @@ ${decayContent.map((item, idx) =>
       }
       
       // 중요한 문장에 배경색 적용 (AI가 <mark> 태그를 사용하지 않은 경우)
+      // 단, hr 태그나 다른 블록 요소가 포함된 경우는 제외
+      // 서론 부분(제목 다음, 첫 번째 h2 이전)은 제외
       if (!html.includes('<mark')) {
         const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수', '반드시', '꼭'];
         let importantCount = 0;
         
+        // 서론 부분 찾기 (h1 다음부터 첫 번째 h2 이전까지)
+        const h1Match = html.match(/<h1[^>]*>.*?<\/h1>/i);
+        const firstH2Match = html.match(/<h2[^>]*>/i);
+        const introEndIndex = firstH2Match ? firstH2Match.index : html.length;
+        const introStartIndex = h1Match ? h1Match.index + h1Match[0].length : 0;
+        
         importantKeywords.forEach(keyword => {
           if (importantCount >= 2) return;
           // 문장 단위로 찾기 (마침표, 느낌표, 물음표로 끝나는 문장)
+          // hr 태그나 다른 블록 요소가 포함된 경우는 제외
           const regex = new RegExp(`([^<]*${keyword}[^<]*[.!?])`, 'gi');
-          html = html.replace(regex, (match) => {
+          html = html.replace(regex, (match, p1, offset, string) => {
+            // 서론 부분(제목 다음, 첫 번째 h2 이전)이면 mark 태그를 추가하지 않음
+            if (offset >= introStartIndex && offset < introEndIndex) {
+              return match;
+            }
+            // hr 태그나 다른 블록 요소가 포함되어 있으면 mark 태그를 추가하지 않음
+            if (match.includes('<hr') || match.includes('<div') || match.includes('<p>') || match.includes('<h')) {
+              return match;
+            }
             if (importantCount < 2 && !match.includes('<mark') && match.trim().length > 10) {
               importantCount++;
               return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
@@ -3650,6 +3682,25 @@ ${decayContent.map((item, idx) =>
             return match;
           });
         });
+      }
+      
+      // 이미 mark 태그 안에 hr 태그가 잘못 들어간 경우 수정
+      html = html.replace(/<mark([^>]*)>([^<]*)<hr([^>]*)>([^<]*)<\/mark>/gi, '<hr$3><mark$1>$2$4</mark>');
+      html = html.replace(/<mark([^>]*)><hr([^>]*)>/gi, '<hr$2><mark$1>');
+      
+      // 서론 부분(제목 다음, 첫 번째 h2 이전)의 mark 태그 제거
+      const h1Match = html.match(/<h1[^>]*>.*?<\/h1>/i);
+      const firstH2Match = html.match(/<h2[^>]*>/i);
+      if (h1Match && firstH2Match) {
+        const introStartIndex = h1Match.index + h1Match[0].length;
+        const introEndIndex = firstH2Match.index;
+        const beforeIntro = html.substring(0, introStartIndex);
+        const introSection = html.substring(introStartIndex, introEndIndex);
+        const afterIntro = html.substring(introEndIndex);
+        
+        // 서론 부분에서 mark 태그 제거
+        const cleanedIntro = introSection.replace(/<mark[^>]*>/gi, '').replace(/<\/mark>/gi, '');
+        html = beforeIntro + cleanedIntro + afterIntro;
       }
       
       return html;
@@ -3760,15 +3811,23 @@ ${decayContent.map((item, idx) =>
             7. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
             8. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
               - **매우 중요**: 이미지 프롬프트는 해당 위치의 콘텐츠 내용과 직접적으로 관련된 이미지여야 합니다.
+              - **형식 규칙 (매우 중요)**:
+                * **줄바꿈 강제**: 영어 프롬프트와 한글 프롬프트는 반드시 줄을 나누어 작성해주세요. 절대 한 줄에 붙여서 작성하지 마세요. 두 프롬프트 사이에는 반드시 줄바꿈이 있어야 합니다.
+                * 각 프롬프트는 녹색 텍스트 색상으로 표시되어야 합니다 (마크다운: <span style="color: #2e7d32;">텍스트</span> 형식 사용).
+                * 형식 예시 (아래처럼 반드시 두 줄로 작성):
+                  <span style="color: #2e7d32;">[이미지 생성 프롬프트 (영어): High-quality photo of [글의 핵심 주제], professional lighting, 8K resolution, photorealistic style]</span>
+                  
+                  <span style="color: #2e7d32;">[이미지 생성 프롬프트 (한글): [글의 핵심 주제]에 대한 고품질 사진, 전문적인 조명, 사실적 스타일]</span>
+                * 위 예시처럼 영어 프롬프트 다음에 빈 줄 하나를 두고 한글 프롬프트를 작성하세요.
+                * 잘못된 예 (절대 금지): 
+                  - "<span style="color: #2e7d32;">[이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]</span>" (한 줄에 붙어 있음, 줄바꿈 없음)
+                  - "> [이미지 생성 프롬프트 ...]" (인용구 형식 사용 금지)
               - 메인 이미지는 제목 바로 아래, 서론 시작 전에 1개: 
                 * 해당 글의 주제와 직접 관련된 이미지 프롬프트를 작성하세요.
-                * 예시 형식: "[이미지 생성 프롬프트 (영어): High-quality photo of [글의 핵심 주제], professional lighting, 8K resolution, photorealistic style] [이미지 생성 프롬프트 (한글): [글의 핵심 주제]에 대한 고품질 사진, 전문적인 조명, 사실적 스타일]"
               - 본문 이미지는 각 섹션 사이에 3~4개 배치: 
                 * 각 섹션의 내용과 직접 관련된 이미지 프롬프트를 작성하세요.
                 * 예: "SmartThings AI 콤보" 섹션이면 SmartThings 관련 이미지, "해결 방법" 섹션이면 해결 과정 관련 이미지
-                * 형식: "[이미지 생성 프롬프트 (영어): ...] [이미지 생성 프롬프트 (한글): ...]"
               - **절대 금지**: 글의 주제와 무관한 예시 이미지(예: 갤럭시 탭, 사무실 등)를 사용하지 마세요. 반드시 해당 글의 실제 내용과 관련된 이미지만 생성하세요.
-              - 태그나 특수 형식 없이 순수 텍스트로만 작성해주세요
               - 프롬프트 작성 가이드 (Gemini 이미지 생성 가이드 참고 - https://ai.google.dev/gemini-api/docs/image-generation?hl=ko):
                 * 주제, 컨텍스트, 스타일을 명확하게 설명하세요
                 * 구체적인 키워드와 수정자를 사용하세요 (예: "high-quality", "natural lighting", "professional photography", "8K resolution")
@@ -3816,14 +3875,18 @@ ${decayContent.map((item, idx) =>
                  * "자세한 내용은 [여기](URL)를 참고하시기 바랍니다." (모호한 표현)
                  * "관련 자료: [제목](URL)" (나열식)
             8. **독자 가독성을 위한 포맷팅 규칙:**
-               - 각 문단 사이에는 적절한 줄바꿈을 넣어주세요 (빈 줄 1개).
-               - 목록이나 단계별 설명에는 들여쓰기를 사용해주세요 (마크다운 리스트 형식: - 또는 1. ).
-               - 중요한 키워드나 개념은 **굵게** 표시해주세요 (마크다운: **텍스트**).
-               - 전문가 의견이나 인용구는 인용 블록을 사용해주세요 (마크다운: > 인용 내용).
-               - 본문에서 가장 중요한 핵심 문장 1~2개를 선택하여 <mark style="background-color: rgb(255, 255, 204);">핵심 문장</mark> 형식으로 강조해주세요.
-               - 링크는 밑줄 없이 작성해주세요 (마크다운 링크 형식 사용).
-               - 제목 태그(h1, h2, h3)는 적절한 간격을 두고 사용해주세요.
-               - 목록, 인용, 일반 텍스트는 읽기 편하도록 적절한 줄간격을 유지해주세요.
+              - **구조적 계층화**: H1(제목) -> H2(중제목) -> H3(소제목) 순서로 논리적으로 나뉘어 있어야 합니다.
+              - **간결한 문장 사용**: 한 문장이 너무 길어 호흡이 가쁘지 않도록 작성해주세요. 접속사를 줄이고 단문 위주로 작성하는 것이 좋습니다.
+              - **전문 용어 풀이**: 업계 은어나 어려운 용어가 있다면, 초보자도 이해할 수 있게 쉽게 풀어서 설명해주세요.
+              - **목록(List) 활용**: 나열되는 정보(특징, 장점, 순서 등)는 줄글 대신 **글머리 기호(Bullet points)**나 번호 매기기를 사용해주세요.
+              - 각 문단 사이에는 적절한 줄바꿈을 넣어주세요 (빈 줄 1개).
+              - 목록이나 단계별 설명에는 들여쓰기를 사용해주세요 (마크다운 리스트 형식: - 또는 1. ).
+              - 중요한 키워드나 개념은 **굵게** 표시해주세요 (마크다운: **텍스트**).
+              - 본문에서 가장 중요한 핵심 문장 1~2개를 선택하여 <mark style="background-color: rgb(255, 255, 204);">핵심 문장</mark> 형식으로 강조해주세요.
+              - 링크는 밑줄 없이 작성해주세요 (마크다운 링크 형식 사용).
+              - 제목 태그(h1, h2, h3)는 적절한 간격을 두고 사용해주세요.
+              - 목록, 인용, 일반 텍스트는 읽기 편하도록 적절한 줄간격을 유지해주세요.
+              - **시각적 환기 장치**: 텍스트만 나열되지 않고, 적절한 위치에 이미지 프롬프트가 삽입되어 지루함을 덜어주어야 합니다.
             
             [중요] **응답 형식 규칙:**
             - 반드시 **순수 마크다운 형식**으로만 작성해주세요.
