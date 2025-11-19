@@ -377,10 +377,15 @@ function createScrapCard(scrap, isLinked) {
   const cleanedTitle = textContent.replace(/\s+/g, " ").trim();
   const displayTitle = cleanedTitle.substring(0, 10);
   
+  // [체크리스트 1-B 최적화] 전용/공용 배지 생성
+  const channelBadge = scrap.channelId 
+    ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="전용 스크랩">🔒 전용</span>`
+    : `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #f1f8e9; color: #558b2f; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="공용 스크랩">🌐 공용</span>`;
+  
   if (isLinked) {
     return `<div class="scrap-card-item linked-scrap-item" data-scrap-id="${scrap.id}" data-text="${textContent.replace(/"/g, "&quot;")}" draggable="true" style="margin:0; flex-shrink:0; position:relative;">
         <div class="linked-scrap-tag">
-          <span class="tag-text">${displayTitle}...</span>
+          <span class="tag-text">${displayTitle}...${channelBadge}</span>
           <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제">×</button>
         </div>
       </div>`;
@@ -400,7 +405,10 @@ function createScrapCard(scrap, isLinked) {
             <button class="scrap-card-delete-btn unlink-scrap-btn" title="연결 해제">×</button>
             ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ""}
             <div class="scrap-card-info">
-                <div class="scrap-card-title">${cleanedTitle.substring(0, 20)}...</div>
+                <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
+                    <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
+                    ${channelBadge}
+                </div>
                 <div class="scrap-card-snippet" style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #4285f4;" title="링크 열기">
                     <span>🔗</span>
                     <span>${shortenLink(scrap.url, 25)}</span>

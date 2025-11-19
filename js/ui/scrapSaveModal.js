@@ -85,9 +85,42 @@ export function showScrapSaveModal(scrapData, activeChannelId, activeChannelName
   const confirmBtn = modalContent.querySelector("#scrap-save-confirm-btn");
   const cancelBtn = modalContent.querySelector("#scrap-save-cancel-btn");
   const checkbox = modalContent.querySelector("#scrap-save-channel-only");
+  
+  // [체크리스트 1-A] 체크박스 기본값 및 활성화 로직
+  if (activeChannelId && activeChannelName) {
+    // 채널이 선택된 상태: 체크박스 활성화 (기본값은 체크)
+    checkbox.checked = true;
+    checkbox.disabled = false;
+    updateSaveButtonText(confirmBtn, true, activeChannelName);
+  } else {
+    // 채널이 없는 상태: 체크박스 비활성화
+    checkbox.checked = false;
+    checkbox.disabled = true;
+    checkbox.style.opacity = "0.5";
+    checkbox.style.cursor = "not-allowed";
+    updateSaveButtonText(confirmBtn, false, null);
+  }
+  
+  // [체크리스트 1-A 최적화] 체크박스 토글 시 저장 버튼 텍스트 변경
+  checkbox.addEventListener("change", () => {
+    if (!checkbox.disabled) {
+      updateSaveButtonText(confirmBtn, checkbox.checked, activeChannelName);
+    }
+  });
+  
+  // 저장 버튼 텍스트 업데이트 함수
+  function updateSaveButtonText(btn, isChannelOnly, channelName) {
+    if (isChannelOnly && channelName) {
+      btn.textContent = `전용 저장 (${channelName})`;
+      btn.title = `이 스크랩을 '${channelName}' 채널에만 저장합니다`;
+    } else {
+      btn.textContent = "공용 저장";
+      btn.title = "이 스크랩을 모든 채널에서 사용할 수 있도록 공용으로 저장합니다";
+    }
+  }
 
   confirmBtn.addEventListener("click", () => {
-    const isChannelOnly = checkbox.checked;
+    const isChannelOnly = checkbox.checked && !checkbox.disabled;
     const targetChannelId = isChannelOnly ? activeChannelId : null;
 
     confirmBtn.disabled = true;

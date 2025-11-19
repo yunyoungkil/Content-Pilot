@@ -126,12 +126,14 @@ async function initGlobalChannelSelector(shadowRoot) {
       selector.innerHTML = "";
 
       if (myBlogs.length === 0) {
-        // 채널이 없을 때
+        // [체크리스트 3-🅱️] 채널이 없을 때
         const option = document.createElement("option");
         option.value = "__MANAGE__";
-        option.textContent = "👉 채널을 추가해주세요"; // 문구 변경
+        option.textContent = "👉 채널을 추가해주세요";
         selector.appendChild(option);
         selector.style.borderColor = "#ea4335"; // 빨간색 테두리로 강조
+        selector.style.color = "#ea4335"; // 빨간색 텍스트로 강조
+        selector.style.fontWeight = "500";
         // openChannelManager(); // panel.js에서 처리하므로 여기선 생략 가능
       } else {
         // 채널 목록 추가
@@ -191,9 +193,30 @@ async function initGlobalChannelSelector(shadowRoot) {
       chrome.storage.local.set({ activeChannelId: selectedValue }, () => {
         console.log(`[Global] 활성 채널 변경됨: ${selectedValue}`);
         
-        // 현재 탭 새로고침 (직접 함수 호출)
+        // [체크리스트 4-1] 헤더 반응성: 로딩 표시 추가
         const mainArea = shadowRoot.querySelector("#cp-main-area");
         if (!mainArea) return;
+        
+        // 로딩 오버레이 표시
+        const loadingOverlay = document.createElement("div");
+        loadingOverlay.id = "channel-switch-loading";
+        loadingOverlay.style.cssText = `
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(255, 255, 255, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          font-size: 14px;
+          color: #666;
+        `;
+        loadingOverlay.innerHTML = `<div style="text-align: center;"><div style="margin-bottom: 8px;">⏳ 채널 데이터 로딩 중...</div></div>`;
+        mainArea.style.position = "relative";
+        mainArea.appendChild(loadingOverlay);
         
         const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
         if (activeTab) {
@@ -202,30 +225,36 @@ async function initGlobalChannelSelector(shadowRoot) {
           // 약간의 지연 후 리로드 (storage 저장 보장)
           setTimeout(() => {
             // 탭별 새로고침 로직
-            if (tabName === "dashboard") {
-              import("./dashboardMode.js").then(module => {
+            Promise.all([
+              tabName === "dashboard" ? import("./dashboardMode.js").then(module => {
                 module.renderDashboard(mainArea);
                 module.addDashboardEventListeners(mainArea);
-              });
-            } else if (tabName === "scrapbook") {
-              import("./scrapbookMode.js").then(module => {
+              }) : null,
+              tabName === "scrapbook" ? import("./scrapbookMode.js").then(module => {
                 module.renderScrapbook(mainArea);
-              });
-            } else if (tabName === "kanban") {
-              import("./kanbanMode.js").then(module => {
+              }) : null,
+              tabName === "kanban" ? import("./kanbanMode.js").then(module => {
                 module.renderKanban(mainArea);
                 module.addKanbanEventListeners(mainArea);
-              });
-            } else if (tabName === "performance") {
-              import("./performanceDashboardMode.js").then(module => {
+              }) : null,
+              tabName === "performance" ? import("./performanceDashboardMode.js").then(module => {
                 module.renderPerformanceDashboard(mainArea);
-              });
-            } else if (tabName === "report") {
-              import("./performanceReportMode.js").then(module => {
+              }) : null,
+              tabName === "report" ? import("./performanceReportMode.js").then(module => {
                 module.renderPerformanceReport(mainArea);
-              });
-            }
+              }) : null
+            ].filter(Boolean)).then(() => {
+              // 로딩 오버레이 제거
+              const loading = mainArea.querySelector("#channel-switch-loading");
+              if (loading) loading.remove();
+            });
           }, 100);
+        } else {
+          // 로딩 오버레이 제거 (탭이 없는 경우)
+          setTimeout(() => {
+            const loading = mainArea.querySelector("#channel-switch-loading");
+            if (loading) loading.remove();
+          }, 500);
         }
       });
     }

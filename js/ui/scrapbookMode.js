@@ -106,12 +106,20 @@ function renderScrapList(scraps, container) {
                 ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
                 : '';
             const cleanedTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim() : '제목 없음';
+            // [체크리스트 1-B 최적화] 전용/공용 배지 생성
+            const channelBadge = scrap.channelId 
+              ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="전용 스크랩">🔒 전용</span>`
+              : `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #f1f8e9; color: #558b2f; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="공용 스크랩">🌐 공용</span>`;
+            
             return `
                 <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}">
                   <button class="scrap-card-delete-btn" data-id="${scrap.id}"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
                   ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ''}
                   <div class="scrap-card-info">
-                    <div class="scrap-card-title">${cleanedTitle.substring(0, 20)}...</div>
+                    <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
+                      <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
+                      ${channelBadge}
+                    </div>
                     <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
                     ${tagsHtml}
                   </div>

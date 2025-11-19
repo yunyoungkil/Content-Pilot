@@ -7416,15 +7416,43 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
   chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
 
-  // 2-3. [신규] 업데이트 시 마이그레이션 필요 여부 확인
+  // 2-3. [체크리스트 2-🅰️] 업데이트 시 마이그레이션 자동 실행
   if (details.reason === "update" || details.reason === "install") {
     // 마이그레이션 완료 상태 확인
     chrome.storage.local.get("migration_completed", async (result) => {
       if (!result.migration_completed) {
-        // 마이그레이션이 필요한지 확인하고, 필요하면 UI에 알림
-        // 실제 마이그레이션은 사용자가 UI에서 선택할 때 실행됨
         console.log("[Migration] 마이그레이션 필요 여부 확인 중...");
-        // UI에서 check_migration_needed를 호출하여 모달 표시
+        // [체크리스트 2-🅰️] 자동 실행: 백그라운드에서 조용히 실행
+        try {
+          // 마이그레이션 필요 여부 확인
+          const db = firebase.database();
+          const userId = "default_user";
+          const channelsSnap = await db.ref(`channels/${userId}/myChannels/blogs`).once("value");
+          const myBlogs = channelsSnap.val() || [];
+          
+          if (myBlogs.length > 0) {
+            // [체크리스트 2-🅰️] 단일 채널 사용자: 모든 데이터를 그 1개 채널의 소유로 자동 변환
+            let targetChannelId = null;
+            if (myBlogs.length === 1) {
+              const blog = myBlogs[0];
+              targetChannelId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : null);
+              console.log(`[Migration] 단일 채널 감지. 자동 마이그레이션 실행: ${targetChannelId}`);
+            } else {
+              // [체크리스트 2-🅰️] 다중 채널 사용자: 데이터를 '공용(null)'으로 안전하게 변환
+              targetChannelId = null;
+              console.log("[Migration] 다중 채널 감지. 기존 데이터를 '공용'으로 유지합니다.");
+            }
+            
+            // 마이그레이션 실행
+            await runDataMigration(targetChannelId);
+            console.log("[Migration] 자동 마이그레이션 완료");
+          } else {
+            console.log("[Migration] 등록된 채널이 없어 마이그레이션을 건너뜁니다.");
+          }
+        } catch (error) {
+          console.error("[Migration] 자동 마이그레이션 실패:", error);
+          // 실패해도 UI에서 수동으로 실행할 수 있도록 상태를 저장하지 않음
+        }
       }
     });
   }

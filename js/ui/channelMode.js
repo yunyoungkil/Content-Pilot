@@ -1,5 +1,7 @@
 // js/ui/channelMode.js (채널 중심 아키텍처 적용 버전)
 
+import { showToast } from "../utils.js";
+
 export function renderChannelMode(container) {
   container.innerHTML = `
     <div class="channel-settings-container">
@@ -431,7 +433,25 @@ export function renderChannelMode(container) {
       
       if (!blogUrlEl) return;
       const url = blogUrlEl.value.trim();
-      if (!url) return alert("블로그 URL은 필수입니다.");
+      if (!url) {
+        showToast("❌ 블로그 URL은 필수입니다.");
+        blogUrlEl.focus();
+        return;
+      }
+      
+      // [체크리스트 4-3] URL 유효성 검사
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.protocol.startsWith('http')) {
+          showToast("❌ URL은 http:// 또는 https://로 시작해야 합니다.");
+          blogUrlEl.focus();
+          return;
+        }
+      } catch (e) {
+        showToast("❌ 유효한 URL 형식이 아닙니다. (예: https://blog.naver.com/myid)");
+        blogUrlEl.focus();
+        return;
+      }
       
       // GA4 ID는 드롭다운 또는 입력 필드에서 가져오기
       const gaSelectEl = container.querySelector("#modal-ga-select");
@@ -477,12 +497,65 @@ export function renderChannelMode(container) {
         geminiApiKey,
         myChannels: { blogs: myChannelsData } // 변경된 데이터 구조에 맞게 전송
       };
+      // [체크리스트 4-3 최적화] 저장 중 로딩 표시
+      saveAllBtn.disabled = true;
+      const originalText = saveAllBtn.textContent;
+      saveAllBtn.textContent = "저장 중...";
+      
       chrome.runtime.sendMessage({
         action: "save_channels_and_key",
         data: payload
       }, (response) => {
+        saveAllBtn.disabled = false;
+        saveAllBtn.textContent = originalText;
+        
         if (response && response.success) {
-          alert("✅ 모든 설정이 저장되었습니다.");
+          // [체크리스트 4-3] 저장 성공 피드백
+          showToast("✅ 채널 설정이 저장되었습니다.");
+          
+          // [체크리스트 3-🆎] 첫 채널 생성 후 자동 선택 및 대시보드 이동
+          chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (channelResponse) => {
+            const myBlogs = channelResponse?.data?.myChannels?.blogs || [];
+            const currentActiveChannelId = chrome.storage.local.get("activeChannelId", (res) => {
+              const activeChannelId = res.activeChannelId;
+              
+              // 활성 채널이 없고, 채널이 1개 이상 있으면 첫 번째 채널 자동 선택
+              if (!activeChannelId && myBlogs.length > 0) {
+                const firstChannel = myBlogs[0];
+                const firstChannelId = firstChannel.id || (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, "") : "");
+                
+                if (firstChannelId) {
+                  chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+                    // [체크리스트 3-🆎] 대시보드로 화면 전환
+                    const shadowRoot = container.closest("#content-pilot-host")?.shadowRoot || document.querySelector("#content-pilot-host")?.shadowRoot;
+                    if (shadowRoot) {
+                      const mainArea = shadowRoot.querySelector("#cp-main-area");
+                      const dashboardTab = shadowRoot.querySelector('[data-key="dashboard"]');
+                      
+                      if (mainArea && dashboardTab) {
+                        // 대시보드 탭 활성화
+                        shadowRoot.querySelectorAll(".cp-mode-tab").forEach(tab => tab.classList.remove("active"));
+                        dashboardTab.classList.add("active");
+                        
+                        // 대시보드 렌더링
+                        import("./dashboardMode.js").then(module => {
+                          module.renderDashboard(mainArea);
+                          module.addDashboardEventListeners(mainArea);
+                        });
+                        
+                        // 헤더 이벤트 리스너 초기화
+                        import("./header.js").then(module => {
+                          module.addHeaderEventListeners(shadowRoot);
+                        });
+                        
+                        showToast("✅ 첫 번째 채널이 선택되었습니다. 대시보드로 이동합니다.");
+                      }
+                    }
+                  });
+                }
+              }
+            });
+          });
         } else {
           alert("❌ 저장 실패: " + (response?.error || "알 수 없는 오류"));
         }

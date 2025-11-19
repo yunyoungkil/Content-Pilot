@@ -316,6 +316,44 @@ function addEventListenersToPanel(shadowRoot) {
             const activeKey = tab.dataset.key;
             if (window.__cp_active_mode === activeKey) return; 
 
+            // [체크리스트 3-🅰️] 채널 없을 때 강제 이동 (채널 관리 탭 제외)
+            if (activeKey !== 'admin') {
+                chrome.storage.local.get("activeChannelId", (res) => {
+                    const activeChannelId = res.activeChannelId;
+                    
+                    if (!activeChannelId) {
+                        // 채널 목록 확인
+                        chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (channelResponse) => {
+                            const myBlogs = channelResponse?.data?.myChannels?.blogs || [];
+                            
+                            if (myBlogs.length === 0) {
+                                // [체크리스트 3-🅰️] 채널이 없으면 채널 관리 화면으로 강제 이동
+                                e.preventDefault();
+                                e.stopPropagation();
+                                
+                                // 탭 UI 선택 해제
+                                shadowRoot.querySelectorAll(".cp-mode-tab").forEach(item => item.classList.remove("active"));
+                                
+                                // 채널 모드 로드 및 온보딩 메시지 표시
+                                import("./channelMode.js").then(module => {
+                                    module.renderChannelMode(mainArea);
+                                });
+                                
+                                // 온보딩 메시지 표시
+                                showOnboardingMessage(mainArea);
+                                
+                                // 경고 메시지
+                                import("../utils.js").then(utils => {
+                                    utils.showToast("⚠️ 채널을 먼저 추가해주세요.");
+                                });
+                                
+                                return;
+                            }
+                        });
+                    }
+                });
+            }
+
             window.__cp_active_mode = activeKey;
             renderHeaderAndTabs(shadowRoot);
 

@@ -190,6 +190,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0; /* flex 컨테이너일 때 자식 요소가 넘치지 않도록 */
+}
+.scrap-card-title:not(:has(span)) {
+  /* 배지가 없는 경우 기본 스타일 유지 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .scrap-card-snippet {
   font-size: 13px;

@@ -127,7 +127,8 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
         // 마이그레이션 완료 상태 저장
         chrome.storage.local.set({ migration_completed: true }, () => {
           modal.remove();
-          showToast("✅ 데이터 마이그레이션이 완료되었습니다.");
+          // [체크리스트 2-B 최적화] 완료 알림
+          showToast("✅ 데이터 구조가 업데이트되었습니다. 모든 데이터가 정상적으로 보존되었습니다.");
           
           // 현재 탭 새로고침
           const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
