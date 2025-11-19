@@ -731,6 +731,12 @@ export function renderWorkspace(container, ideaData) {
   ideaData.workspace.draft = ideaData.workspace.draft || "";
   ideaData.workspace.linkedScraps = ideaData.workspace.linkedScraps || {};
   
+  // [수정] 1. 데이터 동기화 로직 추가
+  // workspace 안에 숨어있는 linkedScraps를 바깥으로 꺼내줍니다.
+  if (!ideaData.linkedScraps && ideaData.workspace.linkedScraps) {
+    ideaData.linkedScraps = ideaData.workspace.linkedScraps;
+  }
+  
   // linkedScraps를 배열로 정규화 (Firebase에서 객체로 올 수 있음)
   if (ideaData.linkedScraps) {
     if (!Array.isArray(ideaData.linkedScraps) && typeof ideaData.linkedScraps === 'object') {

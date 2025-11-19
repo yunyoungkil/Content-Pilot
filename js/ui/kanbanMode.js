@@ -283,9 +283,11 @@ function createKanbanCard(id, data, status) {
       .join("");
   }
 
-  const linkedScrapsCount = data.linkedScraps
-    ? Object.keys(data.linkedScraps).length
-    : 0;
+  // [체크리스트 2] 연결된 스크랩 개수 확인 (workspace.linkedScraps 우선, 없으면 linkedScraps)
+  const linkedScraps = data.workspace?.linkedScraps || data.linkedScraps || {};
+  const linkedScrapsCount = typeof linkedScraps === 'object' && !Array.isArray(linkedScraps)
+    ? Object.keys(linkedScraps).length
+    : (Array.isArray(linkedScraps) ? linkedScraps.length : 0);
   let metaInfoHtml = "";
   
   // ▼▼▼ [수정] 모든 아이디어 카드의 출처 라벨을 명확히 정의 ▼▼▼

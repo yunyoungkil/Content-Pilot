@@ -3711,6 +3711,89 @@ ${decayContent.map((item, idx) =>
             return;
           }
         }
+
+        // [체크리스트 1, 2] 원본 본문 백업 및 AI 요약 적용
+        if (ideaData.description && ideaData.description.length > 200) {
+          // origin 객체 초기화
+          if (!ideaData.origin) {
+            ideaData.origin = {};
+          }
+          
+          // 원본 본문 백업 (나중에 초안 생성 시 참고용)
+          if (!ideaData.origin.fullContent) {
+            ideaData.origin.fullContent = ideaData.description;
+          }
+
+          // AI 요약 실행 (비동기 처리)
+          try {
+            const summary = await summarizeText(ideaData.description);
+            ideaData.description = summary; // 설명은 요약본으로 교체
+          } catch (error) {
+            console.error("[add_idea_to_kanban] 요약 실패, 원본 사용:", error);
+            // 요약 실패 시 원본 유지
+          }
+        }
+
+        // [체크리스트 1] 원본 포스팅을 스크랩으로 자동 변환 및 연결
+        let linkedScraps = ideaData.workspace?.linkedScraps || {};
+        if (typeof linkedScraps === 'object' && !Array.isArray(linkedScraps)) {
+          // 객체 형태로 저장되어 있는 경우 그대로 사용
+        } else if (Array.isArray(linkedScraps)) {
+          // 배열인 경우 객체로 변환
+          const scrapsObj = {};
+          linkedScraps.forEach((scrapId, index) => {
+            if (scrapId) scrapsObj[scrapId] = true;
+          });
+          linkedScraps = scrapsObj;
+        }
+
+        // 리뉴얼 원본이 있다면 '스크랩'으로 자동 생성
+        if (ideaData.origin && ideaData.origin.postUrl) {
+          // 원본 본문 확인 (fullContent 우선, 없으면 description 사용)
+          const originalContent = ideaData.origin.fullContent || ideaData.description || "";
+          
+          if (originalContent && originalContent.length > 0) {
+            try {
+              // 스크랩 제목: [리뉴얼] 태그 제거
+              const scrapTitle = ideaData.title.replace(/^\[.*?\]\s*/, '');
+              
+              // 키워드 추출 (비동기)
+              const tags = await extractKeywords(originalContent);
+              
+              const scrapPayload = {
+                title: scrapTitle,
+                text: originalContent,
+                url: ideaData.origin.postUrl,
+                channelId: channelId, // 현재 채널 소속으로 저장
+                timestamp: Date.now(),
+                tags: tags || ideaData.keywords || ideaData.tags || []
+              };
+
+              // 스크랩 저장 및 ID 확보
+              const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
+              const scrapRef = firebase.database().ref("scraps").push();
+              const scrapId = scrapRef.key;
+              
+              await scrapRef.set(cleanedScrapPayload);
+              
+              // 연결할 스크랩 ID 목록에 추가 (객체 형태로 저장)
+              linkedScraps[scrapId] = true;
+              
+              console.log(`[리뉴얼] 원본 포스팅이 스크랩으로 자동 생성 및 연결됨: ${scrapId}`);
+            } catch (error) {
+              console.error("[리뉴얼] 스크랩 생성 실패:", error);
+              // 스크랩 생성 실패해도 아이디어 생성은 계속 진행
+            }
+          } else {
+            console.warn("[리뉴얼] 원본 본문이 없어 스크랩을 생성하지 않습니다.");
+          }
+        }
+
+        // 아이디어 데이터에 연결 정보 주입
+        if (!ideaData.workspace) {
+          ideaData.workspace = {};
+        }
+        ideaData.workspace.linkedScraps = linkedScraps;
         
         const response = await createAndSaveNewIdea(ideaData, targetStatus, channelId); // channelId 전달
         sendResponse(response);
@@ -4112,6 +4195,12 @@ ${decayContent.map((item, idx) =>
         })
         .join("\n");
 
+      // [체크리스트 3] 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
+      let originalContentText = "";
+      if (ideaData.origin?.fullContent && ideaData.origin.fullContent.length > 0) {
+        originalContentText = `[원본 본문 (리뉴얼 참고용)]\n${ideaData.origin.fullContent.substring(0, 5000)}\n\n`;
+      }
+
       // 3. 추천 검색어와 롱테일 키워드 수집
       const recommendedSearches = ideaData.recommendedSearches || [];
       const longTailKeywords = ideaData.longTailKeywords || [];
@@ -4179,9 +4268,10 @@ ${decayContent.map((item, idx) =>
               : "없음"}
 
             ### 8. 관련 참고 자료
-            ${linkedScrapsText || "참고 자료 없음"}
+            ${originalContentText}${linkedScrapsText || "참고 자료 없음"}
             
             [참고 자료 활용 규칙]
+            - 원본 본문이 제공된 경우(리뉴얼 아이디어), 그 내용을 바탕으로 팩트 기반으로 작성하되, 단순 복사가 아닌 새로운 관점이나 더 풍부한 정보로 발전시켜주세요.
             - 참고 자료가 제공된 경우, 그 내용을 바탕으로 팩트 기반으로 작성해주세요.
             - 참고 자료가 없는 경우, 일반적인 지식과 경험을 바탕으로 작성하되, 확실하지 않은 내용은 추측하지 마세요.
             - 할루시네이션(허위 정보 생성)을 피하고, 확실한 정보만 포함해주세요.
@@ -5833,6 +5923,34 @@ async function fetchYoutubeChannel(channelId, channelType) {
     }
   } catch (error) {
     console.error(`YouTube 채널 데이터 수집 실패 (${channelId}):`, error);
+  }
+}
+
+/**
+ * [체크리스트 2] 텍스트 요약 함수
+ * 긴 본문을 3~5줄의 핵심 요약으로 변환
+ */
+async function summarizeText(text) {
+  if (!text || text.length < 200) {
+    // 짧은 텍스트는 그대로 반환
+    return text;
+  }
+
+  try {
+    const prompt = `다음 텍스트를 콘텐츠 아이디어 카드의 설명으로 사용할 수 있게 3문장 이내로 핵심만 요약해줘. 불필요한 수식어나 장식적인 표현은 제거하고, 핵심 내용만 간결하게 전달해줘:\n\n${text.substring(0, 3000)}`;
+
+    const summary = await callGeminiAPI(prompt);
+    
+    // 오류 메시지인 경우 원본 반환
+    if (summary.startsWith("오류:")) {
+      console.warn("[요약 실패] 원본 텍스트 반환:", summary);
+      return text;
+    }
+
+    return summary.trim();
+  } catch (error) {
+    console.error("[요약 오류] 원본 텍스트 반환:", error);
+    return text; // 오류 시 원본 반환
   }
 }
 
