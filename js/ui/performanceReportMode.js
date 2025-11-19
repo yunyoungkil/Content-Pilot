@@ -10,6 +10,12 @@ let analysisReport = null;
  * 성과 분석 리포트 렌더링
  */
 export function renderPerformanceReport(container) {
+  // [체크리스트 6-1] 완전 초기화: 이전 채널의 모든 데이터 제거
+  container.innerHTML = '';
+  
+  // [체크리스트 6-3] 리포트 초기화: 채널 변경 시 리포트도 초기화
+  analysisReport = null;
+  
   container.innerHTML = `
     <div class="performance-report-container">
       <div class="perf-report-header">

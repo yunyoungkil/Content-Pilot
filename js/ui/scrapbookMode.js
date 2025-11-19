@@ -10,6 +10,14 @@ let activeScrapbookTagFilter = null;
 
 // 스크랩북 모드 UI 렌더링 함수
 export function renderScrapbook(container) {
+  // [체크리스트 4-1] 완전 초기화: 이전 채널의 모든 스크랩 제거
+  container.innerHTML = '';
+  
+  // [체크리스트 4-3] 검색 초기화: 검색어 및 필터 초기화
+  if (typeof activeScrapbookTagFilter !== 'undefined') {
+    activeScrapbookTagFilter = null;
+  }
+  
   container.innerHTML = `
     <div class="scrapbook-root">
       <div class="scrapbook-list-section">
@@ -18,7 +26,7 @@ export function renderScrapbook(container) {
             <div class="filter-status-container">
                 <span class="filter-placeholder">태그 클릭 시 필터가 여기에 표시됩니다.</span>
             </div>
-            <input type="text" id="scrapbook-keyword-input" class="scrapbook-keyword-input" placeholder="키워드로 검색...">
+            <input type="text" id="scrapbook-keyword-input" class="scrapbook-keyword-input" placeholder="키워드로 검색..." value="">
         </div>
         <div class="scrapbook-list-cards"><p style="text-align:center;color:#888;margin-top:20px;">스크랩을 불러오는 중...</p></div>
       </div>
@@ -34,14 +42,6 @@ export function renderScrapbook(container) {
   const keywordInput = container.querySelector('#scrapbook-keyword-input');
   keywordInput.addEventListener('keyup', () => {
       renderScrapList(allScraps, container); // 키워드 입력 시에도 전체 목록을 다시 렌더링하여 필터링
-  });
-
-  // [신규] 채널 변경 감지 -> 스크랩북 새로고침
-  chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === "local" && changes.activeChannelId) {
-      console.log("[Scrapbook] 채널 변경 감지, 스크랩 목록 새로고침");
-      requestScrapsAndRender(container);
-    }
   });
 }
 

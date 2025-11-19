@@ -9,6 +9,9 @@ let allPerformanceData = [];
  * 성과 대시보드 렌더링
  */
 export function renderPerformanceDashboard(container) {
+  // [체크리스트 6-1] 완전 초기화: 이전 채널의 모든 데이터 제거
+  container.innerHTML = '';
+  
   container.innerHTML = `
     <div class="performance-dashboard-container">
       <div class="perf-dashboard-header">

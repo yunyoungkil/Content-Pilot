@@ -588,6 +588,15 @@ async function updateDashboardUI(container) {
     });
 }
 function renderDashboard(container) {
+    // [체크리스트 2-1] 완전 초기화: 이전 채널의 모든 데이터 제거
+    container.innerHTML = '';
+    
+    // [체크리스트 2-5] AI 분석 리셋: 캐시 초기화
+    chrome.storage.local.get(null, (items) => {
+        const cacheKeys = Object.keys(items).filter(key => key.startsWith('dashboard_cache_'));
+        cacheKeys.forEach(key => chrome.storage.local.remove(key));
+    });
+    
     container.innerHTML = `
       <div class="dashboard-container">
           <div class="dashboard-grid">

@@ -293,15 +293,16 @@ function addAdminEventListeners(container) {
 
   function getFixButtonText(checkId) {
     const fixActions = {
-      "auth_token": "로그인 다시 하기",
+      "auth_token": "🔑 재로그인",
       "api_youtube": "API 키 설정",
       "api_gemini": "API 키 설정",
       "data_active_channel": "자동 수정",
-      "data_orphan": "마이그레이션 실행",
+      "data_orphan": "🧹 정리 실행",
       "data_structure": "구조 확인",
       "scheduler": "알람 재등록",
-      "ga4_access": "권한 확인",
-      "adsense_access": "권한 확인",
+      "ga4_access": "🔑 재로그인",
+      "adsense_access": "🔑 재로그인",
+      "url_filtering": "🔑 재로그인",
     };
     return fixActions[checkId] || "해결하기";
   }
@@ -319,9 +320,12 @@ function addAdminEventListeners(container) {
     
     if (checkId === "data_active_channel") {
       // 활성 채널 불일치 수정
+      addLog("info", "활성 채널을 재설정하는 중...");
       chrome.runtime.sendMessage({ action: "fix_active_channel_mismatch" }, (response) => {
         if (response && response.success) {
-          addLog("success", response.message || "활성 채널이 수정되었습니다.");
+          const message = response.message || "활성 채널이 수정되었습니다.";
+          addLog("success", `✅ ${message}`);
+          addLog("info", "상단 헤더의 '글로벌 채널 선택기'에서 채널을 다시 선택할 수도 있습니다.");
           icon.textContent = "✅";
           fixBtn.style.display = "none";
           // 진단 다시 실행하여 상태 확인
@@ -335,6 +339,7 @@ function addAdminEventListeners(container) {
           }, 1000);
         } else {
           addLog("error", response?.error || "수정 실패");
+          addLog("info", "상단 헤더의 '글로벌 채널 선택기'에서 채널을 직접 선택해주세요.");
           icon.textContent = "⚠️";
           fixBtn.disabled = false;
           fixBtn.textContent = getFixButtonText(checkId);
@@ -342,9 +347,11 @@ function addAdminEventListeners(container) {
       });
     } else if (checkId === "data_orphan") {
       // 데이터 마이그레이션 실행
+      addLog("info", "고아 데이터를 정리하는 중...");
       chrome.runtime.sendMessage({ action: "run_data_migration" }, (response) => {
         if (response && response.success) {
-          addLog("success", response.message || "데이터 마이그레이션이 완료되었습니다.");
+          const message = response.message || "데이터 마이그레이션이 완료되었습니다.";
+          addLog("success", `✅ ${message}`);
           icon.textContent = "✅";
           fixBtn.style.display = "none";
           // 진단 다시 실행하여 상태 확인
@@ -358,6 +365,7 @@ function addAdminEventListeners(container) {
           }, 1000);
         } else {
           addLog("error", response?.error || "마이그레이션 실패");
+          addLog("info", "background.js 콘솔에서 runDataMigration()을 직접 실행해보세요.");
           icon.textContent = "⚠️";
           fixBtn.disabled = false;
           fixBtn.textContent = getFixButtonText(checkId);
@@ -386,12 +394,13 @@ function addAdminEventListeners(container) {
           fixBtn.textContent = getFixButtonText(checkId);
         }
       });
-    } else if (checkId === "adsense_access" || checkId === "ga4_access") {
-      // AdSense/GA4 접근 권한 확인
-      chrome.runtime.sendMessage({ action: "test_adsense_ga4_access", checkId }, (response) => {
+    } else if (checkId === "scheduler") {
+      // 알람 재등록
+      chrome.runtime.sendMessage({ action: "register_alarms" }, (response) => {
         if (response && response.success) {
-          addLog("success", response.message || "접근 권한이 정상입니다.");
+          addLog("success", response.message || "알람이 재등록되었습니다.");
           icon.textContent = "✅";
+          fixBtn.style.display = "none";
           // 진단 다시 실행하여 상태 확인
           setTimeout(() => {
             chrome.runtime.sendMessage({ action: "run_system_diagnosis" }, (diagResponse) => {
@@ -402,13 +411,91 @@ function addAdminEventListeners(container) {
             });
           }, 1000);
         } else {
-          addLog("warn", response?.message || response?.error || "접근 권한 확인 실패");
-          addLog("info", "채널 설정에서 Google 로그인을 다시 시도해주세요.");
+          addLog("error", response?.error || "알람 재등록 실패");
           icon.textContent = "⚠️";
+          fixBtn.disabled = false;
+          fixBtn.textContent = getFixButtonText(checkId);
         }
-        fixBtn.disabled = false;
-        fixBtn.textContent = getFixButtonText(checkId);
       });
+    } else if (checkId === "adsense_access" || checkId === "ga4_access" || checkId === "url_filtering") {
+      // AdSense/GA4/URL 필터링 접근 권한 문제: Google 재로그인 필요
+      addLog("info", "Google 계정 인증이 필요합니다. 채널 관리 화면으로 이동합니다...");
+      addLog("warn", "401 에러는 토큰 만료로 인한 것입니다. 재로그인 후 해결됩니다.");
+      const shadowRoot = container.closest("#content-pilot-host")?.shadowRoot || 
+                         document.querySelector("#content-pilot-host")?.shadowRoot;
+      if (shadowRoot) {
+        // 채널 선택기를 통해 채널 관리 화면으로 이동
+        const channelSelector = shadowRoot.querySelector("#global-channel-selector");
+        if (channelSelector) {
+          channelSelector.value = "__MANAGE__";
+          channelSelector.dispatchEvent(new Event("change"));
+        } else {
+          // 헤더가 없으면 직접 채널 모드로 이동
+          const mainArea = shadowRoot.querySelector("#cp-main-area");
+          if (mainArea) {
+            import("./channelMode.js").then(module => {
+              module.renderChannelMode(mainArea);
+            });
+            window.__cp_active_mode = 'channel';
+          }
+        }
+      }
+      fixBtn.disabled = false;
+      fixBtn.textContent = getFixButtonText(checkId);
+    } else if (checkId === "api_youtube" || checkId === "api_gemini") {
+      // API 키 설정: 채널 관리 화면으로 이동
+      addLog("info", "채널 관리 화면으로 이동합니다...");
+      const shadowRoot = container.closest("#content-pilot-host")?.shadowRoot || 
+                         document.querySelector("#content-pilot-host")?.shadowRoot;
+      if (shadowRoot) {
+        // 채널 선택기를 통해 채널 관리 화면으로 이동
+        const channelSelector = shadowRoot.querySelector("#global-channel-selector");
+        if (channelSelector) {
+          channelSelector.value = "__MANAGE__";
+          channelSelector.dispatchEvent(new Event("change"));
+        } else {
+          // 헤더가 없으면 직접 채널 모드로 이동
+          const mainArea = shadowRoot.querySelector("#cp-main-area");
+          if (mainArea) {
+            import("./channelMode.js").then(module => {
+              module.renderChannelMode(mainArea);
+            });
+            // 탭 활성화
+            const adminTab = shadowRoot.querySelector('[data-key="admin"]');
+            const channelTab = shadowRoot.querySelector('[data-key="channel"]');
+            if (adminTab) adminTab.classList.remove("active");
+            // 채널 관리 탭이 없으면 대시보드 탭을 비활성화하고 채널 모드 표시
+            window.__cp_active_mode = 'channel';
+          }
+        }
+      }
+      fixBtn.disabled = false;
+      fixBtn.textContent = getFixButtonText(checkId);
+    } else if (checkId === "auth_token") {
+      // Google 로그인 다시 하기: 채널 관리 화면으로 이동
+      addLog("info", "Google 계정 인증이 필요합니다. 채널 관리 화면으로 이동합니다...");
+      addLog("warn", "401 에러는 토큰 만료로 인한 것입니다. 재로그인 후 해결됩니다.");
+      const shadowRoot = container.closest("#content-pilot-host")?.shadowRoot || 
+                         document.querySelector("#content-pilot-host")?.shadowRoot;
+      if (shadowRoot) {
+        // 채널 선택기를 통해 채널 관리 화면으로 이동
+        const channelSelector = shadowRoot.querySelector("#global-channel-selector");
+        if (channelSelector) {
+          channelSelector.value = "__MANAGE__";
+          channelSelector.dispatchEvent(new Event("change"));
+        } else {
+          // 헤더가 없으면 직접 채널 모드로 이동
+          const mainArea = shadowRoot.querySelector("#cp-main-area");
+          if (mainArea) {
+            import("./channelMode.js").then(module => {
+              module.renderChannelMode(mainArea);
+            });
+            window.__cp_active_mode = 'channel';
+          }
+        }
+      }
+      fixBtn.disabled = false;
+      fixBtn.textContent = getFixButtonText(checkId);
     } else {
       fixBtn.disabled = false;
       fixBtn.textContent = getFixButtonText(checkId);
@@ -422,13 +509,8 @@ function addAdminEventListeners(container) {
       const checkItem = e.target.closest(".check-item");
       if (checkItem) {
         const checkId = checkItem.dataset.checkId;
-        if (checkId === "data_active_channel" || 
-            checkId === "data_orphan" || 
-            checkId === "data_structure" ||
-            checkId === "adsense_access" ||
-            checkId === "ga4_access") {
-          handleAutoFix(checkId);
-        }
+        // 모든 fix-btn 클릭 시 handleAutoFix 호출
+        handleAutoFix(checkId);
       }
     }
   });

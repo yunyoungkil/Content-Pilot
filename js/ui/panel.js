@@ -145,65 +145,103 @@ export function createAndShowPanel() {
       });
     });
 
-    // [신규] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
+    // [체크리스트 1] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
     chrome.storage.onChanged.addListener((changes, namespace) => {
+      // [체크리스트 1-2] 조건 확인: 로컬 스토리지의 activeChannelId만 감지
       if (namespace === "local" && changes.activeChannelId) {
-        console.log("[Panel] 채널 변경 감지, 현재 탭 새로고침");
+        // [체크리스트 1-3] 로그 출력
+        console.log("[Panel] 채널 변경 감지 -> 패널 초기화 시작", {
+          oldValue: changes.activeChannelId.oldValue,
+          newValue: changes.activeChannelId.newValue
+        });
         
         // mainArea 참조 다시 가져오기 (Shadow DOM 내부)
         const host = document.getElementById("content-pilot-host");
-        if (!host || !host.shadowRoot) return;
+        if (!host || !host.shadowRoot) {
+          console.warn("[Panel] Shadow DOM을 찾을 수 없습니다.");
+          return;
+        }
         
         const mainArea = host.shadowRoot.querySelector("#cp-main-area");
-        if (!mainArea) return;
+        if (!mainArea) {
+          console.warn("[Panel] mainArea를 찾을 수 없습니다.");
+          return;
+        }
         
-        // 현재 활성화된 탭 찾기
+        // [체크리스트 2-1] 현재 활성화된 탭 찾기
         const activeTabBtn = host.shadowRoot.querySelector(".cp-mode-tab.active");
-        if (activeTabBtn) {
-          const tabName = activeTabBtn.dataset.key;
-          
-          // 탭별 새로고침 로직
+        if (!activeTabBtn) {
+          console.warn("[Panel] 활성 탭을 찾을 수 없습니다. 초기 로딩 중일 수 있습니다.");
+          return;
+        }
+        
+        // [체크리스트 2-3] 탭 이름 추출
+        const tabName = activeTabBtn.dataset.key;
+        console.log(`[Panel] 현재 활성 탭: ${tabName}`);
+        
+        // [체크리스트 4-1] 로딩 표시 추가
+        mainArea.style.opacity = "0.6";
+        mainArea.style.transition = "opacity 0.3s";
+        mainArea.classList.add("channel-switching");
+        
+        // 탭별 새로고침 로직
+        const renderPromise = (() => {
           if (tabName === "kanban") {
-            // 칸반은 전체 리로드
-            import("./kanbanMode.js").then(module => {
+            // [체크리스트 3-2] 기획 보드 리렌더링
+            return import("./kanbanMode.js").then(module => {
               module.renderKanban(mainArea);
               module.addKanbanEventListeners(mainArea);
             });
           } else if (tabName === "dashboard") {
-            // 대시보드 새로고침
-            import("./dashboardMode.js").then(module => {
+            // [체크리스트 3-1] 대시보드 리렌더링
+            return import("./dashboardMode.js").then(module => {
               module.renderDashboard(mainArea);
               module.addDashboardEventListeners(mainArea);
             });
           } else if (tabName === "scrapbook") {
-            // 스크랩북 새로고침
-            import("./scrapbookMode.js").then(module => {
+            // [체크리스트 3-3] 스크랩북 리렌더링
+            return import("./scrapbookMode.js").then(module => {
               module.renderScrapbook(mainArea);
             });
           } else if (tabName === "performance") {
-            // 성과 대시보드 새로고침
-            import("./performanceDashboardMode.js").then(module => {
+            // [체크리스트 3-4] 성과 대시보드 리렌더링
+            return import("./performanceDashboardMode.js").then(module => {
               module.renderPerformanceDashboard(mainArea);
             });
           } else if (tabName === "report") {
-            // 성과 리포트 새로고침
-            import("./performanceReportMode.js").then(module => {
+            // [체크리스트 3-5] 성과 리포트 리렌더링
+            return import("./performanceReportMode.js").then(module => {
               module.renderPerformanceReport(mainArea);
             });
           } else if (tabName === "workspace") {
-            // 워크스페이스는 현재 아이디어에 따라 스크랩 목록만 새로고침
+            // [체크리스트 3-6 중요] 워크스페이스: 에디터 보호, 자료만 갱신
             const currentIdeaId = mainArea.querySelector('.cp-workspace-container')?.dataset.ideaId;
             if (currentIdeaId) {
-              chrome.runtime.sendMessage({ action: "get_idea_data", ideaId: currentIdeaId }, (response) => {
+              return chrome.runtime.sendMessage({ action: "get_idea_data", ideaId: currentIdeaId }).then((response) => {
                 if (response && response.success) {
-                  import("./workspaceMode.js").then(module => {
+                  return import("./workspaceMode.js").then(module => {
                     module.updateWorkspaceScraps(mainArea, response.data);
                   });
                 }
               });
             }
+            return Promise.resolve();
           }
-        }
+          return Promise.resolve();
+        })();
+        
+        // [체크리스트 4-2] 완료 처리: 로딩 표시 제거
+        renderPromise.then(() => {
+          setTimeout(() => {
+            mainArea.style.opacity = "1";
+            mainArea.classList.remove("channel-switching");
+            console.log(`[Panel] ${tabName} 탭 리렌더링 완료`);
+          }, 100);
+        }).catch((error) => {
+          console.error("[Panel] 리렌더링 중 오류:", error);
+          mainArea.style.opacity = "1";
+          mainArea.classList.remove("channel-switching");
+        });
       }
     });
   }

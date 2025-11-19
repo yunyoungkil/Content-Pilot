@@ -4514,6 +4514,39 @@ ${decayContent.map((item, idx) =>
       }
     })();
     return true;
+  } else if (msg.action === "register_alarms") {
+    // 알람 재등록
+    (async () => {
+      try {
+        // 기존 알람 제거
+        await chrome.alarms.clearAll();
+        
+        // 알람 재등록
+        chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
+        chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
+        
+        // 등록 확인
+        const alarms = await chrome.alarms.getAll();
+        const hasFetch = alarms.some(a => a.name === "fetch-channels");
+        const hasUpdate = alarms.some(a => a.name === "update-performance-metrics");
+        
+        if (hasFetch && hasUpdate) {
+          sendResponse({ 
+            success: true, 
+            message: "알람이 성공적으로 재등록되었습니다. (fetch-channels, update-performance-metrics)" 
+          });
+        } else {
+          sendResponse({ 
+            success: false, 
+            error: `일부 알람 등록 실패 (fetch: ${hasFetch ? "성공" : "실패"}, update: ${hasUpdate ? "성공" : "실패"})` 
+          });
+        }
+      } catch (error) {
+        console.error("[알람 재등록] 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   } else if (msg.action === "test_adsense_ga4_access") {
     // AdSense/GA4 접근 권한 테스트
     (async () => {

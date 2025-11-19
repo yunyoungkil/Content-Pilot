@@ -15,6 +15,14 @@ export { renderKanban, updateKanbanUI, addKanbanEventListeners };
  */
 function renderKanban(container) {
   kanbanContainer = container;
+  
+  // [체크리스트 3-4] 입력창 닫기: 열려있던 카드 추가 입력창이나 상세 메뉴 닫기
+  const existingInputs = container.querySelectorAll('.kanban-card-input, .kanban-card-detail-modal');
+  existingInputs.forEach(el => el.remove());
+  
+  // [체크리스트 3-1] 완전 초기화: 이전 채널의 모든 카드 제거
+  container.innerHTML = '';
+  
   container.innerHTML = `
     <div class="kanban-board-container">
       <div class="kanban-controls-header">

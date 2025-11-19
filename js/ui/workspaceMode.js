@@ -2134,3 +2134,51 @@ window.__cp_updateScrapList = function(filtered, allCont, linkedCont, ideaData) 
         }
     }
 };
+
+// [체크리스트 5-2] 워크스페이스: 채널 변경 시 자료만 갱신 (에디터 보호)
+export function updateWorkspaceScraps(container, ideaData) {
+    // [체크리스트 5-1] 에디터 유지: 에디터와 제목은 절대 건드리지 않음
+    const workspaceEl = container.querySelector('.cp-workspace-container');
+    if (!workspaceEl) {
+        console.warn('[Workspace] 워크스페이스 컨테이너를 찾을 수 없습니다.');
+        return;
+    }
+    
+    // [체크리스트 5-2] 참고 자료 갱신: 우측 패널의 '모든 스크랩', '이미지 갤러리'만 갱신
+    const allScrapsList = workspaceEl.querySelector(".all-scraps-list");
+    const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
+    
+    if (allScrapsList) {
+        // 현재 활성 채널의 스크랩만 다시 로드
+        chrome.storage.local.get("activeChannelId", (res) => {
+            chrome.runtime.sendMessage({ action: "get_all_scraps", channelId: res.activeChannelId }, (response) => {
+                if (response && response.success && response.scraps) {
+                    // 연결된 스크랩은 제외하고 표시
+                    const linkedScrapIds = ideaData.linkedScraps || [];
+                    const availableScraps = response.scraps.filter(s => !linkedScrapIds.includes(s.id));
+                    
+                    if (availableScraps.length > 0) {
+                        allScrapsList.innerHTML = availableScraps.map(s => createScrapCard(s, false)).join("");
+                    } else {
+                        allScrapsList.innerHTML = "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
+                    }
+                    
+                    // 이미지 갤러리도 갱신
+                    if (resourceLibrary) {
+                        const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
+                        if (imageGalleryGrid) {
+                            // updateImageGalleryFromAllScraps 호출
+                            const sendCommand = (action, data = {}) => {
+                                const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+                                if (editorIframe && editorIframe.contentWindow) {
+                                    editorIframe.contentWindow.postMessage({ action, data }, "*");
+                                }
+                            };
+                            updateImageGalleryFromAllScraps(resourceLibrary, response.scraps, sendCommand, ideaData);
+                        }
+                    }
+                }
+            });
+        });
+    }
+}
