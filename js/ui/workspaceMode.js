@@ -377,15 +377,10 @@ function createScrapCard(scrap, isLinked) {
   const cleanedTitle = textContent.replace(/\s+/g, " ").trim();
   const displayTitle = cleanedTitle.substring(0, 10);
   
-  // [체크리스트 1-B 최적화] 전용/공용 배지 생성
-  const channelBadge = scrap.channelId 
-    ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="전용 스크랩">🔒 전용</span>`
-    : `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #f1f8e9; color: #558b2f; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="공용 스크랩">🌐 공용</span>`;
-  
   if (isLinked) {
     return `<div class="scrap-card-item linked-scrap-item" data-scrap-id="${scrap.id}" data-text="${textContent.replace(/"/g, "&quot;")}" draggable="true" style="margin:0; flex-shrink:0; position:relative;">
         <div class="linked-scrap-tag">
-          <span class="tag-text">${displayTitle}...${channelBadge}</span>
+          <span class="tag-text">${displayTitle}...</span>
           <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제">×</button>
         </div>
       </div>`;
@@ -396,18 +391,29 @@ function createScrapCard(scrap, isLinked) {
   const previewText = textContent.length > 200 ? textContent.substring(0, 200) + "..." : textContent;
   const previewImage = scrap.image || (Array.isArray(scrap.allImages) && scrap.allImages.length > 0 ? scrap.allImages[0] : "");
 
+  // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
+  const isDedicated = scrap.channelId !== null && scrap.channelId !== undefined;
+  const toggleBtn = `<button class="scrap-share-toggle-btn" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
+    style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; background: ${isDedicated ? '#e3f2fd' : '#f1f8e9'}; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
+    title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}"
+    onmouseover="this.style.background='${isDedicated ? '#bbdefb' : '#dcedc8'}'; this.style.transform='scale(1.1)'"
+    onmouseout="this.style.background='${isDedicated ? '#e3f2fd' : '#f1f8e9'}'; this.style.transform='scale(1)'">
+    ${isDedicated ? '🔒' : '🌐'}
+  </button>`;
+  
   return `
     <div class="scrap-card-item" draggable="true" data-scrap-id="${scrap.id}" data-text="${textContent.replace(/"/g, "&quot;")}" 
          data-preview-text="${previewText.replace(/"/g, "&quot;").replace(/\n/g, " ")}" 
          data-preview-image="${previewImage.replace(/"/g, "&quot;")}" 
-         data-preview-url="${(scrap.url || "").replace(/"/g, "&quot;")}">
+         data-preview-url="${(scrap.url || "").replace(/"/g, "&quot;")}"
+         style="position: relative;">
         <div class="scrap-card">
+            ${toggleBtn}
             <button class="scrap-card-delete-btn unlink-scrap-btn" title="연결 해제">×</button>
             ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ""}
             <div class="scrap-card-info">
                 <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
                     <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
-                    ${channelBadge}
                 </div>
                 <div class="scrap-card-snippet" style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #4285f4;" title="링크 열기">
                     <span>🔗</span>
@@ -1074,7 +1080,51 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     });
     
     workspaceEl.addEventListener("click", (e) => {
-        if (e.target.classList.contains("interactive-tag")) {
+        // [체크리스트 2] 스크랩 공유 토글 버튼 클릭 처리
+        if (e.target.classList.contains("scrap-share-toggle-btn") || e.target.closest(".scrap-share-toggle-btn")) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = e.target.classList.contains("scrap-share-toggle-btn") ? e.target : e.target.closest(".scrap-share-toggle-btn");
+            if (!btn) return;
+            
+            const scrapId = btn.dataset.scrapId;
+            const currentChannelId = btn.dataset.currentChannelId;
+            
+            // 현재 활성 채널 ID 가져오기
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const activeChannelId = res.activeChannelId || null;
+                
+                // 버튼 비활성화 및 로딩 표시
+                btn.disabled = true;
+                const originalIcon = btn.innerHTML;
+                btn.innerHTML = "⏳";
+                
+                chrome.runtime.sendMessage({
+                    action: "toggle_scrap_sharing",
+                    scrapId: scrapId,
+                    currentChannelId: activeChannelId
+                }, (response) => {
+                    btn.disabled = false;
+                    
+                    if (response && response.success) {
+                        // 성공 시 버튼 아이콘과 툴팁 업데이트
+                        const isNowDedicated = response.newChannelId !== null;
+                        btn.innerHTML = isNowDedicated ? "🔒" : "🌐";
+                        btn.title = isNowDedicated ? "공용으로 변경" : "전용으로 변경";
+                        btn.style.background = isNowDedicated ? "#e3f2fd" : "#f1f8e9";
+                        btn.dataset.currentChannelId = response.newChannelId || "";
+                        
+                        // 배지 제거됨 (토글 버튼만 사용)
+                        
+                        showToast(response.message || (isNowDedicated ? "전용 스크랩으로 변경되었습니다." : "공용 스크랩으로 변경되었습니다."));
+                    } else {
+                        btn.innerHTML = originalIcon;
+                        showToast("❌ 변경 실패: " + (response?.error || "알 수 없는 오류"));
+                    }
+                });
+            });
+            return;
+        } else if (e.target.classList.contains("interactive-tag")) {
             const text = e.target.classList.contains("long-tail-keyword") ? ` ${e.target.textContent} ` : `\n\n## ${e.target.textContent}\n\n`;
             sendCommand("insert-text", { text });
             sendCommand("focus");

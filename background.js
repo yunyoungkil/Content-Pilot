@@ -1046,7 +1046,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       // [수정] 사용자가 선택한 channelId 사용 (없으면 기본값: null = 공용 스크랩)
       // UI에서 모달을 통해 사용자가 선택한 channelId가 msg.channelId로 전달됨
-      const userSelectedChannelId = msg.channelId !== undefined ? msg.channelId : null;
+      // 패널이 닫혀 있을 때는 activeChannelId를 사용
+      const storage = await chrome.storage.local.get("activeChannelId");
+      const activeChannelId = storage.activeChannelId || null;
+      const userSelectedChannelId = msg.channelId !== undefined ? msg.channelId : activeChannelId;
+      
+      // [체크리스트 1] 방어 코드: activeChannelId가 없고 msg.channelId도 없으면 공용으로 저장 (에러 아님)
+      // 사용자가 명시적으로 null을 선택한 경우도 허용하므로, undefined일 때만 activeChannelId 사용
+      
+      // ▼▼▼ [보완] 채널 이름(Name) 찾기 로직 추가 (패널 닫힘 상태 대응) ▼▼▼
+      let activeChannelName = null;
+      if (userSelectedChannelId) {
+        try {
+          const userId = "default_user";
+          const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+          const channelsData = channelsSnapshot.val() || {};
+          const myBlogs = channelsData.myChannels?.blogs || [];
+          
+          // ID나 API URL로 채널 찾기
+          const channel = myBlogs.find(b => 
+            b.id === userSelectedChannelId || 
+            (b.apiUrl && btoa(b.apiUrl).replace(/=/g, "") === userSelectedChannelId)
+          );
+          
+          if (channel) {
+            activeChannelName = channel.inputUrl || channel.url || "내 채널";
+          }
+        } catch (e) {
+          console.warn("[Scrap] 채널 이름 조회 실패:", e);
+        }
+      }
+      // ▲▲▲ [보완 끝] ▲▲▲
 
       const tags = await extractKeywords(msg.data.text);
       let scrapPayload = {
@@ -1054,6 +1084,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         timestamp: Date.now(),
         tags: tags || null,
         channelId: userSelectedChannelId, // 👈 핵심: 사용자 선택에 따른 channelId (null = 공용 스크랩)
+        // [보완] 프리뷰 UI를 위해 채널 이름도 데이터에 포함 (저장은 안 해도 됨)
+        _channelName: activeChannelName
       };
 
       // images 배열을 allImages로 변환 (기존 allImages가 있으면 병합)
@@ -1070,18 +1102,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
+      
+      // 저장용 데이터에서 임시 필드(_channelName) 분리 (DB에는 저장 안 함)
+      const { _channelName, ...dataToSave } = cleanedScrapPayload;
 
       const scrapRef = firebase.database().ref("scraps").push();
       scrapRef
-        .set(cleanedScrapPayload)
+        .set(dataToSave)
         .then(() => {
           // 응답 전송 (비동기 응답을 위해)
-          sendResponse({ success: true, scrapData: cleanedScrapPayload });
+          sendResponse({ success: true, scrapData: dataToSave });
           
           if (sender.tab?.id) {
+            // 프리뷰에는 채널 이름을 포함해서 전송
+            const previewData = { ...dataToSave, channelName: _channelName };
             chrome.tabs.sendMessage(
               sender.tab.id,
-              { action: "cp_show_preview", data: cleanedScrapPayload },
+              { action: "cp_show_preview", data: previewData },
               { frameId: 0 }
             );
           }
@@ -1100,6 +1137,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
     })();
     return true; // 비동기 응답을 위해 true 반환
+  } else if (msg.action === "toggle_scrap_sharing") {
+    // [체크리스트 1] 스크랩 공유 토글 핸들러
+    (async () => {
+      const { scrapId, currentChannelId } = msg;
+      
+      if (!scrapId) {
+        sendResponse({ success: false, error: "스크랩 ID가 필요합니다." });
+        return;
+      }
+      
+      try {
+        const scrapRef = firebase.database().ref(`scraps/${scrapId}`);
+        const scrapSnap = await scrapRef.once("value");
+        const scrapData = scrapSnap.val();
+        
+        if (!scrapData) {
+          sendResponse({ success: false, error: "스크랩을 찾을 수 없습니다." });
+          return;
+        }
+        
+        // 현재 channelId 확인 (null, undefined 모두 공용으로 처리)
+        const currentChannelIdValue = scrapData.channelId;
+        const isCurrentlyPublic = currentChannelIdValue === null || currentChannelIdValue === undefined;
+        
+        // 토글: null/undefined(공용) ↔ currentChannelId(전용)
+        // 공용이면 전용으로, 전용이면 공용으로 변경
+        const newChannelId = isCurrentlyPublic ? currentChannelId : null;
+        
+        // currentChannelId가 없으면 전용으로 변경할 수 없음
+        if (isCurrentlyPublic && !currentChannelId) {
+          sendResponse({ 
+            success: false, 
+            error: "활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다." 
+          });
+          return;
+        }
+        
+        // 업데이트
+        await scrapRef.update({ channelId: newChannelId });
+        
+        sendResponse({ 
+          success: true, 
+          newChannelId,
+          message: newChannelId === null ? "공용 스크랩으로 변경되었습니다." : "전용 스크랩으로 변경되었습니다."
+        });
+      } catch (error) {
+        console.error("[Scrap] 공유 토글 실패:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   } else if (msg.action === "cp_get_firebase_scraps") {
     const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
 
@@ -7552,10 +7640,11 @@ async function runDataMigration(targetChannelId = null) {
 chrome.runtime.onInstalled.addListener((details) => {
   console.log("Content Pilot 설치/업데이트됨:", details.reason);
 
-  // 2-1. 기본 설정 초기화
+  // 2-1. 기본 설정 초기화 (키워드 추출 활성화 추가)
   chrome.storage.local.set({
     isScrapingActive: false,
     highlightToggleState: false,
+    isKeywordExtractionEnabled: true, // [필수] 키워드 추출 기능 활성화
   });
 
   // 2-2. 알람 재등록 (기존 로직)
@@ -7592,6 +7681,13 @@ chrome.runtime.onInstalled.addListener((details) => {
             // 마이그레이션 실행
             await runDataMigration(targetChannelId);
             console.log("[Migration] 자동 마이그레이션 완료");
+            
+            // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지
+            // UI가 로드된 후 표시하기 위해 storage 이벤트로 전달
+            chrome.storage.local.set({ 
+              migration_completed: true,
+              migration_toast_message: "✅ 데이터 구조가 업데이트되었습니다."
+            });
           } else {
             console.log("[Migration] 등록된 채널이 없어 마이그레이션을 건너뜁니다.");
           }

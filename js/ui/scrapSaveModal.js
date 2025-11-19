@@ -135,7 +135,24 @@ export function showScrapSaveModal(scrapData, activeChannelId, activeChannelName
       modal.remove();
       
       if (chrome.runtime.lastError) {
-        showToast("❌ 스크랩 저장 실패: " + chrome.runtime.lastError.message);
+        // [체크리스트 4-3] 에러 복구: 재시도 버튼이 있는 에러 메시지 표시
+        const errorMsg = chrome.runtime.lastError.message;
+        const retryBtn = document.createElement("button");
+        retryBtn.textContent = "다시 시도";
+        retryBtn.style.cssText = "margin-left: 12px; padding: 6px 12px; background: #2d8cf0; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;";
+        retryBtn.onclick = () => {
+          modal.remove();
+          showScrapSaveModal(scrapData, activeChannelId, activeChannelName);
+        };
+        
+        const errorDiv = document.createElement("div");
+        errorDiv.style.cssText = "padding: 12px; background: #ffebee; border: 1px solid #f44336; border-radius: 6px; margin-bottom: 12px;";
+        errorDiv.innerHTML = `<div style="color: #c62828; font-size: 13px; margin-bottom: 8px;">❌ 스크랩 저장 실패: ${errorMsg}</div>`;
+        errorDiv.appendChild(retryBtn);
+        
+        modalContent.insertBefore(errorDiv, modalContent.firstChild);
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "저장";
         return;
       }
 
@@ -152,7 +169,11 @@ export function showScrapSaveModal(scrapData, activeChannelId, activeChannelName
           data: savedScrapData
         }, "*");
         
-        showToast(isChannelOnly ? "✅ 현재 채널에 저장되었습니다." : "✅ 공용 스크랩으로 저장되었습니다.");
+        // [체크리스트 1-A] 저장 피드백: 채널명 포함
+        const feedbackMessage = isChannelOnly && activeChannelName
+          ? `✅ 스크랩이 '${activeChannelName}'에 저장되었습니다.`
+          : "✅ 공용 스크랩으로 저장되었습니다.";
+        showToast(feedbackMessage);
       } else {
         showToast("❌ 스크랩 저장 실패");
       }

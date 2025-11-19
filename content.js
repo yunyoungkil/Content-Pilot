@@ -82,6 +82,22 @@ if (window.self === window.top) {
         }
         break;
       }
+
+      // [체크리스트 1-A] 스크랩 저장 후 프리뷰 UI 표시
+      case "cp_show_preview": {
+        if (msg.data) {
+          showRecentScrapPreview(msg.data);
+        }
+        break;
+      }
+
+      // [체크리스트 1-A] 스크랩 저장 실패 시 토스트 메시지
+      case "cp_show_toast": {
+        if (msg.message) {
+          showToast(msg.message);
+        }
+        break;
+      }
     }
   });
 

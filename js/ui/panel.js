@@ -145,6 +145,20 @@ export function createAndShowPanel() {
       });
     });
 
+    // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지 처리
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === "local" && changes.migration_toast_message) {
+        const message = changes.migration_toast_message.newValue;
+        if (message) {
+          import("../utils.js").then(module => {
+            module.showToast(message);
+          });
+          // 메시지 표시 후 제거
+          chrome.storage.local.remove("migration_toast_message");
+        }
+      }
+    });
+    
     // [체크리스트 1] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
     chrome.storage.onChanged.addListener((changes, namespace) => {
       // [체크리스트 1-2] 조건 확인: 로컬 스토리지의 activeChannelId만 감지

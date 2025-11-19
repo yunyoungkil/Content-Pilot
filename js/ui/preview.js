@@ -4,9 +4,23 @@ import { shortenLink, showToast } from "../utils.js";
 
 // 최근 스크랩 미리보기 카드를 화면에 보여주는 함수
 export function showRecentScrapPreview(scrapData) {
-  const container = document.getElementById("cp-dock-container");
-  // 컨테이너가 없으면 아무것도 하지 않음
-  if (!container) return;
+  let container = document.getElementById("cp-dock-container");
+  
+  // [체크리스트 1-A] 컨테이너가 없으면 자동 생성
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "cp-dock-container";
+    container.style.cssText = `
+      position: fixed;
+      left: 0;
+      bottom: 36px;
+      z-index: 2147483648;
+      display: flex;
+      align-items: center;
+      pointer-events: none;
+    `;
+    document.body.appendChild(container);
+  }
 
   // 이전에 있던 미리보기 카드는 삭제
   const oldCard = document.getElementById('cp-recent-scrap-preview');
@@ -44,16 +58,36 @@ const imageElement = scrapData.image
     </div>`;
 
 // 2. 최종 HTML 조합
-// [신규] 저장된 채널 정보 표시
-const channelIndicator = scrapData.channelId 
-  ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">📂 현재 채널에 저장됨</div>`
-  : `<div style="font-size: 11px; color: #999; margin-top: 2px;">🌐 공용 스크랩으로 저장됨</div>`;
+// [신규] 저장된 채널 정보 표시 (체크리스트 1-A 점검, 패널 닫힘 상태 대응)
+// background.js에서 보낸 channelName 활용
+let channelIndicator = '';
+if (scrapData.channelId) {
+  // background.js에서 보낸 channelName 활용
+  const channelName = scrapData.channelName || "현재 채널";
+  channelIndicator = `<div style="font-size: 11px; color: #1a73e8; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+    📂 <strong>${channelName}</strong>에 저장됨
+  </div>`;
+} else {
+  channelIndicator = `<div style="font-size: 11px; color: #5f6368; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+    🌐 <strong>공용 스크랩</strong>으로 저장됨
+  </div>`;
+}
+
+// URL 호스트명 안전하게 추출
+let hostname = '';
+try {
+  if (scrapData.url) {
+    hostname = new URL(scrapData.url).hostname;
+  }
+} catch (e) {
+  hostname = scrapData.url || '';
+}
 
 card.innerHTML = `
   ${imageElement}
   <div style="display: flex; flex-direction: column; overflow: hidden;">
     <div style="font-weight: 600; font-size: 15px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${scrapData.text ? scrapData.text.substring(0, 30) : '제목 없음'}</div>
-    <div style="font-size: 13px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${new URL(scrapData.url).hostname}</div>
+    <div style="font-size: 13px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${hostname}</div>
     ${channelIndicator}
   </div>
 `;

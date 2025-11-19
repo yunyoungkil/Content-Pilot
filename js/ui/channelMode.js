@@ -520,6 +520,14 @@ export function renderChannelMode(container) {
           // [체크리스트 4-3] 저장 성공 피드백
           showToast("✅ 채널 설정이 저장되었습니다.");
           
+          // [체크리스트 4-2] 실시간 동기화: 헤더의 채널 선택기 갱신
+          const shadowRoot = container.closest("#content-pilot-host")?.shadowRoot || document.querySelector("#content-pilot-host")?.shadowRoot;
+          if (shadowRoot) {
+            import("./header.js").then(module => {
+              module.addHeaderEventListeners(shadowRoot);
+            });
+          }
+          
           // [체크리스트 3-🆎] 첫 채널 생성 후 자동 선택 및 대시보드 이동
           chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (channelResponse) => {
             const myBlogs = channelResponse?.data?.myChannels?.blogs || [];

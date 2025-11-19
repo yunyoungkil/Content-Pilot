@@ -1,5 +1,5 @@
 // js/ui/scrapbookMode.js (필터링 로직 분리)
-import { shortenLink, showConfirmationToast } from "../utils.js";
+import { shortenLink, showConfirmationToast, showToast } from "../utils.js";
 import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js";
 import { renderHeaderAndTabs } from "./header.js";
 
@@ -106,19 +106,25 @@ function renderScrapList(scraps, container) {
                 ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
                 : '';
             const cleanedTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim() : '제목 없음';
-            // [체크리스트 1-B 최적화] 전용/공용 배지 생성
-            const channelBadge = scrap.channelId 
-              ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="전용 스크랩">🔒 전용</span>`
-              : `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: #f1f8e9; color: #558b2f; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 4px;" title="공용 스크랩">🌐 공용</span>`;
+            
+            // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
+            const isDedicated = scrap.channelId !== null && scrap.channelId !== undefined;
+            const toggleBtn = `<button class="scrap-share-toggle-btn" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
+              style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; background: ${isDedicated ? '#e3f2fd' : '#f1f8e9'}; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
+              title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}"
+              onmouseover="this.style.background='${isDedicated ? '#bbdefb' : '#dcedc8'}'; this.style.transform='scale(1.1)'"
+              onmouseout="this.style.background='${isDedicated ? '#e3f2fd' : '#f1f8e9'}'; this.style.transform='scale(1)'">
+              ${isDedicated ? '🔒' : '🌐'}
+            </button>`;
             
             return `
-                <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}">
+                <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}" style="position: relative;">
+                  ${toggleBtn}
                   <button class="scrap-card-delete-btn" data-id="${scrap.id}"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
                   ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ''}
                   <div class="scrap-card-info">
                     <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
                       <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
-                      ${channelBadge}
                     </div>
                     <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
                     ${tagsHtml}
@@ -140,10 +146,60 @@ function renderScrapList(scraps, container) {
     // --- 이벤트 리스너 재연결 ---
     listContainer.querySelectorAll('.scrap-card').forEach(card => {
         card.addEventListener('click', (e) => {
+            // [체크리스트 2] 토글 버튼 클릭은 제외
+            if(e.target.closest('.scrap-share-toggle-btn') || e.target.classList.contains('scrap-share-toggle-btn')) return;
             if(e.target.closest('.scrap-card-delete-btn') || e.target.classList.contains('tag')) return;
             selectedScrapId = card.dataset.id;
             renderScrapList(scraps, container);
             renderDetailView(selectedScrapId, container);
+        });
+    });
+    
+    // [체크리스트 2] 스크랩 공유 토글 버튼 클릭 처리 (스크랩북)
+    listContainer.querySelectorAll('.scrap-share-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const scrapId = btn.dataset.scrapId;
+            const currentChannelId = btn.dataset.currentChannelId;
+            
+            // 현재 활성 채널 ID 가져오기
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const activeChannelId = res.activeChannelId || null;
+                
+                // 버튼 비활성화 및 로딩 표시
+                btn.disabled = true;
+                const originalIcon = btn.innerHTML;
+                btn.innerHTML = "⏳";
+                
+                chrome.runtime.sendMessage({
+                    action: "toggle_scrap_sharing",
+                    scrapId: scrapId,
+                    currentChannelId: activeChannelId
+                }, (response) => {
+                    btn.disabled = false;
+                    
+                    if (response && response.success) {
+                        // 성공 시 버튼 아이콘과 툴팁 업데이트
+                        const isNowDedicated = response.newChannelId !== null;
+                        btn.innerHTML = isNowDedicated ? "🔒" : "🌐";
+                        btn.title = isNowDedicated ? "공용으로 변경" : "전용으로 변경";
+                        btn.style.background = isNowDedicated ? "#e3f2fd" : "#f1f8e9";
+                        btn.dataset.currentChannelId = response.newChannelId || "";
+                        
+                        // 배지 제거됨 (토글 버튼만 사용)
+                        
+                        // 스크랩 목록 새로고침
+                        requestScrapsAndRender(container);
+                        
+                        showToast(response.message || (isNowDedicated ? "전용 스크랩으로 변경되었습니다." : "공용 스크랩으로 변경되었습니다."));
+                    } else {
+                        btn.innerHTML = originalIcon;
+                        showToast("❌ 변경 실패: " + (response?.error || "알 수 없는 오류"));
+                    }
+                });
+            });
         });
     });
 
