@@ -2256,6 +2256,221 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
     return true;
+  } else if (msg.action === "fetch_and_save_single_post") {
+    // [Phase 1] 단건 수집 및 저장 액션 핸들러
+    (async () => {
+      try {
+        const { url } = msg;
+        
+        if (!url || typeof url !== "string") {
+          sendResponse({ success: false, error: "유효한 URL이 필요합니다." });
+          return;
+        }
+
+        // 중복 검사 선행
+        const duplicateCheck = await checkDuplicateUrl(url);
+        if (duplicateCheck.exists) {
+          const statusMap = {
+            "ideas": "아이디어",
+            "in-progress": "진행 중",
+            "done": "완료"
+          };
+          sendResponse({
+            success: false,
+            code: "DUPLICATE_FOUND",
+            cardInfo: {
+              status: duplicateCheck.status,
+              statusLabel: statusMap[duplicateCheck.status] || duplicateCheck.status,
+              cardId: duplicateCheck.cardId,
+              title: duplicateCheck.title
+            }
+          });
+          return;
+        }
+
+        // URL에서 플랫폼 판별
+        let platform = null;
+        let videoId = null;
+        
+        try {
+          const urlObj = new URL(url);
+          const hostname = urlObj.hostname.toLowerCase();
+          
+          if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+            platform = "youtube";
+            // YouTube 비디오 ID 추출
+            if (urlObj.pathname.includes("/watch")) {
+              videoId = urlObj.searchParams.get("v");
+            } else if (urlObj.pathname.includes("/embed/")) {
+              videoId = urlObj.pathname.split("/embed/")[1]?.split("?")[0];
+            } else if (hostname.includes("youtu.be")) {
+              videoId = urlObj.pathname.substring(1);
+            }
+            
+            if (!videoId) {
+              sendResponse({ success: false, error: "YouTube 비디오 ID를 찾을 수 없습니다." });
+              return;
+            }
+          } else {
+            platform = "blog";
+          }
+        } catch (e) {
+          sendResponse({ success: false, error: "유효하지 않은 URL 형식입니다." });
+          return;
+        }
+
+        // 플랫폼별 수집 및 저장
+        if (platform === "youtube") {
+          const { youtubeApiKey } = await chrome.storage.local.get("youtubeApiKey");
+          if (!youtubeApiKey) {
+            sendResponse({ success: false, error: "YouTube API 키가 설정되지 않았습니다." });
+            return;
+          }
+
+          // YouTube videos.list API로 비디오 정보 가져오기
+          const videoApiUrl = `https://www.googleapis.com/youtube/v3/videos?key=${youtubeApiKey}&id=${videoId}&part=snippet,statistics`;
+          const videoResponse = await fetch(videoApiUrl);
+          const videoData = await videoResponse.json();
+
+          if (!videoData.items || videoData.items.length === 0) {
+            sendResponse({ success: false, error: "YouTube 비디오를 찾을 수 없습니다." });
+            return;
+          }
+
+          const apiItem = videoData.items[0];
+          const normalizedData = normalizeYoutubeData(apiItem, apiItem.snippet.channelId, "myChannels");
+          
+          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정
+          if (msg.sourceId) {
+            normalizedData.sourceId = msg.sourceId;
+          } else if (msg.channelId) {
+            // channelId가 있으면 sourceId로 사용 (채널 ID와 sourceId가 같은 경우)
+            normalizedData.sourceId = msg.channelId;
+          }
+          
+          // 키워드 추출
+          const tags = await extractKeywords(normalizedData.description);
+          normalizedData.tags = tags || null;
+
+          // Firebase에 저장
+          const cleanedData = cleanDataForFirebase(normalizedData);
+          await firebase
+            .database()
+            .ref(`channel_content/youtubes/${cleanedData.videoId}`)
+            .set(cleanedData);
+
+          sendResponse({ success: true, data: cleanedData, platform: "youtube" });
+
+        } else if (platform === "blog") {
+          // 블로그 페이지 수집
+          const response = await fetch(url);
+          if (!response.ok) {
+            sendResponse({ success: false, error: `페이지를 가져올 수 없습니다. (HTTP ${response.status})` });
+            return;
+          }
+
+          const html = await response.text();
+          const parsedData = await parseBlogPage(url, html);
+
+          if (!parsedData || !parsedData.success) {
+            sendResponse({ 
+              success: false, 
+              error: parsedData?.error || "페이지를 파싱할 수 없습니다." 
+            });
+            return;
+          }
+
+          // 키워드 추출
+          const tags = await extractKeywords(parsedData.cleanText);
+          
+          // 제목 추출 (HTML에서)
+          let title = "제목 없음";
+          const titleMatch = html.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
+          if (titleMatch && titleMatch[1]) {
+            title = titleMatch[1].trim();
+          }
+
+          // 날짜 추출
+          const pubDate = Date.now();
+          
+          // contentId 생성
+          const linkForId = url.split("?")[0];
+          const contentId = btoa(linkForId).replace(/=/g, "");
+          
+          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정
+          let sourceId = btoa(new URL(url).origin).replace(/=/g, ""); // 기본값 (fallback)
+          if (msg.sourceId) {
+            sourceId = msg.sourceId; // 프론트엔드에서 전달된 sourceId 우선 사용
+          } else if (msg.channelId) {
+            // channelId가 있으면 sourceId로 사용 (채널 ID와 sourceId가 같은 경우)
+            sourceId = msg.channelId;
+          }
+
+          // [체크리스트 3] 썸네일 URL 정제: HTML 엔티티 제거
+          let cleanedThumbnail = parsedData.thumbnail || null;
+          if (cleanedThumbnail) {
+            cleanedThumbnail = cleanedThumbnail.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+          }
+
+          const finalData = {
+            title,
+            fullLink: url,
+            pubDate,
+            description: parsedData.description || null,
+            thumbnail: cleanedThumbnail,
+            cleanText: parsedData.cleanText,
+            sourceId,
+            channelType: "myChannels",
+            fetchedAt: Date.now(),
+            ...parsedData.metrics,
+            tags: tags || null,
+          };
+
+          // Firebase에 저장
+          const cleanedData = cleanDataForFirebase(finalData);
+          await firebase
+            .database()
+            .ref(`channel_content/blogs/${contentId}`)
+            .set(cleanedData);
+
+          sendResponse({ success: true, data: cleanedData, platform: "blog" });
+        } else {
+          sendResponse({ success: false, error: "지원하지 않는 플랫폼입니다." });
+        }
+
+      } catch (error) {
+        console.error("[fetch_and_save_single_post] 오류:", error);
+        sendResponse({ 
+          success: false, 
+          error: error.message || "데이터 수집 중 오류가 발생했습니다." 
+        });
+      }
+    })();
+    return true;
+  } else if (msg.action === "fetch_image_as_base64") {
+    // [체크리스트 2-B] 이미지 프록시 액션: Base64 변환
+    (async () => {
+      try {
+        const response = await fetch(msg.url);
+        if (!response.ok) {
+          sendResponse({ success: false, error: `HTTP ${response.status}` });
+          return;
+        }
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendResponse({ success: true, dataUrl: reader.result });
+        };
+        reader.onerror = () => {
+          sendResponse({ success: false, error: "FileReader 오류" });
+        };
+        reader.readAsDataURL(blob);
+      } catch (e) {
+        console.error("[fetch_image_as_base64] 오류:", e);
+        sendResponse({ success: false, error: e.message || "이미지 로드 실패" });
+      }
+    })();
+    return true;
   } else if (msg.action === "clear_blog_content") {
     firebase
       .database()
@@ -3422,6 +3637,7 @@ ${decayContent.map((item, idx) =>
 
     return true;
   } else if (msg.action === "add_idea_to_kanban") {
+    // [Phase 1] 아이디어 생성 시 중복 검사 추가
     (async () => {
       try {
         const ideaObjectString = msg.data;
@@ -3435,6 +3651,31 @@ ${decayContent.map((item, idx) =>
         }
 
         const ideaData = JSON.parse(ideaObjectString);
+        
+        // [Phase 1] 중복 검사: origin.postUrl이 있는 경우 (리뉴얼 버튼 등)
+        if (ideaData.origin?.postUrl) {
+          const duplicateCheck = await checkDuplicateUrl(ideaData.origin.postUrl);
+          if (duplicateCheck.exists) {
+            const statusMap = {
+              "ideas": "아이디어",
+              "in-progress": "진행 중",
+              "done": "완료"
+            };
+            sendResponse({
+              success: false,
+              code: "DUPLICATE_FOUND",
+              cardInfo: {
+                status: duplicateCheck.status,
+                statusLabel: statusMap[duplicateCheck.status] || duplicateCheck.status,
+                cardId: duplicateCheck.cardId,
+                title: duplicateCheck.title
+              },
+              message: `이미 [${statusMap[duplicateCheck.status] || duplicateCheck.status}] 탭에 등록된 포스팅입니다.`
+            });
+            return;
+          }
+        }
+        
         const response = await createAndSaveNewIdea(ideaData, targetStatus, channelId); // channelId 전달
         sendResponse(response);
       } catch (e) {
@@ -5291,6 +5532,134 @@ async function fetchRssFeed(url, channelType) {
   } catch (error) {
     console.error(`Failed to fetch or parse RSS for ${url}:`, error);
   }
+}
+
+/**
+ * URL 정규화 함수 (중복 검사용)
+ * http/https, www 제거하여 비교
+ */
+function normalizeUrlForComparison(url) {
+  if (!url) return "";
+  try {
+    const urlObj = new URL(url);
+    let normalized = urlObj.hostname.replace(/^www\./, "");
+    normalized += urlObj.pathname.replace(/\/$/, ""); // 끝의 슬래시 제거
+    normalized += urlObj.search; // 쿼리 파라미터는 유지
+    return normalized.toLowerCase();
+  } catch (e) {
+    return url.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+  }
+}
+
+/**
+ * [Phase 1] 중복 검사 헬퍼 함수
+ * Firebase의 kanban 전체 데이터를 조회하여 URL 중복 여부 확인
+ */
+async function checkDuplicateUrl(url) {
+  try {
+    const normalizedUrl = normalizeUrlForComparison(url);
+    
+    // kanban의 모든 상태 조회 (ideas, in-progress, done)
+    const kanbanSnap = await firebase.database().ref("kanban").once("value");
+    const kanbanData = kanbanSnap.val() || {};
+    
+    const statuses = ["ideas", "in-progress", "done"];
+    
+    for (const status of statuses) {
+      const cards = kanbanData[status] || {};
+      
+      for (const [cardId, cardData] of Object.entries(cards)) {
+        // origin.postUrl 또는 publishedUrl 확인
+        const postUrl = cardData.origin?.postUrl || cardData.publishedUrl;
+        if (postUrl) {
+          const normalizedPostUrl = normalizeUrlForComparison(postUrl);
+          if (normalizedPostUrl === normalizedUrl) {
+            return {
+              exists: true,
+              status: status,
+              cardId: cardId,
+              title: cardData.title || "제목 없음"
+            };
+          }
+        }
+      }
+    }
+    
+    return { exists: false };
+  } catch (error) {
+    console.error("[Duplicate Check] 오류:", error);
+    return { exists: false, error: error.message };
+  }
+}
+
+/**
+ * [Phase 1] 공통 파싱 로직: 블로그 페이지 HTML 파싱
+ * fetchRssFeed의 HTML 파싱 로직을 재사용 가능한 함수로 분리
+ */
+async function parseBlogPage(url, html) {
+  try {
+    // 네이버 블로그 iframe 처리
+    let postHtml = html;
+    const naverIframeMatch = postHtml.match(
+      /<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/
+    );
+    if (naverIframeMatch && naverIframeMatch[1]) {
+      const iframeUrl = new URL(
+        naverIframeMatch[1],
+        "https://blog.naver.com"
+      ).href;
+      const iframeResponse = await fetch(iframeUrl);
+      if (iframeResponse.ok) postHtml = await iframeResponse.text();
+    }
+
+    await getOffscreenDocument();
+    const parsedData = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          action: "parse_html_in_offscreen",
+          html: postHtml,
+          baseUrl: url,
+        },
+        (response) => {
+          if (chrome.runtime.lastError)
+            resolve({
+              success: false,
+              error: chrome.runtime.lastError.message,
+            });
+          else resolve(response);
+        }
+      );
+    });
+
+    return parsedData;
+  } catch (error) {
+    console.error(`[parseBlogPage] 오류 (${url}):`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * [Phase 1] 공통 파싱 로직: YouTube API 데이터 정규화
+ * fetchYoutubeChannel의 데이터 정규화 로직을 재사용 가능한 함수로 분리
+ */
+function normalizeYoutubeData(apiItem, channelId, channelType) {
+  const { id, snippet, statistics } = apiItem;
+  const timestamp = new Date(snippet.publishedAt).getTime();
+  
+  return {
+    videoId: id,
+    title: snippet.title,
+    description: snippet.description,
+    publishedAt: timestamp,
+    thumbnail: snippet.thumbnails?.default?.url || snippet.thumbnails?.medium?.url || null,
+    viewCount: statistics?.viewCount ? parseInt(statistics.viewCount, 10) : 0,
+    likeCount: statistics?.likeCount ? parseInt(statistics.likeCount, 10) : 0,
+    commentCount: statistics?.commentCount ? parseInt(statistics.commentCount, 10) : 0,
+    channelId,
+    sourceId: channelId,
+    channelType,
+    fetchedAt: Date.now(),
+  };
 }
 
 async function fetchYoutubeChannel(channelId, channelType) {

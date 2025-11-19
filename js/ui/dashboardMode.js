@@ -297,10 +297,13 @@ function createContentCard(item, type, sourceName = null) {
             <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
         </svg>
     </button>`;
+    // [체크리스트 2-B] 썸네일 이미지 에러 핸들링을 위한 데이터 속성 추가
+    const thumbnailWithErrorHandling = thumbnail ? `<img src="${thumbnail.replace(/&amp;/g, '&')}" alt="Thumbnail" referrerpolicy="no-referrer" class="card-thumbnail-img" data-original-src="${thumbnail.replace(/"/g, '&quot;')}">` : `<div class="no-image">${isVideo ? '▶' : '📄'}</div>`;
+    
     return `
-        <a href="${link}" target="_blank" class="content-card" style="position: relative;">
+        <a href="${link}" target="_blank" class="content-card" data-content-id="${isVideo ? item.videoId : btoa(item.fullLink || item.link || '').replace(/=/g, '')}" style="position: relative;">
             <div class="card-thumbnail">
-                ${thumbnail ? `<img src="${thumbnail}" alt="Thumbnail" referrerpolicy="no-referrer">` : `<div class="no-image">${isVideo ? '▶' : '📄'}</div>`}
+                ${thumbnailWithErrorHandling}
             </div>
             <div class="card-info">
                 ${channelNameHtml}
@@ -345,7 +348,12 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
     
     // 정렬
     const sortKey = state.sortOrder;
-    filteredContent.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
+    // [체크리스트 2] 정렬 키(fetchedAt) 누락 방지: Fallback 로직 추가
+    filteredContent.sort((a, b) => {
+        const timeA = a[sortKey] || a.fetchedAt || a.pubDate || a.publishedAt || 0;
+        const timeB = b[sortKey] || b.fetchedAt || b.pubDate || b.publishedAt || 0;
+        return timeB - timeA;
+    });
     
     // 페이징
     const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
@@ -356,11 +364,13 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
     
     // 정렬 옵션
     const sortOptions = isVideo ? `
+        <option value="fetchedAt" ${sortKey === 'fetchedAt' ? 'selected' : ''}>최근 수집 순 ✨</option>
         <option value="publishedAt" ${sortKey === 'publishedAt' ? 'selected' : ''}>최신 순</option>
         <option value="viewCount" ${sortKey === 'viewCount' ? 'selected' : ''}>조회수 높은 순</option>
         <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
         <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
     ` : `
+        <option value="fetchedAt" ${sortKey === 'fetchedAt' ? 'selected' : ''}>최근 수집 순 ✨</option>
         <option value="pubDate" ${sortKey === 'pubDate' ? 'selected' : ''}>최신 순</option>
         <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
         <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
@@ -416,6 +426,42 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
             img.addEventListener('error', () => { img.style.display = 'none'; });
             img.addEventListener('load', () => { if (img.naturalWidth === 0) { img.style.display = 'none'; } });
         });
+        
+        // [체크리스트 2-B] Daum CDN 이미지 에러 핸들링 (썸네일 포함)
+        listContainer.querySelectorAll('img').forEach(img => {
+            const imgSrc = img.src || img.dataset.originalSrc || '';
+            if (imgSrc && (imgSrc.includes('daumcdn') || imgSrc.includes('img1.daumcdn'))) {
+                img.addEventListener('error', function(e) {
+                    const imgEl = e.target;
+                    // 무한 루프 방지
+                    if (imgEl.dataset.retry === 'true') {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    imgEl.dataset.retry = 'true';
+                    
+                    // 원본 URL 가져오기
+                    const originalUrl = imgEl.dataset.originalSrc || imgEl.src;
+                    if (!originalUrl) {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    
+                    // 백그라운드에 Base64 변환 요청
+                    chrome.runtime.sendMessage({ 
+                        action: "fetch_image_as_base64", 
+                        url: originalUrl 
+                    }, (response) => {
+                        if (response && response.success) {
+                            imgEl.src = response.dataUrl; // Base64로 교체
+                        } else {
+                            // 실패 시 기본 이미지로 대체 또는 숨김
+                            imgEl.style.display = 'none';
+                        }
+                    });
+                }, { once: true });
+            }
+        });
     } else {
         listContainer.innerHTML = `<p class="loading-placeholder">표시할 ${isVideo ? '유튜브 영상이' : '블로그 게시물이'} 없습니다.</p>`;
         if (controlsContainer) controlsContainer.innerHTML = '';
@@ -430,18 +476,25 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
         filteredContent = filteredContent.filter(item => item.tags && item.tags.includes(activeTagFilter));
     }
     const sortKey = state.sortOrder;
-    filteredContent.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
+    // [체크리스트 2] 정렬 키(fetchedAt) 누락 방지: Fallback 로직 추가
+    filteredContent.sort((a, b) => {
+        const timeA = a[sortKey] || a.fetchedAt || a.pubDate || a.publishedAt || 0;
+        const timeB = b[sortKey] || b.fetchedAt || b.pubDate || b.publishedAt || 0;
+        return timeB - timeA;
+    });
     const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
     if (state.currentPage >= totalPages && totalPages > 0) state.currentPage = totalPages - 1;
     if (state.currentPage < 0) state.currentPage = 0;
     const startIndex = state.currentPage * ITEMS_PER_PAGE;
     const paginatedContent = filteredContent.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     const sortOptions = isVideo ? `
+        <option value="fetchedAt" ${sortKey === 'fetchedAt' ? 'selected' : ''}>최근 수집 순 ✨</option>
         <option value="publishedAt" ${sortKey === 'publishedAt' ? 'selected' : ''}>최신 순</option>
         <option value="viewCount" ${sortKey === 'viewCount' ? 'selected' : ''}>조회수 높은 순</option>
         <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
         <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
     ` : `
+        <option value="fetchedAt" ${sortKey === 'fetchedAt' ? 'selected' : ''}>최근 수집 순 ✨</option>
         <option value="pubDate" ${sortKey === 'pubDate' ? 'selected' : ''}>최신 순</option>
         <option value="commentCount" ${sortKey === 'commentCount' ? 'selected' : ''}>댓글 많은 순</option>
         <option value="likeCount" ${sortKey === 'likeCount' ? 'selected' : ''}>좋아요 높은 순</option>
@@ -464,6 +517,42 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
         listContainer.querySelectorAll('.preview-img').forEach(img => {
             img.addEventListener('error', () => { img.style.display = 'none'; });
             img.addEventListener('load', () => { if (img.naturalWidth === 0) { img.style.display = 'none'; } });
+        });
+        
+        // [체크리스트 2-B] Daum CDN 이미지 에러 핸들링 (썸네일 포함)
+        listContainer.querySelectorAll('img').forEach(img => {
+            const imgSrc = img.src || img.dataset.originalSrc || '';
+            if (imgSrc && (imgSrc.includes('daumcdn') || imgSrc.includes('img1.daumcdn'))) {
+                img.addEventListener('error', function(e) {
+                    const imgEl = e.target;
+                    // 무한 루프 방지
+                    if (imgEl.dataset.retry === 'true') {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    imgEl.dataset.retry = 'true';
+                    
+                    // 원본 URL 가져오기
+                    const originalUrl = imgEl.dataset.originalSrc || imgEl.src;
+                    if (!originalUrl) {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    
+                    // 백그라운드에 Base64 변환 요청
+                    chrome.runtime.sendMessage({ 
+                        action: "fetch_image_as_base64", 
+                        url: originalUrl 
+                    }, (response) => {
+                        if (response && response.success) {
+                            imgEl.src = response.dataUrl; // Base64로 교체
+                        } else {
+                            // 실패 시 기본 이미지로 대체 또는 숨김
+                            imgEl.style.display = 'none';
+                        }
+                    });
+                }, { once: true });
+            }
         });
     } else {
         listContainer.innerHTML = `<p class="loading-placeholder">표시할 ${isVideo ? '유튜브 영상이' : '블로그 게시물이'} 없습니다.</p>`;
@@ -601,8 +690,12 @@ function renderDashboard(container) {
       <div class="dashboard-container">
           <div class="dashboard-grid">
               <div id="my-channels-col" class="dashboard-col">
-                  <div class="dashboard-col-header">
+                  <div class="dashboard-col-header" style="display: flex; align-items: center; justify-content: space-between;">
                       <h2>🚀 내 주요 콘텐츠</h2>
+                      <button id="add-url-btn" class="add-url-btn" title="URL로 콘텐츠 추가" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 4px; transition: background 0.2s;">
+                          <span>🔗</span>
+                          <span>URL로 추가</span>
+                      </button>
                   </div>
                   <div class="platform-tabs" data-type="myChannels">
                       <div class="platform-tab active" data-platform="blog">블로그</div>
@@ -725,8 +818,40 @@ function addDashboardEventListeners(container) {
         }
     });
 
+    // [Phase 2] URL 추가 버튼 클릭 이벤트
+    const addUrlBtn = container.querySelector('#add-url-btn');
+    if (addUrlBtn) {
+        addUrlBtn.addEventListener('click', () => {
+            showUrlAddModal(container);
+        });
+    }
+
     container.addEventListener('click', e => {
         const target = e.target;
+        
+        // URL 추가 모달 닫기
+        if (target.classList.contains('url-modal-close') || target.classList.contains('url-modal-backdrop')) {
+            e.preventDefault();
+            e.stopPropagation(); // [피해야 할 동작 방지 2] 이벤트 버블링 방지
+            const modal = container.querySelector('#url-add-modal');
+            if (modal) {
+                // [피해야 할 동작 방지 3] 모달 제거 시 이벤트 리스너 정리
+                const urlInput = modal.querySelector('#url-input');
+                if (urlInput && modal.dataset.enterKeyHandler === 'attached') {
+                    // Enter 키 이벤트 리스너는 이미 모달 내부에서 정리됨
+                }
+                modal.remove();
+            }
+            return;
+        }
+        
+        // URL 추가 모달의 가져오기 버튼
+        if (target.id === 'url-fetch-btn' || target.closest('#url-fetch-btn')) {
+            e.preventDefault();
+            e.stopPropagation(); // [피해야 할 동작 방지 2] 이벤트 버블링 방지
+            handleUrlFetch(container);
+            return;
+        }
         
         // 경쟁 채널 이름 클릭 시 필터 적용
         const channelNameEl = target.closest('.channel-name-clickable');
@@ -1066,6 +1191,278 @@ function addDashboardEventListeners(container) {
             viewState[type].currentPage = 0;
             updateDashboardUI(container);
         }
+    });
+}
+
+/**
+ * [Phase 2] URL 추가 모달 표시
+ */
+function showUrlAddModal(container) {
+    // 기존 모달이 있으면 제거
+    const existingModal = container.querySelector('#url-add-modal');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'url-add-modal';
+    modal.innerHTML = `
+        <div class="url-modal-backdrop"></div>
+        <div class="url-modal-content">
+            <div class="url-modal-header">
+                <h3>🔗 URL로 콘텐츠 추가</h3>
+                <button class="url-modal-close">×</button>
+            </div>
+            <div class="url-modal-body">
+                <div class="url-input-wrapper">
+                    <input type="text" id="url-input" class="url-input" placeholder="블로그 포스팅 또는 YouTube 영상 URL을 입력하세요..." autofocus>
+                    <button id="url-fetch-btn" class="url-fetch-btn">가져오기</button>
+                </div>
+                <div id="url-preview-area" class="url-preview-area" style="display: none;"></div>
+                <div id="url-error-area" class="url-error-area" style="display: none;"></div>
+            </div>
+        </div>
+    `;
+    
+    // 스타일 추가 (인라인으로)
+    modal.style.cssText = 'position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center;';
+    const backdrop = modal.querySelector('.url-modal-backdrop');
+    backdrop.style.cssText = 'position: absolute; inset: 0; background: rgba(0,0,0,0.5);';
+    const modalContent = modal.querySelector('.url-modal-content');
+    modalContent.style.cssText = 'position: relative; background: white; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.25); z-index: 1;';
+    const modalHeader = modal.querySelector('.url-modal-header');
+    modalHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e0e0e0;';
+    modalHeader.querySelector('h3').style.cssText = 'margin: 0; font-size: 18px; font-weight: 600;';
+    const closeBtn = modal.querySelector('.url-modal-close');
+    closeBtn.style.cssText = 'background: none; border: none; font-size: 24px; cursor: pointer; color: #666; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: background 0.2s;';
+    closeBtn.addEventListener('mouseover', () => closeBtn.style.background = '#f0f0f0');
+    closeBtn.addEventListener('mouseout', () => closeBtn.style.background = 'none');
+    const modalBody = modal.querySelector('.url-modal-body');
+    modalBody.style.cssText = 'padding: 20px;';
+    const inputWrapper = modal.querySelector('.url-input-wrapper');
+    inputWrapper.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
+    const urlInput = modal.querySelector('#url-input');
+    urlInput.style.cssText = 'flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;';
+    const fetchBtn = modal.querySelector('#url-fetch-btn');
+    fetchBtn.style.cssText = 'padding: 12px 24px; background: #4285f4; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s;';
+    fetchBtn.addEventListener('mouseover', () => fetchBtn.style.background = '#357ae8');
+    fetchBtn.addEventListener('mouseout', () => fetchBtn.style.background = '#4285f4');
+    
+    container.appendChild(modal);
+    
+    // [Phase 2] 클립보드 감지 또는 포커스
+    urlInput.focus();
+    navigator.clipboard.readText().then(text => {
+        if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+            urlInput.value = text;
+        }
+    }).catch(() => {});
+    
+    // [피해야 할 동작 방지] Enter 키 이벤트 리스너 (모달 제거 시 자동 정리되도록 모달에 저장)
+    const enterKeyHandler = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            handleUrlFetch(container);
+        }
+    };
+    urlInput.addEventListener('keypress', enterKeyHandler);
+    modal.dataset.enterKeyHandler = 'attached'; // 플래그로 표시
+    
+    // [피해야 할 동작 방지] 모달 닫기 시 이벤트 리스너 정리 함수
+    const cleanupModal = () => {
+        urlInput.removeEventListener('keypress', enterKeyHandler);
+        modal.remove();
+    };
+    modal.dataset.cleanup = 'true';
+    
+    // 모달 닫기 버튼에 정리 함수 연결
+    closeBtn.addEventListener('click', cleanupModal);
+    backdrop.addEventListener('click', cleanupModal);
+}
+
+/**
+ * [Phase 2] URL 가져오기 처리
+ */
+function handleUrlFetch(container) {
+    const modal = container.querySelector('#url-add-modal');
+    if (!modal) return; // 모달이 없으면 종료
+    
+    const urlInput = container.querySelector('#url-input');
+    const fetchBtn = container.querySelector('#url-fetch-btn');
+    const previewArea = container.querySelector('#url-preview-area');
+    const errorArea = container.querySelector('#url-error-area');
+    
+    // [피해야 할 동작 방지 1] 중복 요청 방지: 이미 진행 중인 요청이 있으면 차단
+    if (fetchBtn.disabled || modal.dataset.fetching === 'true') {
+        return;
+    }
+    
+    const url = urlInput.value.trim();
+    
+    // 유효성 검사
+    if (!url) {
+        errorArea.style.display = 'block';
+        errorArea.innerHTML = '<div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px;">URL을 입력해주세요.</div>';
+        previewArea.style.display = 'none';
+        return;
+    }
+    
+    try {
+        new URL(url);
+    } catch (e) {
+        errorArea.style.display = 'block';
+        errorArea.innerHTML = '<div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px;">유효한 URL 형식이 아닙니다.</div>';
+        previewArea.style.display = 'none';
+        return;
+    }
+    
+    // [피해야 할 동작 방지 1] 요청 진행 중 플래그 설정
+    modal.dataset.fetching = 'true';
+    
+    // 로딩 상태
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = '수집 중...';
+    previewArea.style.display = 'none';
+    errorArea.style.display = 'none';
+    
+    // [체크리스트 1] 현재 활성 채널의 sourceId 가져오기
+    chrome.storage.local.get("activeChannelId", async (res) => {
+        const activeChannelId = res.activeChannelId;
+        let channelSourceId = null;
+        
+        if (activeChannelId && cachedData && cachedData.channels) {
+            const myBlogs = cachedData.channels.myChannels?.blogs || [];
+            const currentChannel = myBlogs.find(blog => {
+                const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+                return id === activeChannelId;
+            });
+            
+            if (currentChannel && currentChannel.apiUrl) {
+                channelSourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
+            }
+        }
+        
+        // 백엔드로 요청 (channelId 포함)
+        chrome.runtime.sendMessage({ 
+            action: 'fetch_and_save_single_post', 
+            url,
+            channelId: activeChannelId,
+            sourceId: channelSourceId // 현재 채널의 sourceId 전달
+        }, (response) => {
+        // [피해야 할 동작 방지 1] 요청 완료 플래그 해제
+        if (modal) modal.dataset.fetching = 'false';
+        
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '가져오기';
+        
+        if (!response) {
+            errorArea.style.display = 'block';
+            errorArea.innerHTML = '<div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px;">응답을 받을 수 없습니다.</div>';
+            return;
+        }
+        
+        if (response.success) {
+            // [Phase 2] 미리보기 표시
+            const data = response.data;
+            previewArea.style.display = 'block';
+            previewArea.innerHTML = `
+                <div style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-top: 16px;">
+                    <div style="display: flex; gap: 12px;">
+                        ${data.thumbnail ? `<img src="${data.thumbnail}" style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px;" alt="썸네일" referrerpolicy="no-referrer" onerror="this.style.display='none';">` : ''}
+                        <div style="flex: 1;">
+                            <h4 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${data.title || '제목 없음'}</h4>
+                            <p style="margin: 0; color: #666; font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${data.description || data.cleanText?.substring(0, 100) || ''}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // [Phase 2] 리스트 갱신 및 피드백
+            if (cachedData && cachedData.content) {
+                cachedData.content.unshift(data); // 맨 앞에 추가
+                
+                // [체크리스트] URL 추가 성공 시 자동 정렬 전환
+                const type = 'myChannels';
+                viewState[type].sortOrder = 'fetchedAt'; // 최근 수집 순으로 정렬 기준 변경
+                viewState[type].currentPage = 0; // 1페이지로 이동
+                
+                updateDashboardUI(container);
+                
+                // 시각적 강조 (Flash 효과)
+                setTimeout(() => {
+                    const contentId = data.videoId || btoa(data.fullLink).replace(/=/g, '');
+                    const newCard = container.querySelector(`[data-content-id="${contentId}"]`);
+                    if (!newCard) {
+                        // contentId 속성이 없을 수 있으므로 다른 방법으로 찾기
+                        const allCards = container.querySelectorAll('.content-card');
+                        if (allCards.length > 0) {
+                            const firstCard = allCards[0];
+                            firstCard.style.transition = 'background-color 0.3s';
+                            firstCard.style.backgroundColor = '#e8f5e9';
+                            setTimeout(() => {
+                                firstCard.style.backgroundColor = '';
+                            }, 2000);
+                        }
+                    } else {
+                        newCard.style.transition = 'background-color 0.3s';
+                        newCard.style.backgroundColor = '#e8f5e9';
+                        setTimeout(() => {
+                            newCard.style.backgroundColor = '';
+                        }, 2000);
+                    }
+                }, 100);
+            }
+            
+            showToast('✅ 콘텐츠가 추가되었습니다.');
+            
+            // 모달 닫기
+            setTimeout(() => {
+                const modal = container.querySelector('#url-add-modal');
+                if (modal) {
+                    // [피해야 할 동작 방지 3] 모달 제거 시 이벤트 리스너 정리
+                    modal.remove();
+                }
+            }, 1500);
+            
+        } else if (response.code === 'DUPLICATE_FOUND') {
+            // [Phase 2] 중복 에러 핸들링
+            const cardInfo = response.cardInfo;
+            errorArea.style.display = 'block';
+            errorArea.innerHTML = `
+                <div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px; margin-bottom: 8px;">
+                    이미 <strong>[${cardInfo.statusLabel}]</strong> 탭에 등록된 포스팅입니다.
+                </div>
+                <button id="go-to-card-btn" style="padding: 8px 16px; background: #4285f4; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                    해당 카드로 이동
+                </button>
+            `;
+            
+            // 해당 카드로 이동 버튼
+            const goToCardBtn = errorArea.querySelector('#go-to-card-btn');
+            goToCardBtn.addEventListener('click', () => {
+                // 기획 보드로 이동하고 해당 카드 선택
+                const shadowRoot = container.closest('#content-pilot-host')?.shadowRoot || document.querySelector('#content-pilot-host')?.shadowRoot;
+                if (shadowRoot) {
+                    const kanbanTab = shadowRoot.querySelector('[data-key="kanban"]');
+                    if (kanbanTab) {
+                        kanbanTab.click();
+                        // 카드 선택 로직은 kanbanMode.js에서 처리
+                        setTimeout(() => {
+                            chrome.runtime.sendMessage({
+                                action: 'highlight_kanban_card',
+                                cardId: cardInfo.cardId,
+                                status: cardInfo.status
+                            });
+                        }, 300);
+                    }
+                }
+                const modal = container.querySelector('#url-add-modal');
+                if (modal) modal.remove();
+            });
+        } else {
+            errorArea.style.display = 'block';
+            errorArea.innerHTML = `<div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px;">${response.error || '데이터 수집에 실패했습니다.'}</div>`;
+        }
+        });
     });
 }
 
