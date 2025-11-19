@@ -7033,7 +7033,7 @@ async function runFullSystemDiagnosis() {
 
     // ========== 2. 데이터 무결성 (Data Integrity) ==========
     
-    // 2-1. 활성 채널 상태
+    // 2-1. 활성 채널 상태 (수정된 로직)
     try {
       sendDiagnosticLog("data_active_channel", "running", "활성 채널 상태 확인...");
       const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
@@ -7049,10 +7049,23 @@ async function runFullSystemDiagnosis() {
         const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
         
         const allChannels = [...(myChannels.blogs || []), ...(myChannels.youtubes || [])];
-        const channelExists = allChannels.some(ch => ch.id === activeChannelId || ch.channelId === activeChannelId);
+        
+        // [핵심 수정] ID가 없으면 API URL을 변환해서 비교하도록 로직 개선
+        const channelExists = allChannels.some(ch => {
+          // 1. 저장된 ID가 있으면 그것과 비교
+          if (ch.id && ch.id === activeChannelId) return true;
+          if (ch.channelId && ch.channelId === activeChannelId) return true;
+          
+          // 2. 저장된 ID가 없으면 URL을 변환하여 비교 (헤더의 로직과 동일하게 맞춤)
+          if (ch.apiUrl) {
+            const generatedId = btoa(ch.apiUrl).replace(/=/g, "");
+            if (generatedId === activeChannelId) return true;
+          }
+          return false;
+        });
         
         if (channelExists) {
-          sendDiagnosticLog("data_active_channel", "pass", `활성 채널 정상 (ID: ${activeChannelId})`);
+          sendDiagnosticLog("data_active_channel", "pass", `활성 채널 정상 (ID: ${activeChannelId.substring(0, 10)}...)`);
         } else {
           sendDiagnosticLog("data_active_channel", "warn", `활성 채널이 목록에 없음 (ID: ${activeChannelId})`);
           diagnosisResults.warnings.push("활성 채널 불일치");
