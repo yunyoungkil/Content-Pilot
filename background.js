@@ -3740,6 +3740,11 @@ ${decayContent.map((item, idx) =>
 
             ### 8. 관련 참고 자료
             ${linkedScrapsText || "참고 자료 없음"}
+            
+            [참고 자료 활용 규칙]
+            - 참고 자료가 제공된 경우, 그 내용을 바탕으로 팩트 기반으로 작성해주세요.
+            - 참고 자료가 없는 경우, 일반적인 지식과 경험을 바탕으로 작성하되, 확실하지 않은 내용은 추측하지 마세요.
+            - 할루시네이션(허위 정보 생성)을 피하고, 확실한 정보만 포함해주세요.
 
             [작성 규칙]
             1. **제목 최적화**: SEO 최적화된 제목을 생성하고, 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요. 아이디어 제목과는 다를 수 있습니다.
@@ -3819,6 +3824,12 @@ ${decayContent.map((item, idx) =>
                - 링크는 밑줄 없이 작성해주세요 (마크다운 링크 형식 사용).
                - 제목 태그(h1, h2, h3)는 적절한 간격을 두고 사용해주세요.
                - 목록, 인용, 일반 텍스트는 읽기 편하도록 적절한 줄간격을 유지해주세요.
+            
+            [중요] **응답 형식 규칙:**
+            - 반드시 **순수 마크다운 형식**으로만 작성해주세요.
+            - 코드 블록(\`\`\`markdown ... \`\`\`)이나 다른 래퍼 태그 없이, 순수 마크다운 텍스트만 반환해주세요.
+            - 예시: "# 제목\\n\\n본문 내용..." 형식으로 작성 (\`\`\`markdown 태그 없이)
+            - 절대 금지: \`\`\`markdown으로 감싸거나, JSON 형식으로 감싸지 마세요.
         `;
       // 기존에 만들어둔 Gemini API 호출 함수를 재사용합니다.
       let draft;
@@ -3835,31 +3846,52 @@ ${decayContent.map((item, idx) =>
         return;
       }
       
-      if (!draft) {
+      // [체크리스트 4-2] 빈 응답 및 오류 응답 처리
+      if (!draft || draft.trim() === "") {
         console.error('[generate_draft_from_idea] 초안이 비어있습니다.');
         if (sendResponse) {
           sendResponse({ 
             success: false, 
-            error: '초안이 생성되지 않았습니다. Gemini API 응답을 확인해주세요.' 
+            error: '초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.' 
           });
         }
         return;
       }
       
-      if (draft.startsWith("오류:")) {
+      if (draft.startsWith("오류:") || draft.includes("오류:")) {
         console.error('[generate_draft_from_idea] Gemini API 오류:', draft);
+        const errorMessage = draft.replace(/^오류:\s*/i, '').trim() || 'Gemini API에서 오류가 발생했습니다.';
         if (sendResponse) {
           sendResponse({ 
             success: false, 
-            error: draft.replace(/^오류:\s*/, '') || 'Gemini API에서 오류가 발생했습니다.' 
+            error: errorMessage 
           });
         }
         return;
       }
       
-      if (draft && !draft.startsWith("오류:")) {
+      // [체크리스트 4-2] 응답이 너무 짧거나 유효하지 않은 경우 체크
+      if (draft.trim().length < 50) {
+        console.warn('[generate_draft_from_idea] 초안이 너무 짧습니다:', draft);
+        // 너무 짧은 경우에도 경고만 하고 계속 진행 (사용자가 확인할 수 있도록)
+      }
+      
+      // 정상 응답 처리
+      {
+        // [체크리스트 2-3] 마크다운 클리닝: 코드 블록 태그 제거
+        let cleanedDraft = draft;
+        // ```markdown ... ``` 형식 제거
+        cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
+        cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
+        cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
+        cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
+        cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
+        cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
+        // 앞뒤 공백 제거
+        cleanedDraft = cleanedDraft.trim();
+        
         // 생성된 초안에 가독성 포맷팅 후처리 적용
-        let formattedDraft = formatDraftForReadability(draft);
+        let formattedDraft = formatDraftForReadability(cleanedDraft);
         
         // SEO 최적화된 제목 추출 (h1 태그에서)
         let seoTitle = null;
@@ -3985,16 +4017,19 @@ ${decayContent.map((item, idx) =>
           .filter(t => t && t !== 'AI-추천')
           .join(', ');
         
-        // 썸네일 정보 추출 (초안에서 <썸네일정보> 태그 찾기)
+        // [체크리스트 2-3] 썸네일 정보 추출 (초안에서 <썸네일정보> 태그 찾기)
         let thumbnailInfo = null;
-        const thumbnailMatch = draft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
+        // cleanedDraft에서 먼저 찾고, 없으면 formattedDraft에서 찾기
+        const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/) || formattedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
         if (thumbnailMatch && thumbnailMatch[1]) {
           try {
             thumbnailInfo = JSON.parse(thumbnailMatch[1].trim());
-            // 초안에서 썸네일 정보 태그 제거
+            // 초안에서 썸네일 정보 태그 제거 (cleanedDraft와 formattedDraft 모두에서)
+            cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
             formattedDraft = formattedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
           } catch (e) {
-            console.error('썸네일 정보 파싱 실패:', e);
+            console.error('[generate_draft_from_idea] 썸네일 정보 JSON 파싱 실패:', e);
+            // JSON 파싱 실패 시 기본값 사용 (아래에서 처리)
           }
         }
         
@@ -4016,18 +4051,6 @@ ${decayContent.map((item, idx) =>
             tags: tagsForPublish,
             seoTitle: seoTitle, // SEO 최적화된 제목
             thumbnailInfo: thumbnailInfo // 썸네일 정보
-          });
-        }
-      } else {
-        // sendResponse가 이미 호출되었는지 확인
-        console.error('[generate_draft_from_idea] 초안 생성 실패:', draft);
-        if (sendResponse) {
-          const errorMsg = draft 
-            ? (draft.startsWith("오류:") ? draft.replace(/^오류:\s*/, '') : draft) 
-            : '초안 생성에 실패했습니다.';
-          sendResponse({ 
-            success: false, 
-            error: errorMsg || '알 수 없는 오류가 발생했습니다.' 
           });
         }
       }

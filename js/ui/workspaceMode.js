@@ -1121,6 +1121,26 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
             });
             
             getContentPromise.then(async (currentDraftHtml) => {
+                // [체크리스트 1-1] 필수 데이터 유효성 검사
+                const title = ideaData.title || "";
+                const outline = ideaData.outline || ideaData.workspace?.outline || [];
+                
+                if (!title || title.trim() === "") {
+                    alert("❌ 제목이 비어있습니다. 제목을 입력해주세요.");
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    return;
+                }
+                
+                if (!outline || outline.length === 0) {
+                    const proceed = confirm("⚠️ 목차가 없습니다. 목차 없이 초안을 생성하면 글 구조가 엉성할 수 있습니다.\n\n그래도 계속하시겠습니까?");
+                    if (!proceed) {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                        return;
+                    }
+                }
+                
                 // HTML을 텍스트로 변환 (HTML 태그 제거)
                 let currentDraft = "";
                 if (currentDraftHtml) {
@@ -1129,7 +1149,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                     currentDraft = tempDiv.textContent || tempDiv.innerText || "";
                 }
                 
-                // 연결된 스크랩 데이터 가져오기
+                // [체크리스트 1-2] 연결된 스크랩 데이터 가져오기 및 텍스트 truncation
                 // linkedScraps는 Firebase에서 객체로 저장되지만, 코드에서는 배열로도 사용 가능
                 let linkedScrapsIds = [];
                 if (ideaData.linkedScraps) {
@@ -1147,6 +1167,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 }
                 const linkedScrapsContent = [];
                 
+                // 스크랩 텍스트 최대 길이 제한 (토큰 절약)
+                const MAX_SCRAP_TEXT_LENGTH = 2000; // 각 스크랩당 최대 2000자
+                
                 if (linkedScrapsIds.length > 0) {
                     // 모든 스크랩 가져오기
                     const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
@@ -1157,10 +1180,15 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                 linkedScrapsIds.forEach(scrapId => {
                                     const scrap = response.scraps.find(s => s.id === scrapId);
                                     if (scrap) {
+                                        let scrapText = scrap.text || scrap.cleanText || "";
+                                        // 텍스트가 너무 길면 truncation (토큰 절약)
+                                        if (scrapText.length > MAX_SCRAP_TEXT_LENGTH) {
+                                            scrapText = scrapText.substring(0, MAX_SCRAP_TEXT_LENGTH) + "... [내용이 길어 일부만 포함됨]";
+                                        }
                                         linkedScrapsContent.push({
                                             title: scrap.title || scrap.text?.substring(0, 50) || "스크랩",
                                             url: scrap.url || "",
-                                            text: scrap.text || scrap.cleanText || ""
+                                            text: scrapText
                                         });
                                     }
                                 });
@@ -1172,23 +1200,42 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 
                 // 아이디어 데이터 준비
                 const draftData = {
-                    title: ideaData.title || "",
+                    title: title,
                     description: ideaData.description || "",
                     tags: ideaData.tags || ideaData.workspace?.keywords || [],
-                    outline: ideaData.outline || ideaData.workspace?.outline || [],
+                    outline: outline,
                     longTailKeywords: ideaData.longTailKeywords || [],
                     recommendedSearches: ideaData.recommendedKeywords || [],
                     currentDraft: currentDraft || "",
                     linkedScrapsContent: linkedScrapsContent
                 };
                 
+                // [체크리스트 4-3] 타임아웃 처리 (30초)
+                const TIMEOUT_MS = 30000; // 30초
+                let timeoutId = setTimeout(() => {
+                    if (btn.disabled) {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                        alert("⏱️ 초안 생성이 30초를 초과했습니다. 네트워크 상태를 확인하거나 다시 시도해주세요.");
+                        console.error("[Workspace] AI 초안 생성 타임아웃");
+                    }
+                }, TIMEOUT_MS);
+                
                 // AI 초안 생성 요청
                 chrome.runtime.sendMessage({
                     action: "generate_draft_from_idea",
                     data: draftData
                 }, (response) => {
+                    clearTimeout(timeoutId); // 타임아웃 취소
                     btn.disabled = false;
                     btn.textContent = originalText;
+                    
+                    // [체크리스트 4-2] 응답 오류 처리 강화
+                    if (!response) {
+                        alert("❌ 초안 생성에 실패했습니다. 응답을 받지 못했습니다.");
+                        console.error("[Workspace] AI 초안 생성: 응답 없음");
+                        return;
+                    }
                     
                     if (response && response.success && response.draft) {
                         // 마크다운 코드 블록 제거 (```markdown ... ``` 형식)
