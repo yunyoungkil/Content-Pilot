@@ -2267,20 +2267,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // 중복 검사 선행
+        // [핵심] 중복 검사 선행 (강력한 정규화 적용)
         const duplicateCheck = await checkDuplicateUrl(url);
         if (duplicateCheck.exists) {
+          // status를 한글로 변환하여 사용자에게 더 친절하게 안내
           const statusMap = {
-            "ideas": "아이디어",
-            "in-progress": "진행 중",
-            "done": "완료"
+            "ideas": "기획",
+            "in-progress": "작성 중",
+            "done": "발행 완료"
           };
+          const statusText = statusMap[duplicateCheck.status] || duplicateCheck.status;
+          
           sendResponse({
             success: false,
             code: "DUPLICATE_FOUND",
+            message: `이미 '${statusText}' 단계에 있는 포스팅입니다.\n카드명: ${duplicateCheck.title}`,
             cardInfo: {
               status: duplicateCheck.status,
-              statusLabel: statusMap[duplicateCheck.status] || duplicateCheck.status,
+              statusLabel: statusText,
               cardId: duplicateCheck.cardId,
               title: duplicateCheck.title
             }
@@ -2330,6 +2334,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // YouTube videos.list API로 비디오 정보 가져오기
           const videoApiUrl = `https://www.googleapis.com/youtube/v3/videos?key=${youtubeApiKey}&id=${videoId}&part=snippet,statistics`;
           const videoResponse = await fetch(videoApiUrl);
+          
+          if (!videoResponse.ok) {
+            sendResponse({ success: false, error: `YouTube API 호출 실패 (HTTP ${videoResponse.status})` });
+            return;
+          }
+          
           const videoData = await videoResponse.json();
 
           if (!videoData.items || videoData.items.length === 0) {
@@ -2340,12 +2350,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const apiItem = videoData.items[0];
           const normalizedData = normalizeYoutubeData(apiItem, apiItem.snippet.channelId, "myChannels");
           
-          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정
+          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정 (필수)
           if (msg.sourceId) {
-            normalizedData.sourceId = msg.sourceId;
+            normalizedData.sourceId = msg.sourceId; // 프론트엔드에서 전달된 sourceId 우선 사용
           } else if (msg.channelId) {
             // channelId가 있으면 sourceId로 사용 (채널 ID와 sourceId가 같은 경우)
             normalizedData.sourceId = msg.channelId;
+          } else {
+            // sourceId가 없으면 에러 반환 (데이터가 필터링되어 안 보일 수 있음)
+            sendResponse({ success: false, error: "활성 채널이 선택되지 않았습니다. 채널을 선택한 후 다시 시도해주세요." });
+            return;
           }
           
           // 키워드 추출
@@ -2354,6 +2368,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           // Firebase에 저장
           const cleanedData = cleanDataForFirebase(normalizedData);
+          
+          // [체크리스트 3] 데이터 저장 경로 확인: videoId가 없으면 에러
+          if (!cleanedData.videoId) {
+            sendResponse({ success: false, error: "비디오 ID를 찾을 수 없습니다." });
+            return;
+          }
+          
           await firebase
             .database()
             .ref(`channel_content/youtubes/${cleanedData.videoId}`)
@@ -2397,13 +2418,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const linkForId = url.split("?")[0];
           const contentId = btoa(linkForId).replace(/=/g, "");
           
-          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정
-          let sourceId = btoa(new URL(url).origin).replace(/=/g, ""); // 기본값 (fallback)
+          // [체크리스트 1] sourceId를 현재 활성 채널의 sourceId로 강제 지정 (필수)
+          let sourceId = null;
           if (msg.sourceId) {
             sourceId = msg.sourceId; // 프론트엔드에서 전달된 sourceId 우선 사용
           } else if (msg.channelId) {
             // channelId가 있으면 sourceId로 사용 (채널 ID와 sourceId가 같은 경우)
             sourceId = msg.channelId;
+          } else {
+            // sourceId가 없으면 에러 반환 (데이터가 필터링되어 안 보일 수 있음)
+            sendResponse({ success: false, error: "활성 채널이 선택되지 않았습니다. 채널을 선택한 후 다시 시도해주세요." });
+            return;
           }
 
           // [체크리스트 3] 썸네일 URL 정제: HTML 엔티티 제거
@@ -2428,6 +2453,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           // Firebase에 저장
           const cleanedData = cleanDataForFirebase(finalData);
+          
+          // [체크리스트 3] 데이터 저장 경로 확인: contentId가 없으면 에러
+          if (!contentId) {
+            sendResponse({ success: false, error: "콘텐츠 ID를 생성할 수 없습니다." });
+            return;
+          }
+          
           await firebase
             .database()
             .ref(`channel_content/blogs/${contentId}`)
@@ -3652,25 +3684,29 @@ ${decayContent.map((item, idx) =>
 
         const ideaData = JSON.parse(ideaObjectString);
         
-        // [Phase 1] 중복 검사: origin.postUrl이 있는 경우 (리뉴얼 버튼 등)
+        // [핵심] 중복 검사: origin.postUrl이 있는 경우 (리뉴얼 버튼 등)
         if (ideaData.origin?.postUrl) {
           const duplicateCheck = await checkDuplicateUrl(ideaData.origin.postUrl);
           if (duplicateCheck.exists) {
+            // status를 한글로 변환하여 사용자에게 더 친절하게 안내
             const statusMap = {
-              "ideas": "아이디어",
-              "in-progress": "진행 중",
-              "done": "완료"
+              "ideas": "기획",
+              "in-progress": "작성 중",
+              "done": "발행 완료"
             };
+            const statusText = statusMap[duplicateCheck.status] || duplicateCheck.status;
+            
             sendResponse({
               success: false,
               code: "DUPLICATE_FOUND",
+              error: `이미 '${statusText}' 단계에 등록된 아이디어입니다.`,
+              message: `이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${duplicateCheck.title}`,
               cardInfo: {
                 status: duplicateCheck.status,
-                statusLabel: statusMap[duplicateCheck.status] || duplicateCheck.status,
+                statusLabel: statusText,
                 cardId: duplicateCheck.cardId,
                 title: duplicateCheck.title
-              },
-              message: `이미 [${statusMap[duplicateCheck.status] || duplicateCheck.status}] 탭에 등록된 포스팅입니다.`
+              }
             });
             return;
           }
@@ -5535,61 +5571,83 @@ async function fetchRssFeed(url, channelType) {
 }
 
 /**
- * URL 정규화 함수 (중복 검사용)
- * http/https, www 제거하여 비교
+ * [핵심] URL 정규화 함수 (강력한 정규화 적용)
+ * 입력된 URL을 비교 가능한 형태로 정규화합니다.
+ * 예: "https://www.Example.com/path/?query=1" -> "example.com/path"
+ * YouTube URL은 특별 처리: youtu.be/VIDEO_ID와 youtube.com/watch?v=VIDEO_ID를 동일하게 처리
  */
 function normalizeUrlForComparison(url) {
   if (!url) return "";
+  
   try {
-    const urlObj = new URL(url);
-    let normalized = urlObj.hostname.replace(/^www\./, "");
-    normalized += urlObj.pathname.replace(/\/$/, ""); // 끝의 슬래시 제거
-    normalized += urlObj.search; // 쿼리 파라미터는 유지
-    return normalized.toLowerCase();
+    // URL 객체로 변환 (http/https가 없는 경우 임의로 붙여서 시도)
+    const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+    
+    // 호스트: www. 제거, 소문자 변환
+    const host = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+    // 경로: 끝의 슬래시(/) 제거
+    const pathname = urlObj.pathname.replace(/\/$/, '');
+    
+    // 유튜브의 경우 영상 ID만 비교하는 것이 가장 정확함
+    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+      // 1. 짧은 주소 (youtu.be/VIDEO_ID)
+      if (host.includes('youtu.be')) {
+        const videoId = pathname.substring(1); // 첫 번째 슬래시 제거
+        if (videoId) return `youtube:${videoId}`;
+      }
+      // 2. 긴 주소 (youtube.com/watch?v=VIDEO_ID 또는 youtube.com/embed/VIDEO_ID)
+      const videoId = urlObj.searchParams.get('v') || pathname.split('/embed/')[1]?.split('?')[0];
+      if (videoId) return `youtube:${videoId}`;
+    }
+    
+    // 일반적인 경우: 호스트 + 경로 조합 반환 (쿼리 파라미터 제거)
+    return `${host}${pathname}`;
   } catch (e) {
-    return url.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+    // URL 파싱 실패 시, 단순 문자열 처리 (공백 제거, 소문자 변환)
+    return url.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('?')[0].replace(/\/$/, '');
   }
 }
 
 /**
- * [Phase 1] 중복 검사 헬퍼 함수
- * Firebase의 kanban 전체 데이터를 조회하여 URL 중복 여부 확인
+ * [핵심] URL 중복 검사 함수 (강력한 정규화 적용)
+ * 입력된 URL이 칸반 보드의 모든 상태(ideas, in-progress, done)에 존재하는지 확인합니다.
+ * origin.postUrl과 publishedUrl 두 필드를 모두 확인합니다.
  */
-async function checkDuplicateUrl(url) {
-  try {
-    const normalizedUrl = normalizeUrlForComparison(url);
-    
-    // kanban의 모든 상태 조회 (ideas, in-progress, done)
-    const kanbanSnap = await firebase.database().ref("kanban").once("value");
-    const kanbanData = kanbanSnap.val() || {};
-    
-    const statuses = ["ideas", "in-progress", "done"];
-    
-    for (const status of statuses) {
-      const cards = kanbanData[status] || {};
+async function checkDuplicateUrl(targetUrl) {
+  if (!targetUrl) return { exists: false };
+
+  const targetKey = normalizeUrlForComparison(targetUrl);
+  console.log(`[중복 검사] 원본: ${targetUrl} -> 정규화: ${targetKey}`);
+
+  const db = firebase.database();
+  // 전체 칸반 데이터 조회
+  const snapshot = await db.ref("kanban").once("value");
+  const allCards = snapshot.val() || {};
+
+  // 모든 상태(status) 순회
+  for (const status in allCards) {
+    for (const cardId in allCards[status]) {
+      const card = allCards[status][cardId];
       
-      for (const [cardId, cardData] of Object.entries(cards)) {
-        // origin.postUrl 또는 publishedUrl 확인
-        const postUrl = cardData.origin?.postUrl || cardData.publishedUrl;
-        if (postUrl) {
-          const normalizedPostUrl = normalizeUrlForComparison(postUrl);
-          if (normalizedPostUrl === normalizedUrl) {
-            return {
-              exists: true,
-              status: status,
-              cardId: cardId,
-              title: cardData.title || "제목 없음"
-            };
-          }
-        }
+      // 비교 대상 1: 리뉴얼 원본 URL (origin.postUrl)
+      const originUrl = card.origin?.postUrl || "";
+      // 비교 대상 2: 발행된 URL (publishedUrl)
+      const publishedUrl = card.publishedUrl || "";
+
+      // 정규화된 키로 비교 (둘 중 하나라도 일치하면 중복)
+      if (normalizeUrlForComparison(originUrl) === targetKey || normalizeUrlForComparison(publishedUrl) === targetKey) {
+        console.warn(`[중복 발견] 상태: ${status}, 카드: ${card.title}`);
+        return { 
+          exists: true, 
+          status: status, 
+          cardId: cardId, 
+          title: card.title || "제목 없음"
+        };
       }
     }
-    
-    return { exists: false };
-  } catch (error) {
-    console.error("[Duplicate Check] 오류:", error);
-    return { exists: false, error: error.message };
   }
+  
+  return { exists: false };
 }
 
 /**

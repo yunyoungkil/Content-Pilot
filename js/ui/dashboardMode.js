@@ -257,9 +257,15 @@ function createContentCard(item, type, sourceName = null) {
         if (imagesArray.length > 0) {
             imagesPreviewHtml = `
                 <div class="card-images-preview">
-                    ${imagesArray.slice(0, 8).map(image => `
-                        <img src="${image.src}" alt="${image.alt || ''}" class="preview-img" loading="lazy" referrerpolicy="no-referrer">
-                    `).join('')}
+                    ${imagesArray.slice(0, 8).map(image => {
+                        // [체크리스트 1] chrome-extension://invalid/ 방지: 이미지 src 유효성 검사
+                        const imageSrc = image?.src || (typeof image === 'string' ? image : '');
+                        if (!imageSrc || imageSrc === 'undefined' || imageSrc.startsWith('chrome-extension://invalid')) {
+                            return ''; // 유효하지 않은 이미지는 렌더링하지 않음
+                        }
+                        // [체크리스트 2-A] referrerpolicy 적용
+                        return `<img src="${imageSrc.replace(/&amp;/g, '&')}" alt="${(image?.alt || '').replace(/"/g, '&quot;')}" class="preview-img" loading="lazy" referrerpolicy="no-referrer" data-original-src="${imageSrc.replace(/"/g, '&quot;')}">`;
+                    }).filter(html => html).join('')}
                 </div>
             `;
         }
@@ -297,8 +303,16 @@ function createContentCard(item, type, sourceName = null) {
             <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
         </svg>
     </button>`;
+    // [체크리스트 1] chrome-extension://invalid/ 방지: 썸네일 URL 유효성 검사
+    // [체크리스트 2-A] referrerpolicy 적용
     // [체크리스트 2-B] 썸네일 이미지 에러 핸들링을 위한 데이터 속성 추가
-    const thumbnailWithErrorHandling = thumbnail ? `<img src="${thumbnail.replace(/&amp;/g, '&')}" alt="Thumbnail" referrerpolicy="no-referrer" class="card-thumbnail-img" data-original-src="${thumbnail.replace(/"/g, '&quot;')}">` : `<div class="no-image">${isVideo ? '▶' : '📄'}</div>`;
+    let thumbnailWithErrorHandling = '';
+    if (thumbnail && thumbnail !== 'undefined' && !thumbnail.startsWith('chrome-extension://invalid')) {
+        const cleanedThumbnail = thumbnail.replace(/&amp;/g, '&');
+        thumbnailWithErrorHandling = `<img src="${cleanedThumbnail}" alt="Thumbnail" referrerpolicy="no-referrer" class="card-thumbnail-img" data-original-src="${cleanedThumbnail.replace(/"/g, '&quot;')}">`;
+    } else {
+        thumbnailWithErrorHandling = `<div class="no-image">${isVideo ? '▶' : '📄'}</div>`;
+    }
     
     return `
         <a href="${link}" target="_blank" class="content-card" data-content-id="${isVideo ? item.videoId : btoa(item.fullLink || item.link || '').replace(/=/g, '')}" style="position: relative;">
@@ -427,10 +441,18 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
             img.addEventListener('load', () => { if (img.naturalWidth === 0) { img.style.display = 'none'; } });
         });
         
-        // [체크리스트 2-B] Daum CDN 이미지 에러 핸들링 (썸네일 포함)
+        // [체크리스트 2-C] 모든 외부 이미지 에러 핸들링 (Daum CDN 포함)
         listContainer.querySelectorAll('img').forEach(img => {
             const imgSrc = img.src || img.dataset.originalSrc || '';
-            if (imgSrc && (imgSrc.includes('daumcdn') || imgSrc.includes('img1.daumcdn'))) {
+            
+            // [체크리스트 1] chrome-extension://invalid/ 방지: 유효하지 않은 이미지 숨김
+            if (!imgSrc || imgSrc === 'undefined' || imgSrc.startsWith('chrome-extension://invalid')) {
+                img.style.display = 'none';
+                return;
+            }
+            
+            // 외부 이미지(HTTP/HTTPS)에 대해 에러 핸들링 적용
+            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
                 img.addEventListener('error', function(e) {
                     const imgEl = e.target;
                     // 무한 루프 방지
@@ -442,12 +464,13 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
                     
                     // 원본 URL 가져오기
                     const originalUrl = imgEl.dataset.originalSrc || imgEl.src;
-                    if (!originalUrl) {
+                    if (!originalUrl || originalUrl.startsWith('data:')) {
+                        // Base64 이미지는 재시도하지 않음
                         imgEl.style.display = 'none';
                         return;
                     }
                     
-                    // 백그라운드에 Base64 변환 요청
+                    // [체크리스트 2-C] 백그라운드에 Base64 변환 요청
                     chrome.runtime.sendMessage({ 
                         action: "fetch_image_as_base64", 
                         url: originalUrl 
@@ -519,10 +542,18 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
             img.addEventListener('load', () => { if (img.naturalWidth === 0) { img.style.display = 'none'; } });
         });
         
-        // [체크리스트 2-B] Daum CDN 이미지 에러 핸들링 (썸네일 포함)
+        // [체크리스트 2-C] 모든 외부 이미지 에러 핸들링 (Daum CDN 포함)
         listContainer.querySelectorAll('img').forEach(img => {
             const imgSrc = img.src || img.dataset.originalSrc || '';
-            if (imgSrc && (imgSrc.includes('daumcdn') || imgSrc.includes('img1.daumcdn'))) {
+            
+            // [체크리스트 1] chrome-extension://invalid/ 방지: 유효하지 않은 이미지 숨김
+            if (!imgSrc || imgSrc === 'undefined' || imgSrc.startsWith('chrome-extension://invalid')) {
+                img.style.display = 'none';
+                return;
+            }
+            
+            // 외부 이미지(HTTP/HTTPS)에 대해 에러 핸들링 적용
+            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
                 img.addEventListener('error', function(e) {
                     const imgEl = e.target;
                     // 무한 루프 방지
@@ -534,12 +565,13 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
                     
                     // 원본 URL 가져오기
                     const originalUrl = imgEl.dataset.originalSrc || imgEl.src;
-                    if (!originalUrl) {
+                    if (!originalUrl || originalUrl.startsWith('data:')) {
+                        // Base64 이미지는 재시도하지 않음
                         imgEl.style.display = 'none';
                         return;
                     }
                     
-                    // 백그라운드에 Base64 변환 요청
+                    // [체크리스트 2-C] 백그라운드에 Base64 변환 요청
                     chrome.runtime.sendMessage({ 
                         action: "fetch_image_as_base64", 
                         url: originalUrl 
@@ -1329,6 +1361,16 @@ function handleUrlFetch(container) {
         const activeChannelId = res.activeChannelId;
         let channelSourceId = null;
         
+        // [체크리스트 2] 채널이 선택되지 않았을 때 에러 표시
+        if (!activeChannelId) {
+            modal.dataset.fetching = 'false';
+            fetchBtn.disabled = false;
+            fetchBtn.textContent = '가져오기';
+            errorArea.style.display = 'block';
+            errorArea.innerHTML = '<div style="color: #ea4335; padding: 12px; background: #fce8e6; border-radius: 6px;">활성 채널이 선택되지 않았습니다. 상단의 글로벌 채널 선택기에서 채널을 선택한 후 다시 시도해주세요.</div>';
+            return;
+        }
+        
         if (activeChannelId && cachedData && cachedData.channels) {
             const myBlogs = cachedData.channels.myChannels?.blogs || [];
             const currentChannel = myBlogs.find(blog => {
@@ -1339,6 +1381,11 @@ function handleUrlFetch(container) {
             if (currentChannel && currentChannel.apiUrl) {
                 channelSourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
             }
+        }
+        
+        // [체크리스트 2] sourceId를 찾지 못했을 때 경고 (하지만 channelId는 있으므로 계속 진행)
+        if (!channelSourceId && activeChannelId) {
+            console.warn("[URL 추가] sourceId를 찾지 못했지만 channelId로 진행합니다:", activeChannelId);
         }
         
         // 백엔드로 요청 (channelId 포함)
@@ -1367,7 +1414,9 @@ function handleUrlFetch(container) {
             previewArea.innerHTML = `
                 <div style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-top: 16px;">
                     <div style="display: flex; gap: 12px;">
-                        ${data.thumbnail ? `<img src="${data.thumbnail}" style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px;" alt="썸네일" referrerpolicy="no-referrer" onerror="this.style.display='none';">` : ''}
+                        ${data.thumbnail && data.thumbnail !== 'undefined' && !data.thumbnail.startsWith('chrome-extension://invalid') 
+                            ? `<img src="${data.thumbnail.replace(/&amp;/g, '&')}" style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px;" alt="썸네일" referrerpolicy="no-referrer" data-original-src="${data.thumbnail.replace(/"/g, '&quot;')}" onerror="this.style.display='none';">` 
+                            : ''}
                         <div style="flex: 1;">
                             <h4 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${data.title || '제목 없음'}</h4>
                             <p style="margin: 0; color: #666; font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${data.description || data.cleanText?.substring(0, 100) || ''}</p>
