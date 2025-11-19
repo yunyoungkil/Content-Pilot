@@ -341,14 +341,31 @@ function initializeEditor() {
         }
         break;
       case "set-content":
+        console.log('[Editor] set-content 메시지 수신:', { hasDelta: !!data.delta, hasHtml: data.html !== undefined, hasText: data.text !== undefined, html: data.html });
         if (data.delta) {
           quillEditor.setContents(data.delta);
-        } else if (data.html) {
+          console.log('[Editor] Delta로 콘텐츠 설정 완료');
+        } else if (data.html !== undefined) {
+          // 빈 문자열이거나 빈 HTML인 경우 완전히 초기화
+          if (!data.html || data.html.trim() === "" || data.html === "<p><br></p>" || data.html === "<p></p>") {
+            console.log('[Editor] 빈 HTML 감지, 에디터 완전 초기화');
+            quillEditor.setContents([]);
+            quillEditor.setText("");
+            console.log('[Editor] 에디터 초기화 완료, 현재 길이:', quillEditor.getLength());
+          } else {
+            console.log('[Editor] HTML 콘텐츠 설정:', data.html.substring(0, 50) + '...');
+            quillEditor.setContents([]);
+            quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
+            quillEditor.setSelection(quillEditor.getLength(), 0);
+          }
+        } else if (data.text !== undefined) {
+          console.log('[Editor] 텍스트 콘텐츠 설정:', data.text || "");
+          quillEditor.setText(data.text || "");
+        } else {
+          // data가 없거나 모든 필드가 undefined인 경우 초기화
+          console.log('[Editor] 모든 필드가 undefined, 에디터 초기화');
           quillEditor.setContents([]);
-          quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
-          quillEditor.setSelection(quillEditor.getLength(), 0);
-        } else if (data.text) {
-          quillEditor.setText(data.text);
+          quillEditor.setText("");
         }
         break;
       case "get-content":

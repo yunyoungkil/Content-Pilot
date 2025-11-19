@@ -411,10 +411,42 @@
 .linked-scrap-tag .tag-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
-/* 연결 해제 버튼 (X) 스타일 조정 */
-.linked-scraps-list .unlink-scrap-btn {
+/* 태그 내부의 연결 해제 버튼 스타일 */
+.linked-scrap-tag .unlink-scrap-btn {
+  position: static;
+  transform: none;
+  background: transparent;
+  color: #1a73e8;
+  border: none;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  line-height: 1;
+  font-weight: bold;
+  font-size: 12px;
+  opacity: 0.7;
+  transition: color 0.2s, opacity 0.2s;
+  padding: 0;
+  margin-left: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.linked-scrap-tag .unlink-scrap-btn:hover {
+  color: #d93025;
+  opacity: 1;
+  background: transparent;
+}
+
+/* 연결 해제 버튼 (X) 스타일 조정 - 일반 스크랩 카드용 */
+.linked-scraps-list .scrap-card .unlink-scrap-btn {
   position: static;
   transform: none;
   background: none;
@@ -423,16 +455,14 @@
   width: 16px;
   height: 16px;
   line-height: 1;
-  /* 중복 선언 제거: 아래쪽 선언부만 남김 */
   font-weight: bold;
   font-size: 14px;
   opacity: 0.8;
   transition: color 0.2s;
   padding: 0;
-  /* 중복 선언 제거: 아래쪽 선언부만 남김 */
 }
 
-.linked-scraps-list .unlink-scrap-btn:hover {
+.linked-scraps-list .scrap-card .unlink-scrap-btn:hover {
   color: #d93025;
   background: none;
 }
@@ -793,16 +823,27 @@
   display: none;
 }
 
-/* 연결 해제 버튼 위치 및 스타일 조정 */
-.linked-scraps-list .unlink-scrap-btn {
-  /* 기존 .scrap-card-delete-btn 스타일을 그대로 사용하되 위치만 조정 */
+/* 연결 해제 버튼 위치 및 스타일 조정 - 일반 스크랩 카드용 (태그가 아닌 경우) */
+.linked-scraps-list .scrap-card-item:not(.linked-scrap-item) .unlink-scrap-btn {
+  position: absolute;
   top: 50%;
   left: 6px;
   transform: translateY(-50%);
-  opacity: 0.5; /* 기본적으로 보이도록 설정 */
+  opacity: 0.5;
+  background-color: transparent;
+  border: none;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+  border-radius: 50%;
+  transition: opacity 0.2s, background-color 0.2s;
 }
 
-.linked-scraps-list .scrap-card-item:hover .unlink-scrap-btn {
+.linked-scraps-list .scrap-card-item:not(.linked-scrap-item):hover .unlink-scrap-btn {
   opacity: 1;
   background-color: #e9ecef;
 }
@@ -973,6 +1014,28 @@
   border-color: #ff9800;
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(255, 152, 0, 0.3);
+}
+
+/* 추천 검색어 스타일 */
+.recommended-keyword-item {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.recommended-keyword-item:hover {
+  color: #4285f4;
+  text-decoration: underline;
+}
+
+.keyword-search-link {
+  text-decoration: none;
+  color: #4285f4;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.keyword-search-link:hover {
+  opacity: 0.7;
 }
 
 /* TUI 이미지 에디터 헤더 로고 숨김 */

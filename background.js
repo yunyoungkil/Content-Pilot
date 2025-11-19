@@ -1021,9 +1021,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const updates = {
           draftContent: null,
           seoTitle: null,
-          "publishInfo.permalink": null,
-          "publishInfo.tags": null,
-          "publishInfo.thumbnailInfo": null
+          publishInfo: {
+            permalink: null,
+            tags: null,
+            thumbnailInfo: null
+          }
         };
         
         await cardRef.update(updates);
@@ -1200,6 +1202,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           scraps: filteredScraps.sort((a, b) => b.timestamp - a.timestamp),
         });
       });
+    return true;
+  } else if (msg.action === "get_scrap_detail") {
+    const { scrapId, channelId } = msg;
+    if (!scrapId) {
+      sendResponse({ success: false, error: "스크랩 ID가 없습니다." });
+      return true;
+    }
+    
+    firebase
+      .database()
+      .ref(`scraps/${scrapId}`)
+      .once("value", (snapshot) => {
+        const scrapData = snapshot.val();
+        if (!scrapData) {
+          sendResponse({ success: false, error: "스크랩을 찾을 수 없습니다." });
+          return;
+        }
+        
+        // 채널 ID 필터링 (필요한 경우)
+        if (channelId !== undefined && scrapData.channelId !== undefined && 
+            scrapData.channelId !== null && scrapData.channelId !== channelId) {
+          sendResponse({ success: false, error: "접근 권한이 없습니다." });
+          return;
+        }
+        
+        sendResponse({
+          success: true,
+          data: {
+            id: scrapId,
+            text: scrapData.text || scrapData.cleanText || "",
+            url: scrapData.url || "",
+            image: scrapData.image || "",
+            allImages: scrapData.allImages || (scrapData.image ? [scrapData.image] : []),
+            tags: scrapData.tags || [],
+            timestamp: scrapData.timestamp || 0
+          }
+        });
+      })
+      .catch((error) => {
+        console.error("[스크랩 상세 조회 실패]", error);
+        sendResponse({ success: false, error: error.message });
+      });
+    
     return true;
     // (이전 placeholder/canvas 기반 핸들러 완전 제거, Gemini API만 사용)
   } else if (msg.action === "get_canvas_images") {
@@ -3365,20 +3410,64 @@ ${decayContent.map((item, idx) =>
         return;
       }
       
-      // linkedScraps 업데이트 (루트 레벨)
-      const linkedScraps = cardData.linkedScraps || {};
-      linkedScraps[scrapId] = true;
+      // 중복 체크: 이미 연결된 스크랩인지 확인
+      let linkedScraps = cardData.linkedScraps;
+      if (Array.isArray(linkedScraps)) {
+        if (linkedScraps.includes(scrapId)) {
+          sendResponse({ success: false, error: "이미 연결된 스크랩입니다." });
+          return;
+        }
+        linkedScraps = [...linkedScraps, scrapId];
+      } else if (linkedScraps && typeof linkedScraps === 'object') {
+        if (linkedScraps[scrapId]) {
+          sendResponse({ success: false, error: "이미 연결된 스크랩입니다." });
+          return;
+        }
+        linkedScraps = { ...linkedScraps, [scrapId]: true };
+      } else {
+        linkedScraps = { [scrapId]: true };
+      }
       
       // workspace.linkedScraps 업데이트
       const workspace = cardData.workspace || {};
-      const workspaceLinkedScraps = workspace.linkedScraps || {};
-      workspaceLinkedScraps[scrapId] = true;
+      let workspaceLinkedScraps = workspace.linkedScraps;
+      if (Array.isArray(workspaceLinkedScraps)) {
+        if (workspaceLinkedScraps.includes(scrapId)) {
+          sendResponse({ success: false, error: "이미 연결된 스크랩입니다." });
+          return;
+        }
+        workspaceLinkedScraps = [...workspaceLinkedScraps, scrapId];
+      } else if (workspaceLinkedScraps && typeof workspaceLinkedScraps === 'object') {
+        if (workspaceLinkedScraps[scrapId]) {
+          sendResponse({ success: false, error: "이미 연결된 스크랩입니다." });
+          return;
+        }
+        workspaceLinkedScraps = { ...workspaceLinkedScraps, [scrapId]: true };
+      } else {
+        workspaceLinkedScraps = { [scrapId]: true };
+      }
       
+      // workspace 객체 전체를 업데이트 (점(.)을 포함한 키 사용 불가)
       const updates = {
         linkedScraps: linkedScraps,
-        "workspace.linkedScraps": workspaceLinkedScraps,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
       };
+      
+      // workspace 객체가 없으면 생성
+      if (!cardData.workspace) {
+        updates.workspace = {
+          keywords: [],
+          outline: [],
+          draft: "",
+          linkedScraps: workspaceLinkedScraps
+        };
+      } else {
+        // 기존 workspace 객체를 유지하면서 linkedScraps만 업데이트
+        updates.workspace = {
+          ...cardData.workspace,
+          linkedScraps: workspaceLinkedScraps
+        };
+      }
       
       cardRef.update(updates)
         .then(() => sendResponse({ success: true }))
@@ -3407,20 +3496,50 @@ ${decayContent.map((item, idx) =>
         return;
       }
       
-      // linkedScraps 업데이트 (루트 레벨)
-      const linkedScraps = cardData.linkedScraps || {};
-      delete linkedScraps[scrapId];
+      // linkedScraps 업데이트 (루트 레벨) - 배열과 객체 모두 처리
+      let linkedScraps = cardData.linkedScraps;
+      if (Array.isArray(linkedScraps)) {
+        linkedScraps = linkedScraps.filter(id => id !== scrapId);
+      } else if (linkedScraps && typeof linkedScraps === 'object') {
+        linkedScraps = { ...linkedScraps };
+        delete linkedScraps[scrapId];
+      } else {
+        linkedScraps = {};
+      }
       
-      // workspace.linkedScraps 업데이트
+      // workspace.linkedScraps 업데이트 - 배열과 객체 모두 처리
       const workspace = cardData.workspace || {};
-      const workspaceLinkedScraps = workspace.linkedScraps || {};
-      delete workspaceLinkedScraps[scrapId];
+      let workspaceLinkedScraps = workspace.linkedScraps;
+      if (Array.isArray(workspaceLinkedScraps)) {
+        workspaceLinkedScraps = workspaceLinkedScraps.filter(id => id !== scrapId);
+      } else if (workspaceLinkedScraps && typeof workspaceLinkedScraps === 'object') {
+        workspaceLinkedScraps = { ...workspaceLinkedScraps };
+        delete workspaceLinkedScraps[scrapId];
+      } else {
+        workspaceLinkedScraps = {};
+      }
       
+      // workspace 객체 전체를 업데이트 (점(.)을 포함한 키 사용 불가)
       const updates = {
         linkedScraps: linkedScraps,
-        "workspace.linkedScraps": workspaceLinkedScraps,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
       };
+      
+      // workspace 객체가 없으면 생성
+      if (!cardData.workspace) {
+        updates.workspace = {
+          keywords: [],
+          outline: [],
+          draft: "",
+          linkedScraps: workspaceLinkedScraps
+        };
+      } else {
+        // 기존 workspace 객체를 유지하면서 linkedScraps만 업데이트
+        updates.workspace = {
+          ...cardData.workspace,
+          linkedScraps: workspaceLinkedScraps
+        };
+      }
       
       cardRef.update(updates)
         .then(() => {
@@ -5066,6 +5185,7 @@ async function analyzePerformanceData(targetChannelId = null) {
             createdAt: createdAt,
             daysSinceCreation: daysSinceCreation,
             publishedUrl: card.publishedUrl,
+            channelId: card.channelId || null, // [추가] 원본 카드의 채널 ID를 데이터에 포함
           });
         }
       }
@@ -5153,7 +5273,8 @@ ${top5ByPageviews.map((item, idx) =>
       pageviews: item.pageviews,
       daysSinceCreation: Math.round(item.daysSinceCreation),
       publishedUrl: item.publishedUrl,
-      tags: item.tags || []
+      tags: item.tags || [],
+      channelId: item.channelId // [추가] 채널 ID 전달
     })) : null;
     
     return { analysis, decayContent };
@@ -5376,9 +5497,9 @@ async function runAutomatedRenewalChecks() {
         }
       };
 
-      // 5. 1단계에서 만든 헬퍼 함수로 카드 생성
-      console.log(`[자동 재활용] 아이디어 생성: "${ideaData.title}"`);
-      const result = await createAndSaveNewIdea(ideaData, 'ideas');
+      // 5. 1단계에서 만든 헬퍼 함수로 카드 생성 (채널 ID 전달!)
+      console.log(`[자동 재활용] 아이디어 생성: "${ideaData.title}" (채널: ${post.channelId})`);
+      const result = await createAndSaveNewIdea(ideaData, 'ideas', post.channelId);
       
       if (result.success) {
         createdCount++;
@@ -6499,6 +6620,7 @@ async function runAutomatedRenewalTestV2() {
     publishedUrl: "https://example.com/test-post-002",
     performanceTracked: true,
     createdAt: Date.now() - (91 * 24 * 60 * 60 * 1000), // 91일 전
+    channelId: "test-channel-id", // [수정] 채널 ID 추가 (테스트를 위한 임의의 ID)
     tags: ["#테스트", "#성과좋음"],
     performance: {
       estimatedEarnings: 120.50, // 평균(가정)보다 높음
