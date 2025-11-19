@@ -458,7 +458,14 @@ export function renderChannelMode(container) {
       const gaId = gaSelectEl && gaSelectEl.style.display !== "none" 
         ? gaSelectEl.value.trim() 
         : (gaIdEl ? gaIdEl.value.trim() : "");
-      const adsenseId = adsenseIdEl ? adsenseIdEl.value.trim() : "";
+      // [체크리스트 5] AdSense ID 저장 시 공백 제거 및 pub- 접두사 검증
+      let adsenseId = adsenseIdEl ? adsenseIdEl.value.trim() : "";
+      if (adsenseId && !adsenseId.startsWith('pub-')) {
+        // pub- 접두사가 없으면 자동 추가 (사용자가 숫자만 입력한 경우 대비)
+        if (/^\d+$/.test(adsenseId)) {
+          adsenseId = `pub-${adsenseId}`;
+        }
+      }
       
       // 경쟁사 목록 수집
       const competitorInputs = container.querySelectorAll(".competitor-input");

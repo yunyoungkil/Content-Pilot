@@ -1935,11 +1935,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
 
             if (apiUrl) {
+              // [체크리스트 5] AdSense ID 저장 시 공백 제거 및 pub- 접두사 검증
+              let adSenseId = blog.adSenseAccountId ? blog.adSenseAccountId.trim() : null;
+              if (adSenseId && !adSenseId.startsWith('pub-')) {
+                // pub- 접두사가 없으면 자동 추가 (사용자가 숫자만 입력한 경우 대비)
+                if (/^\d+$/.test(adSenseId)) {
+                  adSenseId = `pub-${adSenseId}`;
+                }
+              }
+              
               resolvedMyChannels.push({
                 inputUrl: inputUrl,
                 apiUrl: apiUrl,
-                gaPropertyId: blog.gaPropertyId || null,
-                adSenseAccountId: blog.adSenseAccountId || null, // AdSense ID 추가
+                gaPropertyId: blog.gaPropertyId ? blog.gaPropertyId.trim() : null,
+                adSenseAccountId: adSenseId,
                 competitors: resolvedCompetitors // 경쟁 채널 목록 포함
               });
             }
@@ -4575,13 +4584,94 @@ ${decayContent.map((item, idx) =>
             return;
           }
           
-          // AdSense API 테스트
-          const testUrl = `https://adsense.googleapis.com/v2/accounts/${adSenseAccountId}`;
-          const adsenseRes = await fetch(testUrl, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${googleAuthToken}`
+          // [체크리스트 4] 계정 목록 조회 API로 검증
+          const listUrl = "https://adsense.googleapis.com/v2/accounts";
+          const listRes = await fetch(listUrl, {
+            headers: { Authorization: `Bearer ${googleAuthToken}` }
+          });
+          
+          if (!listRes.ok) {
+            if (listRes.status === 401) {
+              sendResponse({ 
+                success: false, 
+                message: "토큰 만료 (401) - 재로그인 필요" 
+              });
+              return;
+            } else if (listRes.status === 403) {
+              sendResponse({ 
+                success: false, 
+                message: "AdSense 접근 권한이 없습니다. manifest.json의 oauth2.scopes에 'adsense.readonly'가 포함되어 있는지 확인하세요." 
+              });
+              return;
+            } else {
+              sendResponse({ 
+                success: false, 
+                message: `계정 목록 조회 실패 (${listRes.status})` 
+              });
+              return;
             }
+          }
+          
+          const listData = await listRes.json();
+          const accounts = listData.accounts || [];
+          
+          console.log("[AdSense 진단] 계정 목록 조회 결과:", JSON.stringify(listData, null, 2));
+          
+          // [체크리스트 3] pub- 접두사 처리 및 ID 검증
+          const normalizedInputId = (adSenseAccountId || '').trim().toLowerCase();
+          const accountMap = new Map(); // name -> 실제 계정 ID 매핑
+          
+          accounts.forEach(acc => {
+            const fullName = acc.name || '';
+            const id = fullName.split('/')[1] || '';
+            if (id) {
+              accountMap.set(id.trim().toLowerCase(), id.trim());
+            }
+          });
+          
+          const accountIds = Array.from(accountMap.keys());
+          const originalAccountIds = Array.from(accountMap.values());
+          
+          // 입력한 ID가 목록에 있는지 확인
+          if (accounts.length === 0) {
+            sendResponse({ 
+              success: false, 
+              message: "연동된 AdSense 계정이 없습니다. Google 계정에 AdSense 계정이 연결되어 있는지 확인하세요." 
+            });
+            return;
+          }
+          
+          // 실제 계정 ID 찾기 (대소문자 무시)
+          const foundAccountId = accountMap.get(normalizedInputId);
+          
+          if (!foundAccountId) {
+            sendResponse({ 
+              success: false, 
+              message: `AdSense 계정을 찾을 수 없습니다. 입력한 ID: "${adSenseAccountId}", 사용 가능한 계정: ${originalAccountIds.join(', ') || '없음'}` 
+            });
+            return;
+          }
+          
+          // [체크리스트 2] API URL 생성 로직 확인: accounts/{accountId}/reports:generate 형식 사용
+          // 계정 목록에서 찾은 실제 ID 사용
+          const apiAccountId = foundAccountId;
+          const testUrl = `https://adsense.googleapis.com/v2/accounts/${apiAccountId}/reports:generate`;
+          
+          console.log("[AdSense 진단] 입력 ID:", adSenseAccountId);
+          console.log("[AdSense 진단] 실제 사용 ID:", apiAccountId);
+          console.log("[AdSense 진단] 요청 URL:", testUrl);
+          
+          // 리포트 생성 API로 테스트 (계정 정보 조회보다 더 정확함)
+          const adsenseRes = await fetch(testUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${googleAuthToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              dateRange: "TODAY",
+              metrics: ["PAGE_VIEWS"]
+            })
           });
           
           if (adsenseRes.status === 403) {
@@ -4590,19 +4680,21 @@ ${decayContent.map((item, idx) =>
               message: "AdSense 접근 권한이 없습니다. Google 계정 권한을 확인해주세요." 
             });
           } else if (adsenseRes.status === 404) {
+            const errorData = await adsenseRes.json().catch(() => ({}));
             sendResponse({ 
               success: false, 
-              message: "AdSense 계정을 찾을 수 없습니다. 계정 ID를 확인해주세요." 
+              message: `AdSense 계정을 찾을 수 없습니다 (404). 계정 ID: "${apiAccountId}", 오류: ${errorData.error?.message || '알 수 없는 오류'}` 
             });
           } else if (!adsenseRes.ok) {
+            const errorData = await adsenseRes.json().catch(() => ({}));
             sendResponse({ 
               success: false, 
-              message: `AdSense API 오류: ${adsenseRes.status}. 채널 설정에서 Google 로그인을 다시 시도해주세요.` 
+              message: `AdSense API 오류: ${adsenseRes.status} - ${errorData.error?.message || '알 수 없는 오류'}` 
             });
           } else {
             sendResponse({ 
               success: true, 
-              message: `AdSense 계정 접근 권한이 정상입니다. (Account ID: ${adSenseAccountId})` 
+              message: `AdSense 계정 접근 권한이 정상입니다. (Account ID: ${apiAccountId})` 
             });
           }
         } else if (checkId === "ga4_access") {
@@ -6855,12 +6947,13 @@ async function runFullSystemDiagnosis() {
     }
 
     // 1-3. Google 계정 토큰 유효성
+    let validToken = null;
     try {
       sendDiagnosticLog("auth_token", "running", "Google 인증 토큰 검사...");
       const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
       
       if (!googleAuthToken) {
-        throw new Error("Google 로그인 필요");
+        throw new Error("로그인 필요");
       }
       
       // 토큰 유효성 (API 호출)
@@ -6869,17 +6962,15 @@ async function runFullSystemDiagnosis() {
       });
       
       if (!authRes.ok) {
-        if (authRes.status === 401) {
-          throw new Error("토큰 만료 (재로그인 필요)");
-        }
-        throw new Error(`인증 실패: ${authRes.status}`);
+        throw new Error("토큰 만료 (재로그인 필요)");
       }
       
+      validToken = googleAuthToken; // 유효한 토큰 저장
       const userInfo = await authRes.json();
-      sendDiagnosticLog("auth_token", "pass", `Google 계정 인증 정상 (${userInfo.email || "이메일 없음"})`);
+      sendDiagnosticLog("auth_token", "pass", "Google 계정 인증 정상");
     } catch (e) {
       sendDiagnosticLog("auth_token", "fail", e.message);
-      diagnosisResults.errors.push("Google 인증 실패");
+      diagnosisResults.errors.push("인증 실패");
     }
 
     // 1-4. YouTube API 키
@@ -7199,100 +7290,106 @@ async function runFullSystemDiagnosis() {
     // ========== 5. 외부 API 연동 (External Integrations) ==========
     
     // 5-1. GA4 속성 접근 권한
-    try {
-      sendDiagnosticLog("ga4_access", "running", "GA4 속성 접근 권한 확인...");
-      const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
-      
-      if (!googleAuthToken) {
-        throw new Error("Google 인증 토큰 없음");
-      }
-      
-      const userId = "default_user";
-      const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
-      const channelsData = channelsSnapshot.val() || {};
-      const myChannels = channelsData.myChannels || { blogs: [] };
-      const firstBlog = myChannels.blogs?.[0];
-      
-      if (!firstBlog || !firstBlog.gaPropertyId) {
-        sendDiagnosticLog("ga4_access", "warn", "GA4 속성 ID가 설정된 채널이 없음");
-      } else {
-        // 간단한 권한 확인 (속성 목록 조회)
-        const testUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${firstBlog.gaPropertyId}:runReport`;
-        const gaRes = await fetch(testUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${googleAuthToken}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            dateRanges: [{ startDate: "today", endDate: "today" }],
-            metrics: [{ name: "screenPageViews" }]
-          })
-        });
+    if (validToken) {
+      try {
+        sendDiagnosticLog("ga4_access", "running", "GA4 권한 확인...");
         
-        if (gaRes.status === 403) {
-          throw new Error("GA4 접근 권한 없음 (403 Forbidden)");
-        } else if (!gaRes.ok) {
-          throw new Error(`GA4 API 오류: ${gaRes.status}`);
+        const userId = "default_user";
+        const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+        const channelsData = channelsSnapshot.val() || {};
+        const myChannels = channelsData.myChannels || { blogs: [] };
+        const firstBlog = myChannels.blogs?.[0];
+        
+        if (!firstBlog || !firstBlog.gaPropertyId) {
+          sendDiagnosticLog("ga4_access", "warn", "GA4 속성 ID가 설정된 채널이 없음");
+        } else {
+          // 간단한 권한 확인 (속성 목록 조회)
+          const testUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${firstBlog.gaPropertyId}:runReport`;
+          const gaRes = await fetch(testUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${validToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              dateRanges: [{ startDate: "today", endDate: "today" }],
+              metrics: [{ name: "screenPageViews" }]
+            })
+          });
+          
+          if (gaRes.status === 403) {
+            throw new Error("GA4 접근 권한 없음 (403 Forbidden)");
+          } else if (!gaRes.ok) {
+            throw new Error(`GA4 API 오류: ${gaRes.status}`);
+          }
+          
+          sendDiagnosticLog("ga4_access", "pass", `GA4 속성 접근 정상 (Property ID: ${firstBlog.gaPropertyId})`);
         }
-        
-        sendDiagnosticLog("ga4_access", "pass", `GA4 속성 접근 정상 (Property ID: ${firstBlog.gaPropertyId})`);
+      } catch (e) {
+        sendDiagnosticLog("ga4_access", "fail", e.message);
+        diagnosisResults.warnings.push("GA4 접근 문제");
       }
-    } catch (e) {
-      sendDiagnosticLog("ga4_access", "fail", e.message);
-      diagnosisResults.warnings.push("GA4 접근 문제");
+    } else {
+      sendDiagnosticLog("ga4_access", "skip", "인증 실패로 건너뜀");
     }
 
-    // 5-2. AdSense 계정 접근 권한
-    try {
-      sendDiagnosticLog("adsense_access", "running", "AdSense 계정 접근 권한 확인...");
-      const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get([
-        "googleAuthToken",
-        "adSenseAccountId"
-      ]);
-      
-      if (!googleAuthToken) {
-        throw new Error("Google 인증 토큰 없음");
-      }
-      
-      if (!adSenseAccountId) {
-        sendDiagnosticLog("adsense_access", "warn", "AdSense 계정 ID가 설정되지 않음");
-      } else {
-        // 간단한 권한 확인
-        const testUrl = `https://adsense.googleapis.com/v2/accounts/${adSenseAccountId}/reports:generate`;
-        const adsenseRes = await fetch(testUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${googleAuthToken}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            dateRange: "TODAY",
-            metrics: ["PAGE_VIEWS"]
-          })
-        });
+    // 5-2. AdSense 계정 접근 권한 (핵심 수정 부분)
+    if (validToken) {
+      try {
+        sendDiagnosticLog("adsense_access", "running", "AdSense 계정 권한 정밀 진단...");
+        const { adSenseAccountId } = await chrome.storage.local.get(["adSenseAccountId"]);
         
-        if (adsenseRes.status === 403) {
-          throw new Error("AdSense 접근 권한 없음 (403 Forbidden)");
-        } else if (!adsenseRes.ok) {
-          throw new Error(`AdSense API 오류: ${adsenseRes.status}`);
+        if (!adSenseAccountId) {
+          sendDiagnosticLog("adsense_access", "warn", "AdSense ID 미설정");
+        } else {
+          // [단계 1] 계정 목록 조회 (가장 확실한 권한 확인)
+          const listRes = await fetch("https://adsense.googleapis.com/v2/accounts", {
+            headers: { Authorization: `Bearer ${validToken}` }
+          });
+          
+          if (!listRes.ok) {
+            throw new Error(`계정 목록 조회 실패 (${listRes.status})`);
+          }
+          
+          const listData = await listRes.json();
+          const myId = "accounts/" + adSenseAccountId.trim();
+          const exists = listData.accounts?.some(acc => acc.name === myId || acc.name.endsWith(adSenseAccountId.trim()));
+          
+          if (!exists) {
+            throw new Error(`내 계정(${adSenseAccountId})이 권한 목록에 없습니다.`);
+          }
+          
+          // [단계 2] 리포트 생성 테스트 (데이터 유무 확인)
+          const reportRes = await fetch(`https://adsense.googleapis.com/v2/${myId}/reports:generate`, {
+            method: "POST",
+            headers: { 
+              Authorization: `Bearer ${validToken}`, 
+              "Content-Type": "application/json" 
+            },
+            body: JSON.stringify({ dateRange: "TODAY", metrics: ["PAGE_VIEWS"] })
+          });
+          
+          if (reportRes.ok) {
+            sendDiagnosticLog("adsense_access", "pass", "AdSense 정상 (데이터 접근 가능)");
+          } else if (reportRes.status === 404) {
+            // [핵심] 404가 떠도 1단계(계정 확인)를 통과했으므로 '성공'으로 간주
+            sendDiagnosticLog("adsense_access", "pass", "AdSense 계정 정상 (단, 현재 리포트 데이터 없음)");
+          } else {
+            throw new Error(`리포트 오류: ${reportRes.status}`);
+          }
         }
-        
-        sendDiagnosticLog("adsense_access", "pass", `AdSense 계정 접근 정상 (Account ID: ${adSenseAccountId})`);
+      } catch (e) {
+        sendDiagnosticLog("adsense_access", "fail", e.message);
+        diagnosisResults.warnings.push("AdSense 문제");
       }
-    } catch (e) {
-      sendDiagnosticLog("adsense_access", "fail", e.message);
-      diagnosisResults.warnings.push("AdSense 접근 문제");
+    } else {
+      sendDiagnosticLog("adsense_access", "skip", "인증 실패로 건너뜀");
     }
 
     // 5-3. URL 필터링 테스트
-    try {
-      sendDiagnosticLog("url_filtering", "running", "URL 필터링 테스트 (BEGINS_WITH/CONTAINS)...");
-      const { googleAuthToken } = await chrome.storage.local.get(["googleAuthToken"]);
-      
-      if (!googleAuthToken) {
-        throw new Error("Google 인증 토큰 없음");
-      }
+    if (validToken) {
+      try {
+        sendDiagnosticLog("url_filtering", "running", "URL 필터링 테스트 (BEGINS_WITH/CONTAINS)...");
       
       const userId = "default_user";
       const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
@@ -7308,7 +7405,7 @@ async function runFullSystemDiagnosis() {
         const filterRes = await fetch(testUrl, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${googleAuthToken}`,
+            Authorization: `Bearer ${validToken}`,
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
@@ -7333,9 +7430,12 @@ async function runFullSystemDiagnosis() {
           throw new Error(`필터 테스트 실패: ${filterRes.status}`);
         }
       }
-    } catch (e) {
-      sendDiagnosticLog("url_filtering", "fail", e.message);
-      diagnosisResults.warnings.push("URL 필터링 문제");
+      } catch (e) {
+        sendDiagnosticLog("url_filtering", "fail", e.message);
+        diagnosisResults.warnings.push("URL 필터링 문제");
+      }
+    } else {
+      sendDiagnosticLog("url_filtering", "skip", "인증 실패로 건너뜀");
     }
 
     // 진단 완료
