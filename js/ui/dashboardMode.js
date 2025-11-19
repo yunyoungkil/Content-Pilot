@@ -17,6 +17,51 @@ const getCacheKey = async () => {
     return `analysisCache_${activeChannelId || 'default'}`;
 };
 
+/**
+ * [체크리스트 2] 제목 정규화 함수 (AI 아이디어 매칭용)
+ * 공백 제거, 소문자 변환하여 비교
+ */
+function normalizeTitleForMatching(title) {
+    if (!title) return '';
+    return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * [체크리스트 1] URL 정규화 함수 (칸반 보드 추적용)
+ * background.js의 normalizeUrlForComparison과 동일한 로직
+ */
+function normalizeUrlForTracking(url) {
+    if (!url) return "";
+    
+    try {
+        // URL 객체로 변환 (http/https가 없는 경우 임의로 붙여서 시도)
+        const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+        
+        // 호스트: www. 제거, 소문자 변환
+        const host = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+        // 경로: 끝의 슬래시(/) 제거
+        const pathname = urlObj.pathname.replace(/\/$/, '');
+        
+        // 유튜브의 경우 영상 ID만 비교하는 것이 가장 정확함
+        if (host.includes('youtube.com') || host.includes('youtu.be')) {
+            // 1. 짧은 주소 (youtu.be/VIDEO_ID)
+            if (host.includes('youtu.be')) {
+                const videoId = pathname.substring(1); // 첫 번째 슬래시 제거
+                if (videoId) return `youtube:${videoId}`;
+            }
+            // 2. 긴 주소 (youtube.com/watch?v=VIDEO_ID 또는 youtube.com/embed/VIDEO_ID)
+            const videoId = urlObj.searchParams.get('v') || pathname.split('/embed/')[1]?.split('?')[0];
+            if (videoId) return `youtube:${videoId}`;
+        }
+        
+        // 일반적인 경우: 호스트 + 경로 조합 반환 (쿼리 파라미터 제거)
+        return `${host}${pathname}`;
+    } catch (e) {
+        // URL 파싱 실패 시, 단순 문자열 처리 (공백 제거, 소문자 변환)
+        return url.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('?')[0].replace(/\/$/, '');
+    }
+}
+
 
 async function initDashboardMode(container) {
     const CACHE_KEY = await getCacheKey();
@@ -84,16 +129,25 @@ async function initDashboardMode(container) {
                         validIdeas.forEach(idea => {
                             const newItem = document.createElement('li');
                             newItem.dataset.firebaseKey = idea.firebaseKey;
-                            newItem.dataset.ideaIndex = idea.ideaIndex;
+                            newItem.dataset.ideaTitle = (idea.title || '').replace(/"/g, '&quot;');
                             newItem.innerHTML = `<span>${idea.title}</span><button class="undo-add-btn">실행 취소</button>`;
                             recentlyAddedList.prepend(newItem);
-                            const ideaCard = container.querySelector(`.ai-idea-card[data-idea-index="${idea.ideaIndex}"]`);
-                            if (ideaCard) {
-                                const button = ideaCard.querySelector('.add-to-kanban-btn');
-                                if (button) {
-                                    button.disabled = true;
-                                    button.textContent = '✅ 추가됨';
-                                }
+                            
+                            // [체크리스트 2] 제목 기반 매칭으로 변경
+                            const normalizedTitle = normalizeTitleForMatching(idea.title);
+                            if (normalizedTitle) {
+                                const allIdeaCards = container.querySelectorAll('.ai-idea-card');
+                                allIdeaCards.forEach(card => {
+                                    const cardTitle = card.dataset.ideaTitle || '';
+                                    const normalizedCardTitle = normalizeTitleForMatching(cardTitle);
+                                    if (normalizedCardTitle === normalizedTitle) {
+                                        const button = card.querySelector('.add-to-kanban-btn');
+                                        if (button) {
+                                            button.disabled = true;
+                                            button.textContent = '✅ 추가됨';
+                                        }
+                                    }
+                                });
                             }
                         });
                     }
@@ -106,16 +160,25 @@ async function initDashboardMode(container) {
                     cache.addedIdeas.forEach(idea => {
                         const newItem = document.createElement('li');
                         newItem.dataset.firebaseKey = idea.firebaseKey;
-                        newItem.dataset.ideaIndex = idea.ideaIndex;
+                        newItem.dataset.ideaTitle = (idea.title || '').replace(/"/g, '&quot;');
                         newItem.innerHTML = `<span>${idea.title}</span><button class="undo-add-btn">실행 취소</button>`;
                         recentlyAddedList.prepend(newItem);
-                        const ideaCard = container.querySelector(`.ai-idea-card[data-idea-index="${idea.ideaIndex}"]`);
-                        if (ideaCard) {
-                            const button = ideaCard.querySelector('.add-to-kanban-btn');
-                            if (button) {
-                                button.disabled = true;
-                                button.textContent = '✅ 추가됨';
-                            }
+                        
+                        // [체크리스트 2] 제목 기반 매칭으로 변경
+                        const normalizedTitle = normalizeTitleForMatching(idea.title);
+                        if (normalizedTitle) {
+                            const allIdeaCards = container.querySelectorAll('.ai-idea-card');
+                            allIdeaCards.forEach(card => {
+                                const cardTitle = card.dataset.ideaTitle || '';
+                                const normalizedCardTitle = normalizeTitleForMatching(cardTitle);
+                                if (normalizedCardTitle === normalizedTitle) {
+                                    const button = card.querySelector('.add-to-kanban-btn');
+                                    if (button) {
+                                        button.disabled = true;
+                                        button.textContent = '✅ 추가됨';
+                                    }
+                                }
+                            });
                         }
                     });
                 }
@@ -142,7 +205,7 @@ async function initDashboardMode(container) {
         }, 300);
     });
 }
-function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = false) {
+async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = false) {
     if (!analysisText || !analysisText.trim()) {
         container.innerHTML = `<p class="ai-ideas-placeholder">분석 결과에서 제안할 아이디어를 찾지 못했습니다.</p>`;
         return;
@@ -157,6 +220,33 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
         return;
     }
 
+    // [체크리스트 3] Firebase 데이터와 교차 검증: 칸반 보드에 있는 제목 목록 가져오기
+    const existingTitles = new Set();
+    try {
+        const kanbanResponse = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'get_all_kanban_data' }, (response) => {
+                resolve(response);
+            });
+        });
+        
+        if (kanbanResponse && kanbanResponse.success && kanbanResponse.data) {
+            const kanbanData = kanbanResponse.data;
+            const statuses = ['ideas', 'in-progress', 'done'];
+            
+            for (const status of statuses) {
+                const cards = kanbanData[status] || {};
+                for (const [cardId, cardData] of Object.entries(cards)) {
+                    // AI 아이디어 제안: origin.type === "ai_generated"인 경우 제목으로 추적
+                    if (cardData.origin?.type === "ai_generated" && cardData.title) {
+                        const normalizedTitle = normalizeTitleForMatching(cardData.title);
+                        if (normalizedTitle) existingTitles.add(normalizedTitle);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('[renderAnalysisResult] 칸반 데이터 조회 실패:', error);
+    }
 
     try {
         // JSON 코드 블록에서 추출 시도
@@ -176,13 +266,15 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
         
         const ideas = JSON.parse(jsonText);
 
-
         if (!Array.isArray(ideas) || ideas.length === 0) {
             container.innerHTML = `<p class="ai-ideas-placeholder">분석 결과에서 제안할 아이디어를 찾지 못했습니다.</p>`;
             return;
         }
 
         const ideasHtml = ideas.map((idea, index) => {
+            // [체크리스트 3] 제목 기반으로 이미 추가된 아이디어 확인
+            const normalizedTitle = normalizeTitleForMatching(idea.title);
+            const isAlreadyAdded = normalizedTitle && existingTitles.has(normalizedTitle);
 
             const ideaString = JSON.stringify(idea);
             const escapedIdeaString = ideaString.replace(/'/g, "&#39;");
@@ -190,12 +282,16 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
             return `
                 <div class="ai-idea-card" 
                      data-idea-index="${index}" 
+                     data-idea-title="${(idea.title || '').replace(/"/g, '&quot;')}"
                      data-idea-object='${escapedIdeaString}'>
                     <div class="idea-content">
                         <h3>${idea.title}</h3>
                         <p>${idea.description}</p>
                     </div>
-                    <button class="add-to-kanban-btn">📌 기획 보드에 추가</button>
+                    ${isAlreadyAdded 
+                        ? `<button class="add-to-kanban-btn" disabled>✅ 기획 보드에 있음</button>`
+                        : `<button class="add-to-kanban-btn">📌 기획 보드에 추가</button>`
+                    }
                 </div>
             `;
         }).join('');
@@ -208,7 +304,7 @@ function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = fal
     }
 }
 
-function createContentCard(item, type, sourceName = null) {
+function createContentCard(item, type, sourceName = null, trackedUrls = new Set()) {
     if (!item || !item.title) return '';
     const isVideo = !!item.videoId;
     const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.fullLink || item.link || '#';
@@ -221,10 +317,31 @@ function createContentCard(item, type, sourceName = null) {
     // 필터 적용 상태 확인 (경쟁 채널만)
     const isFiltered = type === 'competitorChannels' && activeChannelFilter && sourceName === activeChannelFilter;
     
-    // [신규] 채널 이름 표시 (제목 위에 표시) - 경쟁 채널은 클릭 가능
-    const channelNameHtml = sourceName ? `
+    // [체크리스트 3] 버튼 조건부 렌더링: 이미 등록된 포스팅인지 확인
+    const itemUrl = item.fullLink || item.link || '';
+    const normalizedItemUrl = normalizeUrlForTracking(itemUrl);
+    const isTracked = normalizedItemUrl && trackedUrls.has(normalizedItemUrl);
+    
+    // 추적 중 배지 HTML (card-channel-name 영역에 표시)
+    const statusBadgeHtml = isTracked ? `<div class="status-badge" style="
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 1px 4px;
+        background: #e8f5e9;
+        color: #2e7d32;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 500;
+        line-height: 1.2;
+        margin-left: auto;
+        height: 18px;
+    " title="이미 기획 보드에 있거나 성과 추적 중입니다">✅ 추적 중</div>` : '';
+    
+    // [신규] 채널 이름 표시 (제목 위에 표시) - 경쟁 채널은 클릭 가능, 추적 중 배지 포함
+    const channelNameHtml = sourceName || isTracked ? `
         <div class="card-channel-name ${type === 'competitorChannels' ? 'channel-name-clickable' : ''}" 
-             ${type === 'competitorChannels' ? `data-channel-name="${sourceName.replace(/"/g, '&quot;')}"` : ''}
+             ${type === 'competitorChannels' ? `data-channel-name="${(sourceName || '').replace(/"/g, '&quot;')}"` : ''}
              style="
             margin-bottom: 6px;
             font-size: 12px;
@@ -233,13 +350,25 @@ function createContentCard(item, type, sourceName = null) {
             display: flex;
             align-items: center;
             gap: 4px;
+            height: 18px;
             ${type === 'competitorChannels' ? 'cursor: pointer; text-decoration: underline;' : ''}
             ${isFiltered ? 'background: rgba(26, 115, 232, 0.1); padding: 2px 6px; border-radius: 4px;' : ''}
         ">
-            <span>${type === 'competitorChannels' ? '⚔️' : '🚀'}</span>
-            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;">${sourceName}</span>
+            ${sourceName ? `<span>${type === 'competitorChannels' ? '⚔️' : '🚀'}</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;">${sourceName}</span>` : ''}
+            ${statusBadgeHtml}
         </div>
-    ` : '';
+    ` : (isTracked ? `
+        <div class="card-channel-name" style="
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            height: 18px;
+        ">
+            ${statusBadgeHtml}
+        </div>
+    ` : '');
     let tagsContent = '';
     if (item.tags === undefined) {
         tagsContent = `<span class="tag-placeholder">태그 분석 예정...</span>`;
@@ -297,12 +426,18 @@ function createContentCard(item, type, sourceName = null) {
         `;
     }
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}" title="댓글 분석">💡</button>` : '';
-    const postObjectString = JSON.stringify(item).replace(/'/g, "&#39;");
-    const addToKanbanButton = `<button class="add-post-to-kanban-btn" data-post-object='${postObjectString}' data-channel-type="${type}" title="${type === 'myChannels' ? '리뉴얼 아이디어로 추가' : '벤치마킹 아이디어로 추가'}">
-        <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
-            <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
-        </svg>
-    </button>`;
+    
+    // 미등록 상태일 때만 리뉴얼 버튼 표시 (추적 중 배지는 card-channel-name 영역에 표시됨)
+    let actionButtonHtml = '';
+    if (!isTracked) {
+        // 미등록 -> 리뉴얼 버튼 표시
+        const postObjectString = JSON.stringify(item).replace(/'/g, "&#39;");
+        actionButtonHtml = `<button class="add-post-to-kanban-btn" data-post-object='${postObjectString}' data-channel-type="${type}" data-item-url="${itemUrl.replace(/"/g, '&quot;')}" title="${type === 'myChannels' ? '리뉴얼 아이디어로 추가' : '벤치마킹 아이디어로 추가'}">
+            <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
+                <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
+            </svg>
+        </button>`;
+    }
     // [체크리스트 1] chrome-extension://invalid/ 방지: 썸네일 URL 유효성 검사
     // [체크리스트 2-A] referrerpolicy 적용
     // [체크리스트 2-B] 썸네일 이미지 에러 핸들링을 위한 데이터 속성 추가
@@ -329,7 +464,7 @@ function createContentCard(item, type, sourceName = null) {
                     ${metricsSpans}
                 </div>
             </div>
-            ${addToKanbanButton}
+            ${actionButtonHtml}
             ${commentAnalysisButton}
         </a>
     `;
@@ -337,7 +472,7 @@ function createContentCard(item, type, sourceName = null) {
 /**
  * 경쟁사 콘텐츠 통합 렌더링 (여러 경쟁사의 데이터를 합쳐서 필터링, 정렬, 페이징)
  */
-function renderCompetitorPaginatedContent(listContainer, controlsContainer, sourceIds, allContent, platform, competitorMap = null) {
+function renderCompetitorPaginatedContent(listContainer, controlsContainer, sourceIds, allContent, platform, competitorMap = null, trackedUrls = new Set()) {
     const type = 'competitorChannels';
     const state = viewState[type];
     const isVideo = platform === 'youtube';
@@ -434,7 +569,7 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
             const sourceName = competitorMap && competitorMap[item.sourceId] 
                 ? competitorMap[item.sourceId] 
                 : null;
-            return createContentCard(item, type, sourceName);
+            return createContentCard(item, type, sourceName, trackedUrls);
         }).join('')}</div>`;
         listContainer.querySelectorAll('.preview-img').forEach(img => {
             img.addEventListener('error', () => { img.style.display = 'none'; });
@@ -491,7 +626,7 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
     }
 }
 
-function renderPaginatedContent(listContainer, controlsContainer, sourceId, allContent, type, platform, channelName = null) {
+function renderPaginatedContent(listContainer, controlsContainer, sourceId, allContent, type, platform, channelName = null, trackedUrls = new Set()) {
     const state = viewState[type];
     const isVideo = platform === 'youtube';
     let filteredContent = allContent.filter(item => item.sourceId === sourceId && (isVideo ? !!item.videoId : !item.videoId));
@@ -536,7 +671,7 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
         </div>
     `;
     if (paginatedContent.length > 0) {
-        listContainer.innerHTML = `<div class="content-list">${paginatedContent.map(item => createContentCard(item, type, channelName)).join('')}</div>`;
+        listContainer.innerHTML = `<div class="content-list">${paginatedContent.map(item => createContentCard(item, type, channelName, trackedUrls)).join('')}</div>`;
         listContainer.querySelectorAll('.preview-img').forEach(img => {
             img.addEventListener('error', () => { img.style.display = 'none'; });
             img.addEventListener('load', () => { if (img.naturalWidth === 0) { img.style.display = 'none'; } });
@@ -594,6 +729,39 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
 async function updateDashboardUI(container) {
     if (!cachedData) return;
 
+    // [체크리스트 1] 추적 중인 URL 목록 확보
+    const trackedUrls = new Set();
+    try {
+        const kanbanResponse = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'get_all_kanban_data' }, (response) => {
+                resolve(response);
+            });
+        });
+        
+        if (kanbanResponse && kanbanResponse.success && kanbanResponse.data) {
+            const kanbanData = kanbanResponse.data;
+            const statuses = ['ideas', 'in-progress', 'done'];
+            
+            for (const status of statuses) {
+                const cards = kanbanData[status] || {};
+                for (const [cardId, cardData] of Object.entries(cards)) {
+                    // origin.postUrl: 리뉴얼 원본 URL
+                    if (cardData.origin?.postUrl) {
+                        const normalizedUrl = normalizeUrlForTracking(cardData.origin.postUrl);
+                        if (normalizedUrl) trackedUrls.add(normalizedUrl);
+                    }
+                    // publishedUrl: 발행 완료된 URL
+                    if (cardData.publishedUrl) {
+                        const normalizedUrl = normalizeUrlForTracking(cardData.publishedUrl);
+                        if (normalizedUrl) trackedUrls.add(normalizedUrl);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('[Dashboard] 칸반 데이터 조회 실패:', error);
+    }
+
     // [신규] 활성 채널 ID 가져오기
     const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
@@ -631,8 +799,8 @@ async function updateDashboardUI(container) {
                 channelName = currentChannel.inputUrl || currentChannel.apiUrl || '내 채널';
             }
             
-            // 데이터 렌더링
-            renderPaginatedContent(contentListElement, controlsContainer, sourceId, cachedData.content, 'myChannels', 'blog', channelName);
+            // 데이터 렌더링 (trackedUrls 전달)
+            renderPaginatedContent(contentListElement, controlsContainer, sourceId, cachedData.content, 'myChannels', 'blog', channelName, trackedUrls);
         } else {
             contentListElement.innerHTML = `<p class="loading-placeholder">선택된 채널 데이터를 찾을 수 없습니다.<br>글로벌 채널 선택기를 확인해주세요.</p>`;
         }
@@ -691,8 +859,8 @@ async function updateDashboardUI(container) {
                 }
             });
             
-            // [신규] 경쟁사 통합 렌더링 함수 호출 (필터, 정렬, 페이징, 출처 배지 포함)
-            renderCompetitorPaginatedContent(contentListElement, controlsContainer, compSourceIds, cachedData.content, activePlatform, competitorMap);
+            // [신규] 경쟁사 통합 렌더링 함수 호출 (필터, 정렬, 페이징, 출처 배지 포함, trackedUrls 전달)
+            renderCompetitorPaginatedContent(contentListElement, controlsContainer, compSourceIds, cachedData.content, activePlatform, competitorMap, trackedUrls);
         } else {
             contentListElement.innerHTML = `<p class="loading-placeholder">등록된 경쟁 채널이 없습니다.<br>채널 관리에서 경쟁사를 추가하세요.</p>`;
             if (controlsContainer) controlsContainer.innerHTML = '';
@@ -1050,15 +1218,66 @@ function addDashboardEventListeners(container) {
                 }, (response) => {
                     if (response && response.success) {
                         showToast(`"${post.title}"이(가) 기획 보드에 추가되었습니다.`, 'success');
-                        button.disabled = true;
-                        button.style.opacity = '0.5';
-                        button.style.cursor = 'not-allowed';
-                        // SVG를 체크 아이콘으로 변경
-                        button.innerHTML = `
-                            <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
-                                <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
-                            </svg>
-                        `;
+                        
+                        // [체크리스트 4] 추가 직후 UI 업데이트: 버튼 제거하고 card-channel-name 영역에 배지 추가
+                        const card = button.closest('.content-card');
+                        if (card) {
+                            // 버튼 제거
+                            button.remove();
+                            
+                            // card-channel-name 영역 찾기 또는 생성
+                            let channelNameDiv = card.querySelector('.card-channel-name');
+                            if (!channelNameDiv) {
+                                // card-channel-name이 없으면 생성
+                                const cardInfo = card.querySelector('.card-info');
+                                if (cardInfo) {
+                                    channelNameDiv = document.createElement('div');
+                                    channelNameDiv.className = 'card-channel-name';
+                                    channelNameDiv.style.cssText = `
+                                        margin-bottom: 6px;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: flex-end;
+                                        height: 18px;
+                                    `;
+                                    const cardTitle = cardInfo.querySelector('.card-title');
+                                    if (cardTitle) {
+                                        cardInfo.insertBefore(channelNameDiv, cardTitle);
+                                    } else {
+                                        cardInfo.insertBefore(channelNameDiv, cardInfo.firstChild);
+                                    }
+                                }
+                            }
+                            
+                            // 상태 배지 추가
+                            if (channelNameDiv) {
+                                const statusBadge = document.createElement('div');
+                                statusBadge.className = 'status-badge';
+                                statusBadge.style.cssText = `
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 2px;
+                                    padding: 1px 4px;
+                                    background: #e8f5e9;
+                                    color: #2e7d32;
+                                    border-radius: 3px;
+                                    font-size: 10px;
+                                    font-weight: 500;
+                                    line-height: 1.2;
+                                    margin-left: auto;
+                                    height: 18px;
+                                `;
+                                statusBadge.textContent = '✅ 추적 중';
+                                statusBadge.title = '이미 기획 보드에 있거나 성과 추적 중입니다';
+                                channelNameDiv.appendChild(statusBadge);
+                            }
+                        }
+                        
+                        // trackedUrls에 추가 (다음 렌더링 시 반영)
+                        // 또는 즉시 updateDashboardUI 호출하여 전체 새로고침
+                        setTimeout(() => {
+                            updateDashboardUI(container);
+                        }, 300);
                     } else {
                         alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
                     }
@@ -1095,8 +1314,11 @@ function addDashboardEventListeners(container) {
                     channelId: channelId // 👈 추가됨 (AI 아이디어는 현재 활성 채널에 귀속)
                 }, (response) => {
                 if (response && response.success) {
-                    const ideaTitle = JSON.parse(ideaObjectString).title;
-                    const newIdea = { ideaIndex, firebaseKey: response.firebaseKey, title: ideaTitle };
+                    const ideaData = JSON.parse(ideaObjectString);
+                    const ideaTitle = ideaData.title;
+                    // [체크리스트 2] 제목 기반 저장 (ideaIndex 제거)
+                    const newIdea = { firebaseKey: response.firebaseKey, title: ideaTitle };
+                    const normalizedTitle = normalizeTitleForMatching(ideaTitle);
 
                     // ▼▼▼ 수정된 상태 관리 로직 ▼▼▼
                     // 1. 항상 storage에서 최신 데이터를 가져옵니다.
@@ -1104,8 +1326,11 @@ function addDashboardEventListeners(container) {
                         let cache = result[CACHE_KEY] || {};
                         let ideas = cache.addedIdeas || [];
 
-                        // 2. 중복을 확인하고 아이디어를 추가합니다.
-                        if (!ideas.some(idea => idea.ideaIndex === ideaIndex)) {
+                        // 2. [체크리스트 2] 제목 기반 중복 확인
+                        if (!ideas.some(idea => {
+                            const existingTitle = normalizeTitleForMatching(idea.title);
+                            return existingTitle === normalizedTitle;
+                        })) {
                             ideas.push(newIdea);
                         }
                         cache.addedIdeas = ideas;
@@ -1113,7 +1338,7 @@ function addDashboardEventListeners(container) {
                         // 3. storage에 데이터를 저장하고, 저장이 완료된 후 UI를 업데이트합니다.
                         chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
                             console.log('[Dashboard] addedIdeas 캐시 저장 완료:', CACHE_KEY);
-                            // UI 업데이트 로직
+                            // [체크리스트 4] UI 상태 즉시 반영
                             target.disabled = true;
                             target.textContent = '✅ 추가됨';
 
@@ -1126,7 +1351,7 @@ function addDashboardEventListeners(container) {
 
                                 const newItem = document.createElement('li');
                                 newItem.dataset.firebaseKey = response.firebaseKey;
-                                newItem.dataset.ideaIndex = ideaIndex;
+                                newItem.dataset.ideaTitle = ideaTitle.replace(/"/g, '&quot;');
                                 newItem.innerHTML = `<span>${ideaTitle}</span><button class="undo-add-btn">실행 취소</button>`;
                                 recentlyAddedList.prepend(newItem);
                             }
@@ -1143,7 +1368,7 @@ function addDashboardEventListeners(container) {
         if (target.closest('.undo-add-btn')) {
             const listItem = target.closest('li');
             const firebaseKey = listItem.dataset.firebaseKey;
-            const ideaIndex = listItem.dataset.ideaIndex;
+            const ideaTitle = listItem.dataset.ideaTitle || listItem.querySelector('span')?.textContent || '';
 
             (async () => {
                 const CACHE_KEY = await getCacheKey();
@@ -1155,8 +1380,12 @@ function addDashboardEventListeners(container) {
                             let cache = result[CACHE_KEY] || {};
                             let ideas = cache.addedIdeas || [];
                             
-                            // 아이디어를 배열에서 제거
-                            cache.addedIdeas = ideas.filter(idea => idea.ideaIndex !== ideaIndex);
+                            // [체크리스트 2] 제목 기반으로 아이디어를 배열에서 제거
+                            const normalizedTitle = normalizeTitleForMatching(ideaTitle);
+                            cache.addedIdeas = ideas.filter(idea => {
+                                const existingTitle = normalizeTitleForMatching(idea.title);
+                                return existingTitle !== normalizedTitle;
+                            });
 
                             // 데이터를 저장하고, 저장이 완료된 후 UI를 업데이트합니다.
                             chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
@@ -1164,13 +1393,20 @@ function addDashboardEventListeners(container) {
                                 // UI 업데이트 로직
                                 listItem.remove();
                                 
-                                const originalCard = container.querySelector(`.ai-idea-card[data-idea-index="${ideaIndex}"]`);
-                                if (originalCard) {
-                                    const button = originalCard.querySelector('.add-to-kanban-btn');
-                                    if (button) {
-                                        button.disabled = false;
-                                        button.textContent = '📌 기획 보드에 추가';
-                                    }
+                                // [체크리스트 2] 제목 기반으로 원본 카드 찾기
+                                if (normalizedTitle) {
+                                    const allIdeaCards = container.querySelectorAll('.ai-idea-card');
+                                    allIdeaCards.forEach(card => {
+                                        const cardTitle = card.dataset.ideaTitle || '';
+                                        const normalizedCardTitle = normalizeTitleForMatching(cardTitle);
+                                        if (normalizedCardTitle === normalizedTitle) {
+                                            const button = card.querySelector('.add-to-kanban-btn');
+                                            if (button) {
+                                                button.disabled = false;
+                                                button.textContent = '📌 기획 보드에 추가';
+                                            }
+                                        }
+                                    });
                                 }
                                 
                                 const recentlyAddedList = container.querySelector('#recently-added-list');
