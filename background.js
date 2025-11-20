@@ -8462,3 +8462,87 @@ async function runAdSenseDeepDiagnosis() {
     return { success: false, logs, error: e.message };
   }
 }
+
+/**
+ * [GA4 정밀 진단] GA4 서버에 저장된 실제 데이터(Path)를 조회합니다.
+ * - 최근 28일간 조회수가 가장 높은 페이지 20개를 가져와서 보여줍니다.
+ * - 내 글의 주소가 GA4에는 어떻게 저장되어 있는지(인코딩 여부 등) 확인할 수 있습니다.
+ */
+async function runGA4DeepDiagnosis() {
+  console.log("🔍 [GA4 진단] 시작...");
+  
+  // 1. 인증 정보 및 속성 ID 확인
+  const { googleAuthToken } = await chrome.storage.local.get("googleAuthToken");
+  if (!googleAuthToken) {
+    console.error("❌ [GA4 진단] 실패: 구글 로그인 토큰이 없습니다.");
+    return;
+  }
+  
+  const userId = "default_user";
+  const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+  const channelsData = channelsSnapshot.val() || {};
+  const myChannels = channelsData.myChannels || { blogs: [] };
+  
+  // 첫 번째 블로그의 GA4 속성 ID 사용
+  const firstBlog = myChannels.blogs?.[0];
+  if (!firstBlog || !firstBlog.gaPropertyId) {
+    console.error("❌ [GA4 진단] 실패: 설정된 GA4 속성 ID가 없습니다. 채널 설정을 확인해주세요.");
+    return;
+  }
+  
+  const propertyId = firstBlog.gaPropertyId;
+  console.log(`📡 [GA4 진단] 속성 ID: ${propertyId} (대상 채널: ${firstBlog.inputUrl || firstBlog.url})`);
+
+  // 2. API 호출 (최근 28일간 조회수 상위 20개 페이지 조회)
+  try {
+    const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+      method: "POST",
+      headers: { 
+        Authorization: `Bearer ${googleAuthToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "pagePath" }], // 페이지 경로별로 쪼개서 보기
+        metrics: [{ name: "screenPageViews" }], // 조회수 보기
+        orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }], // 조회수 높은 순 정렬
+        limit: 20
+      })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json();
+      console.error(`❌ [GA4 진단] API 오류 (${res.status}):`, errData);
+      if (res.status === 401) console.warn("👉 토큰이 만료되었습니다. 채널 연동 탭에서 로그아웃 후 재로그인하세요.");
+      if (res.status === 404) console.warn("👉 속성 ID가 잘못되었습니다. GA4 속성 ID가 맞는지 확인하세요 (UA-XXXX 아님).");
+      return;
+    }
+
+    const data = await res.json();
+    
+    // 3. 결과 출력
+    console.log(`📦 [GA4 진단] 데이터 수신 성공 (총 ${data.rowCount || 0}개 행 발견)`);
+    
+    if (data.rows && data.rows.length > 0) {
+      console.log("📊 [GA4 상위 20개 페이지 목록]");
+      console.table(data.rows.map(r => ({
+        '페이지 경로 (Path)': r.dimensionValues[0].value,
+        '조회수': r.metricValues[0].value
+      })));
+      
+      // 샘플 분석
+      const samplePath = data.rows[0].dimensionValues[0].value;
+      const isEncoded = samplePath.includes('%');
+      console.log(`ℹ️ [분석 결과] GA4는 주소를 ${isEncoded ? "암호화(인코딩)하여" : "한글 그대로(디코딩하여)"} 저장하고 있습니다.`);
+      
+      if (isEncoded) console.log("👉 팁: 현재 코드는 '디코딩된 경로'를 우선 시도하므로, '인코딩된 경로' 전략이 뒤로 밀려있을 수 있습니다.");
+      else console.log("👉 팁: 주소가 깔끔합니다. 만약 데이터가 안 나온다면 'Trailing Slash(/)' 문제일 수 있습니다.");
+
+    } else {
+      console.warn("⚠️ [GA4 진단] 데이터가 0건입니다. 최근 28일간 방문자가 없거나, 속성 ID가 엉뚱한 곳(데이터 없는 속성)일 수 있습니다.");
+    }
+
+  } catch (e) {
+    console.error("💥 [GA4 진단] 치명적 오류:", e);
+  }
+}
