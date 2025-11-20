@@ -8552,31 +8552,3 @@ async function runAdSenseDeepDiagnosis() {
     return { success: false, logs, error: e.message };
   }
 }
-
-/**
- * URL 비교를 위해 정규화하는 헬퍼 함수
- * 프로토콜 제거, 소문자 변환, trailing slash 제거 등
- */
-function normalizeUrlForComparison(url) {
-  try {
-    // URL 객체로 파싱하여 정규화
-    const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
-    
-    // 프로토콜 제거, 소문자 변환, trailing slash 제거
-    let normalized = urlObj.hostname + urlObj.pathname;
-    
-    // trailing slash 제거 (단, 루트 경로는 유지)
-    if (normalized.endsWith('/') && normalized !== '/') {
-      normalized = normalized.slice(0, -1);
-    }
-    
-    // 쿼리 파라미터와 해시 제거 (비교 시 불필요)
-    // 이미 pathname만 사용하므로 추가 처리 불필요
-    
-    return normalized.toLowerCase();
-  } catch (e) {
-    // URL 파싱 실패 시 원본을 소문자로만 변환
-    return url.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
-  }
-}
-
