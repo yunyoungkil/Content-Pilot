@@ -143,13 +143,77 @@ export function renderChannelMode(container) {
     .competitor-delete-btn { padding: 8px; color: #999; cursor: pointer; background: none; border: none; font-size: 18px; }
     .competitor-delete-btn:hover { color: #d32f2f; }
     
-    /* 채널 상세 설정 모달 좌우 여백 추가 */
-    #channel-detail-modal .cp-modal-body {
-      padding: 24px;
+    /* 채널 상세 설정 모달 스타일 */
+    #channel-detail-modal.cp-modal-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+    }
+    #channel-detail-modal.cp-modal-wrap[style*="flex"] {
+      display: flex !important;
+    }
+    #channel-detail-modal .cp-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 1;
     }
     #channel-detail-modal .cp-modal {
+      position: relative;
+      z-index: 2;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
       max-width: min(90vw, 700px);
-      margin: 0 auto;
+      width: 100%;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #channel-detail-modal .cp-modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    #channel-detail-modal .cp-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid #eee;
+    }
+    #channel-detail-modal .cp-modal-title {
+      font-weight: 600;
+      font-size: 18px;
+      margin: 0;
+    }
+    #channel-detail-modal .cp-modal-close {
+      width: 32px;
+      height: 32px;
+      border: 1px solid #ddd;
+      background: #f9fafb;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      line-height: 1;
+    }
+    #channel-detail-modal .cp-modal-close:hover {
+      background: #f0f0f0;
+    }
+    #channel-detail-modal .cp-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 16px 24px;
+      border-top: 1px solid #eee;
     }
   `;
   container.appendChild(style);
@@ -157,25 +221,41 @@ export function renderChannelMode(container) {
   let myChannelsData = []; // 로컬 상태 관리
 
   // 데이터 로드
-  chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
-    if (response && response.success) {
-      const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
-      const geminiApiKeyEl = container.querySelector("#gemini-api-key");
-      if (youtubeApiKeyEl) youtubeApiKeyEl.value = response.data.youtubeApiKey || "";
-      if (geminiApiKeyEl) geminiApiKeyEl.value = response.data.geminiApiKey || "";
+  try {
+    chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("[채널 관리] 데이터 로드 실패:", chrome.runtime.lastError);
+        if (chrome.runtime.lastError.message.includes("Extension context invalidated")) {
+          alert("확장 프로그램이 새로고침되었습니다. 페이지를 새로고침해주세요.");
+          return;
+        }
+        return;
+      }
       
-      // 데이터 구조가 변경되었으므로 response.data.myChannels.blogs 사용
-      // 각 블로그 객체에는 { inputUrl, gaPropertyId, adSenseAccountId, competitors: [] } 가 포함됨
-      myChannelsData = (response.data.myChannels?.blogs || []).map(blog => ({
-        url: blog.inputUrl || blog.url,
-        gaPropertyId: blog.gaPropertyId || "",
-        adSenseAccountId: blog.adSenseAccountId || "",
-        competitors: (blog.competitors || []).map(c => c.inputUrl || c)
-      }));
-      
-      renderMyChannels();
+      if (response && response.success) {
+        const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
+        const geminiApiKeyEl = container.querySelector("#gemini-api-key");
+        if (youtubeApiKeyEl) youtubeApiKeyEl.value = response.data.youtubeApiKey || "";
+        if (geminiApiKeyEl) geminiApiKeyEl.value = response.data.geminiApiKey || "";
+        
+        // 데이터 구조가 변경되었으므로 response.data.myChannels.blogs 사용
+        // 각 블로그 객체에는 { inputUrl, gaPropertyId, adSenseAccountId, competitors: [] } 가 포함됨
+        myChannelsData = (response.data.myChannels?.blogs || []).map(blog => ({
+          url: blog.inputUrl || blog.url,
+          gaPropertyId: blog.gaPropertyId || "",
+          adSenseAccountId: blog.adSenseAccountId || "",
+          competitors: (blog.competitors || []).map(c => c.inputUrl || c)
+        }));
+        
+        renderMyChannels();
+      }
+    });
+  } catch (error) {
+    console.error("[채널 관리] 데이터 로드 중 예외:", error);
+    if (error.message && error.message.includes("Extension context invalidated")) {
+      alert("확장 프로그램이 새로고침되었습니다. 페이지를 새로고침해주세요.");
     }
-  });
+  }
 
   // 내 채널 목록 렌더링
   function renderMyChannels() {
@@ -200,15 +280,33 @@ export function renderChannelMode(container) {
       `;
       
       // 수정 버튼
-      card.querySelector(".edit-btn").addEventListener("click", () => openDetailModal(index));
+      const editBtn = card.querySelector(".edit-btn");
+      if (editBtn) {
+        editBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log(`[채널 관리] 관리 버튼 클릭: index=${index}`);
+          try {
+            openDetailModal(index);
+          } catch (error) {
+            console.error("[채널 관리] 모달 열기 실패:", error);
+            alert("모달을 열 수 없습니다: " + error.message);
+          }
+        });
+      }
       
       // 삭제 버튼
-      card.querySelector(".delete-btn").addEventListener("click", () => {
-        if (confirm("이 채널을 삭제하시겠습니까?")) {
-          myChannelsData.splice(index, 1);
-          renderMyChannels();
-        }
-      });
+      const deleteBtn = card.querySelector(".delete-btn");
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (confirm("이 채널을 삭제하시겠습니까?")) {
+            myChannelsData.splice(index, 1);
+            renderMyChannels();
+          }
+        });
+      }
       
       listEl.appendChild(card);
     });
@@ -246,9 +344,21 @@ export function renderChannelMode(container) {
 
   // 상세 모달 열기
   function openDetailModal(index) {
+    console.log(`[채널 관리] openDetailModal 호출: index=${index}`);
+    
+    // 모달 요소 다시 찾기 (동적으로 생성된 경우 대비)
+    const modalEl = container.querySelector("#channel-detail-modal");
+    if (!modalEl) {
+      console.error("[채널 관리] 모달 요소를 찾을 수 없습니다!");
+      alert("모달을 찾을 수 없습니다. 페이지를 새로고침해주세요.");
+      return;
+    }
+    
     currentEditingIndex = index;
     const isNew = index === -1;
     const data = isNew ? { url: "", gaPropertyId: "", adSenseAccountId: "", competitors: [] } : myChannelsData[index];
+    
+    console.log(`[채널 관리] 모달 데이터:`, data);
     
     const modalTitle = container.querySelector(".cp-modal-title");
     if (modalTitle) modalTitle.textContent = isNew ? "새 채널 추가" : "채널 상세 설정";
@@ -273,7 +383,20 @@ export function renderChannelMode(container) {
       // 빈 입력칸 하나 추가 (UX)
       if (data.competitors.length === 0) addCompetitorInput("");
     }
-    if (modal) modal.style.display = "flex";
+    
+    // 모달 표시
+    console.log(`[채널 관리] 모달 표시 시도: display=${modalEl.style.display}`);
+    modalEl.style.display = "flex";
+    console.log(`[채널 관리] 모달 표시 완료: display=${modalEl.style.display}`);
+    
+    // 모달이 제대로 표시되었는지 확인
+    setTimeout(() => {
+      const computedStyle = window.getComputedStyle(modalEl);
+      console.log(`[채널 관리] 모달 computed display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+      if (computedStyle.display === "none") {
+        console.warn("[채널 관리] 모달이 표시되지 않습니다. CSS 확인 필요.");
+      }
+    }, 100);
   }
 
   // Google 로그인 상태 확인

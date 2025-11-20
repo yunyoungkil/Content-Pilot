@@ -2089,8 +2089,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "get_channels_and_key") {
     const userId = "default_user";
+    // chrome.storage.local.get은 Promise를 반환하지 않으므로 Promise로 감싸야 함
     Promise.all([
-      chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
+      new Promise((resolve, reject) => {
+        chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"], (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(result);
+          }
+        });
+      }),
       firebase.database().ref(`channels/${userId}`).once("value"),
     ])
       .then(([storage, snapshot]) => {
@@ -2112,6 +2121,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ success: true, data: responseData });
       })
       .catch((error) => {
+        console.error("[get_channels_and_key] 오류:", error);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -6723,48 +6733,39 @@ async function updateSinglePerformanceMetric(contentInfo) {
 }
 
 /**
- * [G-14] Google Analytics Data API를 호출하여 지표를 가져옵니다.
- * 재시도 로직과 상세 로그를 포함합니다.
- */
-/**
- * [검증 모드] GA4 데이터 수집 (상세 로그 포함)
+ * [최종 해결판] GA4 데이터 수집 (리스트 조회 + 수동 매칭 방식)
+ * - API 필터링 버그를 우회하기 위해, 상위 데이터를 목록으로 가져온 후 JS에서 직접 찾습니다.
+ * - 진단 도구에서 성공한 방식(RunReport without filter)을 그대로 적용했습니다.
  */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
-  console.log(`🔍 [GA4 검증] 함수 호출됨 - URL: ${url}, PropertyId: ${propertyId}, RetryCount: ${retryCount}`);
-  
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   
-  // 1. URL 경로 정제
+  // 1. URL 경로 준비 (비교용)
   let urlObj;
-  try { 
-    urlObj = new URL(url); 
-  } catch (e) { 
-    console.error(`❌ [GA4 검증] URL 파싱 실패: ${url}`, e);
-    return { pageviews: 0, gaEarnings: 0 }; 
-  }
+  try { urlObj = new URL(url); } catch (e) { return { pageviews: 0, gaEarnings: 0 }; }
 
-  const rawPath = urlObj.pathname;
+  const rawPath = urlObj.pathname; // /entry/%ED...
   let decodedPath = rawPath;
-  try { decodedPath = decodeURIComponent(rawPath); } catch(e) {}
-  const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
+  try { decodedPath = decodeURIComponent(rawPath); } catch(e) {} // /entry/한글
+  
+  // 끝에 슬래시 제거 버전
+  const cleanRawPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
+  const cleanDecodedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
 
-  // 필터 경로 (디코딩된 한글 경로 사용)
-  const filterPath = normalizedPath; 
-
-  console.log(`🔍 [GA4 검증] 요청 시작: ${url}`);
-  console.log(`   - 원본 경로: ${rawPath}`);
-  console.log(`   - 디코딩 경로: ${decodedPath}`);
-  console.log(`   - 정규화 경로: ${normalizedPath}`);
-  console.log(`   - 필터 경로: ${filterPath}`);
+  // 비교할 후보군 (이 중 하나라도 맞으면 내 글임)
+  const targetPaths = [decodedPath, rawPath, cleanDecodedPath, cleanRawPath];
+  
+  console.log(`🔍 [GA4] 스마트 조회 시작: ${decodedPath}`);
 
   try {
-    // [요청 1] 핵심 성과 지표 (Metrics)
-    const metricsRequest = fetch(API_URL, {
+    // [단계 1] 상위 50개 페이지 목록 조회 (필터 없이 가져옴 -> 진단 도구 방식)
+    // 필터링 실패를 방지하기 위해 일단 가져와서 내가 직접 찾음
+    const listResponse = await fetch(API_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-        dimensions: [{ name: "pagePath" }], 
+        dimensions: [{ name: "pagePath" }],
         metrics: [
           { name: "screenPageViews" },          // 0
           { name: "averageSessionDuration" },   // 1
@@ -6779,105 +6780,158 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
           { name: "newUsers" },                 // 10
           { name: "activeUsers" }               // 11
         ],
-        dimensionFilter: {
-          filter: {
-            fieldName: "pagePath",
-            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
-          }
-        }
+        orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }],
+        limit: 50 // 상위 50개 (대부분의 활성 글은 여기에 포함됨)
       })
     });
 
-    // [요청 2] 유입 경로 분석 (Source)
-    const sourceRequest = fetch(API_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-        dimensions: [{ name: "sessionSource" }, { name: "sessionMedium" }],
-        metrics: [{ name: "activeUsers" }], 
-        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
-        limit: 1, 
-        dimensionFilter: {
-          filter: {
-            fieldName: "pagePath",
-            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
-          }
-        }
-      })
-    });
-
-    const [metricsRes, sourceRes] = await Promise.all([metricsRequest, sourceRequest]);
-
-    if (!metricsRes.ok) {
-      console.error(`❌ [GA4 검증] API 오류: ${metricsRes.status}`);
-      if (metricsRes.status === 401) throw new Error("UNAUTHORIZED");
-      return { pageviews: 0, gaEarnings: 0 };
+    if (!listResponse.ok) {
+      if (listResponse.status === 401) throw new Error("UNAUTHORIZED");
+      throw new Error(`API Error ${listResponse.status}`);
     }
 
-    const metricsData = await metricsRes.json();
-    const sourceData = await sourceRes.ok ? await sourceRes.json() : {};
+    const listData = await listResponse.json();
+    let matchedRow = null;
+    let foundPath = null;
 
-    // 검증 로그: 원본 데이터 출력
-    console.log(`📦 [GA4 검증] 원본 응답 (Metrics):`, metricsData);
-    console.log(`📦 [GA4 검증] 원본 응답 (Source):`, sourceData);
+    // [단계 2] 목록에서 내 글 찾기 (수동 매칭)
+    if (listData.rows && listData.rows.length > 0) {
+      // 1. 정확한 일치 찾기
+      matchedRow = listData.rows.find(row => {
+        const gaPath = row.dimensionValues[0].value;
+        return targetPaths.includes(gaPath);
+      });
 
-    if (metricsData.rows && metricsData.rows.length > 0) {
-      const row = metricsData.rows[0]; 
-      const values = row.metricValues;
-
-      // 데이터 파싱
-      const adRevenue = parseFloat(values[5]?.value || "0");
-      const adImpressions = parseInt(values[6]?.value || "0", 10);
-      const adClicks = parseInt(values[7]?.value || "0", 10);
-      const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
-      const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
-
-      let topSource = "-";
-      if (sourceData.rows && sourceData.rows.length > 0) {
-        const srcRow = sourceData.rows[0];
-        topSource = `${srcRow.dimensionValues[0].value} / ${srcRow.dimensionValues[1].value}`;
+      // 2. 없다면, 포함 관계 확인 (Decode된 한글 기준)
+      if (!matchedRow) {
+        matchedRow = listData.rows.find(row => {
+          const gaPath = row.dimensionValues[0].value;
+          // GA path가 내 path를 포함하거나, 그 반대인 경우
+          // 예: GA(/entry/한글?abc) vs 내꺼(/entry/한글)
+          return gaPath.includes(cleanDecodedPath) || cleanDecodedPath.includes(gaPath);
+        });
       }
 
-      const analyticsData = {
-        pageviews: parseInt(values[0]?.value || "0", 10),
-        avgSessionDuration: parseFloat(values[1]?.value || "0"),
-        sessions: parseInt(values[2]?.value || "0", 10),
-        pagesPerSession: parseFloat(values[3]?.value || "0"),
-        bounceRate: parseFloat(values[4]?.value || "0"),
-        gaEarnings: adRevenue,
-        gaImpressions: adImpressions,
-        gaClicks: adClicks,
-        pageRPM: parseFloat(pageRPM.toFixed(2)),
-        pageCTR: parseFloat(pageCTR.toFixed(2)),
-        engagementRate: parseFloat(values[8]?.value || "0"),
-        avgEngagementTime: parseFloat(values[9]?.value || "0"),
-        newUsers: parseInt(values[10]?.value || "0", 10),
-        activeUsers: parseInt(values[11]?.value || "0", 10),
-        topSource: topSource
-      };
-      
-      analyticsData.returningUsers = Math.max(0, analyticsData.activeUsers - analyticsData.newUsers);
-
-      console.log(`✅ [GA4 검증] 최종 파싱 데이터 (${url}):`, analyticsData);
-      return analyticsData;
+      if (matchedRow) {
+        foundPath = matchedRow.dimensionValues[0].value;
+        console.log(`✅ [GA4] 목록에서 매칭 성공! ("${foundPath}")`);
+      }
     }
 
-    console.warn(`⚠️ [GA4 검증] 데이터 없음 (매칭된 행 0개)`);
-    return { pageviews: 0, gaEarnings: 0 };
+    // [단계 3] 매칭된 데이터가 없으면? (필터 조회 시도 - 최후의 수단)
+    if (!matchedRow) {
+      console.log(`⚠️ [GA4] 상위 목록에 없음. 정밀 필터 조회 시도...`);
+      // 기존의 필터 방식 한 번 더 시도 (순위 밖의 글일 수 있음)
+      const filterResponse = await fetch(API_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+          dimensions: [{ name: "pagePath" }],
+          metrics: [
+            { name: "screenPageViews" }, { name: "averageSessionDuration" }, { name: "sessions" },
+            { name: "screenPageViewsPerSession" }, { name: "bounceRate" }, { name: "publisherAdRevenue" },
+            { name: "publisherAdImpressions" }, { name: "publisherAdClicks" }, { name: "engagementRate" },
+            { name: "averageEngagementTime" }, { name: "newUsers" }, { name: "activeUsers" }
+          ],
+          dimensionFilter: {
+            filter: {
+              fieldName: "pagePath",
+              stringFilter: { matchType: "BEGINS_WITH", value: cleanDecodedPath } // 한글 경로로 시도
+            }
+          }
+        })
+      });
+      
+      if (filterResponse.ok) {
+        const filterData = await filterResponse.json();
+        if (filterData.rows && filterData.rows.length > 0) {
+          matchedRow = filterData.rows[0];
+          foundPath = matchedRow.dimensionValues[0].value;
+          console.log(`✅ [GA4] 정밀 필터로 발견! ("${foundPath}")`);
+        }
+      }
+    }
+
+    // [단계 4] 데이터가 없으면 0 반환
+    if (!matchedRow) {
+      console.log(`💨 [GA4] 데이터 없음 (0건)`);
+      return { pageviews: 0, gaEarnings: 0, topSource: "-" };
+    }
+
+    // [단계 5] 유입 경로(Source) 별도 조회
+    // 정확히 찾은 그 Path(foundPath)를 이용해서 소스를 물어봄
+    let topSource = "-";
+    try {
+      const sourceRes = await fetch(API_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+          dimensions: [{ name: "sessionSource" }, { name: "sessionMedium" }],
+          metrics: [{ name: "activeUsers" }],
+          orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+          limit: 1,
+          dimensionFilter: {
+            filter: {
+              fieldName: "pagePath",
+              stringFilter: { matchType: "EQUALS", value: foundPath } // 찾은 정확한 경로 사용
+            }
+          }
+        })
+      });
+      
+      if (sourceRes.ok) {
+        const sourceData = await sourceRes.json();
+        if (sourceData.rows && sourceData.rows.length > 0) {
+          const src = sourceData.rows[0];
+          topSource = `${src.dimensionValues[0].value} / ${src.dimensionValues[1].value}`;
+        }
+      }
+    } catch (e) { /* 소스 조회 실패는 무시 */ }
+
+    // [단계 6] 최종 데이터 파싱 및 반환
+    const values = matchedRow.metricValues;
+    const adRevenue = parseFloat(values[5]?.value || "0");
+    const adImpressions = parseInt(values[6]?.value || "0", 10);
+    const adClicks = parseInt(values[7]?.value || "0", 10);
+    
+    const result = {
+      pageviews: parseInt(values[0]?.value || "0", 10),
+      avgSessionDuration: parseFloat(values[1]?.value || "0"),
+      sessions: parseInt(values[2]?.value || "0", 10),
+      pagesPerSession: parseFloat(values[3]?.value || "0"),
+      bounceRate: parseFloat(values[4]?.value || "0"),
+      gaEarnings: adRevenue,
+      gaImpressions: adImpressions,
+      gaClicks: adClicks,
+      pageRPM: adImpressions > 0 ? parseFloat(((adRevenue / adImpressions) * 1000).toFixed(2)) : 0,
+      pageCTR: adImpressions > 0 ? parseFloat(((adClicks / adImpressions) * 100).toFixed(2)) : 0,
+      engagementRate: parseFloat(values[8]?.value || "0"),
+      avgEngagementTime: parseFloat(values[9]?.value || "0"),
+      newUsers: parseInt(values[10]?.value || "0", 10),
+      activeUsers: parseInt(values[11]?.value || "0", 10),
+      topSource: topSource
+    };
+    
+    result.returningUsers = Math.max(0, result.activeUsers - result.newUsers);
+    
+    console.log(`📊 [GA4] 최종 데이터 확보 (${foundPath}):`, result);
+    return result;
 
   } catch (error) {
+    // 토큰 만료 시 재시도
     if (error.message === "UNAUTHORIZED" && retryCount < 3) {
       try {
         await new Promise(r => chrome.identity.removeCachedAuthToken({ token }, r));
         const newToken = await new Promise((resolve) => {
-          chrome.identity.getAuthToken({ interactive: false }, resolve);
+          chrome.identity.getAuthToken({ interactive: false }, (t) => resolve(t));
         });
         await chrome.storage.local.set({ googleAuthToken: newToken });
         return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
       } catch (e) {}
     }
-    console.error(`💥 [GA4 검증] 예외 발생:`, error);
+    console.error("[GA4] 에러:", error);
     return { pageviews: 0, gaEarnings: 0 };
   }
 }
