@@ -246,11 +246,18 @@ function analyzePerformanceData() {
     0
   ) / allPerformanceData.length;
   const avgCTR = allPerformanceData.reduce(
-    (sum, item) => sum + (item.performance.ctr || 0),
+    (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
     0
   ) / allPerformanceData.length;
   const avgBounceRate = allPerformanceData.reduce(
     (sum, item) => sum + (item.performance.bounceRate || 0),
+    0
+  ) / allPerformanceData.length;
+  
+  // [추가] 평균 RPM 계산
+  // 단순 평균으로 계산 (각 페이지의 RPM의 합 / 개수)
+  const avgRPM = allPerformanceData.reduce(
+    (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
     0
   ) / allPerformanceData.length;
 
@@ -314,11 +321,15 @@ function analyzePerformanceData() {
       0
     ) / topPerformers.length,
     avgCTR: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.ctr || 0),
+      (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
       0
     ) / topPerformers.length,
     avgBounceRate: topPerformers.reduce(
       (sum, item) => sum + (item.performance.bounceRate || 0),
+      0
+    ) / topPerformers.length,
+    avgRPM: topPerformers.reduce(
+      (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
       0
     ) / topPerformers.length,
     tags: successTags,
@@ -339,11 +350,15 @@ function analyzePerformanceData() {
       0
     ) / bottomPerformers.length,
     avgCTR: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.ctr || 0),
+      (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
       0
     ) / bottomPerformers.length,
     avgBounceRate: bottomPerformers.reduce(
       (sum, item) => sum + (item.performance.bounceRate || 0),
+      0
+    ) / bottomPerformers.length,
+    avgRPM: bottomPerformers.reduce(
+      (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
       0
     ) / bottomPerformers.length,
     tags: failureTags,
@@ -361,6 +376,7 @@ function analyzePerformanceData() {
       avgDuration,
       avgCTR,
       avgBounceRate,
+      avgRPM, // [추가]
     },
     topPerformers: topPerformers.slice(0, 5),
     bottomPerformers: bottomPerformers.slice(0, 5),
@@ -384,6 +400,7 @@ async function generateAIInsights(analysis) {
 - 평균 수익: $${analysis.summary.avgEarnings.toFixed(2)}
 - 평균 페이지뷰: ${analysis.summary.avgPageviews.toFixed(0)}회
 - 평균 체류 시간: ${Math.round(analysis.summary.avgDuration)}초
+- 평균 RPM: $${analysis.summary.avgRPM.toFixed(2)}
 - 평균 CTR: ${analysis.summary.avgCTR.toFixed(2)}%
 - 평균 이탈률: ${analysis.summary.avgBounceRate.toFixed(2)}%
 
@@ -391,6 +408,7 @@ async function generateAIInsights(analysis) {
 - 평균 수익: $${analysis.successPatterns.avgEarnings.toFixed(2)}
 - 평균 페이지뷰: ${analysis.successPatterns.avgPageviews.toFixed(0)}회
 - 평균 체류 시간: ${Math.round(analysis.successPatterns.avgDuration)}초
+- 평균 RPM: $${analysis.successPatterns.avgRPM.toFixed(2)}
 - 평균 CTR: ${analysis.successPatterns.avgCTR.toFixed(2)}%
 - 성공 태그: ${analysis.successPatterns.tags.join(", ")}
 
@@ -398,6 +416,7 @@ async function generateAIInsights(analysis) {
 - 평균 수익: $${analysis.failurePatterns.avgEarnings.toFixed(2)}
 - 평균 페이지뷰: ${analysis.failurePatterns.avgPageviews.toFixed(0)}회
 - 평균 체류 시간: ${Math.round(analysis.failurePatterns.avgDuration)}초
+- 평균 RPM: $${analysis.failurePatterns.avgRPM.toFixed(2)}
 - 평균 CTR: ${analysis.failurePatterns.avgCTR.toFixed(2)}%
 - 실패 태그: ${analysis.failurePatterns.tags.join(", ")}
 
@@ -480,6 +499,10 @@ function renderReport(container) {
             <div class="summary-value">${analysis.summary.avgPageviews.toFixed(0)}</div>
           </div>
           <div class="perf-summary-card">
+            <div class="summary-label">평균 RPM</div>
+            <div class="summary-value">$${analysis.summary.avgRPM.toFixed(2)}</div>
+          </div>
+          <div class="perf-summary-card">
             <div class="summary-label">평균 CTR</div>
             <div class="summary-value">${analysis.summary.avgCTR.toFixed(2)}%</div>
           </div>
@@ -498,6 +521,10 @@ function renderReport(container) {
             <div class="pattern-metric">
               <span class="metric-label">평균 페이지뷰</span>
               <span class="metric-value highlight">${analysis.successPatterns.avgPageviews.toFixed(0)}</span>
+            </div>
+            <div class="pattern-metric">
+              <span class="metric-label">평균 RPM</span>
+              <span class="metric-value highlight">$${analysis.successPatterns.avgRPM.toFixed(2)}</span>
             </div>
             <div class="pattern-metric">
               <span class="metric-label">평균 체류 시간</span>
@@ -535,6 +562,10 @@ function renderReport(container) {
             <div class="pattern-metric">
               <span class="metric-label">평균 페이지뷰</span>
               <span class="metric-value warning">${analysis.failurePatterns.avgPageviews.toFixed(0)}</span>
+            </div>
+            <div class="pattern-metric">
+              <span class="metric-label">평균 RPM</span>
+              <span class="metric-value warning">$${analysis.failurePatterns.avgRPM.toFixed(2)}</span>
             </div>
             <div class="pattern-metric">
               <span class="metric-label">평균 체류 시간</span>

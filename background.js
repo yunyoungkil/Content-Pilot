@@ -5238,6 +5238,13 @@ ${decayContent.map((item, idx) =>
     })();
     return true;
   }
+  else if (msg.action === "run_adsense_deep_diagnosis") {
+    (async () => {
+      const result = await runAdSenseDeepDiagnosis();
+      sendResponse(result);
+    })();
+    return true;
+  }
 });
 
 // Util: create a simple PNG data URL with text
@@ -8352,94 +8359,198 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 /**
- * [신규 기능] 애드센스에 수동으로 등록된 URL 채널 목록을 가져와서
- * 칸반 보드의 카드들에 '등록됨(adSenseRegistered)' 태그를 붙입니다.
+ * [최종 수정 v2] 애드센스 등록 여부 확인 (URL 디코딩 적용)
+ * - API가 보내주는 인코딩된 URL(%ED%95%9C%EA%B8%80)을 디코딩하여 비교합니다.
  */
 async function checkAdSenseRegistrationStatus() {
   console.log("[AdSense 등록 확인] 시작...");
   
-  // 1. 인증 정보 가져오기
-  const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get([
-    "googleAuthToken",
-    "adSenseAccountId"
-  ]);
+  const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"]);
+  if (!googleAuthToken || !adSenseAccountId) throw new Error("인증 정보 없음");
 
-  if (!googleAuthToken || !adSenseAccountId) {
-    throw new Error("Google 계정 또는 AdSense ID가 설정되지 않았습니다.");
-  }
-
-  // 2. 애드센스 API에서 등록된 URL 채널 '전체' 목록 가져오기 (페이지네이션 처리)
-  const registeredUrls = new Set();
-  let nextPageToken = null;
-  const accountName = `accounts/${adSenseAccountId}`;
-  
-  do {
-    let url = `https://adsense.googleapis.com/v2/${accountName}/urlchannels?pageSize=1000`;
-    if (nextPageToken) url += `&pageToken=${nextPageToken}`;
-
-    const response = await fetch(url, {
+  // 1. 계정 찾기
+  let accountName = `accounts/${adSenseAccountId}`;
+  try {
+    const listRes = await fetch("https://adsense.googleapis.com/v2/accounts", {
       headers: { Authorization: `Bearer ${googleAuthToken}` }
     });
-
-    if (!response.ok) {
-      throw new Error(`AdSense API 오류: ${response.status}`);
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      const normalizedInput = adSenseAccountId.trim().replace(/^accounts\//, '');
+      const matched = listData.accounts?.find(acc => acc.name.includes(normalizedInput));
+      if (matched) accountName = matched.name;
     }
+  } catch (e) { /* 무시 */ }
 
-    const data = await response.json();
-    if (data.urlChannels) {
-      data.urlChannels.forEach(channel => {
-        // urlPattern: 등록된 실제 URL (예: example.com/post/123)
-        if (channel.urlPattern) {
-          // 비교를 위해 정규화 (프로토콜 제거, 소문자 등)
-          registeredUrls.add(normalizeUrlForComparison(channel.urlPattern));
+  // 2. 클라이언트 및 URL 채널 조회
+  const registeredUrls = new Set();
+  try {
+    const clientsRes = await fetch(`https://adsense.googleapis.com/v2/${accountName}/adclients`, {
+      headers: { Authorization: `Bearer ${googleAuthToken}` }
+    });
+    
+    if (!clientsRes.ok) throw new Error(`AdSense 조회 실패 (${clientsRes.status})`);
+    
+    const clientsData = await clientsRes.json();
+    const adClients = clientsData.adClients || [];
+
+    await Promise.all(adClients.map(async (client) => {
+      if (client.productCode === "YOUTUBE" || client.name.includes("ca-yt")) return;
+
+      let nextPageToken = null;
+      do {
+        let url = `https://adsense.googleapis.com/v2/${client.name}/urlchannels?pageSize=1000`;
+        if (nextPageToken) url += `&pageToken=${nextPageToken}`;
+        
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${googleAuthToken}` } });
+        if (!res.ok) return;
+
+        const json = await res.json();
+        if (json.urlChannels) {
+          json.urlChannels.forEach(ch => {
+            if (ch.urlPattern) {
+              // 🚨 [핵심 수정] URL 디코딩 적용 (암호문 -> 평문 변환)
+              try {
+                  // 1. 먼저 디코딩 (예: %F0%9F... -> 🛒)
+                  const decodedUrl = decodeURIComponent(ch.urlPattern);
+                  // 2. 정규화 후 저장
+                  registeredUrls.add(normalizeUrlForComparison(decodedUrl));
+              } catch (err) {
+                  // 디코딩 실패 시 원본 그대로 사용
+                  registeredUrls.add(normalizeUrlForComparison(ch.urlPattern));
+              }
+            }
+          });
         }
-      });
-    }
-    nextPageToken = data.nextPageToken;
-  } while (nextPageToken);
+        nextPageToken = json.nextPageToken;
+      } while (nextPageToken);
+    }));
+  } catch (e) {
+    console.error("[AdSense] 데이터 동기화 실패:", e);
+    throw e;
+  }
 
-  console.log(`[AdSense 등록 확인] 총 ${registeredUrls.size}개의 등록된 URL을 발견했습니다.`);
+  console.log(`[AdSense] 동기화 완료: ${registeredUrls.size}개 URL 채널 확인됨`);
 
-  // 3. Firebase 칸반 데이터와 비교하여 업데이트
-  const db = firebase.database();
-  const snapshot = await db.ref("kanban").once("value");
-  const allCards = snapshot.val() || {};
+  // 3. 데이터베이스 업데이트 (매칭 로직 강화)
   let updatedCount = 0;
+  if (registeredUrls.size > 0) {
+    const db = firebase.database();
+    const snapshot = await db.ref("kanban").once("value");
+    const allCards = snapshot.val() || {};
+    const updates = {};
 
-  const updates = {};
+    for (const status in allCards) {
+      for (const cardId in allCards[status]) {
+        const card = allCards[status][cardId];
+        if (card.publishedUrl) {
+          // 카드 URL도 디코딩 후 정규화
+          let normUrl = "";
+          try {
+             normUrl = normalizeUrlForComparison(decodeURIComponent(card.publishedUrl));
+          } catch(e) {
+             normUrl = normalizeUrlForComparison(card.publishedUrl);
+          }
+          
+          const isReg = registeredUrls.has(normUrl);
+          
+          // 디버깅: 매칭 실패 시 로그 (필요시 주석 해제)
+          // if (!isReg) console.log(`매칭 실패: [카드] ${normUrl} vs [목록]`, [...registeredUrls].slice(0,3));
 
-  for (const status in allCards) {
-    for (const cardId in allCards[status]) {
-      const card = allCards[status][cardId];
-      
-      // 발행된 URL이 있는 카드만 검사
-      if (card.publishedUrl) {
-        const normalizedCardUrl = normalizeUrlForComparison(card.publishedUrl);
-        
-        // 애드센스 목록에 있는지 확인
-        const isRegistered = registeredUrls.has(normalizedCardUrl);
-        
-        // 상태가 다를 때만 업데이트 (불필요한 쓰기 방지)
-        if (card.adSenseRegistered !== isRegistered) {
-          updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isRegistered;
-          updatedCount++;
+          if (card.adSenseRegistered !== isReg) {
+            updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isReg;
+            updatedCount++;
+          }
         }
       }
     }
+    if (updatedCount > 0) await db.ref().update(updates);
   }
 
-  // 4. 변경 사항이 있으면 일괄 업데이트
-  if (updatedCount > 0) {
-    await db.ref().update(updates);
-    console.log(`[AdSense 등록 확인] ${updatedCount}개 카드의 상태를 업데이트했습니다.`);
-  } else {
-    console.log("[AdSense 등록 확인] 변경된 사항이 없습니다.");
-  }
+  return { totalRegistered: registeredUrls.size, updatedCards: updatedCount };
+}
 
-  return { 
-    totalRegistered: registeredUrls.size, 
-    updatedCards: updatedCount 
+/**
+ * [테스트용] AdSense 연결 상태 정밀 진단 (Deep Diagnosis)
+ * - 상세 로그를 리턴하여 UI에서 보여줄 수 있게 함
+ */
+async function runAdSenseDeepDiagnosis() {
+  const logs = [];
+  const log = (msg, data) => {
+    console.log(`🔬 ${msg}`, data || "");
+    logs.push({ message: msg, data: data, timestamp: new Date().toLocaleTimeString() });
   };
+
+  log("진단 시작: 저장된 토큰 및 ID 확인 중...");
+  
+  try {
+    const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"]);
+    if (!googleAuthToken) throw new Error("구글 인증 토큰이 없습니다.");
+    
+    // 1. 계정 확인
+    log("Step 1: 계정 목록(accounts) 조회");
+    const accRes = await fetch("https://adsense.googleapis.com/v2/accounts", {
+      headers: { Authorization: `Bearer ${googleAuthToken}` }
+    });
+    const accData = await accRes.json();
+    
+    if (!accRes.ok) throw new Error(`계정 조회 API 오류: ${accRes.status} ${accData.error?.message}`);
+    
+    log(`계정 목록 응답: ${accData.accounts?.length || 0}개 발견`, accData);
+
+    let targetAccount = `accounts/${adSenseAccountId}`;
+    const normalizedId = adSenseAccountId.replace("accounts/", "");
+    const matched = accData.accounts?.find(a => a.name.includes(normalizedId));
+
+    if (matched) {
+      targetAccount = matched.name;
+      log(`✅ 계정 매칭 성공: ${targetAccount}`);
+    } else {
+      log(`⚠️ 경고: 입력한 ID(${adSenseAccountId})와 일치하는 계정을 목록에서 찾을 수 없습니다. 강제 진행합니다.`);
+    }
+
+    // 2. 클라이언트 확인
+    log(`Step 2: 광고 클라이언트(adclients) 조회 - ${targetAccount}`);
+    const clientRes = await fetch(`https://adsense.googleapis.com/v2/${targetAccount}/adclients`, {
+      headers: { Authorization: `Bearer ${googleAuthToken}` }
+    });
+    const clientData = await clientRes.json();
+    
+    if (!clientRes.ok) throw new Error(`클라이언트 조회 실패: ${clientRes.status}`);
+    
+    log(`클라이언트 목록 응답: ${clientData.adClients?.length || 0}개 발견`, clientData);
+
+    // 3. URL 채널 확인
+    log("Step 3: 각 클라이언트별 URL 채널 조회");
+    const results = [];
+    
+    for (const client of clientData.adClients || []) {
+      const isWeb = !client.productCode || client.productCode === "AFC"; // AdSense For Content
+      const label = isWeb ? "🌐 웹사이트용" : "📺 기타/유튜브용";
+      
+      log(`검사 중: [${label}] ${client.name}`);
+      
+      const urlRes = await fetch(`https://adsense.googleapis.com/v2/${client.name}/urlchannels?pageSize=10`, {
+        headers: { Authorization: `Bearer ${googleAuthToken}` }
+      });
+      
+      if (urlRes.ok) {
+        const urlData = await urlRes.json();
+        const count = urlData.urlChannels?.length || 0;
+        log(`  - 결과: ${count}개 채널 발견`, urlData);
+        results.push({ client: client.name, count, channels: urlData.urlChannels });
+      } else {
+        log(`  - 결과: 조회 실패 (${urlRes.status}) - 지원하지 않는 클라이언트일 수 있음`);
+      }
+    }
+
+    log("🏁 진단 완료");
+    return { success: true, logs, results };
+
+  } catch (e) {
+    log(`❌ 진단 중단: ${e.message}`);
+    return { success: false, logs, error: e.message };
+  }
 }
 
 /**
@@ -8468,3 +8579,4 @@ function normalizeUrlForComparison(url) {
     return url.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
   }
 }
+

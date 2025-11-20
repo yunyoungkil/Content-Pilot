@@ -22,6 +22,8 @@ export function renderPerformanceDashboard(container) {
             <option value="earnings-asc">수익 낮은 순</option>
             <option value="pageviews-desc">페이지뷰 높은 순</option>
             <option value="pageviews-asc">페이지뷰 낮은 순</option>
+            <option value="rpm-desc">RPM 높은 순 (알짜배기)</option>
+            <option value="ctr-desc">CTR 높은 순 (클릭률)</option>
             <option value="recent">최근 업데이트 순</option>
           </select>
           <button id="perf-refresh-btn" class="perf-control-btn">🔄 새로고침</button>
@@ -127,6 +129,11 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
 
   // 정렬
   const sortedData = [...allPerformanceData].sort((a, b) => {
+    const rpmA = a.performance.pageRPM || a.performance.rpm || 0;
+    const rpmB = b.performance.pageRPM || b.performance.rpm || 0;
+    const ctrA = a.performance.pageCTR || a.performance.ctr || 0;
+    const ctrB = b.performance.pageCTR || b.performance.ctr || 0;
+
     switch (sortBy) {
       case "earnings-desc":
         return (b.performance.estimatedEarnings || 0) - (a.performance.estimatedEarnings || 0);
@@ -136,6 +143,10 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
         return (b.performance.pageviews || 0) - (a.performance.pageviews || 0);
       case "pageviews-asc":
         return (a.performance.pageviews || 0) - (b.performance.pageviews || 0);
+      case "rpm-desc": // [추가]
+        return rpmB - rpmA;
+      case "ctr-desc": // [추가]
+        return ctrB - ctrA;
       case "recent":
         return (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
       default:
@@ -233,7 +244,9 @@ function createPerformanceCard(item, index) {
   const pageviews = perf.pageviews || 0;
   const sessions = perf.sessions || 0;
   const avgDuration = perf.avgSessionDuration || 0;
-  const ctr = perf.ctr || 0;
+  // [수정] pageRPM/pageCTR 우선 사용, 없으면 기존 ctr 사용
+  const rpm = perf.pageRPM || perf.rpm || 0;
+  const ctr = perf.pageCTR || perf.ctr || 0;
 
   return `
     <div class="perf-card" data-card-id="${item.id}">
@@ -254,23 +267,21 @@ function createPerformanceCard(item, index) {
             <span class="metric-label">페이지뷰</span>
             <span class="metric-value">${pageviews.toLocaleString()}</span>
           </div>
-          <div class="perf-metric-item">
-            <span class="metric-icon">👥</span>
-            <span class="metric-label">세션</span>
-            <span class="metric-value">${sessions.toLocaleString()}</span>
+          <div class="perf-metric-item" title="1,000회 노출당 예상 수익">
+            <span class="metric-icon">📈</span>
+            <span class="metric-label">RPM</span>
+            <span class="metric-value">$${rpm.toFixed(2)}</span>
+          </div>
+          <div class="perf-metric-item" title="광고 클릭률">
+            <span class="metric-icon">🎯</span>
+            <span class="metric-label">CTR</span>
+            <span class="metric-value">${ctr.toFixed(2)}%</span>
           </div>
           <div class="perf-metric-item">
             <span class="metric-icon">⏱️</span>
-            <span class="metric-label">체류 시간</span>
+            <span class="metric-label">체류</span>
             <span class="metric-value">${Math.round(avgDuration)}초</span>
           </div>
-          ${ctr > 0 ? `
-            <div class="perf-metric-item">
-              <span class="metric-icon">🎯</span>
-              <span class="metric-label">CTR</span>
-              <span class="metric-value">${ctr.toFixed(2)}%</span>
-            </div>
-          ` : ''}
         </div>
         ${perf.lastUpdatedAt ? `
           <div class="perf-card-footer">
