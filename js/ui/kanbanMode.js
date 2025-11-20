@@ -289,6 +289,13 @@ function createKanbanCard(id, data, status) {
     ? Object.keys(linkedScraps).length
     : (Array.isArray(linkedScraps) ? linkedScraps.length : 0);
   let metaInfoHtml = "";
+
+  // ▼▼▼ [1] 애드센스 배지 HTML 생성 (조건 없이 독립적으로 생성) ▼▼▼
+  let adsenseBadgeHtml = "";
+  if (data.adSenseRegistered) {
+    adsenseBadgeHtml = `<span class="adsense-badge" title="애드센스 URL 채널에 정식 등록됨 (데이터 2중 백업)">A</span>`;
+  }
+  // ▲▲▲ 생성 끝 ▲▲▲
   
   // ▼▼▼ [수정] 모든 아이디어 카드의 출처 라벨을 명확히 정의 ▼▼▼
   // 출처 정보 표시 (모든 origin 타입에 대해 명확한 라벨 정의)
@@ -422,11 +429,6 @@ function createKanbanCard(id, data, status) {
       const pageviews = performance.pageviews || 0;
       const earnings = performance.estimatedEarnings || 0;
       const avgDuration = performance.avgSessionDuration || 0;
-      
-      // [추가] 애드센스 등록 배지 HTML 생성
-      const adsenseBadgeHtml = data.adSenseRegistered 
-        ? `<span class="adsense-badge" title="애드센스 URL 채널에 정식 등록됨 (데이터 2중 백업)">A</span>` 
-        : '';
 
       metaInfoHtml += `
         <span class="kanban-card-meta performance-summary-tag" title="페이지뷰: ${pageviews.toLocaleString()}, 수익: $${earnings.toFixed(2)}, 체류: ${Math.round(avgDuration)}초">
@@ -434,6 +436,16 @@ function createKanbanCard(id, data, status) {
         </span>
       `;
     }
+    
+    // ▼▼▼ [2] 메타 정보(metaInfoHtml)에 배지 추가하기 ▼▼▼
+    // [수정 포인트] 기존에는 hasPerformance 안에서만 배지를 넣었을 수 있습니다.
+    // 아래와 같이 '발행 완료(done)' 컬럼이면 성과가 없어도 배지가 보이게 하세요.
+    // [추가] 배지가 있고, 아직 메타 정보에 추가되지 않았다면 추가
+    if (adsenseBadgeHtml && !hasPerformance) {
+      // 성과 태그 옆이나, 별도의 줄에 추가
+      metaInfoHtml += `<span class="kanban-card-meta" style="margin-left:4px;">${adsenseBadgeHtml} 인증됨</span>`;
+    }
+    // ▲▲▲ 추가 완료 ▲▲▲
     
     // 데이터 수집 상태 표시 (GA4, AdSense 개별 상태)
     // 실제 오류가 있거나 수집 중이거나 성과 데이터가 있을 때만 표시

@@ -8363,14 +8363,42 @@ chrome.runtime.onInstalled.addListener((details) => {
  * - API가 보내주는 인코딩된 URL(%ED%95%9C%EA%B8%80)을 디코딩하여 비교합니다.
  */
 /**
- * [최종 완결판 v4] 애드센스 등록 여부 확인 (토큰 자동 갱신 포함)
- * - 401(Unauthorized) 발생 시 토큰을 자동으로 갱신하고 재시도합니다.
- * - 유튜브 클라이언트는 제외하고 웹사이트용 채널만 정확히 가져옵니다.
+ * [신규] AdSense URL 전용 정규화 함수 (충돌 방지용)
+ */
+function normalizeAdSenseUrl(url) {
+  if (!url) return "";
+  try {
+    const urlStr = url.trim();
+    // 프로토콜이 없으면 붙여서 파싱
+    const targetUrl = (urlStr.startsWith('http://') || urlStr.startsWith('https://')) ? urlStr : `https://${urlStr}`;
+    const urlObj = new URL(targetUrl);
+    
+    // 호스트(www제거) + 경로(끝슬래시제거)
+    const host = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+    const pathname = urlObj.pathname.replace(/\/$/, '');
+    
+    // 디코딩 한번 더 안전하게 수행 후 반환
+    try {
+        return decodeURIComponent(`${host}${pathname}`);
+    } catch (e) {
+        return `${host}${pathname}`;
+    }
+  } catch (e) {
+    return url.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('?')[0].replace(/\/$/, '');
+  }
+}
+
+/**
+ * [최종 수정 v5] 애드센스 등록 여부 확인 (필드명 수정: uriPattern)
+ * - API 응답 필드명을 urlPattern -> uriPattern 으로 수정하여 데이터를 정확히 가져옵니다.
+ */
+/**
+ * [최종 업그레이드 v7] 애드센스 등록 여부 확인 (유연한 매칭 적용)
+ * - 정확한 일치뿐만 아니라, '포함(Contains)' 관계도 인정하여 서브도메인 문제를 해결합니다.
  */
 async function checkAdSenseRegistrationStatus(retryToken = null) {
-  console.log(`🚀 [AdSense] 등록 확인 v4 시작... ${retryToken ? '(재시도)' : ''}`);
+  console.log(`🚀 [AdSense] 등록 확인 v7 (유연한 매칭) 시작...`);
   
-  // 재시도 시에는 전달받은 새 토큰 사용, 아니면 저장된 토큰 사용
   let token = retryToken;
   let accountId = null;
 
@@ -8383,32 +8411,23 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
     accountId = storage.adSenseAccountId;
   }
 
-  if (!token || !accountId) throw new Error("인증 정보가 없습니다. 채널 설정에서 다시 로그인해주세요.");
+  if (!token || !accountId) throw new Error("인증 정보가 없습니다.");
 
   try {
-    // 1. 계정 찾기
+    // 1. 계정 확인
     let accountName = `accounts/${accountId}`;
     try {
       const listRes = await fetch("https://adsense.googleapis.com/v2/accounts", {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      // 401 에러 체크 (여기서 걸리면 바로 catch로 이동하여 갱신 시도)
       if (listRes.status === 401) throw new Error("UNAUTHORIZED");
-      
       if (listRes.ok) {
         const listData = await listRes.json();
         const normalizedInput = accountId.trim().replace(/^accounts\//, '');
         const matched = listData.accounts?.find(acc => acc.name.includes(normalizedInput));
-        if (matched) {
-          accountName = matched.name;
-          console.log(`✅ [AdSense] 계정 확인됨: ${accountName}`);
-        }
+        if (matched) accountName = matched.name;
       }
-    } catch (e) { 
-      if (e.message === "UNAUTHORIZED") throw e; // 401은 상위로 던짐
-      /* 그 외 오류는 무시하고 진행 */ 
-    }
+    } catch (e) { if (e.message === "UNAUTHORIZED") throw e; }
 
     // 2. 클라이언트 및 URL 채널 조회
     const registeredUrls = new Set();
@@ -8424,12 +8443,9 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
     const adClients = clientsData.adClients || [];
 
     await Promise.all(adClients.map(async (client) => {
-      // 유튜브 및 기타 클라이언트 필터링
-      if (client.productCode === "YOUTUBE" || client.name.includes("ca-yt")) {
-        return; 
-      }
+      if (client.productCode === "YOUTUBE" || client.name.includes("ca-yt")) return;
 
-      console.log(`📡 [AdSense] 웹사이트 클라이언트 조회 중: ${client.name}`);
+      console.log(`📡 [AdSense] 조회 중: ${client.name}`);
 
       let nextPageToken = null;
       do {
@@ -8437,25 +8453,24 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
         if (nextPageToken) url += `&pageToken=${nextPageToken}`;
         
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        
-        if (res.status === 401) throw new Error("UNAUTHORIZED"); // 루프 내부라도 즉시 상위로 던짐
-        
-        if (!res.ok) {
-          console.warn(`⚠️ [AdSense] 조회 실패 (${client.name}): ${res.status}`);
-          return;
-        }
+        if (res.status === 401) throw new Error("UNAUTHORIZED");
+        if (!res.ok) return;
 
         const json = await res.json();
         if (json.urlChannels) {
-          console.log(`📦 [AdSense] ${json.urlChannels.length}개 채널 데이터 수신`);
           json.urlChannels.forEach(ch => {
-            if (ch.urlPattern) {
+            const urlValue = ch.uriPattern || ch.urlPattern;
+            if (urlValue) {
+              // 디코딩 및 정규화하여 저장
+              let normalized = "";
               try {
-                  const decodedUrl = decodeURIComponent(ch.urlPattern);
-                  registeredUrls.add(normalizeUrlForComparison(decodedUrl));
-              } catch (err) {
-                  registeredUrls.add(normalizeUrlForComparison(ch.urlPattern));
+                // normalizeAdSenseUrl 함수 사용 (없으면 fallback)
+                const normalizer = typeof normalizeAdSenseUrl === 'function' ? normalizeAdSenseUrl : (u) => u.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+                normalized = normalizer(decodeURIComponent(urlValue));
+              } catch (e) {
+                normalized = urlValue;
               }
+              registeredUrls.add(normalized);
             }
           });
         }
@@ -8463,72 +8478,69 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
       } while (nextPageToken);
     }));
 
-    console.log(`🏁 [AdSense] 최종 집계된 URL: ${registeredUrls.size}개`);
+    console.log(`📦 [AdSense] 수집된 URL 패턴: ${registeredUrls.size}개`);
 
-    // 3. 데이터베이스 업데이트
+    // 3. 데이터베이스 업데이트 (유연한 매칭 로직 적용)
     let updatedCount = 0;
+    
     if (registeredUrls.size > 0) {
       const db = firebase.database();
       const snapshot = await db.ref("kanban").once("value");
       const allCards = snapshot.val() || {};
       const updates = {};
+      const normalizer = typeof normalizeAdSenseUrl === 'function' ? normalizeAdSenseUrl : (u) => u.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const urlList = [...registeredUrls]; // 배열로 변환
 
       for (const status in allCards) {
         for (const cardId in allCards[status]) {
           const card = allCards[status][cardId];
           if (card.publishedUrl) {
             let normUrl = "";
-            try { normUrl = normalizeUrlForComparison(decodeURIComponent(card.publishedUrl)); } 
-            catch(e) { normUrl = normalizeUrlForComparison(card.publishedUrl); }
+            try { normUrl = normalizer(decodeURIComponent(card.publishedUrl)); } 
+            catch(e) { normUrl = normalizer(card.publishedUrl); }
             
-            const isReg = registeredUrls.has(normUrl);
+            // 🔥 [핵심 업그레이드] 매칭 로직 3단계
+            // 1. 정확히 일치 (Exact Match)
+            // 2. 등록된 패턴으로 시작 (Prefix Match): 예) example.com/blog -> example.com/blog/1
+            // 3. 카드 URL이 등록된 패턴을 포함 (Contains Match): 예) k-posting.info -> costcatcher.k-posting.info
+            const isReg = urlList.some(reg => {
+                return normUrl === reg || normUrl.startsWith(reg) || (normUrl.includes(reg) && reg.includes('.'));
+            });
+            
             if (card.adSenseRegistered !== isReg) {
               updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isReg;
               updatedCount++;
+            }
+            
+            // 디버깅: 매칭 성공한 경우 로그
+            if (isReg && updatedCount <= 5) {
+               console.log(`✅ [매칭 성공] 카드: ${normUrl}`);
             }
           }
         }
       }
       if (updatedCount > 0) await db.ref().update(updates);
     }
-
+    
+    console.log(`🏁 [AdSense] 최종 완료: ${updatedCount}개 카드 상태 업데이트됨`);
     return { totalRegistered: registeredUrls.size, updatedCards: updatedCount };
 
   } catch (e) {
-    // 🔥 [핵심] 401 에러 발생 시 토큰 자동 갱신 로직
-    if (e.message === "UNAUTHORIZED" || e.message.includes("401")) {
-      if (retryToken) { // 이미 재시도 중이었다면 포기
-        console.error("💥 [AdSense] 토큰 갱신 후에도 실패했습니다. 재로그인이 필요합니다.");
-        throw e;
-      }
-      
-      console.log("🔄 [AdSense] 토큰 만료 감지! 자동 갱신을 시도합니다...");
-      
+    if (e.message === "UNAUTHORIZED") {
+      if (retryToken) throw e;
+      console.log("🔄 [AdSense] 토큰 갱신 시도...");
       try {
-        // 1. 기존 토큰 제거
         await new Promise(resolve => chrome.identity.removeCachedAuthToken({ token }, resolve));
-        
-        // 2. 새 토큰 발급
         const newToken = await new Promise((resolve, reject) => {
           chrome.identity.getAuthToken({ interactive: false }, (t) => {
              if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
              else resolve(t);
           });
         });
-        
-        // 3. 저장 및 재시도
         await chrome.storage.local.set({ googleAuthToken: newToken });
-        console.log("✅ [AdSense] 토큰 갱신 성공! 작업을 재시작합니다.");
-        
-        return checkAdSenseRegistrationStatus(newToken); // 재귀 호출
-
-      } catch (refreshError) {
-        console.error("❌ [AdSense] 토큰 자동 갱신 실패:", refreshError);
-        throw new Error("인증 세션이 만료되었습니다. 채널 연동 탭에서 다시 로그인해주세요.");
-      }
+        return checkAdSenseRegistrationStatus(newToken);
+      } catch (err) { throw new Error("재로그인 필요"); }
     }
-    
-    console.error("💥 [AdSense] 데이터 동기화 실패:", e);
     throw e;
   }
 }

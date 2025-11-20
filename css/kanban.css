@@ -1682,17 +1682,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  background-color: #e6f4ea;
-  color: #137333;
+  width: 18px;
+  height: 18px;
+  background-color: #e6f4ea; /* 연한 초록색 */
+  color: #137333; /* 진한 초록색 글씨 */
   border: 1px solid #ceead6;
   border-radius: 50%;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   margin-left: 6px;
   cursor: help;
   vertical-align: middle;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 /* 2. 상세 지표 (RPM, CTR) 태그 */
