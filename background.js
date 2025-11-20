@@ -6572,10 +6572,21 @@ async function updateSinglePerformanceMetric(contentInfo) {
     }
 
     // GA4와 AdSense 데이터를 병렬로 수집
+    console.log(`🚀 [성과 지표 수집] 데이터 수집 시작:`, {
+      url: contentInfo.url,
+      gaPropertyId: gaPropertyId,
+      adSenseAccountId: adSenseAccountId
+    });
+    
     const [analyticsData, adsenseData] = await Promise.allSettled([
       getAnalyticsData(googleAuthToken, gaPropertyId, contentInfo.url),
       getAdsenseData(googleAuthToken, adSenseAccountId, contentInfo.url),
     ]);
+    
+    console.log(`📊 [성과 지표 수집] 데이터 수집 완료:`, {
+      analyticsStatus: analyticsData.status,
+      adsenseStatus: adsenseData.status
+    });
 
     // 결과 처리
     const analyticsResult = analyticsData.status === "fulfilled" 
@@ -6716,16 +6727,21 @@ async function updateSinglePerformanceMetric(contentInfo) {
  * 재시도 로직과 상세 로그를 포함합니다.
  */
 /**
- * [최종 완성] GA4 데이터 수집 (기본 지표 + 유입 경로 분석)
- * - 매칭 로직: BEGINS_WITH + 디코딩된 경로 사용 (매칭률 100% 목표)
- * - 데이터 확장: 참여율, 신규 방문자, 그리고 '주력 유입 경로(Top Source)'까지 수집
+ * [검증 모드] GA4 데이터 수집 (상세 로그 포함)
  */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
+  console.log(`🔍 [GA4 검증] 함수 호출됨 - URL: ${url}, PropertyId: ${propertyId}, RetryCount: ${retryCount}`);
+  
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   
   // 1. URL 경로 정제
   let urlObj;
-  try { urlObj = new URL(url); } catch (e) { return { pageviews: 0, gaEarnings: 0 }; }
+  try { 
+    urlObj = new URL(url); 
+  } catch (e) { 
+    console.error(`❌ [GA4 검증] URL 파싱 실패: ${url}`, e);
+    return { pageviews: 0, gaEarnings: 0 }; 
+  }
 
   const rawPath = urlObj.pathname;
   let decodedPath = rawPath;
@@ -6734,6 +6750,12 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
 
   // 필터 경로 (디코딩된 한글 경로 사용)
   const filterPath = normalizedPath; 
+
+  console.log(`🔍 [GA4 검증] 요청 시작: ${url}`);
+  console.log(`   - 원본 경로: ${rawPath}`);
+  console.log(`   - 디코딩 경로: ${decodedPath}`);
+  console.log(`   - 정규화 경로: ${normalizedPath}`);
+  console.log(`   - 필터 경로: ${filterPath}`);
 
   try {
     // [요청 1] 핵심 성과 지표 (Metrics)
@@ -6744,18 +6766,18 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
         dimensions: [{ name: "pagePath" }], 
         metrics: [
-          { name: "screenPageViews" },          // 0: 조회수
-          { name: "averageSessionDuration" },   // 1: 체류 시간
-          { name: "sessions" },                 // 2: 세션
-          { name: "screenPageViewsPerSession" },// 3: 세션당 페이지수
-          { name: "bounceRate" },               // 4: 이탈률
-          { name: "publisherAdRevenue" },       // 5: 수익
-          { name: "publisherAdImpressions" },   // 6: 노출수
-          { name: "publisherAdClicks" },        // 7: 클릭수
-          { name: "engagementRate" },           // 8: 참여율 (New!)
-          { name: "averageEngagementTime" },    // 9: 평균 참여 시간 (New!)
-          { name: "newUsers" },                 // 10: 신규 방문자 (New!)
-          { name: "activeUsers" }               // 11: 활성 사용자 (New!)
+          { name: "screenPageViews" },          // 0
+          { name: "averageSessionDuration" },   // 1
+          { name: "sessions" },                 // 2
+          { name: "screenPageViewsPerSession" },// 3
+          { name: "bounceRate" },               // 4
+          { name: "publisherAdRevenue" },       // 5
+          { name: "publisherAdImpressions" },   // 6
+          { name: "publisherAdClicks" },        // 7
+          { name: "engagementRate" },           // 8
+          { name: "averageEngagementTime" },    // 9
+          { name: "newUsers" },                 // 10
+          { name: "activeUsers" }               // 11
         ],
         dimensionFilter: {
           filter: {
@@ -6766,16 +6788,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       })
     });
 
-    // [요청 2] 유입 경로 분석 (Source) - 이 글의 1등 유입처 찾기
+    // [요청 2] 유입 경로 분석 (Source)
     const sourceRequest = fetch(API_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-        dimensions: [{ name: "sessionSource" }, { name: "sessionMedium" }], // 소스/매체
+        dimensions: [{ name: "sessionSource" }, { name: "sessionMedium" }],
         metrics: [{ name: "activeUsers" }], 
-        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }], // 사용자 많은 순 정렬
-        limit: 1, // 1등만 가져옴
+        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+        limit: 1, 
         dimensionFilter: {
           filter: {
             fieldName: "pagePath",
@@ -6785,39 +6807,36 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       })
     });
 
-    // 병렬 실행
     const [metricsRes, sourceRes] = await Promise.all([metricsRequest, sourceRequest]);
 
     if (!metricsRes.ok) {
+      console.error(`❌ [GA4 검증] API 오류: ${metricsRes.status}`);
       if (metricsRes.status === 401) throw new Error("UNAUTHORIZED");
-      // 데이터가 없거나 오류인 경우
       return { pageviews: 0, gaEarnings: 0 };
     }
 
     const metricsData = await metricsRes.json();
     const sourceData = await sourceRes.ok ? await sourceRes.json() : {};
 
-    // 데이터 파싱
+    // 검증 로그: 원본 데이터 출력
+    console.log(`📦 [GA4 검증] 원본 응답 (Metrics):`, metricsData);
+    console.log(`📦 [GA4 검증] 원본 응답 (Source):`, sourceData);
+
     if (metricsData.rows && metricsData.rows.length > 0) {
-      const row = metricsData.rows[0]; // 가장 관련성 높은 첫 번째 행 사용
+      const row = metricsData.rows[0]; 
       const values = row.metricValues;
 
-      // 기본 데이터
+      // 데이터 파싱
       const adRevenue = parseFloat(values[5]?.value || "0");
       const adImpressions = parseInt(values[6]?.value || "0", 10);
       const adClicks = parseInt(values[7]?.value || "0", 10);
-      
-      // 파생 지표
       const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
       const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
 
-      // 유입 경로 파싱
       let topSource = "-";
       if (sourceData.rows && sourceData.rows.length > 0) {
         const srcRow = sourceData.rows[0];
-        const source = srcRow.dimensionValues[0].value; // google, naver
-        const medium = srcRow.dimensionValues[1].value; // organic, referral
-        topSource = `${source} / ${medium}`;
+        topSource = `${srcRow.dimensionValues[0].value} / ${srcRow.dimensionValues[1].value}`;
       }
 
       const analyticsData = {
@@ -6826,34 +6845,28 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         sessions: parseInt(values[2]?.value || "0", 10),
         pagesPerSession: parseFloat(values[3]?.value || "0"),
         bounceRate: parseFloat(values[4]?.value || "0"),
-        
         gaEarnings: adRevenue,
         gaImpressions: adImpressions,
         gaClicks: adClicks,
         pageRPM: parseFloat(pageRPM.toFixed(2)),
         pageCTR: parseFloat(pageCTR.toFixed(2)),
-        
-        // [신규] 성장 지표
         engagementRate: parseFloat(values[8]?.value || "0"),
         avgEngagementTime: parseFloat(values[9]?.value || "0"),
         newUsers: parseInt(values[10]?.value || "0", 10),
         activeUsers: parseInt(values[11]?.value || "0", 10),
-        
-        // [신규] 유입 경로
         topSource: topSource
       };
       
-      // 재방문자 계산
       analyticsData.returningUsers = Math.max(0, analyticsData.activeUsers - analyticsData.newUsers);
 
-      console.log(`[GA4] 데이터 수집 성공 (${url})`, analyticsData);
+      console.log(`✅ [GA4 검증] 최종 파싱 데이터 (${url}):`, analyticsData);
       return analyticsData;
     }
 
+    console.warn(`⚠️ [GA4 검증] 데이터 없음 (매칭된 행 0개)`);
     return { pageviews: 0, gaEarnings: 0 };
 
   } catch (error) {
-    // 토큰 만료 시 재시도 (기존 로직 유지)
     if (error.message === "UNAUTHORIZED" && retryCount < 3) {
       try {
         await new Promise(r => chrome.identity.removeCachedAuthToken({ token }, r));
@@ -6864,6 +6877,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
       } catch (e) {}
     }
+    console.error(`💥 [GA4 검증] 예외 발생:`, error);
     return { pageviews: 0, gaEarnings: 0 };
   }
 }
@@ -6873,9 +6887,14 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
  * 재시도 로직과 상세 로그를 포함합니다.
  */
 async function getAdsenseData(token, accountId, url, retryCount = 0) {
+  console.log(`🔍 [AdSense 검증] 함수 호출됨 - URL: ${url}, AccountId: ${accountId}, RetryCount: ${retryCount}`);
+  
   const parentAccount = `accounts/${accountId}`;
   const API_URL = `https://adsense.googleapis.com/v2/${parentAccount}/reports:generate`;
   const MAX_RETRIES = 3;
+
+  console.log(`🔍 [AdSense 검증] 요청 시작: ${url}`);
+  console.log(`   - 계정 ID: ${accountId}`);
 
   try {
     // URL 정규화 (도메인만 추출하여 필터링 정확도 향상)
@@ -6913,6 +6932,7 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
     let hasAccountData = false;
     let allAccountData = null;
     try {
+      console.log(`🔍 [AdSense 검증] 전체 계정 데이터 확인 시작`);
       const testResponse = await fetch(API_URL, {
         method: "POST",
         headers: { 
@@ -6930,7 +6950,8 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
         const testData = await testResponse.json();
         hasAccountData = testData.rows && testData.rows.length > 0;
         allAccountData = testData;
-        console.log(`[AdSense] 전체 계정 데이터 확인: ${hasAccountData ? `데이터 있음 (${testData.rows.length}개 URL)` : '데이터 없음'}`);
+        console.log(`📦 [AdSense 검증] 전체 계정 데이터 원본 응답:`, testData);
+        console.log(`   - 데이터 있음: ${hasAccountData ? `예 (${testData.rows.length}개 URL)` : '아니오'}`);
         
         // 전체 데이터에서 URL 매칭 시도
         if (hasAccountData && testData.rows) {
@@ -6952,15 +6973,17 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
               const ctr = pageViews > 0 ? (clicks / pageViews) * 100 : 0;
               
               const matchedUrl = matchedRow.dimensionValues?.[0]?.value || '알 수 없음';
-              console.log(`[AdSense] 전체 데이터에서 매칭 성공: ${matchedUrl}`);
-              
-              return {
+              const matchedData = {
                 estimatedEarnings: parseFloat(row[0]?.value || "0.0"),
                 pageRPM: parseFloat(row[1]?.value || "0.0"),
                 clicks: clicks,
                 pageViews: pageViews,
                 ctr: parseFloat(ctr.toFixed(2)),
               };
+              console.log(`✅ [AdSense 검증] 전체 데이터에서 매칭 성공: ${matchedUrl}`);
+              console.log(`   - 최종 파싱 데이터:`, matchedData);
+              
+              return matchedData;
             }
           }
         }
@@ -7023,6 +7046,9 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
       const filter = filterStrategy.filter;
       triedFilters.push(filterStrategy.name);
       
+      console.log(`🔍 [AdSense 검증] 필터 시도: ${filterStrategy.name}`);
+      console.log(`   - 필터 값:`, filter);
+      
       try {
         const requestBody = {
           dateRange: "LAST_30_DAYS",
@@ -7053,6 +7079,8 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
+          
+          console.error(`❌ [AdSense 검증] API 오류 (${response.status}):`, errorData);
           
           // 404 오류 처리: 리포트 생성 불가 (데이터 부재일 수 있음)
           // AdSense API에서 404는 계정이 없거나 리포트를 생성할 수 없을 때 발생
@@ -7126,9 +7154,12 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 
         const data = await response.json();
         
+        // 검증 로그: 원본 데이터 출력
+        console.log(`📦 [AdSense 검증] 원본 응답 (필터: ${filterStrategy.name}):`, data);
+        
         // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음)
         if (!data.rows || data.rows.length === 0) {
-          console.log(`[AdSense] 데이터 없음 (${url}, 필터: ${filter}): 해당 URL/도메인에 데이터가 없습니다.`);
+          console.log(`⚠️ [AdSense 검증] 데이터 없음 (필터: ${filterStrategy.name}): 해당 URL/도메인에 데이터가 없습니다.`);
           // 다음 필터 전략 시도
           continue;
         }
@@ -7147,7 +7178,7 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
               pageViews: pageViews,
               ctr: parseFloat(ctr.toFixed(2)),
             };
-            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, adsenseData);
+            console.log(`✅ [AdSense 검증] 최종 파싱 데이터 (${url}, 필터: ${filterStrategy.name}):`, adsenseData);
             break; // 성공하면 루프 종료
           }
         }
@@ -7160,6 +7191,9 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 
     // 모든 필터 전략 실패한 경우
     if (!adsenseData) {
+      console.warn(`⚠️ [AdSense 검증] 모든 필터 전략 실패`);
+      console.log(`   - 시도한 필터: ${triedFilters.join(', ')}`);
+      
       // lastError가 실제 API 오류(401, 403 등)인지 확인
       // 404는 리포트 생성 실패를 의미하지만, 계정 정보 조회가 성공했다면 데이터 없음을 의미할 수 있음
       const isRealError = lastError && (
@@ -7172,10 +7206,11 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
       
       if (isRealError) {
         // 실제 API 오류인 경우
+        console.error(`❌ [AdSense 검증] 실제 API 오류 발생:`, lastError);
         throw lastError;
       } else {
         // 데이터가 없는 경우 (404이지만 계정은 존재, 또는 200 OK이지만 rows가 비어있음) - 오류가 아님
-        console.log(`[AdSense] 데이터 없음 (${url}): 모든 필터 전략 실패했지만 실제 오류는 아닙니다. 데이터가 없을 수 있습니다.`);
+        console.log(`⚠️ [AdSense 검증] 데이터 없음 (${url}): 모든 필터 전략 실패했지만 실제 오류는 아닙니다. 데이터가 없을 수 있습니다.`);
         return {
           estimatedEarnings: 0,
           pageRPM: 0,
@@ -7189,7 +7224,7 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 
     return adsenseData;
   } catch (error) {
-    console.error(`[AdSense] 데이터 요청 실패 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
+    console.error(`💥 [AdSense 검증] 예외 발생 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
       url,
       accountId,
       error: error.message,
