@@ -19,6 +19,15 @@ export function renderChannelMode(container) {
           <input type="password" id="gemini-api-key" placeholder="AIzaSy...">
           </div>
       </div>
+      <div class="api-key-section">
+        <div class="input-group" style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed #eee;">
+           <div style="display: flex; justify-content: space-between; align-items: center;">
+             <label style="margin: 0;">애드센스 URL 채널 동기화</label>
+             <button id="sync-adsense-status-btn" class="cp-btn-secondary small">🔄 등록 상태 확인하기</button>
+           </div>
+           <p class="settings-desc" style="margin-top: 4px;">애드센스 관리자 페이지에 수동으로 등록된 URL 목록을 가져와 카드의 상태를 업데이트합니다.</p>
+        </div>
+      </div>
       <div class="my-channel-list-section">
         <div class="section-header">
           <h3>📺 내 채널 목록</h3>
@@ -573,6 +582,28 @@ export function renderChannelMode(container) {
           });
         } else {
           alert("❌ 저장 실패: " + (response?.error || "알 수 없는 오류"));
+        }
+      });
+    });
+  }
+
+  // [추가] 애드센스 동기화 버튼 이벤트
+  const syncBtn = container.querySelector("#sync-adsense-status-btn");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", () => {
+      syncBtn.disabled = true;
+      syncBtn.textContent = "확인 중...";
+      
+      chrome.runtime.sendMessage({ action: "check_adsense_registration" }, (response) => {
+        syncBtn.disabled = false;
+        syncBtn.textContent = "🔄 등록 상태 확인하기";
+        
+        if (response && response.success) {
+          const { totalRegistered, updatedCards } = response.data;
+          alert(`✅ 확인 완료!\n\n- 발견된 등록 URL: ${totalRegistered}개\n- 업데이트된 카드: ${updatedCards}개`);
+          // 대시보드나 칸반 데이터 갱신이 필요하면 여기서 트리거
+        } else {
+          alert("❌ 확인 실패: " + (response?.error || "알 수 없는 오류"));
         }
       });
     });

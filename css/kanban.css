@@ -1674,3 +1674,41 @@
   margin: 0 0 12px 0;
   font-size: 20px;
 }
+
+/* --- [신규] 애드센스 등록 배지 및 상세 지표 스타일 --- */
+
+/* 1. 애드센스 등록 배지 (카드 제목 옆이나 수익 옆에 표시) */
+.adsense-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background-color: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 900;
+  margin-left: 6px;
+  cursor: help;
+  vertical-align: middle;
+}
+
+/* 2. 상세 지표 (RPM, CTR) 태그 */
+.metric-detail-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #f1f3f5;
+}
+
+.metric-sub-tag {
+  font-size: 10px;
+  color: #5f6368;
+  background: #f8f9fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}

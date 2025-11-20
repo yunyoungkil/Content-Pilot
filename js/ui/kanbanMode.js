@@ -423,9 +423,14 @@ function createKanbanCard(id, data, status) {
       const earnings = performance.estimatedEarnings || 0;
       const avgDuration = performance.avgSessionDuration || 0;
       
+      // [추가] 애드센스 등록 배지 HTML 생성
+      const adsenseBadgeHtml = data.adSenseRegistered 
+        ? `<span class="adsense-badge" title="애드센스 URL 채널에 정식 등록됨 (데이터 2중 백업)">A</span>` 
+        : '';
+
       metaInfoHtml += `
         <span class="kanban-card-meta performance-summary-tag" title="페이지뷰: ${pageviews.toLocaleString()}, 수익: $${earnings.toFixed(2)}, 체류: ${Math.round(avgDuration)}초">
-          📊 ${pageviews.toLocaleString()}회 / $${earnings.toFixed(2)}
+          📊 ${pageviews.toLocaleString()}회 / $${earnings.toFixed(2)} ${adsenseBadgeHtml}
         </span>
       `;
     }
@@ -458,12 +463,21 @@ function createKanbanCard(id, data, status) {
     const avgDuration = performance.avgSessionDuration || 0;
     
     // 성과 지표 미리보기
+    const pageRPM = performance.pageRPM || 0; // [추가]
+    const pageCTR = performance.pageCTR || 0; // [추가]
+
     const performancePreview = `
       <div class="performance-preview">
         <span class="perf-metric" title="페이지뷰">👁️ ${pageviews.toLocaleString()}</span>
         <span class="perf-metric" title="수익">💰 $${earnings.toFixed(2)}</span>
         ${avgDuration > 0 ? `<span class="perf-metric" title="평균 체류 시간">⏱️ ${Math.round(avgDuration)}초</span>` : ''}
       </div>
+      ${(pageRPM > 0 || pageCTR > 0) ? `
+        <div class="metric-detail-row">
+          <span class="metric-sub-tag" title="1,000회 노출당 수익">RPM $${pageRPM.toFixed(2)}</span>
+          <span class="metric-sub-tag" title="광고 클릭률">CTR ${pageCTR.toFixed(1)}%</span>
+        </div>
+      ` : ''}
     `;
     metaInfoHtml += performancePreview;
   } else if (hasError) {
