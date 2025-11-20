@@ -131,11 +131,13 @@ async function processPerformanceData(allCards, container) {
           title: card.title,
           performance: {
             estimatedEarnings: card.performance.estimatedEarnings,
+            gaEarnings: card.performance.gaEarnings,
             pageviews: card.performance.pageviews,
             engagementRate: card.performance.engagementRate,
             newUsers: card.performance.newUsers,
             avgEngagementTime: card.performance.avgEngagementTime,
-            pageRPM: card.performance.pageRPM
+            pageRPM: card.performance.pageRPM,
+            lastUpdatedAt: card.performance.lastUpdatedAt
           }
         });
         
@@ -314,7 +316,10 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
  */
 function createPerformanceCard(item, index) {
   const perf = item.performance;
-  const earnings = perf.estimatedEarnings || 0;
+  // 수익 데이터: estimatedEarnings 우선, 없으면 gaEarnings, 없으면 0
+  const earnings = perf.estimatedEarnings !== undefined && perf.estimatedEarnings !== null
+    ? perf.estimatedEarnings
+    : (perf.gaEarnings !== undefined && perf.gaEarnings !== null ? perf.gaEarnings : 0);
   // [수정 요청 2] 카드 생성 함수 수정: pageviews와 pageViews 둘 다 체크 (Fallback 로직)
   const pageviews = perf.pageviews || perf.pageViews || 0; // AdSense는 pageViews (대문자 V)
   const engagementRate = (perf.engagementRate || 0) * 100; // % 변환

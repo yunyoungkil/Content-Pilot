@@ -6793,6 +6793,9 @@ async function updateSinglePerformanceMetric(contentInfo) {
       path: contentInfo.path,
       updateData: {
         estimatedEarnings: updateData.estimatedEarnings,
+        gaEarnings: updateData.gaEarnings,
+        adsenseEarnings: adsenseResult.estimatedEarnings,
+        finalEarnings: finalEarnings,
         pageviews: updateData.pageviews,
         engagementRate: updateData.engagementRate,
         newUsers: updateData.newUsers,
@@ -6981,26 +6984,9 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       let errorBody = null;
       try {
         errorBody = await metricsRes.clone().json();
-        const errorMessage = errorBody?.error?.message || 'Unknown error';
-        const errorCode = errorBody?.error?.code || 'Unknown';
-        console.error(`[GA4 API 에러] ${metricsRes.status} ${metricsRes.statusText}`, {
-          status: metricsRes.status,
-          errorCode: errorCode,
-          errorMessage: errorMessage,
-          fullError: errorBody,
-          url: url,
-          filterPath: filterPath,
-          propertyId: propertyId
-        });
-        // 에러 메시지를 더 명확하게 표시
-        console.error(`[GA4 API 에러 상세]`, errorBody);
+        // 에러 로그는 재시도 로직에서 처리하므로 여기서는 출력하지 않음
       } catch (e) {
-        console.error(`[GA4 API 에러] ${metricsRes.status} ${metricsRes.statusText} (응답 본문 파싱 실패)`, {
-          status: metricsRes.status,
-          url: url,
-          filterPath: filterPath,
-          parseError: e.message
-        });
+        // 에러 응답 파싱 실패는 조용히 처리
       }
 
       if (metricsRes.status === 401) throw new Error("UNAUTHORIZED");
@@ -7024,17 +7010,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         const isPublisherMetricError = errorMsg.includes('publisherAdRevenue') || errorMsg.includes('publisherAdImpressions') || errorMsg.includes('publisherAdClicks');
         const isAverageEngagementTimeError = errorMsg.includes('averageEngagementTime');
         
-        if (isMetricError) {
-          console.error(`[GA4] 메트릭 이름 오류 감지: ${errorMsg}`);
-          console.error(`[GA4] 사용 중인 메트릭:`, [
-            "screenPageViews", "averageSessionDuration", "sessions", 
-            "screenPageViewsPerSession", "bounceRate", 
-            ...(excludePublisherMetrics ? [] : ["publisherAdRevenue", "publisherAdImpressions", "publisherAdClicks"]),
-            "engagementRate", 
-            ...(excludeAverageEngagementTime ? [] : ["averageEngagementTime"]),
-            "newUsers", "activeUsers"
-          ]);
-        }
+        // 메트릭 오류는 재시도 로직에서 자동 처리되므로 로그 제거
         
         // Publisher 메트릭 오류인 경우, Publisher 메트릭을 제외하고 재시도
         if (isPublisherMetricError && !excludePublisherMetrics && retryCount < 3) {
