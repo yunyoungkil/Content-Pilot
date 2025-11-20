@@ -6715,71 +6715,48 @@ async function updateSinglePerformanceMetric(contentInfo) {
  * [G-14] Google Analytics Data API를 호출하여 지표를 가져옵니다.
  * 재시도 로직과 상세 로그를 포함합니다.
  */
+/**
+ * [최종 수정] Google Analytics Data API 호출 (한글 URL 매칭 강화)
+ * - 인코딩된 경로(%ED...)와 디코딩된 경로(한글)를 모두 시도하여 매칭 성공률을 높입니다.
+ */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   const urlObj = new URL(url);
-  const pagePath = urlObj.pathname;
-  // pagePath 정규화 (trailing slash 제거, 여러 변형 준비)
-  const normalizedPath = pagePath.endsWith('/') && pagePath !== '/' ? pagePath.slice(0, -1) : pagePath;
+  const pagePath = urlObj.pathname; // 브라우저/OS에 따라 인코딩 여부가 다를 수 있음
+
+  // 1. 경로 변형 생성 (디코딩, 인코딩, Trailing Slash 처리)
+  let decodedPath = pagePath;
+  try { decodedPath = decodeURIComponent(pagePath); } catch(e) {}
+  
+  const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
   const pathWithSlash = normalizedPath === '/' ? '/' : normalizedPath + '/';
+
   const MAX_RETRIES = 3;
 
-  try {
-    // 먼저 필터 없이 전체 데이터 확인 (해당 페이지가 있는지 확인)
-    let allPageData = null;
-    try {
-      const testResponse = await fetch(API_URL, {
-        method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-          dimensions: [{ name: "pagePath" }],
-          metrics: [{ name: "screenPageViews" }],
-          limit: 1000, // 최대 1000개 페이지 확인
-        }),
-      });
-      
-      if (testResponse.ok) {
-        const testData = await testResponse.json();
-        if (testData.rows && testData.rows.length > 0) {
-          // pagePath 매칭 전략 (우선순위 순)
-          const matchStrategies = [
-            (row) => row.dimensionValues?.[0]?.value === pagePath, // 정확한 매칭
-            (row) => row.dimensionValues?.[0]?.value === normalizedPath, // trailing slash 제거한 버전
-            (row) => row.dimensionValues?.[0]?.value === pathWithSlash, // trailing slash 추가한 버전
-            (row) => row.dimensionValues?.[0]?.value?.startsWith(normalizedPath), // 경로로 시작
-            (row) => row.dimensionValues?.[0]?.value?.includes(normalizedPath), // 경로 포함
-          ];
-          
-          for (const matchStrategy of matchStrategies) {
-            const matchedRow = testData.rows.find(matchStrategy);
-            if (matchedRow) {
-              const matchedPath = matchedRow.dimensionValues?.[0]?.value;
-              console.log(`[GA4] 전체 데이터에서 페이지 매칭 성공: ${matchedPath} (원본: ${pagePath})`);
-              allPageData = { matchedPath };
-              break;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("[GA4] 전체 페이지 데이터 확인 실패:", e.message);
+  // 2. 필터 전략 수립 (우선순위: 디코딩된 한글 경로 -> 원본 -> 인코딩)
+  const filterStrategies = [
+    { path: decodedPath, name: '디코딩된 경로 (한글)' }, // 예: /entry/한글-제목
+    { path: normalizedPath, name: '정규화된 경로 (슬래시 제거)' },
+    { path: pagePath, name: '원본 경로 (Raw)' },
+    { path: pathWithSlash, name: '경로 (슬래시 추가)' }
+  ];
+
+  // 중복 제거 (Set 활용)
+  const uniqueStrategies = [];
+  const seenPaths = new Set();
+  filterStrategies.forEach(s => {
+    if (!seenPaths.has(s.path)) {
+      seenPaths.add(s.path);
+      uniqueStrategies.push(s);
     }
+  });
 
-    // 여러 필터 전략 시도
-    const filterStrategies = [
-      { path: pagePath, name: '정확한 경로' },
-      { path: normalizedPath, name: '정규화된 경로 (trailing slash 제거)' },
-      { path: pathWithSlash, name: '경로 (trailing slash 추가)' },
-    ];
+  let analyticsData = null;
+  let lastError = null;
 
-    let analyticsData = null;
-    let lastError = null;
+  try {
 
-    for (const filterStrategy of filterStrategies) {
+    for (const filterStrategy of uniqueStrategies) {
       try {
         const basicMetricsResponse = await fetch(API_URL, {
           method: "POST",
@@ -6796,7 +6773,6 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
               { name: "sessions" },
               { name: "screenPageViewsPerSession" },
               { name: "bounceRate" },
-              // 수익 상세 지표 3형제
               { name: "publisherAdRevenue" },     // 수익
               { name: "publisherAdImpressions" }, // 노출 수
               { name: "publisherAdClicks" }       // 클릭 수
@@ -6804,7 +6780,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
             dimensionFilter: {
               filter: {
                 fieldName: "pagePath",
-                // "정확히 일치" 대신 "다음으로 시작"을 사용
+                // [핵심] BEGINS_WITH로 유연하게 매칭하되, 한글/특수문자 처리된 경로 사용
                 stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
               },
             },
@@ -6812,321 +6788,180 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         });
 
         if (!basicMetricsResponse.ok) {
-          const errorData = await basicMetricsResponse.json().catch(() => ({}));
-          
-          // 404 오류 처리: Property를 찾을 수 없음 (데이터 부재가 아님)
-          if (basicMetricsResponse.status === 404) {
-            lastError = new Error(`GA4 속성을 찾을 수 없습니다 (404). Property ID를 확인해주세요: ${propertyId}`);
-            continue; // 다음 필터 전략 시도
-          }
-          
-          // 401 오류면 토큰 갱신 후 재시도
+          // 401 등 에러 처리 로직 (기존과 동일)
           if (basicMetricsResponse.status === 401 && retryCount < MAX_RETRIES) {
-        console.log(`[GA4] 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
-        
-        try {
-          // 기존 토큰 무효화
-          try {
-            await new Promise((resolve) => {
-              chrome.identity.removeCachedAuthToken({ token }, resolve);
-            });
-          } catch (e) {
-            console.warn("[GA4 토큰 갱신] 기존 토큰 제거 실패:", e);
+             // ... (토큰 갱신 로직은 아래 catch 블록에서 통합 처리)
+             throw new Error("UNAUTHORIZED");
           }
+          // 404 등 다른 에러는 다음 전략으로 넘어감
+          continue;
+        }
 
-          // 새 토큰 발급
-          const newToken = await new Promise((resolve, reject) => {
-            chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
-              if (chrome.runtime.lastError) {
-                chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                  } else {
-                    resolve(newToken2);
-                  }
-                });
-              } else {
-                resolve(newToken);
-              }
-            });
-          });
-
-          // 새 토큰 저장
-          await new Promise((resolve) => {
-            chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
-          });
+        const basicData = await basicMetricsResponse.json();
+        
+        // 데이터가 있으면 성공!
+        if (basicData.rows && basicData.rows.length > 0) {
+          const basicRow = basicData.rows[0];
           
-            console.log("[GA4 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
-            
-            // 지수 백오프 후 재시도
-            const delay = Math.pow(2, retryCount) * 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
-          } catch (tokenError) {
-            console.error("[GA4 토큰 갱신 실패]", tokenError);
-            lastError = new Error(`GA4 API 오류 (401): 토큰 갱신 실패 - ${tokenError.message}`);
+          // basicRow가 없거나 metricValues가 없는 경우
+          if (!basicRow || !basicRow.metricValues || basicRow.metricValues.length === 0) {
+            console.warn(`[GA4] 데이터 구조 오류 (${url}, 필터: ${filterStrategy.name}): basicRow 또는 metricValues가 없습니다.`, basicRow);
             continue; // 다음 필터 전략 시도
           }
-        }
-        
-        lastError = new Error(`GA4 API 오류 (${basicMetricsResponse.status}): ${errorData.error?.message || basicMetricsResponse.statusText}`);
-        continue; // 다음 필터 전략 시도
-      }
 
-      const basicData = await basicMetricsResponse.json();
-      
-      // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음)
-      if (!basicData.rows || basicData.rows.length === 0) {
-        console.log(`[GA4] 데이터 없음 (${url}, 필터: ${filterStrategy.name}): 해당 페이지 경로에 데이터가 없습니다.`);
-        continue; // 다음 필터 전략 시도
-      }
-      
-      const basicRow = basicData.rows?.[0];
-      
-      // basicRow가 없거나 metricValues가 없는 경우
-      if (!basicRow || !basicRow.metricValues || basicRow.metricValues.length === 0) {
-        console.warn(`[GA4] 데이터 구조 오류 (${url}, 필터: ${filterStrategy.name}): basicRow 또는 metricValues가 없습니다.`, basicRow);
-        continue; // 다음 필터 전략 시도
-      }
+          // 추가 데이터 수집 (유입 경로, 시간대) - 성공한 필터 그대로 사용
+          let trafficSourceData = {};
+          let hourlyTrafficData = {};
 
-      // 유입 경로 및 시간대별 데이터 요청 (별도 API 호출)
-      let trafficSourceData = {};
-      let hourlyTrafficData = {};
-
-      try {
-        // 유입 경로 데이터
-        const trafficSourceResponse = await fetch(API_URL, {
-          method: "POST",
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-            dimensions: [
-              { name: "pagePath" },
-              { name: "sessionSource" },
-              { name: "sessionMedium" },
-            ],
-            metrics: [{ name: "sessions" }],
-            dimensionFilter: {
-              filter: {
-                fieldName: "pagePath",
-                stringFilter: { matchType: "EXACT", value: filterStrategy.path },
+          try {
+            // 유입 경로 데이터
+            const trafficSourceResponse = await fetch(API_URL, {
+              method: "POST",
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
               },
-            },
-            orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
-            limit: 5,
-          }),
-        });
+              body: JSON.stringify({
+                dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+                dimensions: [
+                  { name: "pagePath" },
+                  { name: "sessionSource" },
+                  { name: "sessionMedium" },
+                ],
+                metrics: [{ name: "sessions" }],
+                dimensionFilter: {
+                  filter: {
+                    fieldName: "pagePath",
+                    stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
+                  },
+                },
+                orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+                limit: 5,
+              }),
+            });
 
-      if (trafficSourceResponse.ok) {
-        const trafficData = await trafficSourceResponse.json();
-        if (trafficData.rows && trafficData.rows.length > 0) {
-          trafficSourceData = {
-            topSources: trafficData.rows.slice(0, 5).map(row => ({
-              source: row.dimensionValues[1]?.value || "직접",
-              medium: row.dimensionValues[2]?.value || "none",
-              sessions: parseInt(row.metricValues[0]?.value || "0", 10),
-            })),
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("[GA4] 유입 경로 데이터 수집 실패:", e.message);
-    }
-
-    try {
-      // 시간대별 트래픽 데이터
-      const hourlyResponse = await fetch(API_URL, {
-        method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-          dimensions: [
-            { name: "pagePath" },
-            { name: "hour" },
-          ],
-          metrics: [{ name: "screenPageViews" }],
-          dimensionFilter: {
-            filter: {
-              fieldName: "pagePath",
-              stringFilter: { matchType: "EXACT", value: filterStrategy.path },
-            },
-          },
-        }),
-      });
-
-      if (hourlyResponse.ok) {
-        const hourlyData = await hourlyResponse.json();
-        if (hourlyData.rows && hourlyData.rows.length > 0) {
-          hourlyTrafficData = {
-            hourlyViews: hourlyData.rows.map(row => ({
-              hour: parseInt(row.dimensionValues[1]?.value || "0", 10),
-              views: parseInt(row.metricValues[0]?.value || "0", 10),
-            })),
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
-    }
-
-      // GA4 원본 데이터 파싱
-      const adRevenue = parseFloat(basicRow.metricValues[5]?.value || "0.0");
-      const adImpressions = parseInt(basicRow.metricValues[6]?.value || "0", 10);
-      const adClicks = parseInt(basicRow.metricValues[7]?.value || "0", 10);
-
-      // [계산] 페이지 단위 CTR 및 RPM (Content Pilot 전용 지표)
-      // RPM = (수익 / 노출수) * 1000
-      const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
-      // CTR = (클릭수 / 노출수) * 100
-      const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
-
-      const result = {
-        pageviews: parseInt(basicRow.metricValues[0]?.value || "0", 10),
-        avgSessionDuration: parseFloat(basicRow.metricValues[1]?.value || "0.0"),
-        sessions: parseInt(basicRow.metricValues[2]?.value || "0", 10),
-        pagesPerSession: parseFloat(basicRow.metricValues[3]?.value || "0.0"),
-        bounceRate: parseFloat(basicRow.metricValues[4]?.value || "0.0"),
-        
-        // GA4 원본 데이터
-        gaEarnings: adRevenue,
-        gaImpressions: adImpressions,
-        gaClicks: adClicks,
-        
-        // 가공된 고급 지표 (AI 분석용)
-        pageRPM: parseFloat(pageRPM.toFixed(2)), // $ 단위
-        pageCTR: parseFloat(pageCTR.toFixed(2)), // % 단위
-        
-        ...trafficSourceData,
-        ...hourlyTrafficData,
-      };
-
-      console.log(`[GA4] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, result);
-      analyticsData = result;
-      break; // 성공하면 루프 종료
-    } catch (filterError) {
-      lastError = filterError;
-      console.warn(`[GA4] 필터 전략 실패 (${filterStrategy.name}):`, filterError.message);
-      continue; // 다음 필터 전략 시도
-    }
-  }
-
-  // 모든 필터 전략 실패한 경우
-  if (!analyticsData) {
-    // lastError가 실제 API 오류(404, 401 등)인지 확인
-    const isRealError = lastError && (
-      lastError.message.includes('404') || 
-      lastError.message.includes('401') || 
-      lastError.message.includes('403') ||
-      lastError.message.includes('속성을 찾을 수 없습니다') ||
-      lastError.message.includes('토큰')
-    );
-    
-    if (isRealError) {
-      // 실제 API 오류인 경우
-      throw lastError;
-    } else {
-      // 데이터가 없는 경우 (200 OK이지만 rows가 비어있음) - 오류가 아님
-      console.log(`[GA4] 데이터 없음 (${url}): 모든 필터 전략 실패했지만 실제 오류는 아닙니다. 데이터가 없을 수 있습니다.`);
-      return {
-        pageviews: 0,
-        avgSessionDuration: 0,
-        sessions: 0,
-        pagesPerSession: 0,
-        bounceRate: 0,
-        gaEarnings: 0,
-        gaImpressions: 0,
-        gaClicks: 0,
-        pageRPM: 0,
-        pageCTR: 0,
-      };
-    }
-  }
-
-  return analyticsData;
-  } catch (error) {
-    console.error(`[GA4] 데이터 요청 실패 (시도 ${retryCount + 1}/${MAX_RETRIES}):`, {
-      url,
-      propertyId,
-      error: error.message,
-      stack: error.stack,
-    });
-
-    // 401 오류면 토큰 갱신 후 재시도
-    if (error.message.includes('401') && retryCount < MAX_RETRIES) {
-      console.log(`[GA4] catch 블록에서 토큰 만료 감지, 토큰 갱신 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
-      
-      try {
-        // 기존 토큰 무효화
-        try {
-          await new Promise((resolve) => {
-            chrome.identity.removeCachedAuthToken({ token }, resolve);
-          });
-        } catch (e) {
-          console.warn("[GA4 토큰 갱신] 기존 토큰 제거 실패:", e);
-        }
-
-        // 새 토큰 발급
-        const newToken = await new Promise((resolve, reject) => {
-          chrome.identity.getAuthToken({ interactive: false }, (newToken) => {
-            if (chrome.runtime.lastError) {
-              chrome.identity.getAuthToken({ interactive: true }, (newToken2) => {
-                if (chrome.runtime.lastError) {
-                  reject(new Error(chrome.runtime.lastError.message));
-                } else {
-                  resolve(newToken2);
-                }
-              });
-            } else {
-              resolve(newToken);
+            if (trafficSourceResponse.ok) {
+              const trafficData = await trafficSourceResponse.json();
+              if (trafficData.rows && trafficData.rows.length > 0) {
+                trafficSourceData = {
+                  topSources: trafficData.rows.slice(0, 5).map(row => ({
+                    source: row.dimensionValues[1]?.value || "직접",
+                    medium: row.dimensionValues[2]?.value || "none",
+                    sessions: parseInt(row.metricValues[0]?.value || "0", 10),
+                  })),
+                };
+              }
             }
-          });
-        });
+          } catch (e) {
+            console.warn("[GA4] 유입 경로 데이터 수집 실패:", e.message);
+          }
 
-        // 새 토큰 저장
-        await new Promise((resolve) => {
-          chrome.storage.local.set({ googleAuthToken: newToken }, resolve);
-        });
-        
-        console.log("[GA4 토큰 갱신] 새 토큰 발급 완료, 재시도 중...");
-        
-        // 지수 백오프 후 재시도
-        const delay = Math.pow(2, retryCount) * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
-      } catch (tokenError) {
-        console.error("[GA4 토큰 갱신 실패]", tokenError);
-        // 토큰 갱신 실패해도 일반 재시도 로직으로 진행
+          try {
+            // 시간대별 트래픽 데이터
+            const hourlyResponse = await fetch(API_URL, {
+              method: "POST",
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
+                dimensions: [
+                  { name: "pagePath" },
+                  { name: "hour" },
+                ],
+                metrics: [{ name: "screenPageViews" }],
+                dimensionFilter: {
+                  filter: {
+                    fieldName: "pagePath",
+                    stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
+                  },
+                },
+              }),
+            });
+
+            if (hourlyResponse.ok) {
+              const hourlyData = await hourlyResponse.json();
+              if (hourlyData.rows && hourlyData.rows.length > 0) {
+                hourlyTrafficData = {
+                  hourlyViews: hourlyData.rows.map(row => ({
+                    hour: parseInt(row.dimensionValues[1]?.value || "0", 10),
+                    views: parseInt(row.metricValues[0]?.value || "0", 10),
+                  })),
+                };
+              }
+            }
+          } catch (e) {
+            console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
+          }
+
+          // 결과 파싱
+          const adRevenue = parseFloat(basicRow.metricValues[5]?.value || "0.0");
+          const adImpressions = parseInt(basicRow.metricValues[6]?.value || "0", 10);
+          const adClicks = parseInt(basicRow.metricValues[7]?.value || "0", 10);
+          const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
+          const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
+
+          analyticsData = {
+            pageviews: parseInt(basicRow.metricValues[0]?.value || "0", 10),
+            avgSessionDuration: parseFloat(basicRow.metricValues[1]?.value || "0.0"),
+            sessions: parseInt(basicRow.metricValues[2]?.value || "0", 10),
+            pagesPerSession: parseFloat(basicRow.metricValues[3]?.value || "0.0"),
+            bounceRate: parseFloat(basicRow.metricValues[4]?.value || "0.0"),
+            gaEarnings: adRevenue,
+            gaImpressions: adImpressions,
+            gaClicks: adClicks,
+            pageRPM: parseFloat(pageRPM.toFixed(2)),
+            pageCTR: parseFloat(pageCTR.toFixed(2)),
+            ...trafficSourceData,
+            ...hourlyTrafficData,
+          };
+
+          console.log(`[GA4] 데이터 수집 성공 (${url}):`, {
+            filter: filterStrategy.name,
+            path: filterStrategy.path,
+            views: analyticsData.pageviews
+          });
+          break; // 루프 종료
+        } else {
+           console.log(`[GA4] 데이터 없음 (${filterStrategy.name}): ${filterStrategy.path}`);
+        }
+      } catch (filterError) {
+        if (filterError.message === "UNAUTHORIZED") throw filterError;
+        console.warn(`[GA4] 필터 오류 (${filterStrategy.name}):`, filterError.message);
       }
     }
 
-    // 재시도 로직
-    if (retryCount < MAX_RETRIES) {
-      const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
-      console.log(`[GA4] ${delay}ms 후 재시도...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return getAnalyticsData(token, propertyId, url, retryCount + 1);
+    // 모든 전략 실패 시 0 반환
+    if (!analyticsData) {
+      return {
+        pageviews: 0, avgSessionDuration: 0, sessions: 0, pagesPerSession: 0, bounceRate: 0,
+        gaEarnings: 0, gaImpressions: 0, gaClicks: 0, pageRPM: 0, pageCTR: 0
+      };
     }
 
-    // 최종 실패 시 기본값 반환
-    return {
-      pageviews: 0,
-      avgSessionDuration: 0,
-      sessions: 0,
-      pagesPerSession: 0,
-      bounceRate: 0,
-      gaEarnings: 0,
-      gaImpressions: 0,
-      gaClicks: 0,
-      pageRPM: 0,
-      pageCTR: 0,
-      error: error.message,
-    };
+    return analyticsData;
+
+  } catch (error) {
+    // 토큰 만료 시 재시도 로직
+    if (error.message === "UNAUTHORIZED" && retryCount < MAX_RETRIES) {
+      console.log(`[GA4] 토큰 갱신 후 재시도 (${retryCount + 1})...`);
+      try {
+        await new Promise(r => chrome.identity.removeCachedAuthToken({ token }, r));
+        const newToken = await new Promise((resolve, reject) => {
+          chrome.identity.getAuthToken({ interactive: false }, (t) => {
+             if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(t);
+          });
+        });
+        await chrome.storage.local.set({ googleAuthToken: newToken });
+        return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
+      } catch (e) {
+        console.error("[GA4] 토큰 갱신 실패:", e);
+      }
+    }
+    
+    console.error("[GA4] 최종 실패:", error);
+    return { error: error.message, pageviews: 0, gaEarnings: 0 };
   }
 }
 
