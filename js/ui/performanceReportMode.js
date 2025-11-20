@@ -261,6 +261,10 @@ function analyzePerformanceData() {
     0
   ) / allPerformanceData.length;
 
+  // [신규] 평균 참여율 및 신규 방문자 계산
+  const avgEngagementRate = allPerformanceData.reduce((sum, item) => sum + (item.performance.engagementRate || 0), 0) / allPerformanceData.length;
+  const avgNewUsers = allPerformanceData.reduce((sum, item) => sum + (item.performance.newUsers || 0), 0) / allPerformanceData.length;
+
   // 성공 콘텐츠 분석 (상위 20%)
   const successThreshold = Math.ceil(allPerformanceData.length * 0.2);
   const sortedByEarnings = [...allPerformanceData].sort(
@@ -377,6 +381,8 @@ function analyzePerformanceData() {
       avgCTR,
       avgBounceRate,
       avgRPM, // [추가]
+      avgEngagementRate: avgEngagementRate * 100, // % 변환
+      avgNewUsers,
     },
     topPerformers: topPerformers.slice(0, 5),
     bottomPerformers: bottomPerformers.slice(0, 5),
@@ -505,6 +511,14 @@ function renderReport(container) {
           <div class="perf-summary-card">
             <div class="summary-label">평균 CTR</div>
             <div class="summary-value">${analysis.summary.avgCTR.toFixed(2)}%</div>
+          </div>
+          <div class="perf-summary-card">
+            <div class="summary-label">평균 참여율</div>
+            <div class="summary-value">${analysis.summary.avgEngagementRate.toFixed(1)}%</div>
+          </div>
+          <div class="perf-summary-card">
+            <div class="summary-label">평균 신규 방문</div>
+            <div class="summary-value">${Math.round(analysis.summary.avgNewUsers)}명</div>
           </div>
         </div>
       </section>

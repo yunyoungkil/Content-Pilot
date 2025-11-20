@@ -24,6 +24,8 @@ export function renderPerformanceDashboard(container) {
             <option value="pageviews-asc">페이지뷰 낮은 순</option>
             <option value="rpm-desc">RPM 높은 순 (알짜배기)</option>
             <option value="ctr-desc">CTR 높은 순 (클릭률)</option>
+            <option value="engagement-desc">참여율 높은 순</option>
+            <option value="new-users-desc">신규 방문자 많은 순</option>
             <option value="recent">최근 업데이트 순</option>
           </select>
           <button id="perf-refresh-btn" class="perf-control-btn">🔄 새로고침</button>
@@ -133,6 +135,10 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
     const rpmB = b.performance.pageRPM || b.performance.rpm || 0;
     const ctrA = a.performance.pageCTR || a.performance.ctr || 0;
     const ctrB = b.performance.pageCTR || b.performance.ctr || 0;
+    const engagementA = (a.performance.engagementRate || 0) * 100;
+    const engagementB = (b.performance.engagementRate || 0) * 100;
+    const newUsersA = a.performance.newUsers || 0;
+    const newUsersB = b.performance.newUsers || 0;
 
     switch (sortBy) {
       case "earnings-desc":
@@ -147,6 +153,10 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
         return rpmB - rpmA;
       case "ctr-desc": // [추가]
         return ctrB - ctrA;
+      case "engagement-desc":
+        return engagementB - engagementA;
+      case "new-users-desc":
+        return newUsersB - newUsersA;
       case "recent":
         return (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
       default:
@@ -242,11 +252,17 @@ function createPerformanceCard(item, index) {
   const perf = item.performance;
   const earnings = perf.estimatedEarnings || 0;
   const pageviews = perf.pageviews || 0;
-  const sessions = perf.sessions || 0;
-  const avgDuration = perf.avgSessionDuration || 0;
-  // [수정] pageRPM/pageCTR 우선 사용, 없으면 기존 ctr 사용
-  const rpm = perf.pageRPM || perf.rpm || 0;
-  const ctr = perf.pageCTR || perf.ctr || 0;
+  const engagementRate = (perf.engagementRate || 0) * 100; // % 변환
+  const newUsers = perf.newUsers || 0;
+  const topSource = perf.topSource || "-";
+  const avgEngagementTime = Math.round(perf.avgEngagementTime || perf.avgSessionDuration || 0);
+  
+  // 소스 아이콘 처리
+  let sourceIcon = "🌐";
+  if (topSource.includes("google")) sourceIcon = "🇬";
+  else if (topSource.includes("naver")) sourceIcon = "🇳";
+  else if (topSource.includes("kakao")) sourceIcon = "🇰";
+  else if (topSource.includes("direct")) sourceIcon = "🔗";
 
   return `
     <div class="perf-card" data-card-id="${item.id}">
@@ -254,9 +270,13 @@ function createPerformanceCard(item, index) {
       <div class="perf-card-content">
         <div class="perf-card-header">
           <h3 class="perf-card-title">${item.title}</h3>
-          <a href="${item.publishedUrl}" target="_blank" class="perf-card-link">🔗</a>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="source-badge" title="주력 유입 경로: ${topSource}">${sourceIcon} ${topSource.split('/')[0]}</span>
+            <a href="${item.publishedUrl}" target="_blank" class="perf-card-link">🔗</a>
+          </div>
         </div>
-        <div class="perf-card-metrics">
+        
+        <div class="perf-card-metrics primary">
           <div class="perf-metric-item highlight">
             <span class="metric-icon">💰</span>
             <span class="metric-label">수익</span>
@@ -267,22 +287,28 @@ function createPerformanceCard(item, index) {
             <span class="metric-label">페이지뷰</span>
             <span class="metric-value">${pageviews.toLocaleString()}</span>
           </div>
-          <div class="perf-metric-item" title="1,000회 노출당 예상 수익">
-            <span class="metric-icon">📈</span>
-            <span class="metric-label">RPM</span>
-            <span class="metric-value">$${rpm.toFixed(2)}</span>
-          </div>
-          <div class="perf-metric-item" title="광고 클릭률">
-            <span class="metric-icon">🎯</span>
-            <span class="metric-label">CTR</span>
-            <span class="metric-value">${ctr.toFixed(2)}%</span>
-          </div>
           <div class="perf-metric-item">
-            <span class="metric-icon">⏱️</span>
-            <span class="metric-label">체류</span>
-            <span class="metric-value">${Math.round(avgDuration)}초</span>
+            <span class="metric-icon">❤️</span>
+            <span class="metric-label">참여율</span>
+            <span class="metric-value">${engagementRate.toFixed(1)}%</span>
           </div>
         </div>
+
+        <div class="perf-card-metrics secondary" style="margin-top:8px; padding-top:8px; border-top:1px dashed #eee;">
+           <div class="perf-metric-item compact" title="신규 방문자">
+            <span class="metric-icon">🆕</span>
+            <span class="metric-value">${newUsers.toLocaleString()}명</span>
+          </div>
+          <div class="perf-metric-item compact" title="평균 참여 시간">
+            <span class="metric-icon">⏱️</span>
+            <span class="metric-value">${avgEngagementTime}초</span>
+          </div>
+          <div class="perf-metric-item compact" title="RPM (1,000회 노출당 수익)">
+            <span class="metric-icon">📈</span>
+            <span class="metric-value">$${(perf.pageRPM || 0).toFixed(2)}</span>
+          </div>
+        </div>
+
         ${perf.lastUpdatedAt ? `
           <div class="perf-card-footer">
             <span class="perf-updated-time">업데이트: ${new Date(perf.lastUpdatedAt).toLocaleString('ko-KR')}</span>
