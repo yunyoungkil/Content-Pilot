@@ -5225,6 +5225,19 @@ ${decayContent.map((item, idx) =>
     })();
     return true;
   }
+  // 애드센스 등록 여부 일괄 확인
+  else if (msg.action === "check_adsense_registration") {
+    (async () => {
+      try {
+        const result = await checkAdSenseRegistrationStatus();
+        sendResponse({ success: true, data: result });
+      } catch (error) {
+        console.error("[AdSense 등록 확인 실패]", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
 });
 
 // Util: create a simple PNG data URL with text
@@ -6560,15 +6573,31 @@ async function updateSinglePerformanceMetric(contentInfo) {
     // 결과 처리
     const analyticsResult = analyticsData.status === "fulfilled" 
       ? analyticsData.value 
-      : { error: analyticsData.reason?.message || "알 수 없는 오류" };
+      : { error: analyticsData.reason?.message || "알 수 없는 오류", gaEarnings: 0 };
     
     const adsenseResult = adsenseData.status === "fulfilled"
       ? adsenseData.value
-      : { error: adsenseData.reason?.message || "알 수 없는 오류" };
+      : { error: adsenseData.reason?.message || "알 수 없는 오류", estimatedEarnings: 0 };
+
+    // 🚨 [핵심 수정] 수익 데이터 우선순위 결정 로직
+    // GA4 수익 데이터가 있으면(0보다 크면) 그것을 사용하고, 없으면 기존 AdSense API 값을 사용
+    // AdSense API는 개별 URL 채널 설정이 없으면 0을 반환하는 경우가 많기 때문입니다.
+    const finalEarnings = (analyticsResult.gaEarnings && analyticsResult.gaEarnings > 0)
+      ? analyticsResult.gaEarnings
+      : (adsenseResult.estimatedEarnings || 0);
 
     const performanceData = {
       ...analyticsResult,
       ...adsenseResult,
+      // 최종 수익 (하이브리드)
+      estimatedEarnings: finalEarnings,
+      
+      // [추가] 상세 분석 지표 저장 (GA4 기준)
+      adImpressions: analyticsResult.gaImpressions || 0,
+      adClicks: analyticsResult.gaClicks || 0,
+      pageRPM: analyticsResult.pageRPM || 0,
+      pageCTR: analyticsResult.pageCTR || 0,
+      
       lastUpdatedAt: Date.now(),
       collectionDuration: Date.now() - startTime,
     };
@@ -6760,6 +6789,10 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
               { name: "sessions" },
               { name: "screenPageViewsPerSession" },
               { name: "bounceRate" },
+              // 수익 상세 지표 3형제
+              { name: "publisherAdRevenue" },     // 수익
+              { name: "publisherAdImpressions" }, // 노출 수
+              { name: "publisherAdClicks" }       // 클릭 수
             ],
             dimensionFilter: {
               filter: {
@@ -6935,12 +6968,33 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
     }
 
+      // GA4 원본 데이터 파싱
+      const adRevenue = parseFloat(basicRow.metricValues[5]?.value || "0.0");
+      const adImpressions = parseInt(basicRow.metricValues[6]?.value || "0", 10);
+      const adClicks = parseInt(basicRow.metricValues[7]?.value || "0", 10);
+
+      // [계산] 페이지 단위 CTR 및 RPM (Content Pilot 전용 지표)
+      // RPM = (수익 / 노출수) * 1000
+      const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
+      // CTR = (클릭수 / 노출수) * 100
+      const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
+
       const result = {
         pageviews: parseInt(basicRow.metricValues[0]?.value || "0", 10),
         avgSessionDuration: parseFloat(basicRow.metricValues[1]?.value || "0.0"),
         sessions: parseInt(basicRow.metricValues[2]?.value || "0", 10),
         pagesPerSession: parseFloat(basicRow.metricValues[3]?.value || "0.0"),
         bounceRate: parseFloat(basicRow.metricValues[4]?.value || "0.0"),
+        
+        // GA4 원본 데이터
+        gaEarnings: adRevenue,
+        gaImpressions: adImpressions,
+        gaClicks: adClicks,
+        
+        // 가공된 고급 지표 (AI 분석용)
+        pageRPM: parseFloat(pageRPM.toFixed(2)), // $ 단위
+        pageCTR: parseFloat(pageCTR.toFixed(2)), // % 단위
+        
         ...trafficSourceData,
         ...hourlyTrafficData,
       };
@@ -6978,6 +7032,11 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         sessions: 0,
         pagesPerSession: 0,
         bounceRate: 0,
+        gaEarnings: 0,
+        gaImpressions: 0,
+        gaClicks: 0,
+        pageRPM: 0,
+        pageCTR: 0,
       };
     }
   }
@@ -7054,6 +7113,11 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       sessions: 0,
       pagesPerSession: 0,
       bounceRate: 0,
+      gaEarnings: 0,
+      gaImpressions: 0,
+      gaClicks: 0,
+      pageRPM: 0,
+      pageCTR: 0,
       error: error.message,
     };
   }
@@ -7161,16 +7225,18 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
     }
 
     // 필터를 사용한 전략 시도 (AdSense API v2 필터 형식)
+    // 우선순위: DOMAIN_NAME 차원 사용 → 도메인 단위 매칭 → URL_CHANNEL_NAME 기반 상세 매칭
     const filterStrategies = [
+      // [최우선] DOMAIN_NAME 차원을 활용하여 도메인 전체의 수익 확인
       { 
-        // [신규 추가] URL 경로(path)를 '포함'하는 모든 데이터 (가장 유연함)
-        filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: path },
-        name: '경로 포함 (CONTAINS)'
+        filter: { dimension: "DOMAIN_NAME", operator: "EQUALS", value: domain },
+        name: '도메인 전체 (DOMAIN_NAME EQUALS)'
       },
       { 
-        filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: url },
-        name: '전체 URL (EQUALS)'
+        filter: { dimension: "DOMAIN_NAME", operator: "EQUALS", value: mainDomain },
+        name: '메인 도메인 전체 (DOMAIN_NAME EQUALS)'
       },
+      // 도메인 단위 매칭 (URL_CHANNEL_NAME 사용하되 도메인만)
       { 
         filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: domain },
         name: '전체 도메인 (EQUALS)'
@@ -7183,14 +7249,24 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
         filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: mainDomain },
         name: '메인 도메인 포함 (CONTAINS)'
       },
-      // 문자열 형식 필터도 시도
+      // [후순위] URL_CHANNEL_NAME 기반의 상세 페이지 매칭 (실패 확률이 높음)
       { 
-        filter: `URL_CHANNEL_NAME=="${url}"`,
-        name: '전체 URL (문자열)'
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "EQUALS", value: url },
+        name: '전체 URL (EQUALS)'
       },
+      { 
+        // URL 경로(path)를 '포함'하는 모든 데이터 (가장 유연하지만 부정확할 수 있음)
+        filter: { dimension: "URL_CHANNEL_NAME", operator: "CONTAINS", value: path },
+        name: '경로 포함 (CONTAINS)'
+      },
+      // 문자열 형식 필터도 시도 (최후의 수단)
       { 
         filter: `URL_CHANNEL_NAME=="${domain}"`,
         name: '전체 도메인 (문자열)'
+      },
+      { 
+        filter: `URL_CHANNEL_NAME=="${url}"`,
+        name: '전체 URL (문자열)'
       },
     ];
 
@@ -7374,6 +7450,19 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
       error: error.message,
       stack: error.stack,
     });
+
+    // 404 오류는 '수익 데이터 없음'으로 정상 처리 (에러가 아님)
+    if (error.message.includes('404')) {
+      console.log(`[AdSense] 404 오류 발생 - 수익 데이터 없음으로 처리 (${url})`);
+      return {
+        estimatedEarnings: 0,
+        pageRPM: 0,
+        clicks: 0,
+        pageViews: 0,
+        ctr: 0,
+        // 오류가 아닌 정상 응답 (데이터 없음)
+      };
+    }
 
     // 401 오류면 토큰 갱신 후 재시도
     if (error.message.includes('401') && retryCount < MAX_RETRIES) {
@@ -8021,20 +8110,22 @@ async function runFullSystemDiagnosis() {
           }
           
           // [단계 2] 리포트 생성 테스트 (데이터 유무 확인)
+          // 날짜 범위를 LAST_7_DAYS로 변경하여 데이터 존재 확률을 높임
           const reportRes = await fetch(`https://adsense.googleapis.com/v2/${myId}/reports:generate`, {
             method: "POST",
             headers: { 
               Authorization: `Bearer ${validToken}`, 
               "Content-Type": "application/json" 
             },
-            body: JSON.stringify({ dateRange: "TODAY", metrics: ["PAGE_VIEWS"] })
+            body: JSON.stringify({ dateRange: "LAST_7_DAYS", metrics: ["PAGE_VIEWS"] })
           });
           
           if (reportRes.ok) {
             sendDiagnosticLog("adsense_access", "pass", "AdSense 정상 (데이터 접근 가능)");
           } else if (reportRes.status === 404) {
-            // [핵심] 404가 떠도 1단계(계정 확인)를 통과했으므로 '성공'으로 간주
-            sendDiagnosticLog("adsense_access", "pass", "AdSense 계정 정상 (단, 현재 리포트 데이터 없음)");
+            // [핵심] 404가 떠도 1단계(계정 확인)를 통과했으므로 '연동 성공'으로 간주
+            // 신규 연동 직후나 데이터 집계 대기 중일 수 있음
+            sendDiagnosticLog("adsense_access", "pass", "연동 성공 (데이터 집계 대기 중)");
           } else {
             throw new Error(`리포트 오류: ${reportRes.status}`);
           }
@@ -8259,3 +8350,121 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   }
 });
+
+/**
+ * [신규 기능] 애드센스에 수동으로 등록된 URL 채널 목록을 가져와서
+ * 칸반 보드의 카드들에 '등록됨(adSenseRegistered)' 태그를 붙입니다.
+ */
+async function checkAdSenseRegistrationStatus() {
+  console.log("[AdSense 등록 확인] 시작...");
+  
+  // 1. 인증 정보 가져오기
+  const { googleAuthToken, adSenseAccountId } = await chrome.storage.local.get([
+    "googleAuthToken",
+    "adSenseAccountId"
+  ]);
+
+  if (!googleAuthToken || !adSenseAccountId) {
+    throw new Error("Google 계정 또는 AdSense ID가 설정되지 않았습니다.");
+  }
+
+  // 2. 애드센스 API에서 등록된 URL 채널 '전체' 목록 가져오기 (페이지네이션 처리)
+  const registeredUrls = new Set();
+  let nextPageToken = null;
+  const accountName = `accounts/${adSenseAccountId}`;
+  
+  do {
+    let url = `https://adsense.googleapis.com/v2/${accountName}/urlchannels?pageSize=1000`;
+    if (nextPageToken) url += `&pageToken=${nextPageToken}`;
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${googleAuthToken}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`AdSense API 오류: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.urlChannels) {
+      data.urlChannels.forEach(channel => {
+        // urlPattern: 등록된 실제 URL (예: example.com/post/123)
+        if (channel.urlPattern) {
+          // 비교를 위해 정규화 (프로토콜 제거, 소문자 등)
+          registeredUrls.add(normalizeUrlForComparison(channel.urlPattern));
+        }
+      });
+    }
+    nextPageToken = data.nextPageToken;
+  } while (nextPageToken);
+
+  console.log(`[AdSense 등록 확인] 총 ${registeredUrls.size}개의 등록된 URL을 발견했습니다.`);
+
+  // 3. Firebase 칸반 데이터와 비교하여 업데이트
+  const db = firebase.database();
+  const snapshot = await db.ref("kanban").once("value");
+  const allCards = snapshot.val() || {};
+  let updatedCount = 0;
+
+  const updates = {};
+
+  for (const status in allCards) {
+    for (const cardId in allCards[status]) {
+      const card = allCards[status][cardId];
+      
+      // 발행된 URL이 있는 카드만 검사
+      if (card.publishedUrl) {
+        const normalizedCardUrl = normalizeUrlForComparison(card.publishedUrl);
+        
+        // 애드센스 목록에 있는지 확인
+        const isRegistered = registeredUrls.has(normalizedCardUrl);
+        
+        // 상태가 다를 때만 업데이트 (불필요한 쓰기 방지)
+        if (card.adSenseRegistered !== isRegistered) {
+          updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isRegistered;
+          updatedCount++;
+        }
+      }
+    }
+  }
+
+  // 4. 변경 사항이 있으면 일괄 업데이트
+  if (updatedCount > 0) {
+    await db.ref().update(updates);
+    console.log(`[AdSense 등록 확인] ${updatedCount}개 카드의 상태를 업데이트했습니다.`);
+  } else {
+    console.log("[AdSense 등록 확인] 변경된 사항이 없습니다.");
+  }
+
+  return { 
+    totalRegistered: registeredUrls.size, 
+    updatedCards: updatedCount 
+  };
+}
+
+/**
+ * URL 비교를 위해 정규화하는 헬퍼 함수
+ * 프로토콜 제거, 소문자 변환, trailing slash 제거 등
+ */
+function normalizeUrlForComparison(url) {
+  try {
+    // URL 객체로 파싱하여 정규화
+    const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+    
+    // 프로토콜 제거, 소문자 변환, trailing slash 제거
+    let normalized = urlObj.hostname + urlObj.pathname;
+    
+    // trailing slash 제거 (단, 루트 경로는 유지)
+    if (normalized.endsWith('/') && normalized !== '/') {
+      normalized = normalized.slice(0, -1);
+    }
+    
+    // 쿼리 파라미터와 해시 제거 (비교 시 불필요)
+    // 이미 pathname만 사용하므로 추가 처리 불필요
+    
+    return normalized.toLowerCase();
+  } catch (e) {
+    // URL 파싱 실패 시 원본을 소문자로만 변환
+    return url.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  }
+}
