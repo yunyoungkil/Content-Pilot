@@ -6716,49 +6716,43 @@ async function updateSinglePerformanceMetric(contentInfo) {
  * 재시도 로직과 상세 로그를 포함합니다.
  */
 /**
- * [최종 수정] Google Analytics Data API 호출 (한글 URL 매칭 강화)
- * - 인코딩된 경로(%ED...)와 디코딩된 경로(한글)를 모두 시도하여 매칭 성공률을 높입니다.
+ * [최종 최적화] Google Analytics Data API 호출
+ * - 진단 결과에 따라 '디코딩된 한글 경로'를 최우선으로 검색합니다.
  */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
-  const urlObj = new URL(url);
-  const pagePath = urlObj.pathname; // 브라우저/OS에 따라 인코딩 여부가 다를 수 있음
-
-  // 1. 경로 변형 생성 (디코딩, 인코딩, Trailing Slash 처리)
-  let decodedPath = pagePath;
-  try { decodedPath = decodeURIComponent(pagePath); } catch(e) {}
   
-  const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
-  const pathWithSlash = normalizedPath === '/' ? '/' : normalizedPath + '/';
+  // 1. URL 경로 정제 (진단 결과 반영)
+  const urlObj = new URL(url);
+  const rawPath = urlObj.pathname; // 보통 인코딩된 상태 (/entry/%ED%...)
+  
+  // 디코딩 (한글로 변환)
+  let decodedPath = rawPath;
+  try { decodedPath = decodeURIComponent(rawPath); } catch(e) {}
+
+  // 끝에 붙은 슬래시(/) 제거 (GA4 저장 방식에 맞춤)
+  if (decodedPath.endsWith('/') && decodedPath !== '/') {
+    decodedPath = decodedPath.slice(0, -1);
+  }
+  
+  // 인코딩된 버전도 슬래시 제거 준비 (백업용)
+  let normalizedRawPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
 
   const MAX_RETRIES = 3;
 
-  // 2. 필터 전략 수립 (우선순위: 디코딩된 한글 경로 -> 원본 -> 인코딩)
+  // 2. 필터 전략 (우선순위: 한글 경로 -> 원본 경로)
+  // 진단 결과 GA4가 '한글'로 저장하고 있으므로 decodedPath가 핵심입니다.
   const filterStrategies = [
-    { path: decodedPath, name: '디코딩된 경로 (한글)' }, // 예: /entry/한글-제목
-    { path: normalizedPath, name: '정규화된 경로 (슬래시 제거)' },
-    { path: pagePath, name: '원본 경로 (Raw)' },
-    { path: pathWithSlash, name: '경로 (슬래시 추가)' }
+    { path: decodedPath, name: '✅ 최우선: 한글 경로 (디코딩됨)' },
+    { path: normalizedRawPath, name: '백업: 원본 경로 (인코딩됨)' }
   ];
 
-  // 중복 제거 (Set 활용)
-  const uniqueStrategies = [];
-  const seenPaths = new Set();
-  filterStrategies.forEach(s => {
-    if (!seenPaths.has(s.path)) {
-      seenPaths.add(s.path);
-      uniqueStrategies.push(s);
-    }
-  });
-
   let analyticsData = null;
-  let lastError = null;
 
   try {
-
-    for (const filterStrategy of uniqueStrategies) {
+    for (const filterStrategy of filterStrategies) {
       try {
-        const basicMetricsResponse = await fetch(API_URL, {
+        const response = await fetch(API_URL, {
           method: "POST",
           headers: { 
             Authorization: `Bearer ${token}`,
@@ -6773,171 +6767,63 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
               { name: "sessions" },
               { name: "screenPageViewsPerSession" },
               { name: "bounceRate" },
-              { name: "publisherAdRevenue" },     // 수익
-              { name: "publisherAdImpressions" }, // 노출 수
-              { name: "publisherAdClicks" }       // 클릭 수
+              { name: "publisherAdRevenue" },
+              { name: "publisherAdImpressions" },
+              { name: "publisherAdClicks" }
             ],
             dimensionFilter: {
               filter: {
                 fieldName: "pagePath",
-                // [핵심] BEGINS_WITH로 유연하게 매칭하되, 한글/특수문자 처리된 경로 사용
-                stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
-              },
-            },
+                // 정확한 매칭을 위해 EQUALS 사용 (또는 유연하게 BEGINS_WITH)
+                stringFilter: { matchType: "EQUALS", value: filterStrategy.path }
+              }
+            }
           }),
         });
 
-        if (!basicMetricsResponse.ok) {
-          // 401 등 에러 처리 로직 (기존과 동일)
-          if (basicMetricsResponse.status === 401 && retryCount < MAX_RETRIES) {
-             // ... (토큰 갱신 로직은 아래 catch 블록에서 통합 처리)
-             throw new Error("UNAUTHORIZED");
-          }
-          // 404 등 다른 에러는 다음 전략으로 넘어감
+        if (!response.ok) {
+          if (response.status === 401) throw new Error("UNAUTHORIZED");
           continue;
         }
 
-        const basicData = await basicMetricsResponse.json();
+        const data = await response.json();
         
-        // 데이터가 있으면 성공!
-        if (basicData.rows && basicData.rows.length > 0) {
-          const basicRow = basicData.rows[0];
+        if (data.rows && data.rows.length > 0) {
+          const row = data.rows[0];
           
-          // basicRow가 없거나 metricValues가 없는 경우
-          if (!basicRow || !basicRow.metricValues || basicRow.metricValues.length === 0) {
-            console.warn(`[GA4] 데이터 구조 오류 (${url}, 필터: ${filterStrategy.name}): basicRow 또는 metricValues가 없습니다.`, basicRow);
-            continue; // 다음 필터 전략 시도
-          }
-
-          // 추가 데이터 수집 (유입 경로, 시간대) - 성공한 필터 그대로 사용
-          let trafficSourceData = {};
-          let hourlyTrafficData = {};
-
-          try {
-            // 유입 경로 데이터
-            const trafficSourceResponse = await fetch(API_URL, {
-              method: "POST",
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
-                dimensions: [
-                  { name: "pagePath" },
-                  { name: "sessionSource" },
-                  { name: "sessionMedium" },
-                ],
-                metrics: [{ name: "sessions" }],
-                dimensionFilter: {
-                  filter: {
-                    fieldName: "pagePath",
-                    stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
-                  },
-                },
-                orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
-                limit: 5,
-              }),
-            });
-
-            if (trafficSourceResponse.ok) {
-              const trafficData = await trafficSourceResponse.json();
-              if (trafficData.rows && trafficData.rows.length > 0) {
-                trafficSourceData = {
-                  topSources: trafficData.rows.slice(0, 5).map(row => ({
-                    source: row.dimensionValues[1]?.value || "직접",
-                    medium: row.dimensionValues[2]?.value || "none",
-                    sessions: parseInt(row.metricValues[0]?.value || "0", 10),
-                  })),
-                };
-              }
-            }
-          } catch (e) {
-            console.warn("[GA4] 유입 경로 데이터 수집 실패:", e.message);
-          }
-
-          try {
-            // 시간대별 트래픽 데이터
-            const hourlyResponse = await fetch(API_URL, {
-              method: "POST",
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-                dimensions: [
-                  { name: "pagePath" },
-                  { name: "hour" },
-                ],
-                metrics: [{ name: "screenPageViews" }],
-                dimensionFilter: {
-                  filter: {
-                    fieldName: "pagePath",
-                    stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path },
-                  },
-                },
-              }),
-            });
-
-            if (hourlyResponse.ok) {
-              const hourlyData = await hourlyResponse.json();
-              if (hourlyData.rows && hourlyData.rows.length > 0) {
-                hourlyTrafficData = {
-                  hourlyViews: hourlyData.rows.map(row => ({
-                    hour: parseInt(row.dimensionValues[1]?.value || "0", 10),
-                    views: parseInt(row.metricValues[0]?.value || "0", 10),
-                  })),
-                };
-              }
-            }
-          } catch (e) {
-            console.warn("[GA4] 시간대별 트래픽 데이터 수집 실패:", e.message);
-          }
-
-          // 결과 파싱
-          const adRevenue = parseFloat(basicRow.metricValues[5]?.value || "0.0");
-          const adImpressions = parseInt(basicRow.metricValues[6]?.value || "0", 10);
-          const adClicks = parseInt(basicRow.metricValues[7]?.value || "0", 10);
-          const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
-          const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
-
+          // 데이터 파싱
+          const adRevenue = parseFloat(row.metricValues[5]?.value || "0");
+          const adImpressions = parseInt(row.metricValues[6]?.value || "0", 10);
+          const adClicks = parseInt(row.metricValues[7]?.value || "0", 10);
+          
           analyticsData = {
-            pageviews: parseInt(basicRow.metricValues[0]?.value || "0", 10),
-            avgSessionDuration: parseFloat(basicRow.metricValues[1]?.value || "0.0"),
-            sessions: parseInt(basicRow.metricValues[2]?.value || "0", 10),
-            pagesPerSession: parseFloat(basicRow.metricValues[3]?.value || "0.0"),
-            bounceRate: parseFloat(basicRow.metricValues[4]?.value || "0.0"),
+            pageviews: parseInt(row.metricValues[0]?.value || "0", 10),
+            avgSessionDuration: parseFloat(row.metricValues[1]?.value || "0"),
+            sessions: parseInt(row.metricValues[2]?.value || "0", 10),
+            pagesPerSession: parseFloat(row.metricValues[3]?.value || "0"),
+            bounceRate: parseFloat(row.metricValues[4]?.value || "0"),
             gaEarnings: adRevenue,
             gaImpressions: adImpressions,
             gaClicks: adClicks,
-            pageRPM: parseFloat(pageRPM.toFixed(2)),
-            pageCTR: parseFloat(pageCTR.toFixed(2)),
-            ...trafficSourceData,
-            ...hourlyTrafficData,
+            pageRPM: adImpressions > 0 ? parseFloat(((adRevenue / adImpressions) * 1000).toFixed(2)) : 0,
+            pageCTR: adImpressions > 0 ? parseFloat(((adClicks / adImpressions) * 100).toFixed(2)) : 0,
           };
 
           console.log(`[GA4] 데이터 수집 성공 (${url}):`, {
-            filter: filterStrategy.name,
-            path: filterStrategy.path,
-            views: analyticsData.pageviews
+            전략: filterStrategy.name,
+            조회수: analyticsData.pageviews,
+            수익: analyticsData.gaEarnings
           });
-          break; // 루프 종료
-        } else {
-           console.log(`[GA4] 데이터 없음 (${filterStrategy.name}): ${filterStrategy.path}`);
+          break; // 성공하면 즉시 종료
         }
-      } catch (filterError) {
-        if (filterError.message === "UNAUTHORIZED") throw filterError;
-        console.warn(`[GA4] 필터 오류 (${filterStrategy.name}):`, filterError.message);
+      } catch (e) {
+        if (e.message === "UNAUTHORIZED") throw e;
       }
     }
 
-    // 모든 전략 실패 시 0 반환
     if (!analyticsData) {
-      return {
-        pageviews: 0, avgSessionDuration: 0, sessions: 0, pagesPerSession: 0, bounceRate: 0,
-        gaEarnings: 0, gaImpressions: 0, gaClicks: 0, pageRPM: 0, pageCTR: 0
-      };
+      console.log(`[GA4] 데이터 없음 (${url}): 방문자가 없거나 아직 집계되지 않음`);
+      return { pageviews: 0, gaEarnings: 0, pageRPM: 0, pageCTR: 0 };
     }
 
     return analyticsData;
@@ -6948,20 +6834,14 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       console.log(`[GA4] 토큰 갱신 후 재시도 (${retryCount + 1})...`);
       try {
         await new Promise(r => chrome.identity.removeCachedAuthToken({ token }, r));
-        const newToken = await new Promise((resolve, reject) => {
-          chrome.identity.getAuthToken({ interactive: false }, (t) => {
-             if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(t);
-          });
+        const newToken = await new Promise((resolve) => {
+          chrome.identity.getAuthToken({ interactive: false }, resolve);
         });
         await chrome.storage.local.set({ googleAuthToken: newToken });
         return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
-      } catch (e) {
-        console.error("[GA4] 토큰 갱신 실패:", e);
-      }
+      } catch (e) { console.error(e); }
     }
-    
-    console.error("[GA4] 최종 실패:", error);
-    return { error: error.message, pageviews: 0, gaEarnings: 0 };
+    return { pageviews: 0, gaEarnings: 0 };
   }
 }
 
