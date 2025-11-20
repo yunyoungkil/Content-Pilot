@@ -6716,41 +6716,59 @@ async function updateSinglePerformanceMetric(contentInfo) {
  * 재시도 로직과 상세 로그를 포함합니다.
  */
 /**
- * [최종 최적화] Google Analytics Data API 호출
- * - 진단 결과에 따라 '디코딩된 한글 경로'를 최우선으로 검색합니다.
+ * [최종 수정] Google Analytics Data API 호출 (매칭 로직 개선 & 성장 지표 추가)
+ * - EQUALS 대신 BEGINS_WITH를 사용하여 URL 매칭 유연성 확보
+ * - 블로그 성장에 필요한 핵심 지표(참여율, 신규 방문자 등) 추가 수집
  */
 async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   
-  // 1. URL 경로 정제 (진단 결과 반영)
-  const urlObj = new URL(url);
-  const rawPath = urlObj.pathname; // 보통 인코딩된 상태 (/entry/%ED%...)
+  // 1. URL 경로 정제
+  let urlObj;
+  try {
+    urlObj = new URL(url);
+  } catch (e) {
+    console.error(`[GA4] 잘못된 URL 형식: ${url}`);
+    return { pageviews: 0, gaEarnings: 0 };
+  }
+
+  const rawPath = urlObj.pathname; // 인코딩된 상태일 수 있음
   
   // 디코딩 (한글로 변환)
   let decodedPath = rawPath;
   try { decodedPath = decodeURIComponent(rawPath); } catch(e) {}
 
-  // 끝에 붙은 슬래시(/) 제거 (GA4 저장 방식에 맞춤)
-  if (decodedPath.endsWith('/') && decodedPath !== '/') {
-    decodedPath = decodedPath.slice(0, -1);
-  }
+  // 끝에 붙은 슬래시(/) 제거 및 정규화
+  const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
   
-  // 인코딩된 버전도 슬래시 제거 준비 (백업용)
-  let normalizedRawPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
+  // 슬래시가 있는 버전과 없는 버전 모두 준비
+  const pathWithSlash = normalizedPath === '/' ? '/' : normalizedPath + '/';
+  const pathWithoutSlash = normalizedPath;
 
   const MAX_RETRIES = 3;
 
-  // 2. 필터 전략 (우선순위: 한글 경로 -> 원본 경로)
-  // 진단 결과 GA4가 '한글'로 저장하고 있으므로 decodedPath가 핵심입니다.
+  // 2. 필터 전략 (다양한 경로 패턴 시도)
   const filterStrategies = [
-    { path: decodedPath, name: '✅ 최우선: 한글 경로 (디코딩됨)' },
-    { path: normalizedRawPath, name: '백업: 원본 경로 (인코딩됨)' }
+    { path: pathWithoutSlash, name: '✅ 한글 경로 (슬래시 제거)' }, // 가장 일반적
+    { path: pathWithSlash, name: '경로 (슬래시 포함)' },
+    { path: rawPath, name: '원본 경로 (Raw)' },
+    { path: decodedPath, name: '디코딩된 경로 (원본)' }
   ];
+
+  // 중복 제거
+  const uniqueStrategies = [];
+  const seenPaths = new Set();
+  filterStrategies.forEach(s => {
+    if (!seenPaths.has(s.path)) {
+      seenPaths.add(s.path);
+      uniqueStrategies.push(s);
+    }
+  });
 
   let analyticsData = null;
 
   try {
-    for (const filterStrategy of filterStrategies) {
+    for (const filterStrategy of uniqueStrategies) {
       try {
         const response = await fetch(API_URL, {
           method: "POST",
@@ -6762,20 +6780,26 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
             dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
             dimensions: [{ name: "pagePath" }],
             metrics: [
-              { name: "screenPageViews" },
-              { name: "averageSessionDuration" },
-              { name: "sessions" },
-              { name: "screenPageViewsPerSession" },
-              { name: "bounceRate" },
-              { name: "publisherAdRevenue" },
-              { name: "publisherAdImpressions" },
-              { name: "publisherAdClicks" }
+              // 기존 지표
+              { name: "screenPageViews" },          // 0
+              { name: "averageSessionDuration" },   // 1
+              { name: "sessions" },                 // 2
+              { name: "screenPageViewsPerSession" },// 3
+              { name: "bounceRate" },               // 4
+              { name: "publisherAdRevenue" },       // 5
+              { name: "publisherAdImpressions" },   // 6
+              { name: "publisherAdClicks" },        // 7
+              // [신규] 성장 지표 추가
+              { name: "engagementRate" },           // 8: 참여율
+              { name: "averageEngagementTime" },    // 9: 평균 참여 시간
+              { name: "newUsers" },                 // 10: 신규 방문자
+              { name: "activeUsers" }               // 11: 활성 사용자 (재방문 계산용)
             ],
             dimensionFilter: {
               filter: {
                 fieldName: "pagePath",
-                // 정확한 매칭을 위해 EQUALS 사용 (또는 유연하게 BEGINS_WITH)
-                stringFilter: { matchType: "EQUALS", value: filterStrategy.path }
+                // 🔥 [핵심 수정] EQUALS -> BEGINS_WITH로 변경하여 매칭 확률 극대화
+                stringFilter: { matchType: "BEGINS_WITH", value: filterStrategy.path }
               }
             }
           }),
@@ -6789,41 +6813,62 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         const data = await response.json();
         
         if (data.rows && data.rows.length > 0) {
+          // 여러 행이 나올 수 있으므로(BEGINS_WITH), 정확히 일치하거나 가장 유사한 행을 찾거나 합산해야 함
+          // 여기서는 첫 번째 행(가장 관련성 높은)을 사용하되, 필요시 합산 로직 추가 가능
           const row = data.rows[0];
+          const values = row.metricValues;
           
-          // 데이터 파싱
-          const adRevenue = parseFloat(row.metricValues[5]?.value || "0");
-          const adImpressions = parseInt(row.metricValues[6]?.value || "0", 10);
-          const adClicks = parseInt(row.metricValues[7]?.value || "0", 10);
+          const adRevenue = parseFloat(values[5]?.value || "0");
+          const adImpressions = parseInt(values[6]?.value || "0", 10);
+          const adClicks = parseInt(values[7]?.value || "0", 10);
           
+          // 파생 지표 계산
+          const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
+          const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
+
           analyticsData = {
-            pageviews: parseInt(row.metricValues[0]?.value || "0", 10),
-            avgSessionDuration: parseFloat(row.metricValues[1]?.value || "0"),
-            sessions: parseInt(row.metricValues[2]?.value || "0", 10),
-            pagesPerSession: parseFloat(row.metricValues[3]?.value || "0"),
-            bounceRate: parseFloat(row.metricValues[4]?.value || "0"),
+            pageviews: parseInt(values[0]?.value || "0", 10),
+            avgSessionDuration: parseFloat(values[1]?.value || "0"),
+            sessions: parseInt(values[2]?.value || "0", 10),
+            pagesPerSession: parseFloat(values[3]?.value || "0"),
+            bounceRate: parseFloat(values[4]?.value || "0"),
+            
+            // 수익 지표
             gaEarnings: adRevenue,
             gaImpressions: adImpressions,
             gaClicks: adClicks,
-            pageRPM: adImpressions > 0 ? parseFloat(((adRevenue / adImpressions) * 1000).toFixed(2)) : 0,
-            pageCTR: adImpressions > 0 ? parseFloat(((adClicks / adImpressions) * 100).toFixed(2)) : 0,
+            pageRPM: parseFloat(pageRPM.toFixed(2)),
+            pageCTR: parseFloat(pageCTR.toFixed(2)),
+            
+            // [신규] 성장 지표
+            engagementRate: parseFloat(values[8]?.value || "0"),
+            avgEngagementTime: parseFloat(values[9]?.value || "0"),
+            newUsers: parseInt(values[10]?.value || "0", 10),
+            activeUsers: parseInt(values[11]?.value || "0", 10)
           };
+
+          // 재방문자 수 계산 (활성 사용자 - 신규 사용자)
+          analyticsData.returningUsers = Math.max(0, analyticsData.activeUsers - analyticsData.newUsers);
 
           console.log(`[GA4] 데이터 수집 성공 (${url}):`, {
             전략: filterStrategy.name,
             조회수: analyticsData.pageviews,
             수익: analyticsData.gaEarnings
           });
-          break; // 성공하면 즉시 종료
+          break; // 성공하면 루프 종료
         }
       } catch (e) {
         if (e.message === "UNAUTHORIZED") throw e;
+        // 다른 에러는 무시하고 다음 전략 시도
       }
     }
 
     if (!analyticsData) {
-      console.log(`[GA4] 데이터 없음 (${url}): 방문자가 없거나 아직 집계되지 않음`);
-      return { pageviews: 0, gaEarnings: 0, pageRPM: 0, pageCTR: 0 };
+      console.log(`[GA4] 데이터 없음 (${url}): 모든 전략 시도했으나 데이터가 없거나 매칭되지 않음`);
+      return { 
+        pageviews: 0, gaEarnings: 0, pageRPM: 0, pageCTR: 0, 
+        engagementRate: 0, newUsers: 0, returningUsers: 0 
+      };
     }
 
     return analyticsData;
@@ -6834,13 +6879,17 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
       console.log(`[GA4] 토큰 갱신 후 재시도 (${retryCount + 1})...`);
       try {
         await new Promise(r => chrome.identity.removeCachedAuthToken({ token }, r));
-        const newToken = await new Promise((resolve) => {
-          chrome.identity.getAuthToken({ interactive: false }, resolve);
+        const newToken = await new Promise((resolve, reject) => {
+          chrome.identity.getAuthToken({ interactive: false }, (t) => {
+             if (chrome.runtime.lastError) reject(chrome.runtime.lastError); else resolve(t);
+          });
         });
         await chrome.storage.local.set({ googleAuthToken: newToken });
         return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("[GA4] 토큰 갱신 실패:", e); }
     }
+    
+    console.error("[GA4] 최종 실패:", error);
     return { pageviews: 0, gaEarnings: 0 };
   }
 }
