@@ -599,8 +599,30 @@ export function renderChannelMode(container) {
         syncBtn.textContent = "🔄 등록 상태 확인하기";
         
         if (response && response.success) {
-          const { totalRegistered, updatedCards } = response.data;
-          alert(`✅ 확인 완료!\n\n- 발견된 등록 URL: ${totalRegistered}개\n- 업데이트된 카드: ${updatedCards}개`);
+          const { totalRegistered, updatedCards, matchedCards, alreadyRegistered, notMatched } = response.data;
+          
+          // [팝업 메시지 개선] 더 명확한 메시지 표시
+          let message = `✅ 확인 완료!\n\n`;
+          message += `📋 수집된 등록 URL: ${totalRegistered}개\n`;
+          message += `✅ 매칭된 카드: ${matchedCards || 0}개\n`;
+          
+          if (updatedCards > 0) {
+            message += `🔄 업데이트된 카드: ${updatedCards}개\n`;
+          } else if (matchedCards > 0 && alreadyRegistered === matchedCards) {
+            message += `✅ 이미 등록된 카드: ${alreadyRegistered}개\n`;
+            message += `\n💡 모든 카드가 이미 올바르게 등록되어 있어 추가 업데이트가 필요 없습니다.`;
+          } else if (matchedCards === 0) {
+            message += `⚠️ 매칭된 카드가 없습니다.\n`;
+            message += `\n💡 발행된 콘텐츠의 URL이 AdSense에 등록되어 있는지 확인하세요.`;
+          } else {
+            message += `ℹ️ 업데이트된 카드: 0개\n`;
+          }
+          
+          if (notMatched > 0) {
+            message += `\n⚠️ 매칭 실패한 카드: ${notMatched}개`;
+          }
+          
+          alert(message);
           // 대시보드나 칸반 데이터 갱신이 필요하면 여기서 트리거
         } else {
           alert("❌ 확인 실패: " + (response?.error || "알 수 없는 오류"));

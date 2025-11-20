@@ -3563,6 +3563,21 @@ ${decayContent.map((item, idx) =>
     return true;
   }
 
+  // [체크리스트 2-1] 메시지 핸들러 추가: trigger_performance_refresh
+  if (msg.action === "trigger_performance_refresh") {
+    (async () => {
+      try {
+        console.log("[Performance Refresh] 사용자 요청으로 성과 데이터 수집 시작...");
+        await updateAllPerformanceMetrics();
+        sendResponse({ success: true, message: "성과 데이터 수집이 시작되었습니다." });
+      } catch (error) {
+        console.error("[Performance Refresh] 오류 발생:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // 비동기 응답을 위해 true 반환
+  }
+
   // 칸반 보드 및 워크스페이스
   if (msg.action === "get_kanban_data") {
     // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
@@ -6399,22 +6414,55 @@ async function updateAllPerformanceMetrics() {
   const snapshot = await kanbanRef.once("value");
   const allCards = snapshot.val() || {};
 
-  const promises = [];
+  // [체크리스트 2-2] URL 유효성 검사 함수
+  const isValidUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      const urlObj = new URL(url);
+      return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // [체크리스트 2-2] 배치 처리: 한 번에 처리할 카드 수 제한 (API Quota 방지)
+  const BATCH_SIZE = 5; // 한 번에 5개씩 처리
+  const tasks = [];
+  
   for (const status in allCards) {
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
-      if (card.performanceTracked && card.publishedUrl) {
-        promises.push(
-          updateSinglePerformanceMetric({
-            id: cardId,
-            path: `kanban/${status}/${cardId}`,
-            url: card.publishedUrl,
-          })
-        );
+      // [체크리스트 2-2] URL 유효성 검사 강화
+      if (card.performanceTracked && card.publishedUrl && isValidUrl(card.publishedUrl)) {
+        tasks.push({
+          id: cardId,
+          path: `kanban/${status}/${cardId}`,
+          url: card.publishedUrl,
+        });
+      } else if (card.performanceTracked && card.publishedUrl && !isValidUrl(card.publishedUrl)) {
+        console.warn(`[성과 지표 수집] 유효하지 않은 URL 건너뛰기: ${card.publishedUrl} (카드 ID: ${cardId})`);
       }
     }
   }
-  await Promise.all(promises);
+
+  // 배치 처리: 한 번에 BATCH_SIZE개씩 처리
+  console.log(`[성과 지표 수집] 총 ${tasks.length}개 카드 수집 시작 (배치 크기: ${BATCH_SIZE})`);
+  
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+    const batch = tasks.slice(i, i + BATCH_SIZE);
+    const batchPromises = batch.map(task => 
+      updateSinglePerformanceMetric(task)
+    );
+    
+    await Promise.all(batchPromises);
+    console.log(`[성과 지표 수집] 배치 ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tasks.length / BATCH_SIZE)} 완료 (${batch.length}개)`);
+    
+    // 배치 간 짧은 지연 (API Quota 방지)
+    if (i + BATCH_SIZE < tasks.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
   console.log("모든 콘텐츠의 성과 지표 업데이트 완료.");
 
   // 성과 업데이트가 끝난 직후, 재활용 자동화 로직 실행
@@ -6433,7 +6481,45 @@ async function updateSinglePerformanceMetric(contentInfo) {
     timestamp: new Date().toISOString(),
   };
 
+  // [체크리스트 2-2] URL 유효성 검사 강화
+  if (!contentInfo.url || typeof contentInfo.url !== 'string') {
+    const errorMsg = "publishedUrl이 유효하지 않습니다 (null 또는 undefined)";
+    console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
+    await firebase
+      .database()
+      .ref(contentInfo.path)
+      .child("performance")
+      .update({
+        lastUpdatedAt: Date.now(),
+        error: errorMsg,
+        errorType: "INVALID_URL",
+        collecting: false,
+        collectingCompletedAt: Date.now(),
+      });
+    return;
+  }
+
   try {
+    // URL 형식 검증
+    try {
+      new URL(contentInfo.url);
+    } catch (e) {
+      const errorMsg = `publishedUrl이 유효한 URL 형식이 아닙니다: ${contentInfo.url}`;
+      console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
+      await firebase
+        .database()
+        .ref(contentInfo.path)
+        .child("performance")
+        .update({
+          lastUpdatedAt: Date.now(),
+          error: errorMsg,
+          errorType: "INVALID_URL",
+          collecting: false,
+          collectingCompletedAt: Date.now(),
+        });
+      return;
+    }
+
     console.log(`[성과 지표 수집 시작]`, logContext);
 
     // 수집 시작 상태를 Firebase에 저장
@@ -6455,6 +6541,13 @@ async function updateSinglePerformanceMetric(contentInfo) {
     
     const googleAuthToken = storageResult.googleAuthToken;
     const adSenseAccountId = storageResult.adSenseAccountId;
+    
+    // [체크리스트 1-1] Google 인증 토큰 유효성 확인
+    console.log("[1단계: 사전 조건] Google 인증 토큰 확인", {
+      hasToken: !!googleAuthToken,
+      tokenLength: googleAuthToken?.length || 0,
+      hasAdSenseId: !!adSenseAccountId
+    });
     
     // Firebase에서 채널 데이터 가져오기 (chrome.storage.local이 아닌 Firebase에 저장됨)
     const userId = "default_user";
@@ -6543,13 +6636,15 @@ async function updateSinglePerformanceMetric(contentInfo) {
       gaPropertyId = blogInfo?.gaPropertyId;
     }
     
-    // 디버깅 로그
-    console.log(`[성과 지표 수집] URL 매칭 결과:`, {
+    // [체크리스트 1-2] GA4 속성 ID 매핑 확인
+    console.log(`[1단계: 사전 조건] URL 매칭 결과:`, {
       contentUrl: contentInfo.url,
       myChannelsBlogs: myChannels.blogs,
       matchedBlog: blogInfo,
       gaPropertyId: gaPropertyId,
-      adSenseAccountId: adSenseAccountId
+      adSenseAccountId: adSenseAccountId,
+      hasGaPropertyId: !!gaPropertyId,
+      hasAdSenseAccountId: !!adSenseAccountId
     }, logContext);
 
     if (!gaPropertyId || !adSenseAccountId) {
@@ -6592,12 +6687,38 @@ async function updateSinglePerformanceMetric(contentInfo) {
     const finalEarnings = (analyticsResult.gaEarnings && analyticsResult.gaEarnings > 0)
       ? analyticsResult.gaEarnings
       : (adsenseResult.estimatedEarnings || 0);
+    
+    // [수정 요청 1] 페이지뷰 하이브리드 로직 추가 (수익 로직 참고)
+    // GA4 페이지뷰 데이터가 있으면(0보다 크면) 그것을 사용하고, 없으면 AdSense API 값을 사용
+    const finalPageviews = (analyticsResult.pageviews && analyticsResult.pageviews > 0)
+      ? analyticsResult.pageviews
+      : (adsenseResult.pageViews || 0); // AdSense는 pageViews (대문자 V)
+    
+    // [체크리스트 3-2] 수익 파싱 확인
+    console.log("[3단계: 데이터 파싱] 수익 파싱", {
+      gaEarnings: analyticsResult.gaEarnings,
+      adsenseEarnings: adsenseResult.estimatedEarnings,
+      finalEarnings: finalEarnings,
+      "GA4 raw (index 5)": analyticsResult.gaEarnings,
+      "하이브리드 로직": analyticsResult.gaEarnings > 0 ? "GA4 사용" : "AdSense 사용"
+    });
+    
+    // [수정 요청 1] 페이지뷰 파싱 확인
+    console.log("[3단계: 데이터 파싱] 페이지뷰 파싱", {
+      gaPageviews: analyticsResult.pageviews,
+      adsensePageViews: adsenseResult.pageViews,
+      finalPageviews: finalPageviews,
+      "GA4 raw (index 0)": analyticsResult.pageviews,
+      "하이브리드 로직": analyticsResult.pageviews > 0 ? "GA4 사용" : "AdSense 사용"
+    });
 
     const performanceData = {
       ...analyticsResult,
       ...adsenseResult,
       // 최종 수익 (하이브리드)
       estimatedEarnings: finalEarnings,
+      // [수정 요청 1] 최종 페이지뷰 (하이브리드)
+      pageviews: finalPageviews,
       
       // [추가] 상세 분석 지표 저장 (GA4 기준)
       adImpressions: analyticsResult.gaImpressions || 0,
@@ -6667,6 +6788,43 @@ async function updateSinglePerformanceMetric(contentInfo) {
       updateData.error = null;
     }
     
+    // [체크리스트 4-1] Firebase 저장 확인
+    console.log("[4단계: 데이터 저장] Firebase 저장", {
+      path: contentInfo.path,
+      updateData: {
+        estimatedEarnings: updateData.estimatedEarnings,
+        pageviews: updateData.pageviews,
+        engagementRate: updateData.engagementRate,
+        newUsers: updateData.newUsers,
+        avgEngagementTime: updateData.avgEngagementTime,
+        pageRPM: updateData.pageRPM,
+        collecting: updateData.collecting
+      }
+    });
+    
+    // [체크리스트 4-2] 데이터 병합 확인
+    console.log("[4단계: 데이터 저장] 데이터 병합", {
+      analyticsResult: {
+        pageviews: analyticsResult.pageviews,
+        gaEarnings: analyticsResult.gaEarnings,
+        engagementRate: analyticsResult.engagementRate,
+        newUsers: analyticsResult.newUsers,
+        avgEngagementTime: analyticsResult.avgEngagementTime,
+        pageRPM: analyticsResult.pageRPM
+      },
+      adsenseResult: {
+        estimatedEarnings: adsenseResult.estimatedEarnings
+      },
+      performanceData: {
+        estimatedEarnings: performanceData.estimatedEarnings,
+        pageviews: performanceData.pageviews,
+        engagementRate: performanceData.engagementRate,
+        newUsers: performanceData.newUsers,
+        avgEngagementTime: performanceData.avgEngagementTime,
+        pageRPM: performanceData.pageRPM
+      }
+    });
+    
     await firebase
       .database()
       .ref(contentInfo.path)
@@ -6720,20 +6878,39 @@ async function updateSinglePerformanceMetric(contentInfo) {
  * - 매칭 로직: BEGINS_WITH + 디코딩된 경로 사용 (매칭률 100% 목표)
  * - 데이터 확장: 참여율, 신규 방문자, 그리고 '주력 유입 경로(Top Source)'까지 수집
  */
-async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
+async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncodedPath = false, excludePublisherMetrics = false, excludeAverageEngagementTime = false) {
   const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
   
-  // 1. URL 경로 정제
+  // 1. URL 경로 정제 (https://가 없으면 추가)
   let urlObj;
-  try { urlObj = new URL(url); } catch (e) { return { pageviews: 0, gaEarnings: 0 }; }
+  try {
+    // https://가 없으면 추가
+    const normalizedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+    urlObj = new URL(normalizedUrl);
+  } catch (e) { 
+    console.error(`[GA4] URL 파싱 실패: ${e.message}`, { url });
+    return { pageviews: 0, gaEarnings: 0 }; 
+  }
 
   const rawPath = urlObj.pathname;
   let decodedPath = rawPath;
   try { decodedPath = decodeURIComponent(rawPath); } catch(e) {}
   const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
+  const normalizedRawPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
 
-  // 필터 경로 (디코딩된 한글 경로 사용)
-  const filterPath = normalizedPath; 
+  // 필터 경로 선택: useEncodedPath가 true면 인코딩된 경로, false면 디코딩된 경로
+  const filterPath = useEncodedPath ? normalizedRawPath : normalizedPath;
+  
+  // [체크리스트 2-3] URL 필터 매칭 확인
+  console.log("[2단계: GA4 API] URL 필터", {
+    rawPath: rawPath,
+    decodedPath: decodedPath,
+    normalizedPath: normalizedPath,
+    normalizedRawPath: normalizedRawPath,
+    filterPath: filterPath,
+    useEncodedPath: useEncodedPath,
+    url: url
+  }); 
 
   try {
     // [요청 1] 핵심 성과 지표 (Metrics)
@@ -6749,13 +6926,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
           { name: "sessions" },                 // 2: 세션
           { name: "screenPageViewsPerSession" },// 3: 세션당 페이지수
           { name: "bounceRate" },               // 4: 이탈률
-          { name: "publisherAdRevenue" },       // 5: 수익
-          { name: "publisherAdImpressions" },   // 6: 노출수
-          { name: "publisherAdClicks" },        // 7: 클릭수
-          { name: "engagementRate" },           // 8: 참여율 (New!)
-          { name: "averageEngagementTime" },    // 9: 평균 참여 시간 (New!)
-          { name: "newUsers" },                 // 10: 신규 방문자 (New!)
-          { name: "activeUsers" }               // 11: 활성 사용자 (New!)
+          // Publisher 메트릭은 AdSense 연결 시에만 사용 가능
+          ...(excludePublisherMetrics ? [] : [
+            { name: "publisherAdRevenue" },       // 5: 수익
+            { name: "publisherAdImpressions" },   // 6: 노출수
+            { name: "publisherAdClicks" }         // 7: 클릭수
+          ]),
+          { name: "engagementRate" },           // 8: 참여율
+          ...(excludeAverageEngagementTime ? [] : [{ name: "averageEngagementTime" }]),    // 9: 평균 참여 시간 (선택적)
+          { name: "newUsers" },                 // 10: 신규 방문자
+          { name: "activeUsers" }               // 11: 활성 사용자
         ],
         dimensionFilter: {
           filter: {
@@ -6788,28 +6968,196 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
     // 병렬 실행
     const [metricsRes, sourceRes] = await Promise.all([metricsRequest, sourceRequest]);
 
+    // [체크리스트 2-1] API 요청 성공 여부 확인
+    console.log("[2단계: GA4 API] API 응답 상태", {
+      status: metricsRes.status,
+      ok: metricsRes.ok,
+      url: url,
+      propertyId: propertyId
+    });
+
     if (!metricsRes.ok) {
+      // 에러 응답 본문 확인 (400, 401 등 상세 에러 파악용)
+      let errorBody = null;
+      try {
+        errorBody = await metricsRes.clone().json();
+        const errorMessage = errorBody?.error?.message || 'Unknown error';
+        const errorCode = errorBody?.error?.code || 'Unknown';
+        console.error(`[GA4 API 에러] ${metricsRes.status} ${metricsRes.statusText}`, {
+          status: metricsRes.status,
+          errorCode: errorCode,
+          errorMessage: errorMessage,
+          fullError: errorBody,
+          url: url,
+          filterPath: filterPath,
+          propertyId: propertyId
+        });
+        // 에러 메시지를 더 명확하게 표시
+        console.error(`[GA4 API 에러 상세]`, errorBody);
+      } catch (e) {
+        console.error(`[GA4 API 에러] ${metricsRes.status} ${metricsRes.statusText} (응답 본문 파싱 실패)`, {
+          status: metricsRes.status,
+          url: url,
+          filterPath: filterPath,
+          parseError: e.message
+        });
+      }
+
       if (metricsRes.status === 401) throw new Error("UNAUTHORIZED");
+      
+      // 400 Bad Request 처리: 필터 경로 문제일 수 있음
+      if (metricsRes.status === 400) {
+        // 인코딩된 경로로 재시도 (한글 경로가 인코딩되어 저장된 경우)
+        // 단, 메트릭 오류가 아닌 경우에만 시도 (메트릭 오류는 별도 처리)
+        const isMetricErrorCheck = errorBody?.error?.message?.includes('Did you mean') || errorBody?.error?.message?.includes('metric');
+        if (retryCount === 0 && !useEncodedPath && rawPath !== normalizedPath && !isMetricErrorCheck) {
+          console.warn(`[GA4] 400 에러 발생, 인코딩된 경로로 재시도...`, {
+            originalFilter: filterPath,
+            retryFilter: normalizedRawPath
+          });
+          // 인코딩된 경로로 재시도
+          return getAnalyticsData(token, propertyId, url, retryCount + 1, true, excludePublisherMetrics, excludeAverageEngagementTime);
+        }
+        // 에러 메시지에서 메트릭 이름 문제를 확인
+        const errorMsg = errorBody?.error?.message || 'Invalid filter path';
+        const isMetricError = errorMsg.includes('Did you mean') || errorMsg.includes('metric');
+        const isPublisherMetricError = errorMsg.includes('publisherAdRevenue') || errorMsg.includes('publisherAdImpressions') || errorMsg.includes('publisherAdClicks');
+        const isAverageEngagementTimeError = errorMsg.includes('averageEngagementTime');
+        
+        if (isMetricError) {
+          console.error(`[GA4] 메트릭 이름 오류 감지: ${errorMsg}`);
+          console.error(`[GA4] 사용 중인 메트릭:`, [
+            "screenPageViews", "averageSessionDuration", "sessions", 
+            "screenPageViewsPerSession", "bounceRate", 
+            ...(excludePublisherMetrics ? [] : ["publisherAdRevenue", "publisherAdImpressions", "publisherAdClicks"]),
+            "engagementRate", 
+            ...(excludeAverageEngagementTime ? [] : ["averageEngagementTime"]),
+            "newUsers", "activeUsers"
+          ]);
+        }
+        
+        // Publisher 메트릭 오류인 경우, Publisher 메트릭을 제외하고 재시도
+        if (isPublisherMetricError && !excludePublisherMetrics && retryCount < 3) {
+          console.warn(`[GA4] Publisher 메트릭 오류 감지, Publisher 메트릭을 제외하고 재시도...`);
+          return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, true, excludeAverageEngagementTime);
+        }
+        
+        // averageEngagementTime 오류인 경우, 해당 메트릭을 제외하고 재시도
+        if (isAverageEngagementTimeError && !excludeAverageEngagementTime && retryCount < 3) {
+          console.warn(`[GA4] averageEngagementTime 메트릭 오류 감지, 해당 메트릭을 제외하고 재시도...`);
+          return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, true);
+        }
+        
+        return { 
+          pageviews: 0, 
+          gaEarnings: 0, 
+          error: `Bad Request (400): ${errorMsg}`,
+          errorDetails: errorBody,
+          isMetricError: isMetricError,
+          isPublisherMetricError: isPublisherMetricError
+        };
+      }
+      
+      // [체크리스트 3-4] 429 Quota 제한 처리
+      if (metricsRes.status === 429) {
+        if (retryCount < 3) {
+          const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
+          console.warn(`[GA4] Quota 제한 감지 (429), ${delay}ms 후 재시도 (${retryCount + 1}/3)...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, excludeAverageEngagementTime);
+        } else {
+          console.error(`[GA4] Quota 제한 초과, 재시도 실패 (${retryCount}회 시도)`);
+          return { pageviews: 0, gaEarnings: 0, error: "Quota limit exceeded" };
+        }
+      }
+      // [체크리스트 C-3] 500 Internal Server Error 처리
+      if (metricsRes.status === 500 || metricsRes.status >= 502 && metricsRes.status <= 504) {
+        if (retryCount < 2) {
+          const delay = Math.pow(2, retryCount) * 2000; // 지수 백오프: 2초, 4초
+          console.warn(`[GA4] 서버 오류 감지 (${metricsRes.status}), ${delay}ms 후 재시도 (${retryCount + 1}/2)...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, excludeAverageEngagementTime);
+        } else {
+          console.error(`[GA4] 서버 오류, 재시도 실패 (${retryCount}회 시도)`);
+          return { pageviews: 0, gaEarnings: 0, error: `Server error (${metricsRes.status})` };
+        }
+      }
       // 데이터가 없거나 오류인 경우
-      return { pageviews: 0, gaEarnings: 0 };
+      return { pageviews: 0, gaEarnings: 0, error: `HTTP ${metricsRes.status}: ${errorBody?.error?.message || metricsRes.statusText}` };
     }
 
     const metricsData = await metricsRes.json();
     const sourceData = await sourceRes.ok ? await sourceRes.json() : {};
+
+    // [체크리스트 2-2] API 응답 데이터 존재 여부 확인
+    console.log("[2단계: GA4 API] 응답 데이터", {
+      hasRows: metricsData.rows && metricsData.rows.length > 0,
+      rowCount: metricsData.rowCount || 0,
+      rowsLength: metricsData.rows?.length || 0,
+      firstRow: metricsData.rows?.[0] || null,
+      url: url
+    });
 
     // 데이터 파싱
     if (metricsData.rows && metricsData.rows.length > 0) {
       const row = metricsData.rows[0]; // 가장 관련성 높은 첫 번째 행 사용
       const values = row.metricValues;
 
-      // 기본 데이터
-      const adRevenue = parseFloat(values[5]?.value || "0");
-      const adImpressions = parseInt(values[6]?.value || "0", 10);
-      const adClicks = parseInt(values[7]?.value || "0", 10);
+      // Publisher 메트릭과 averageEngagementTime이 없을 때 인덱스 조정
+      // excludePublisherMetrics가 true면 인덱스가 3개씩 앞당겨짐
+      // excludeAverageEngagementTime이 true면 인덱스가 1개씩 앞당겨짐
+      const baseIndex = 0; // screenPageViews
+      const adRevenueIndex = excludePublisherMetrics ? -1 : 5; // publisherAdRevenue
+      const adImpressionsIndex = excludePublisherMetrics ? -1 : 6; // publisherAdImpressions
+      const adClicksIndex = excludePublisherMetrics ? -1 : 7; // publisherAdClicks
+      const engagementRateIndex = excludePublisherMetrics ? 5 : 8; // engagementRate
+      const avgEngagementTimeIndex = excludeAverageEngagementTime ? -1 : (excludePublisherMetrics ? 6 : 9); // averageEngagementTime
+      const newUsersIndex = excludeAverageEngagementTime 
+        ? (excludePublisherMetrics ? 6 : 9) 
+        : (excludePublisherMetrics ? 7 : 10); // newUsers
+      const activeUsersIndex = excludeAverageEngagementTime 
+        ? (excludePublisherMetrics ? 7 : 10) 
+        : (excludePublisherMetrics ? 8 : 11); // activeUsers
+
+      // [체크리스트 2-4] Metrics 배열 순서 확인
+      console.log("[2단계: GA4 API] Metrics 인덱스", {
+        excludePublisherMetrics: excludePublisherMetrics,
+        totalMetrics: values.length,
+        values: values,
+        "0-pageviews": values[0]?.value,
+        "1-avgSessionDuration": values[1]?.value,
+        "2-sessions": values[2]?.value,
+        "3-pagesPerSession": values[3]?.value,
+        "4-bounceRate": values[4]?.value,
+        ...(excludePublisherMetrics ? {} : {
+          "5-earnings": values[5]?.value,
+          "6-adImpressions": values[6]?.value,
+          "7-adClicks": values[7]?.value
+        }),
+        [`${engagementRateIndex}-engagementRate`]: values[engagementRateIndex]?.value,
+        ...(excludeAverageEngagementTime ? {} : { [`${avgEngagementTimeIndex}-avgEngagementTime`]: values[avgEngagementTimeIndex]?.value }),
+        [`${newUsersIndex}-newUsers`]: values[newUsersIndex]?.value,
+        [`${activeUsersIndex}-activeUsers`]: values[activeUsersIndex]?.value
+      });
+
+      // 기본 데이터 (Publisher 메트릭이 없으면 0)
+      const adRevenue = excludePublisherMetrics ? 0 : parseFloat(values[adRevenueIndex]?.value || "0");
+      const adImpressions = excludePublisherMetrics ? 0 : parseInt(values[adImpressionsIndex]?.value || "0", 10);
+      const adClicks = excludePublisherMetrics ? 0 : parseInt(values[adClicksIndex]?.value || "0", 10);
       
       // 파생 지표
       const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
       const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
+      
+      // [체크리스트 3-6] RPM 계산 확인
+      console.log("[3단계: 데이터 파싱] RPM 계산", {
+        excludePublisherMetrics: excludePublisherMetrics,
+        adRevenue: adRevenue,
+        adImpressions: adImpressions,
+        adClicks: adClicks,
+        pageRPM: pageRPM,
+        formula: adImpressions > 0 ? `(${adRevenue} / ${adImpressions}) * 1000` : "0 (노출수 없음)"
+      });
 
       // 유입 경로 파싱
       let topSource = "-";
@@ -6820,8 +7168,47 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         topSource = `${source} / ${medium}`;
       }
 
+      // [체크리스트 3-1~5] 각 지표별 파싱 확인
+      const pageviews = parseInt(values[0]?.value || "0", 10);
+      const engagementRate = parseFloat(values[engagementRateIndex]?.value || "0");
+      const avgEngagementTime = excludeAverageEngagementTime ? 0 : parseFloat(values[avgEngagementTimeIndex]?.value || "0");
+      const newUsers = parseInt(values[newUsersIndex]?.value || "0", 10);
+      
+      console.log("[3단계: 데이터 파싱] 지표별 파싱 결과", {
+        excludePublisherMetrics: excludePublisherMetrics,
+        "페이지뷰 (index 0)": {
+          rawValue: values[0]?.value,
+          parsed: pageviews,
+          isZero: pageviews === 0
+        },
+        ...(excludePublisherMetrics ? {} : {
+          "수익 (index 5)": {
+            rawValue: values[5]?.value,
+            parsed: adRevenue,
+            isZero: adRevenue === 0
+          }
+        }),
+        [`참여율 (index ${engagementRateIndex})`]: {
+          rawValue: values[engagementRateIndex]?.value,
+          parsed: engagementRate,
+          isZero: engagementRate === 0
+        },
+        ...(excludeAverageEngagementTime ? {} : {
+          [`평균 참여시간 (index ${avgEngagementTimeIndex})`]: {
+            rawValue: values[avgEngagementTimeIndex]?.value,
+            parsed: avgEngagementTime,
+            isZero: avgEngagementTime === 0
+          }
+        }),
+        [`신규 방문자 (index ${newUsersIndex})`]: {
+          rawValue: values[newUsersIndex]?.value,
+          parsed: newUsers,
+          isZero: newUsers === 0
+        }
+      });
+
       const analyticsData = {
-        pageviews: parseInt(values[0]?.value || "0", 10),
+        pageviews: pageviews,
         avgSessionDuration: parseFloat(values[1]?.value || "0"),
         sessions: parseInt(values[2]?.value || "0", 10),
         pagesPerSession: parseFloat(values[3]?.value || "0"),
@@ -6834,10 +7221,10 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0) {
         pageCTR: parseFloat(pageCTR.toFixed(2)),
         
         // [신규] 성장 지표
-        engagementRate: parseFloat(values[8]?.value || "0"),
-        avgEngagementTime: parseFloat(values[9]?.value || "0"),
-        newUsers: parseInt(values[10]?.value || "0", 10),
-        activeUsers: parseInt(values[11]?.value || "0", 10),
+        engagementRate: engagementRate,
+        avgEngagementTime: avgEngagementTime,
+        newUsers: newUsers,
+        activeUsers: parseInt(values[activeUsersIndex]?.value || "0", 10),
         
         // [신규] 유입 경로
         topSource: topSource
@@ -8220,6 +8607,9 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
 
     // 3. 데이터베이스 업데이트 (유연한 매칭 로직 적용)
     let updatedCount = 0;
+    let matchedCount = 0;
+    let alreadyRegisteredCount = 0;
+    let notMatchedCount = 0;
     
     if (registeredUrls.size > 0) {
       const db = firebase.database();
@@ -8245,23 +8635,93 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
                 return normUrl === reg || normUrl.startsWith(reg) || (normUrl.includes(reg) && reg.includes('.'));
             });
             
-            if (card.adSenseRegistered !== isReg) {
-              updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isReg;
-              updatedCount++;
+            // 통계 수집
+            if (isReg) {
+              matchedCount++;
+              if (card.adSenseRegistered === true) {
+                alreadyRegisteredCount++;
+              }
+            } else {
+              notMatchedCount++;
             }
             
-            // 디버깅: 매칭 성공한 경우 로그
-            if (isReg && updatedCount <= 5) {
-               console.log(`✅ [매칭 성공] 카드: ${normUrl}`);
+            // 현재 상태 확인 (undefined도 false로 처리)
+            const currentStatus = card.adSenseRegistered === true;
+            const needsUpdate = currentStatus !== isReg;
+            
+            // 디버깅: 매칭 결과 상세 로그
+            if (isReg) {
+              console.log(`✅ [매칭 성공] 카드: ${normUrl}`, {
+                cardId: cardId,
+                currentStatus: currentStatus,
+                currentStatusRaw: card.adSenseRegistered, // 원본 값 확인
+                newStatus: isReg,
+                needsUpdate: needsUpdate
+              });
+            } else {
+              // 매칭 실패한 경우도 로그 (디버깅용)
+              if (card.adSenseRegistered === true) {
+                console.log(`⚠️ [매칭 실패] 카드: ${normUrl}`, {
+                  cardId: cardId,
+                  currentStatus: currentStatus,
+                  newStatus: isReg,
+                  needsUpdate: needsUpdate,
+                  note: "이전에는 등록되어 있었으나 현재 매칭되지 않음"
+                });
+              }
+            }
+            
+            if (needsUpdate) {
+              updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isReg;
+              updatedCount++;
+              console.log(`🔄 [상태 업데이트] 카드 ${cardId}: ${currentStatus} → ${isReg}`, {
+                url: normUrl,
+                title: card.title || "제목 없음"
+              });
             }
           }
         }
       }
-      if (updatedCount > 0) await db.ref().update(updates);
+      if (updatedCount > 0) {
+        console.log(`💾 [AdSense] Firebase 업데이트 시작: ${updatedCount}개 카드`);
+        await db.ref().update(updates);
+        console.log(`✅ [AdSense] Firebase 업데이트 완료: ${updatedCount}개 카드`);
+      }
+      
+      // 상태 요약 로그 (항상 출력)
+      const summaryMessage = updatedCount === 0 && alreadyRegisteredCount === matchedCount 
+        ? "✅ 모든 카드가 이미 올바르게 등록되어 있습니다."
+        : updatedCount === 0 && matchedCount === 0
+        ? "⚠️ 매칭된 카드가 없습니다. URL 패턴을 확인하세요."
+        : updatedCount > 0
+        ? `🔄 ${updatedCount}개 카드 상태가 업데이트되었습니다.`
+        : "ℹ️ 상태 변경이 필요하지 않습니다.";
+        
+      console.log(`📊 [AdSense] 상태 요약:`, {
+        총_수집된_URL_패턴: registeredUrls.size,
+        매칭_성공_카드: matchedCount,
+        이미_등록됨: alreadyRegisteredCount,
+        매칭_실패_카드: notMatchedCount,
+        업데이트_필요: updatedCount,
+        메시지: summaryMessage
+      });
+    } else {
+      // registeredUrls가 0개인 경우
+      matchedCount = 0;
+      alreadyRegisteredCount = 0;
+      notMatchedCount = 0;
     }
     
     console.log(`🏁 [AdSense] 최종 완료: ${updatedCount}개 카드 상태 업데이트됨`);
-    return { totalRegistered: registeredUrls.size, updatedCards: updatedCount };
+    
+    // [팝업 메시지 개선] 더 상세한 정보 반환
+    return { 
+      totalRegistered: registeredUrls.size, 
+      updatedCards: updatedCount,
+      matchedCards: matchedCount,
+      alreadyRegistered: alreadyRegisteredCount,
+      notMatched: notMatchedCount
+    };
 
   } catch (e) {
     if (e.message === "UNAUTHORIZED") {
@@ -8448,4 +8908,254 @@ async function runGA4DeepDiagnosis() {
   } catch (e) {
     console.error("💥 [GA4 진단] 치명적 오류:", e);
   }
+}
+
+/**
+ * [테스트 함수] 콘솔에서 URL 매칭 및 데이터 수집 테스트
+ * 사용법: testUrlMatching("https://example.com/path")
+ * 
+ * @param {string} url - 테스트할 URL
+ */
+async function testUrlMatching(url) {
+  console.log("🧪 [URL 매칭 테스트] 시작...", { url });
+  console.log("=".repeat(80));
+  
+  try {
+    // 1. URL 유효성 검사
+    let urlObj;
+    try {
+      urlObj = new URL(url);
+      console.log("✅ [1단계] URL 파싱 성공", {
+        hostname: urlObj.hostname,
+        pathname: urlObj.pathname,
+        fullUrl: urlObj.href
+      });
+    } catch (e) {
+      console.error("❌ [1단계] URL 파싱 실패:", e.message);
+      return;
+    }
+
+    // 2. 인증 토큰 및 계정 정보 가져오기
+    const storageData = await chrome.storage.local.get([
+      "googleAuthToken",
+      "adSenseAccountId"
+    ]);
+    const googleAuthToken = storageData.googleAuthToken;
+    const adSenseAccountId = storageData.adSenseAccountId;
+
+    console.log("📋 [2단계] 인증 정보 확인", {
+      hasToken: !!googleAuthToken,
+      hasAdSenseAccountId: !!adSenseAccountId,
+      tokenLength: googleAuthToken?.length || 0
+    });
+
+    if (!googleAuthToken) {
+      console.error("❌ [2단계] Google 인증 토큰이 없습니다. 먼저 Google 계정을 연동해주세요.");
+      return;
+    }
+
+    // 3. Firebase에서 채널 데이터 가져오기
+    const userId = "default_user";
+    const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
+    const channelsData = channelsSnapshot.val() || {};
+    const myChannels = channelsData.myChannels || { blogs: [] };
+
+    console.log("📋 [3단계] 채널 데이터 확인", {
+      totalBlogs: myChannels.blogs?.length || 0,
+      blogs: myChannels.blogs?.map(b => ({
+        url: b.inputUrl || b.url,
+        gaPropertyId: b.gaPropertyId
+      })) || []
+    });
+
+    // 4. URL 매칭 로직 실행
+    const contentHostname = urlObj.hostname;
+    let blogInfo = null;
+    let gaPropertyId = null;
+
+    // 방법 1: 정확한 hostname 매칭
+    try {
+      blogInfo = myChannels.blogs.find((b) => {
+        const blogUrl = b.inputUrl || b.url;
+        if (!blogUrl) return false;
+        try {
+          const blogUrlObj = new URL(blogUrl);
+          const blogHostname = blogUrlObj.hostname;
+          
+          // 정확한 hostname 매칭
+          if (contentHostname === blogHostname) return true;
+          
+          // 하위 도메인 고려
+          const contentParts = contentHostname.split('.');
+          const blogParts = blogHostname.split('.');
+          
+          const getMainDomain = (parts) => {
+            if (parts.length <= 2) return parts.join('.');
+            if (parts.length >= 3 && 
+                (parts[parts.length - 2] === 'co' && parts[parts.length - 1] === 'kr') ||
+                (parts[parts.length - 2] === 'com' && parts[parts.length - 1] === 'au')) {
+              return parts.slice(-3).join('.');
+            }
+            return parts.slice(-2).join('.');
+          };
+          
+          const contentMainDomain = getMainDomain(contentParts);
+          const blogMainDomain = getMainDomain(blogParts);
+          
+          return contentMainDomain === blogMainDomain;
+        } catch {
+          return false;
+        }
+      });
+      
+      gaPropertyId = blogInfo?.gaPropertyId;
+    } catch (err) {
+      console.warn("⚠️ [4단계] Hostname 매칭 중 오류:", err);
+    }
+    
+    // 방법 2: URL 문자열 포함 여부로 매칭 (fallback)
+    if (!blogInfo) {
+      blogInfo = myChannels.blogs.find((b) => {
+        const blogUrl = b.inputUrl || b.url || '';
+        if (!blogUrl) return false;
+        return url.includes(blogUrl) || blogUrl.includes(contentHostname);
+      });
+      gaPropertyId = blogInfo?.gaPropertyId;
+    }
+
+    console.log("🔍 [4단계] URL 매칭 결과", {
+      matched: !!blogInfo,
+      matchedBlog: blogInfo ? {
+        url: blogInfo.inputUrl || blogInfo.url,
+        gaPropertyId: blogInfo.gaPropertyId
+      } : null,
+      gaPropertyId: gaPropertyId,
+      contentHostname: contentHostname
+    });
+
+    if (!gaPropertyId) {
+      console.error("❌ [4단계] 매칭된 GA4 Property ID가 없습니다. 채널 설정을 확인해주세요.");
+      return;
+    }
+
+    // 5. GA4 데이터 수집 테스트
+    console.log("📊 [5단계] GA4 데이터 수집 시작...");
+    
+    // API 요청 정보 미리보기
+    const testUrlObj = new URL(contentHostname.includes('://') ? url : `https://${url}`);
+    const testRawPath = testUrlObj.pathname;
+    let testDecodedPath = testRawPath;
+    try { testDecodedPath = decodeURIComponent(testRawPath); } catch(e) {}
+    const testNormalizedPath = testDecodedPath.endsWith('/') && testDecodedPath !== '/' ? testDecodedPath.slice(0, -1) : testDecodedPath;
+    
+    const apiUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${gaPropertyId}:runReport`;
+    const requestBody = {
+      dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+      dimensions: [{ name: "pagePath" }],
+      metrics: [
+        { name: "screenPageViews" },
+        { name: "averageSessionDuration" },
+        { name: "sessions" },
+        { name: "screenPageViewsPerSession" },
+        { name: "bounceRate" },
+        { name: "publisherAdRevenue" },
+        { name: "publisherAdImpressions" },
+        { name: "publisherAdClicks" },
+        { name: "engagementRate" },
+        { name: "averageEngagementTime" },
+        { name: "newUsers" },
+        { name: "activeUsers" }
+      ],
+      dimensionFilter: {
+        filter: {
+          fieldName: "pagePath",
+          stringFilter: { matchType: "BEGINS_WITH", value: testNormalizedPath }
+        }
+      }
+    };
+    
+    console.log("🔗 [API 요청 정보]", {
+      method: "POST",
+      url: apiUrl,
+      headers: {
+        Authorization: `Bearer ${googleAuthToken.substring(0, 20)}...`,
+        "Content-Type": "application/json"
+      },
+      body: requestBody
+    });
+    console.log("📤 [실제 API 요청]", {
+      endpoint: apiUrl,
+      requestBody: JSON.stringify(requestBody, null, 2)
+    });
+    
+    const analyticsData = await getAnalyticsData(googleAuthToken, gaPropertyId, url);
+
+    // 6. 결과 출력
+    console.log("=".repeat(80));
+    if (analyticsData.error) {
+      console.error("❌ [최종 결과] GA4 데이터 수집 실패");
+      console.error("🚨 에러 정보:", {
+        error: analyticsData.error,
+        errorDetails: analyticsData.errorDetails
+      });
+      // 에러 상세 정보를 더 명확하게 표시
+      if (analyticsData.errorDetails?.error) {
+        console.error("📋 [에러 상세 분석]", {
+          code: analyticsData.errorDetails.error.code,
+          message: analyticsData.errorDetails.error.message,
+          status: analyticsData.errorDetails.error.status,
+          details: analyticsData.errorDetails.error.details
+        });
+      }
+    } else {
+      console.log("✅ [최종 결과] GA4 데이터 수집 완료");
+    }
+    console.log("📈 수집된 데이터:", {
+      pageviews: analyticsData.pageviews,
+      gaEarnings: analyticsData.gaEarnings,
+      avgSessionDuration: analyticsData.avgSessionDuration,
+      sessions: analyticsData.sessions,
+      pageviewsPerSession: analyticsData.pageviewsPerSession,
+      bounceRate: analyticsData.bounceRate,
+      impressions: analyticsData.impressions,
+      clicks: analyticsData.clicks,
+      engagementRate: analyticsData.engagementRate,
+      avgEngagementTime: analyticsData.avgEngagementTime,
+      newUsers: analyticsData.newUsers,
+      activeUsers: analyticsData.activeUsers,
+      topSource: analyticsData.topSource,
+      error: analyticsData.error,
+      errorDetails: analyticsData.errorDetails
+    });
+
+    // 7. URL 필터링 상세 정보
+    const rawPath = urlObj.pathname;
+    let decodedPath = rawPath;
+    try { decodedPath = decodeURIComponent(rawPath); } catch(e) {}
+    const normalizedPath = decodedPath.endsWith('/') && decodedPath !== '/' ? decodedPath.slice(0, -1) : decodedPath;
+
+    console.log("🔧 [필터링 정보]", {
+      rawPath: rawPath,
+      decodedPath: decodedPath,
+      normalizedPath: normalizedPath,
+      filterUsed: normalizedPath,
+      matchType: "BEGINS_WITH",
+      dateRange: "28daysAgo ~ today"
+    });
+
+    console.log("=".repeat(80));
+    console.log("💡 사용법: testUrlMatching('https://your-url.com/path')");
+
+  } catch (error) {
+    console.error("💥 [테스트 실패] 오류 발생:", error);
+    console.error("스택 트레이스:", error.stack);
+  }
+}
+
+// 전역 함수로 등록 (콘솔에서 직접 호출 가능)
+if (typeof window !== 'undefined') {
+  window.testUrlMatching = testUrlMatching;
+} else {
+  // Service Worker 환경에서는 self에 등록
+  self.testUrlMatching = testUrlMatching;
 }

@@ -82,10 +82,39 @@ async function processPerformanceData(allCards, container) {
   // [신규] 현재 활성 채널 ID 가져오기
   const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
+  // [체크리스트 5-1] Firebase 데이터 로드 확인
+  console.log("[5단계: UI 로드] Firebase 데이터 로드", {
+    allCards: allCards,
+    statusCount: Object.keys(allCards).length,
+    activeChannelId: activeChannelId
+  });
+
   // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
   for (const status in allCards) {
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
+      
+      // [체크리스트 5-2] 데이터 필터링 확인
+      const hasPerformance = !!card.performance;
+      const hasError = card.performance?.error;
+      const channelMatch = !activeChannelId || card.channelId === activeChannelId;
+      const hasPublishedUrl = !!card.publishedUrl;
+      
+      if (!hasPerformance || hasError || !hasPublishedUrl || !channelMatch) {
+        console.log("[5단계: UI 로드] 데이터 필터링", {
+          cardId: cardId,
+          title: card.title,
+          hasPerformance: hasPerformance,
+          hasError: hasError,
+          channelMatch: channelMatch,
+          hasPublishedUrl: hasPublishedUrl,
+          filtered: true,
+          reason: !hasPerformance ? "performance 없음" : 
+                  hasError ? "error 있음" : 
+                  !hasPublishedUrl ? "publishedUrl 없음" : 
+                  !channelMatch ? "channelId 불일치" : "기타"
+        });
+      }
       
       // [신규] 채널 필터링: 현재 활성 채널과 일치하는 카드만 포함
       if (activeChannelId && card.channelId !== activeChannelId) {
@@ -96,6 +125,20 @@ async function processPerformanceData(allCards, container) {
       }
       
       if (card.publishedUrl && card.performance && !card.performance.error) {
+        // [체크리스트 5-3] UI 렌더링 확인
+        console.log("[5단계: UI 로드] UI 렌더링 데이터", {
+          cardId: cardId,
+          title: card.title,
+          performance: {
+            estimatedEarnings: card.performance.estimatedEarnings,
+            pageviews: card.performance.pageviews,
+            engagementRate: card.performance.engagementRate,
+            newUsers: card.performance.newUsers,
+            avgEngagementTime: card.performance.avgEngagementTime,
+            pageRPM: card.performance.pageRPM
+          }
+        });
+        
         allPerformanceData.push({
           id: cardId,
           status: status,
@@ -108,6 +151,16 @@ async function processPerformanceData(allCards, container) {
       }
     }
   }
+
+  console.log("[5단계: UI 로드] 최종 필터링 결과", {
+    totalCards: allPerformanceData.length,
+    cards: allPerformanceData.map(c => ({
+      id: c.id,
+      title: c.title,
+      earnings: c.performance.estimatedEarnings,
+      pageviews: c.performance.pageviews
+    }))
+  });
 
   renderPerformanceList(container);
 }
@@ -139,6 +192,13 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
     const engagementB = (b.performance.engagementRate || 0) * 100;
     const newUsersA = a.performance.newUsers || 0;
     const newUsersB = b.performance.newUsers || 0;
+    
+    // [수정 요청 2] 페이지뷰 참조 로직 수정: pageviews와 pageViews 둘 다 체크
+    const getPageviews = (perf) => {
+      return perf.pageviews || perf.pageViews || 0; // AdSense는 pageViews (대문자 V)
+    };
+    const pageviewsA = getPageviews(a.performance);
+    const pageviewsB = getPageviews(b.performance);
 
     switch (sortBy) {
       case "earnings-desc":
@@ -146,9 +206,9 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
       case "earnings-asc":
         return (a.performance.estimatedEarnings || 0) - (b.performance.estimatedEarnings || 0);
       case "pageviews-desc":
-        return (b.performance.pageviews || 0) - (a.performance.pageviews || 0);
+        return pageviewsB - pageviewsA;
       case "pageviews-asc":
-        return (a.performance.pageviews || 0) - (b.performance.pageviews || 0);
+        return pageviewsA - pageviewsB;
       case "rpm-desc": // [추가]
         return rpmB - rpmA;
       case "ctr-desc": // [추가]
@@ -164,9 +224,12 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
     }
   });
 
+  // [수정 요청 2] 페이지뷰 참조 로직 수정: pageviews와 pageViews 둘 다 체크
+  const getPageviews = (perf) => perf.pageviews || perf.pageViews || 0;
+  
   // 통계 계산
   const totalEarnings = sortedData.reduce((sum, item) => sum + (item.performance.estimatedEarnings || 0), 0);
-  const totalPageviews = sortedData.reduce((sum, item) => sum + (item.performance.pageviews || 0), 0);
+  const totalPageviews = sortedData.reduce((sum, item) => sum + getPageviews(item.performance), 0);
   const totalSessions = sortedData.reduce((sum, item) => sum + (item.performance.sessions || 0), 0);
   const avgEarnings = sortedData.length > 0 ? totalEarnings / sortedData.length : 0;
   const avgPageviews = sortedData.length > 0 ? totalPageviews / sortedData.length : 0;
@@ -174,7 +237,7 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   // 상위 5개 콘텐츠 추출 (차트용)
   const top5ForChart = sortedData.slice(0, 5);
   const maxEarnings = Math.max(...sortedData.map(item => item.performance.estimatedEarnings || 0), 1);
-  const maxPageviews = Math.max(...sortedData.map(item => item.performance.pageviews || 0), 1);
+  const maxPageviews = Math.max(...sortedData.map(item => getPageviews(item.performance)), 1);
 
   contentEl.innerHTML = `
     <div class="perf-stats-summary">
@@ -221,7 +284,8 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
           <h3 class="perf-chart-title">👁️ 상위 5개 콘텐츠 페이지뷰 비교</h3>
           <div class="perf-bar-chart pageviews-chart">
             ${top5ForChart.map((item, idx) => {
-              const pageviews = item.performance.pageviews || 0;
+              // [수정 요청 2] 페이지뷰 참조 로직 수정: pageviews와 pageViews 둘 다 체크
+              const pageviews = item.performance.pageviews || item.performance.pageViews || 0;
               const percentage = maxPageviews > 0 ? (pageviews / maxPageviews) * 100 : 0;
               const shortTitle = item.title.length > 20 ? item.title.substring(0, 20) + '...' : item.title;
               return `
@@ -251,11 +315,21 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
 function createPerformanceCard(item, index) {
   const perf = item.performance;
   const earnings = perf.estimatedEarnings || 0;
-  const pageviews = perf.pageviews || 0;
+  // [수정 요청 2] 카드 생성 함수 수정: pageviews와 pageViews 둘 다 체크 (Fallback 로직)
+  const pageviews = perf.pageviews || perf.pageViews || 0; // AdSense는 pageViews (대문자 V)
   const engagementRate = (perf.engagementRate || 0) * 100; // % 변환
   const newUsers = perf.newUsers || 0;
   const topSource = perf.topSource || "-";
   const avgEngagementTime = Math.round(perf.avgEngagementTime || perf.avgSessionDuration || 0);
+  
+  // [체크리스트 1-3] 수집 상태 시각화: collecting이 true일 때 배지 및 테두리 표시
+  const isCollecting = perf.collecting === true;
+  const collectingBadge = isCollecting 
+    ? '<span class="collecting-badge" style="background: #FFA500; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔄 수집 중</span>'
+    : '';
+  const cardBorderStyle = isCollecting 
+    ? 'border: 2px solid #FFA500; box-shadow: 0 0 8px rgba(255, 165, 0, 0.3);'
+    : '';
   
   // 소스 아이콘 처리
   let sourceIcon = "🌐";
@@ -265,12 +339,13 @@ function createPerformanceCard(item, index) {
   else if (topSource.includes("direct")) sourceIcon = "🔗";
 
   return `
-    <div class="perf-card" data-card-id="${item.id}">
+    <div class="perf-card" data-card-id="${item.id}" style="${cardBorderStyle}">
       <div class="perf-card-rank">#${index + 1}</div>
       <div class="perf-card-content">
         <div class="perf-card-header">
           <h3 class="perf-card-title">${item.title}</h3>
           <div style="display:flex; align-items:center; gap:8px;">
+            ${collectingBadge}
             <span class="source-badge" title="주력 유입 경로: ${topSource}">${sourceIcon} ${topSource.split('/')[0]}</span>
             <a href="${item.publishedUrl}" target="_blank" class="perf-card-link">🔗</a>
           </div>
@@ -333,9 +408,31 @@ function addPerformanceDashboardEventListeners(container) {
   }
 
   if (refreshBtn) {
-    refreshBtn.addEventListener("click", () => {
-      showToast("성과 데이터를 새로고침합니다...");
-      loadPerformanceData(container);
+    refreshBtn.addEventListener("click", async () => {
+      // [체크리스트 1-1] 새로고침 버튼 리스너 수정: 백그라운드에 명시적 데이터 수집 요청
+      showToast("데이터 수집을 시작합니다...");
+      
+      // [체크리스트 1-2] 로딩 UI 피드백: 버튼 비활성화 및 로딩 표시
+      refreshBtn.disabled = true;
+      const originalText = refreshBtn.textContent;
+      refreshBtn.textContent = "🔄 수집 중...";
+      
+      try {
+        // 백그라운드에 데이터 수집 요청
+        await chrome.runtime.sendMessage({ action: "trigger_performance_refresh" });
+        
+        // 데이터는 Firebase 리스너를 통해 자동으로 업데이트됨
+        // UI는 kanban_data_updated 메시지를 받아 자동 갱신
+      } catch (error) {
+        console.error("[Performance Dashboard] 새로고침 요청 실패:", error);
+        showToast("❌ 데이터 수집 요청에 실패했습니다.");
+      } finally {
+        // 버튼 상태 복원 (3초 후)
+        setTimeout(() => {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = originalText;
+        }, 3000);
+      }
     });
   }
 
