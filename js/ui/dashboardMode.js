@@ -892,10 +892,16 @@ function renderDashboard(container) {
               <div id="my-channels-col" class="dashboard-col">
                   <div class="dashboard-col-header" style="display: flex; align-items: center; justify-content: space-between;">
                       <h2>🚀 내 주요 콘텐츠</h2>
-                      <button id="add-url-btn" class="add-url-btn" title="URL로 콘텐츠 추가" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 4px; transition: background 0.2s;">
-                          <span>🔗</span>
-                          <span>URL로 추가</span>
-                      </button>
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                          <button id="refresh-my-channels-btn" class="refresh-channel-btn" title="RSS/채널 데이터 새로고침" style="background: #f8f9fa; color: #5f6368; border: 1px solid #dadce0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+                              <span>🔄</span>
+                              <span>새로고침</span>
+                          </button>
+                          <button id="add-url-btn" class="add-url-btn" title="URL로 콘텐츠 추가" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 4px; transition: background 0.2s;">
+                              <span>🔗</span>
+                              <span>URL로 추가</span>
+                          </button>
+                      </div>
                   </div>
                   <div class="platform-tabs" data-type="myChannels">
                       <div class="platform-tab active" data-platform="blog">블로그</div>
@@ -908,8 +914,12 @@ function renderDashboard(container) {
                   <div id="myChannels-content-list" class="content-list-area"><p class="loading-placeholder">채널 정보를 불러오는 중...</p></div>
               </div>
               <div id="competitor-channels-col" class="dashboard-col">
-                  <div class="dashboard-col-header">
+                  <div class="dashboard-col-header" style="display: flex; align-items: center; justify-content: space-between;">
                       <h2>⚔️ 경쟁사 주요 콘텐츠</h2>
+                      <button id="refresh-competitor-channels-btn" class="refresh-channel-btn" title="RSS/채널 데이터 새로고침" style="background: #f8f9fa; color: #5f6368; border: 1px solid #dadce0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 4px; transition: all 0.2s;">
+                          <span>🔄</span>
+                          <span>새로고침</span>
+                      </button>
                   </div>
                   <div class="platform-tabs" data-type="competitorChannels">
                       <div class="platform-tab active" data-platform="blog">블로그</div>
@@ -1023,6 +1033,72 @@ function addDashboardEventListeners(container) {
     if (addUrlBtn) {
         addUrlBtn.addEventListener('click', () => {
             showUrlAddModal(container);
+        });
+    }
+
+    // [신규] RSS/채널 데이터 새로고침 버튼 이벤트
+    const refreshMyChannelsBtn = container.querySelector('#refresh-my-channels-btn');
+    const refreshCompetitorChannelsBtn = container.querySelector('#refresh-competitor-channels-btn');
+    
+    const handleRefreshChannels = async (btn) => {
+        if (btn.disabled) return;
+        
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span>🔄</span><span>수집 중...</span>';
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'not-allowed';
+        
+        showToast('RSS/채널 데이터 수집을 시작합니다...');
+        
+        try {
+            await chrome.runtime.sendMessage({ action: 'fetch_all_channel_data' });
+            showToast('✅ 데이터 수집이 시작되었습니다. 완료되면 자동으로 업데이트됩니다.');
+        } catch (error) {
+            console.error('[Dashboard] 새로고침 요청 실패:', error);
+            showToast('❌ 데이터 수집 요청에 실패했습니다.');
+        } finally {
+            // 3초 후 버튼 상태 복원
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }, 3000);
+        }
+    };
+    
+    if (refreshMyChannelsBtn) {
+        refreshMyChannelsBtn.addEventListener('click', () => handleRefreshChannels(refreshMyChannelsBtn));
+        // 호버 효과
+        refreshMyChannelsBtn.addEventListener('mouseenter', () => {
+            if (!refreshMyChannelsBtn.disabled) {
+                refreshMyChannelsBtn.style.background = '#e8f0fe';
+                refreshMyChannelsBtn.style.borderColor = '#1a73e8';
+            }
+        });
+        refreshMyChannelsBtn.addEventListener('mouseleave', () => {
+            if (!refreshMyChannelsBtn.disabled) {
+                refreshMyChannelsBtn.style.background = '#f8f9fa';
+                refreshMyChannelsBtn.style.borderColor = '#dadce0';
+            }
+        });
+    }
+    
+    if (refreshCompetitorChannelsBtn) {
+        refreshCompetitorChannelsBtn.addEventListener('click', () => handleRefreshChannels(refreshCompetitorChannelsBtn));
+        // 호버 효과
+        refreshCompetitorChannelsBtn.addEventListener('mouseenter', () => {
+            if (!refreshCompetitorChannelsBtn.disabled) {
+                refreshCompetitorChannelsBtn.style.background = '#e8f0fe';
+                refreshCompetitorChannelsBtn.style.borderColor = '#1a73e8';
+            }
+        });
+        refreshCompetitorChannelsBtn.addEventListener('mouseleave', () => {
+            if (!refreshCompetitorChannelsBtn.disabled) {
+                refreshCompetitorChannelsBtn.style.background = '#f8f9fa';
+                refreshCompetitorChannelsBtn.style.borderColor = '#dadce0';
+            }
         });
     }
 

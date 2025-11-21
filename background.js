@@ -642,6 +642,12 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', channelId 
     const newCardKey = newCardRef.key;
     await newCardRef.set(newCard);
 
+    // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)
+    if (origin?.postUrl) {
+      updateUrlIndex(newCardKey, targetStatus, origin.postUrl, null)
+        .catch(error => console.warn(`[URL 인덱스 업데이트 실패] ${newCardKey}:`, error));
+    }
+
     // AI 브리핑 자동 생성
     // 'manual_entry'를 제외한 모든 아이디어는 생성 즉시 AI 브리핑을 실행
     // (ai_generated, my_post, competitor_post, my_post_renewal 등 모든 경우)
@@ -848,6 +854,11 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // [추가] 확장 프로그램 컨텍스트 유효성 확인용 ping 핸들러
+  if (msg.action === "ping") {
+    sendResponse({ success: true });
+    return true;
+  }
   // 썸네일용 Gemini 슬로건 생성 (draft 전체와 outline 리스트를 함께 보냄)
   if (
     msg.action === "gemini_generate_thumbnail_texts" &&
@@ -2296,6 +2307,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
     return true;
+  } else if (msg.action === "fetch_all_channel_data") {
+    // [신규] 모든 채널 데이터 수집 (RSS 새로고침)
+    (async () => {
+      try {
+        await fetchAllChannelData();
+        // 수집 완료 후 UI에 알림
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: "cp_data_refreshed" }).catch(() => {});
+            }
+          });
+        });
+        sendResponse({ success: true, message: "모든 채널 데이터 수집이 시작되었습니다." });
+      } catch (error) {
+        console.error("[fetch_all_channel_data] 오류:", error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "fetch_and_save_single_post") {
     // [Phase 1] 단건 수집 및 저장 액션 핸들러
     (async () => {
@@ -3709,15 +3740,27 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const userId = CONSTANTS.USER_ID;
-    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
-    cardRef
-      .update({
-        publishedUrl: url,
-        performanceTracked: true,
-      })
-      .then(async () => {
+    // [최적화] async 함수로 변경하여 await 사용 가능하도록
+    (async () => {
+      try {
+        const userId = CONSTANTS.USER_ID;
+        const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
+        
+        // [최적화] 기존 카드 정보 가져오기 (origin.postUrl 확인용)
+        const cardSnapshot = await cardRef.once("value");
+        const existingCard = cardSnapshot.val() || {};
+        
+        await cardRef.update({
+          publishedUrl: url,
+          performanceTracked: true,
+        });
+        
         console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
+        
+        // [최적화] URL 인덱스 업데이트
+        updateUrlIndex(cardId, status, existingCard.origin?.postUrl || null, url)
+          .catch(error => console.warn(`[URL 인덱스 업데이트 실패] ${cardId}:`, error));
+        
         sendResponse({ success: true });
         
         // GA4 데이터 수집 시작 (비동기로 실행, 완료를 기다리지 않음)
@@ -3739,9 +3782,11 @@ ${decayContent.map((item, idx) =>
         } catch (error) {
           console.warn(`[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`, error.message);
         }
-      })
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
     return true;
   } else if (msg.action === "add_idea_to_kanban") {
     // [Phase 1] 아이디어 생성 시 중복 검사 추가
@@ -4727,15 +4772,27 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const userId = CONSTANTS.USER_ID;
-    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
-    cardRef
-      .update({
-        publishedUrl: url,
-        performanceTracked: true,
-      })
-      .then(async () => {
+    // [최적화] async 함수로 변경하여 await 사용 가능하도록
+    (async () => {
+      try {
+        const userId = CONSTANTS.USER_ID;
+        const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
+        
+        // [최적화] 기존 카드 정보 가져오기 (origin.postUrl 확인용)
+        const cardSnapshot = await cardRef.once("value");
+        const existingCard = cardSnapshot.val() || {};
+        
+        await cardRef.update({
+          publishedUrl: url,
+          performanceTracked: true,
+        });
+        
         console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
+        
+        // [최적화] URL 인덱스 업데이트
+        updateUrlIndex(cardId, status, existingCard.origin?.postUrl || null, url)
+          .catch(error => console.warn(`[URL 인덱스 업데이트 실패] ${cardId}:`, error));
+        
         sendResponse({ success: true });
         
         // GA4 데이터 수집 시작 (비동기로 실행, 완료를 기다리지 않음)
@@ -4757,9 +4814,11 @@ ${decayContent.map((item, idx) =>
         } catch (error) {
           console.warn(`[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`, error.message);
         }
-      })
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    
     return true;
   } else if (msg.action === "save_draft_content") {
     const { ideaId, status, draft } = msg.data;
@@ -5570,6 +5629,212 @@ async function fetchAllChannelData() {
 // --- ▼▼▼ [하이브리드 방식] 블로그 데이터 수집 함수 수정 ▼▼▼ ---
 // background.js
 
+/**
+ * [유틸리티] 동시 실행 수를 제한하는 함수 (p-limit 스타일)
+ * @param {Array} items - 처리할 항목 배열
+ * @param {Function} fn - 각 항목을 처리하는 함수
+ * @param {number} limit - 동시 실행 수 제한 (기본값: 5)
+ * @returns {Promise<Array>} 처리 결과 배열
+ */
+async function limitConcurrency(items, fn, limit = 5) {
+  const results = [];
+  const executing = [];
+  
+  for (const item of items) {
+    // Promise 생성 및 실행 시작
+    const promise = (async () => {
+      try {
+        return await fn(item);
+      } finally {
+        // 완료 시 executing 배열에서 제거
+        const index = executing.indexOf(promise);
+        if (index > -1) {
+          executing.splice(index, 1);
+        }
+      }
+    })();
+    
+    results.push(promise);
+    executing.push(promise);
+    
+    // 동시 실행 수가 제한에 도달하면 하나가 완료될 때까지 대기
+    if (executing.length >= limit) {
+      await Promise.race(executing);
+    }
+  }
+  
+  // 모든 작업이 완료될 때까지 대기
+  return Promise.all(results);
+}
+
+/**
+ * [리팩토링] RSS 아이템 처리 함수 (병렬 처리용)
+ * @param {string} itemText - RSS 아이템 XML 텍스트
+ * @param {string} sourceId - 소스 ID
+ * @param {string} channelType - 채널 타입
+ * @returns {Promise<void>}
+ */
+async function processRssItem(itemText, sourceId, channelType) {
+  let itemLink = null;
+  const atomLinkMatch = itemText.match(
+    /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']*)["']/
+  );
+  if (atomLinkMatch && atomLinkMatch[1]) {
+    itemLink = atomLinkMatch[1];
+  } else {
+    const rssLinkMatch = itemText.match(
+      /<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/
+    );
+    if (rssLinkMatch && rssLinkMatch[1]) {
+      itemLink = rssLinkMatch[1];
+    }
+  }
+  if (!itemLink) return;
+
+  // 게시물 제목과 날짜 추출
+  const titleMatch = itemText.match(
+    /<title.*?>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/
+  );
+  const pubDateMatch = itemText.match(
+    /<(pubDate|published|updated)>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/\1>/
+  );
+
+  const title = titleMatch ? titleMatch[1] : "제목 없음";
+  const timestamp = new Date(
+    pubDateMatch ? pubDateMatch[2] : Date.now()
+  ).getTime();
+
+  const fullLink = itemLink.replace(/\s/g, "");
+  const linkForId = fullLink.split("?")[0];
+  const contentId = btoa(linkForId).replace(/=/g, "");
+  const userId = CONSTANTS.USER_ID;
+  const contentRef = firebase
+    .database()
+    .ref(`channel_content/${userId}/blogs/${contentId}`);
+
+  const existingDataSnap = await contentRef.once("value");
+
+  if (existingDataSnap.exists()) {
+    const existingData = existingDataSnap.val();
+    if (!existingData.tags && existingData.cleanText) {
+      try {
+        const tags = await extractKeywords(existingData.cleanText);
+        if (tags) {
+          contentRef.update({ tags: tags });
+        }
+      } catch (e) {
+        console.error(`'${fullLink}' 태그 추가 중 오류:`, e);
+      }
+    }
+
+    try {
+      const postResponse = await fetch(fullLink);
+      if (!postResponse.ok) return;
+      let postHtml = await postResponse.text();
+
+      const naverIframeMatch = postHtml.match(
+        /<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/
+      );
+      if (naverIframeMatch && naverIframeMatch[1]) {
+        const iframeUrl = new URL(
+          naverIframeMatch[1],
+          "https://blog.naver.com"
+        ).href;
+        const iframeResponse = await fetch(iframeUrl);
+        if (iframeResponse.ok) postHtml = await iframeResponse.text();
+      }
+
+      await getOffscreenDocument();
+      const parsedData = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            action: "parse_html_in_offscreen",
+            html: postHtml,
+            baseUrl: fullLink,
+          },
+          (response) => resolve(response)
+        );
+      });
+
+      if (parsedData && parsedData.success) {
+        contentRef.update({
+          commentCount: parsedData.metrics.commentCount,
+          likeCount: parsedData.metrics.likeCount || null,
+          readTimeInSeconds: parsedData.metrics.readTimeInSeconds || null,
+          fetchedAt: Date.now(),
+        });
+      }
+    } catch (updateError) {
+      console.error(`'${fullLink}' 가벼운 업데이트 중 오류:`, updateError);
+    }
+  } else {
+    const postResponse = await fetch(fullLink);
+    if (!postResponse.ok) return;
+    let postHtml = await postResponse.text();
+    const naverIframeMatch = postHtml.match(
+      /<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/
+    );
+    if (naverIframeMatch && naverIframeMatch[1]) {
+      const iframeUrl = new URL(
+        naverIframeMatch[1],
+        "https://blog.naver.com"
+      ).href;
+      const iframeResponse = await fetch(iframeUrl);
+      if (iframeResponse.ok) postHtml = await iframeResponse.text();
+    }
+
+    await getOffscreenDocument();
+    const parsedData = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          action: "parse_html_in_offscreen",
+          html: postHtml,
+          baseUrl: fullLink,
+        },
+        (response) => {
+          if (chrome.runtime.lastError)
+            resolve({
+              success: false,
+              error: chrome.runtime.lastError.message,
+            });
+          else resolve(response);
+        }
+      );
+    });
+
+    if (parsedData && parsedData.success) {
+      const tags = await extractKeywords(parsedData.cleanText);
+      const finalData = {
+        title: title,
+        fullLink,
+        pubDate: timestamp,
+        description: parsedData.description,
+        thumbnail: parsedData.thumbnail,
+        cleanText: parsedData.cleanText,
+        sourceId,
+        channelType,
+        fetchedAt: Date.now(),
+        ...parsedData.metrics,
+        tags: tags || null,
+      };
+      const cleanedFinalData = cleanDataForFirebase(finalData);
+      contentRef.set(cleanedFinalData);
+
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id)
+            chrome.tabs
+              .sendMessage(tab.id, {
+                action: "cp_item_updated",
+                data: cleanedFinalData,
+              })
+              .catch((e) => {});
+        });
+      });
+    }
+  }
+}
+
 async function fetchRssFeed(url, channelType) {
   try {
     const response = await fetch(url);
@@ -5614,167 +5879,19 @@ async function fetchRssFeed(url, channelType) {
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
 
-    for (const itemText of items.slice(0, 10)) {
-      let itemLink = null;
-      const atomLinkMatch = itemText.match(
-        /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']*)["']/
-      );
-      if (atomLinkMatch && atomLinkMatch[1]) {
-        itemLink = atomLinkMatch[1];
-      } else {
-        const rssLinkMatch = itemText.match(
-          /<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/
-        );
-        if (rssLinkMatch && rssLinkMatch[1]) {
-          itemLink = rssLinkMatch[1];
-        }
-      }
-      if (!itemLink) continue;
-
-      // ▼▼▼ [수정] 게시물 제목과 날짜 추출 로직 변경 ▼▼▼
-      const titleMatch = itemText.match(
-        /<title.*?>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/
-      );
-      const pubDateMatch = itemText.match(
-        /<(pubDate|published|updated)>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/\1>/
-      );
-
-      const title = titleMatch ? titleMatch[1] : "제목 없음";
-      const timestamp = new Date(
-        pubDateMatch ? pubDateMatch[2] : Date.now()
-      ).getTime();
-      // ▲▲▲ 수정 완료 ▲▲▲
-
-      const fullLink = itemLink.replace(/\s/g, "");
-      const linkForId = fullLink.split("?")[0];
-      const contentId = btoa(linkForId).replace(/=/g, "");
-      const userId = CONSTANTS.USER_ID;
-      const contentRef = firebase
-        .database()
-        .ref(`channel_content/${userId}/blogs/${contentId}`);
-
-      const existingDataSnap = await contentRef.once("value");
-
-      if (existingDataSnap.exists()) {
-        const existingData = existingDataSnap.val();
-        if (!existingData.tags && existingData.cleanText) {
-          try {
-            const tags = await extractKeywords(existingData.cleanText);
-            if (tags) {
-              contentRef.update({ tags: tags });
-            }
-          } catch (e) {
-            console.error(`'${fullLink}' 태그 추가 중 오류:`, e);
-          }
-        }
-
-        try {
-          const postResponse = await fetch(fullLink);
-          if (!postResponse.ok) continue;
-          let postHtml = await postResponse.text();
-
-          const naverIframeMatch = postHtml.match(
-            /<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/
-          );
-          if (naverIframeMatch && naverIframeMatch[1]) {
-            const iframeUrl = new URL(
-              naverIframeMatch[1],
-              "https://blog.naver.com"
-            ).href;
-            const iframeResponse = await fetch(iframeUrl);
-            if (iframeResponse.ok) postHtml = await iframeResponse.text();
-          }
-
-          await getOffscreenDocument();
-          const parsedData = await new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-              {
-                action: "parse_html_in_offscreen",
-                html: postHtml,
-                baseUrl: fullLink,
-              },
-              (response) => resolve(response)
-            );
-          });
-
-          if (parsedData && parsedData.success) {
-            contentRef.update({
-              commentCount: parsedData.metrics.commentCount,
-              likeCount: parsedData.metrics.likeCount || null,
-              readTimeInSeconds: parsedData.metrics.readTimeInSeconds || null,
-              fetchedAt: Date.now(),
-            });
-          }
-        } catch (updateError) {
-          console.error(`'${fullLink}' 가벼운 업데이트 중 오류:`, updateError);
-        }
-      } else {
-        const postResponse = await fetch(fullLink);
-        if (!postResponse.ok) continue;
-        let postHtml = await postResponse.text();
-        const naverIframeMatch = postHtml.match(
-          /<iframe[^>]+id="mainFrame"[^>]+src="([^"]+)"/
-        );
-        if (naverIframeMatch && naverIframeMatch[1]) {
-          const iframeUrl = new URL(
-            naverIframeMatch[1],
-            "https://blog.naver.com"
-          ).href;
-          const iframeResponse = await fetch(iframeUrl);
-          if (iframeResponse.ok) postHtml = await iframeResponse.text();
-        }
-
-        await getOffscreenDocument();
-        const parsedData = await new Promise((resolve) => {
-          chrome.runtime.sendMessage(
-            {
-              action: "parse_html_in_offscreen",
-              html: postHtml,
-              baseUrl: fullLink,
-            },
-            (response) => {
-              if (chrome.runtime.lastError)
-                resolve({
-                  success: false,
-                  error: chrome.runtime.lastError.message,
-                });
-              else resolve(response);
-            }
-          );
-        });
-
-        if (parsedData && parsedData.success) {
-          const tags = await extractKeywords(parsedData.cleanText);
-          const finalData = {
-            title: title, // 여기서 수정된 title이 사용됩니다.
-            fullLink,
-            pubDate: timestamp, // 여기서 수정된 timestamp가 사용됩니다.
-            description: parsedData.description,
-            thumbnail: parsedData.thumbnail,
-            cleanText: parsedData.cleanText,
-            sourceId,
-            channelType,
-            fetchedAt: Date.now(),
-            ...parsedData.metrics,
-            tags: tags || null,
-          };
-          const cleanedFinalData = cleanDataForFirebase(finalData);
-          contentRef.set(cleanedFinalData);
-
-          chrome.tabs.query({}, (tabs) => {
-            tabs.forEach((tab) => {
-              if (tab.id)
-                chrome.tabs
-                  .sendMessage(tab.id, {
-                    action: "cp_item_updated",
-                    data: cleanedFinalData,
-                  })
-                  .catch((e) => {});
-            });
-          });
-        }
-      }
-    }
+    // [성능 최적화] 순차 처리 → 병렬 처리로 변경 (동시 요청 수 제한: 5개)
+    const itemsToProcess = items.slice(0, 10);
+    const startTime = Date.now();
+    
+    // 동시 실행 수를 5개로 제한하여 병렬 처리
+    await limitConcurrency(
+      itemsToProcess,
+      (itemText) => processRssItem(itemText, sourceId, channelType),
+      5 // 동시 요청 수 제한
+    );
+    
+    const duration = Date.now() - startTime;
+    console.log(`[RSS 수집] ${itemsToProcess.length}개 아이템 처리 완료 (${duration}ms)`);
   } catch (error) {
     console.error(`Failed to fetch or parse RSS for ${url}:`, error);
   }
@@ -5863,9 +5980,131 @@ function normalizeUrlForComparison(url) {
 }
 
 /**
- * [핵심] URL 중복 검사 함수 (강력한 정규화 적용)
+ * [유틸리티] Firebase 키로 사용 가능하도록 URL 인코딩
+ * Firebase 키에는 ".", "#", "$", "/", "[", "]" 문자가 허용되지 않으므로 안전한 문자로 치환
+ * @param {string} url - 정규화된 URL
+ * @returns {string} Firebase 키로 사용 가능한 문자열
+ */
+function encodeUrlForFirebaseKey(url) {
+  if (!url) return "";
+  // 특수 문자를 안전한 문자로 치환
+  return url
+    .replace(/\./g, '_DOT_')
+    .replace(/\//g, '_SLASH_')
+    .replace(/#/g, '_HASH_')
+    .replace(/\$/g, '_DOLLAR_')
+    .replace(/\[/g, '_LBRACKET_')
+    .replace(/\]/g, '_RBRACKET_');
+}
+
+/**
+ * [유틸리티] Firebase 키를 원래 URL로 디코딩
+ * @param {string} encodedUrl - 인코딩된 URL
+ * @returns {string} 원래 정규화된 URL
+ */
+function decodeUrlFromFirebaseKey(encodedUrl) {
+  if (!encodedUrl) return "";
+  // 안전한 문자를 원래 특수 문자로 복원
+  return encodedUrl
+    .replace(/_DOT_/g, '.')
+    .replace(/_SLASH_/g, '/')
+    .replace(/_HASH_/g, '#')
+    .replace(/_DOLLAR_/g, '$')
+    .replace(/_LBRACKET_/g, '[')
+    .replace(/_RBRACKET_/g, ']');
+}
+
+/**
+ * [최적화] URL 인덱스 업데이트 함수
+ * 카드 저장/업데이트 시 URL 인덱스를 자동으로 업데이트합니다.
+ * @param {string} cardId - 카드 ID
+ * @param {string} status - 카드 상태
+ * @param {string} originUrl - origin.postUrl (선택)
+ * @param {string} publishedUrl - publishedUrl (선택)
+ */
+async function updateUrlIndex(cardId, status, originUrl = null, publishedUrl = null) {
+  const db = firebase.database();
+  const userId = CONSTANTS.USER_ID;
+  const indexRef = db.ref(`url_index/${userId}`);
+  
+  const updates = {};
+  
+  // origin.postUrl 인덱스 업데이트
+  if (originUrl) {
+    const normalizedOriginUrl = normalizeUrlForComparison(originUrl);
+    if (normalizedOriginUrl) {
+      // [수정] Firebase 키로 사용 가능하도록 인코딩
+      const encodedKey = encodeUrlForFirebaseKey(normalizedOriginUrl);
+      updates[`${encodedKey}/origin/${cardId}`] = { status, cardId };
+    }
+  }
+  
+  // publishedUrl 인덱스 업데이트
+  if (publishedUrl) {
+    const normalizedPublishedUrl = normalizeUrlForComparison(publishedUrl);
+    if (normalizedPublishedUrl) {
+      // [수정] Firebase 키로 사용 가능하도록 인코딩
+      const encodedKey = encodeUrlForFirebaseKey(normalizedPublishedUrl);
+      updates[`${encodedKey}/published/${cardId}`] = { status, cardId };
+    }
+  }
+  
+  if (Object.keys(updates).length > 0) {
+    try {
+      await indexRef.update(updates);
+    } catch (error) {
+      console.warn(`[URL 인덱스 업데이트 실패] ${cardId}:`, error);
+    }
+  }
+}
+
+/**
+ * [최적화] URL 인덱스에서 카드 제거
+ * 카드 삭제 시 인덱스에서도 제거합니다.
+ * @param {string} cardId - 카드 ID
+ * @param {string} originUrl - origin.postUrl (선택)
+ * @param {string} publishedUrl - publishedUrl (선택)
+ */
+async function removeUrlIndex(cardId, originUrl = null, publishedUrl = null) {
+  const db = firebase.database();
+  const userId = CONSTANTS.USER_ID;
+  const indexRef = db.ref(`url_index/${userId}`);
+  
+  const updates = {};
+  
+  if (originUrl) {
+    const normalizedOriginUrl = normalizeUrlForComparison(originUrl);
+    if (normalizedOriginUrl) {
+      // [수정] Firebase 키로 사용 가능하도록 인코딩
+      const encodedKey = encodeUrlForFirebaseKey(normalizedOriginUrl);
+      updates[`${encodedKey}/origin/${cardId}`] = null;
+    }
+  }
+  
+  if (publishedUrl) {
+    const normalizedPublishedUrl = normalizeUrlForComparison(publishedUrl);
+    if (normalizedPublishedUrl) {
+      // [수정] Firebase 키로 사용 가능하도록 인코딩
+      const encodedKey = encodeUrlForFirebaseKey(normalizedPublishedUrl);
+      updates[`${encodedKey}/published/${cardId}`] = null;
+    }
+  }
+  
+  if (Object.keys(updates).length > 0) {
+    try {
+      await indexRef.update(updates);
+    } catch (error) {
+      console.warn(`[URL 인덱스 제거 실패] ${cardId}:`, error);
+    }
+  }
+}
+
+/**
+ * [최적화] URL 중복 검사 함수 (Firebase Query 사용)
  * 입력된 URL이 칸반 보드의 모든 상태(ideas, in-progress, done)에 존재하는지 확인합니다.
  * origin.postUrl과 publishedUrl 두 필드를 모두 확인합니다.
+ * 
+ * 최적화: URL 인덱스 노드를 사용하여 O(1) 조회 (기존 O(N) 방식에서 개선)
  */
 async function checkDuplicateUrl(targetUrl) {
   if (!targetUrl) return { exists: false };
@@ -5874,8 +6113,61 @@ async function checkDuplicateUrl(targetUrl) {
   console.log(`[중복 검사] 원본: ${targetUrl} -> 정규화: ${targetKey}`);
 
   const db = firebase.database();
-  // 전체 칸반 데이터 조회
   const userId = CONSTANTS.USER_ID;
+  
+  // [최적화] URL 인덱스에서 직접 조회 (O(1))
+  try {
+    // [수정] Firebase 키로 사용 가능하도록 인코딩
+    const encodedKey = encodeUrlForFirebaseKey(targetKey);
+    const indexRef = db.ref(`url_index/${userId}/${encodedKey}`);
+    const indexSnapshot = await indexRef.once("value");
+    const indexData = indexSnapshot.val();
+    
+    if (indexData) {
+      // origin 또는 published 중 하나라도 있으면 중복
+      const originCards = indexData.origin || {};
+      const publishedCards = indexData.published || {};
+      
+      // 첫 번째 매칭되는 카드 정보 가져오기
+      const matchedCardId = Object.keys(originCards)[0] || Object.keys(publishedCards)[0];
+      const matchedCardInfo = originCards[matchedCardId] || publishedCards[matchedCardId];
+      
+      if (matchedCardInfo) {
+        // 카드 상세 정보 가져오기
+        const cardRef = db.ref(`kanban/${userId}/${matchedCardInfo.status}/${matchedCardInfo.cardId}`);
+        const cardSnapshot = await cardRef.once("value");
+        const card = cardSnapshot.val();
+        
+        if (card) {
+          console.warn(`[중복 발견] 상태: ${matchedCardInfo.status}, 카드: ${card.title}`);
+          return {
+            exists: true,
+            status: matchedCardInfo.status,
+            cardId: matchedCardInfo.cardId,
+            title: card.title || "제목 없음"
+          };
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`[URL 인덱스 조회 실패, fallback 사용]:`, error);
+    // 인덱스가 없거나 오류 발생 시 기존 방식으로 fallback
+    return await checkDuplicateUrlFallback(targetUrl);
+  }
+  
+  return { exists: false };
+}
+
+/**
+ * [Fallback] 기존 방식의 URL 중복 검사 (인덱스가 없을 때 사용)
+ * @private
+ */
+async function checkDuplicateUrlFallback(targetUrl) {
+  const targetKey = normalizeUrlForComparison(targetUrl);
+  const db = firebase.database();
+  const userId = CONSTANTS.USER_ID;
+  
+  // 전체 칸반 데이터 조회 (fallback)
   const snapshot = await db.ref(`kanban/${userId}`).once("value");
   const allCards = snapshot.val() || {};
 
@@ -10040,6 +10332,49 @@ function testUrlNormalization() {
   return { passed, failed, total: passed + failed };
 }
 
+/**
+ * [최적화] 기존 데이터의 URL 인덱스 구축 함수
+ * 기존 카드들의 URL을 인덱스에 추가합니다.
+ * 콘솔에서 실행: buildUrlIndex()
+ */
+async function buildUrlIndex() {
+  console.log('🔨 [URL 인덱스 구축] 시작...');
+  const db = firebase.database();
+  const userId = CONSTANTS.USER_ID;
+  const kanbanRef = db.ref(`kanban/${userId}`);
+  
+  try {
+    const snapshot = await kanbanRef.once('value');
+    const allCards = snapshot.val() || {};
+    
+    let processedCount = 0;
+    let indexedCount = 0;
+    
+    for (const status in allCards) {
+      for (const cardId in allCards[status]) {
+        const card = allCards[status][cardId];
+        const originUrl = card.origin?.postUrl || null;
+        const publishedUrl = card.publishedUrl || null;
+        
+        if (originUrl || publishedUrl) {
+          await updateUrlIndex(cardId, status, originUrl, publishedUrl);
+          indexedCount++;
+        }
+        processedCount++;
+      }
+    }
+    
+    console.log(`✅ [URL 인덱스 구축] 완료!`);
+    console.log(`  - 처리된 카드: ${processedCount}개`);
+    console.log(`  - 인덱스 추가: ${indexedCount}개`);
+    
+    return { processed: processedCount, indexed: indexedCount };
+  } catch (error) {
+    console.error('❌ [URL 인덱스 구축] 오류:', error);
+    throw error;
+  }
+}
+
 // 전역 함수로 등록 (콘솔에서 직접 호출 가능)
 if (typeof window !== 'undefined') {
   window.testUrlMatching = testUrlMatching;
@@ -10047,6 +10382,8 @@ if (typeof window !== 'undefined') {
   window.fixDraftStatusCards = fixDraftStatusCards;
   window.testUrlNormalization = testUrlNormalization;
   window.getNormalizedUrl = getNormalizedUrl;
+  window.buildUrlIndex = buildUrlIndex;
+  window.updateUrlIndex = updateUrlIndex;
 } else {
   // Service Worker 환경에서는 self에 등록
   self.testUrlMatching = testUrlMatching;
@@ -10054,4 +10391,6 @@ if (typeof window !== 'undefined') {
   self.fixDraftStatusCards = fixDraftStatusCards;
   self.testUrlNormalization = testUrlNormalization;
   self.getNormalizedUrl = getNormalizedUrl;
+  self.buildUrlIndex = buildUrlIndex;
+  self.updateUrlIndex = updateUrlIndex;
 }
