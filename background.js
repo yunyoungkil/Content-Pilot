@@ -5781,25 +5781,45 @@ async function fetchRssFeed(url, channelType) {
 }
 
 /**
- * [핵심] URL 정규화 함수 (강력한 정규화 적용)
+ * [공통] URL 정규화 함수 (기본 정규화 로직)
  * 입력된 URL을 비교 가능한 형태로 정규화합니다.
- * 예: "https://www.Example.com/path/?query=1" -> "example.com/path"
- * YouTube URL은 특별 처리: youtu.be/VIDEO_ID와 youtube.com/watch?v=VIDEO_ID를 동일하게 처리
+ * 
+ * @param {string} url - 정규화할 URL
+ * @param {Object} options - 정규화 옵션
+ * @param {boolean} options.handleYouTube - YouTube URL 특별 처리 여부 (기본값: false)
+ * @param {boolean} options.decodeURI - URI 디코딩 수행 여부 (기본값: false)
+ * @returns {string} 정규화된 URL
+ * 
+ * @example
+ * getNormalizedUrl("https://www.Example.com/path/?query=1")
+ * // -> "example.com/path"
+ * 
+ * getNormalizedUrl("https://youtu.be/VIDEO_ID", { handleYouTube: true })
+ * // -> "youtube:VIDEO_ID"
+ * 
+ * getNormalizedUrl("https://example.com/%ED%95%9C%EA%B8%80", { decodeURI: true })
+ * // -> "example.com/한글"
  */
-function normalizeUrlForComparison(url) {
+function getNormalizedUrl(url, options = {}) {
   if (!url) return "";
+  
+  const { handleYouTube = false, decodeURI = false } = options;
   
   try {
     // URL 객체로 변환 (http/https가 없는 경우 임의로 붙여서 시도)
-    const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+    const urlStr = url.trim();
+    const targetUrl = (urlStr.startsWith('http://') || urlStr.startsWith('https://')) 
+      ? urlStr 
+      : `https://${urlStr}`;
+    const urlObj = new URL(targetUrl);
     
     // 호스트: www. 제거, 소문자 변환
     const host = urlObj.hostname.replace(/^www\./, '').toLowerCase();
     // 경로: 끝의 슬래시(/) 제거
     const pathname = urlObj.pathname.replace(/\/$/, '');
     
-    // 유튜브의 경우 영상 ID만 비교하는 것이 가장 정확함
-    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+    // YouTube 특별 처리 (옵션)
+    if (handleYouTube && (host.includes('youtube.com') || host.includes('youtu.be'))) {
       // 1. 짧은 주소 (youtu.be/VIDEO_ID)
       if (host.includes('youtu.be')) {
         const videoId = pathname.substring(1); // 첫 번째 슬래시 제거
@@ -5811,11 +5831,35 @@ function normalizeUrlForComparison(url) {
     }
     
     // 일반적인 경우: 호스트 + 경로 조합 반환 (쿼리 파라미터 제거)
-    return `${host}${pathname}`;
+    const normalized = `${host}${pathname}`;
+    
+    // URI 디코딩 (옵션)
+    if (decodeURI) {
+      try {
+        return decodeURIComponent(normalized);
+      } catch (e) {
+        return normalized;
+      }
+    }
+    
+    return normalized;
   } catch (e) {
     // URL 파싱 실패 시, 단순 문자열 처리 (공백 제거, 소문자 변환)
     return url.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('?')[0].replace(/\/$/, '');
   }
+}
+
+/**
+ * [핵심] URL 정규화 함수 (강력한 정규화 적용)
+ * 입력된 URL을 비교 가능한 형태로 정규화합니다.
+ * 예: "https://www.Example.com/path/?query=1" -> "example.com/path"
+ * YouTube URL은 특별 처리: youtu.be/VIDEO_ID와 youtube.com/watch?v=VIDEO_ID를 동일하게 처리
+ * 
+ * @deprecated 이 함수는 getNormalizedUrl을 사용하도록 리팩토링되었습니다.
+ *             하위 호환성을 위해 유지되지만, 새로운 코드에서는 getNormalizedUrl을 사용하세요.
+ */
+function normalizeUrlForComparison(url) {
+  return getNormalizedUrl(url, { handleYouTube: true });
 }
 
 /**
@@ -8738,28 +8782,12 @@ chrome.runtime.onInstalled.addListener((details) => {
  */
 /**
  * [신규] AdSense URL 전용 정규화 함수 (충돌 방지용)
+ * 
+ * @deprecated 이 함수는 getNormalizedUrl을 사용하도록 리팩토링되었습니다.
+ *             하위 호환성을 위해 유지되지만, 새로운 코드에서는 getNormalizedUrl을 사용하세요.
  */
 function normalizeAdSenseUrl(url) {
-  if (!url) return "";
-  try {
-    const urlStr = url.trim();
-    // 프로토콜이 없으면 붙여서 파싱
-    const targetUrl = (urlStr.startsWith('http://') || urlStr.startsWith('https://')) ? urlStr : `https://${urlStr}`;
-    const urlObj = new URL(targetUrl);
-    
-    // 호스트(www제거) + 경로(끝슬래시제거)
-    const host = urlObj.hostname.replace(/^www\./, '').toLowerCase();
-    const pathname = urlObj.pathname.replace(/\/$/, '');
-    
-    // 디코딩 한번 더 안전하게 수행 후 반환
-    try {
-        return decodeURIComponent(`${host}${pathname}`);
-    } catch (e) {
-        return `${host}${pathname}`;
-    }
-  } catch (e) {
-    return url.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('?')[0].replace(/\/$/, '');
-  }
+  return getNormalizedUrl(url, { decodeURI: true });
 }
 
 /**
@@ -9885,14 +9913,145 @@ async function fixDraftStatusCards(options = {}) {
   }
 }
 
+/**
+ * URL 정규화 함수 단위 테스트
+ * 검증: https://www.google.com과 http://google.com 입력 시 동일한 정규화된 문자열 반환
+ * 
+ * 콘솔에서 실행: testUrlNormalization()
+ */
+function testUrlNormalization() {
+  console.log('🧪 [URL 정규화 테스트] 시작...\n');
+  
+  const testCases = [
+    {
+      name: '기본 테스트 (www 포함 vs 미포함)',
+      urls: [
+        'https://www.google.com',
+        'http://google.com',
+        'https://google.com',
+        'http://www.google.com'
+      ],
+      expected: 'google.com'
+    },
+    {
+      name: '경로 포함 테스트',
+      urls: [
+        'https://www.google.com/search',
+        'http://google.com/search',
+        'https://google.com/search/'
+      ],
+      expected: 'google.com/search'
+    },
+    {
+      name: '쿼리 파라미터 포함 테스트',
+      urls: [
+        'https://www.google.com/search?q=test',
+        'http://google.com/search?q=test&lang=ko'
+      ],
+      expected: 'google.com/search'
+    },
+    {
+      name: 'YouTube 테스트 (normalizeUrlForComparison)',
+      urls: [
+        'https://www.youtube.com/watch?v=VIDEO_ID',
+        'http://youtu.be/VIDEO_ID',
+        'https://youtube.com/embed/VIDEO_ID'
+      ],
+      expected: 'youtube:VIDEO_ID',
+      useYouTube: true
+    },
+    {
+      name: 'AdSense URL 디코딩 테스트',
+      urls: [
+        'https://www.example.com/%ED%95%9C%EA%B8%80',
+        'http://example.com/%ED%95%9C%EA%B8%80'
+      ],
+      expected: 'example.com/한글',
+      useDecode: true
+    }
+  ];
+  
+  let passed = 0;
+  let failed = 0;
+  
+  testCases.forEach((testCase, index) => {
+    console.log(`\n[테스트 ${index + 1}] ${testCase.name}`);
+    console.log('─'.repeat(50));
+    
+    const results = testCase.urls.map(url => {
+      let result;
+      if (testCase.useYouTube) {
+        result = normalizeUrlForComparison(url);
+      } else if (testCase.useDecode) {
+        result = normalizeAdSenseUrl(url);
+      } else {
+        result = getNormalizedUrl(url);
+      }
+      return { url, result };
+    });
+    
+    // 모든 결과가 동일한지 확인
+    const firstResult = results[0].result;
+    const allMatch = results.every(r => r.result === firstResult);
+    const matchesExpected = firstResult === testCase.expected;
+    
+    results.forEach(({ url, result }) => {
+      console.log(`  입력: ${url}`);
+      console.log(`  출력: ${result}`);
+    });
+    
+    if (allMatch && matchesExpected) {
+      console.log(`  ✅ 통과: 모든 URL이 "${firstResult}"로 정규화됨`);
+      passed++;
+    } else {
+      console.log(`  ❌ 실패:`);
+      if (!allMatch) {
+        console.log(`     - 결과가 일치하지 않음`);
+      }
+      if (!matchesExpected) {
+        console.log(`     - 예상: "${testCase.expected}", 실제: "${firstResult}"`);
+      }
+      failed++;
+    }
+  });
+  
+  console.log('\n' + '='.repeat(50));
+  console.log(`📊 테스트 결과: ${passed}개 통과, ${failed}개 실패`);
+  console.log('='.repeat(50));
+  
+  // 핵심 검증: https://www.google.com과 http://google.com
+  console.log('\n🔍 [핵심 검증] https://www.google.com vs http://google.com');
+  const result1 = normalizeUrlForComparison('https://www.google.com');
+  const result2 = normalizeUrlForComparison('http://google.com');
+  const result3 = getNormalizedUrl('https://www.google.com');
+  const result4 = getNormalizedUrl('http://google.com');
+  
+  console.log(`  normalizeUrlForComparison('https://www.google.com') => "${result1}"`);
+  console.log(`  normalizeUrlForComparison('http://google.com') => "${result2}"`);
+  console.log(`  getNormalizedUrl('https://www.google.com') => "${result3}"`);
+  console.log(`  getNormalizedUrl('http://google.com') => "${result4}"`);
+  
+  if (result1 === result2 && result3 === result4 && result1 === result3) {
+    console.log(`  ✅ 성공: 모든 함수가 동일한 결과 "${result1}"를 반환합니다.`);
+  } else {
+    console.log(`  ❌ 실패: 결과가 일치하지 않습니다.`);
+  }
+  
+  return { passed, failed, total: passed + failed };
+}
+
 // 전역 함수로 등록 (콘솔에서 직접 호출 가능)
 if (typeof window !== 'undefined') {
   window.testUrlMatching = testUrlMatching;
   window.migrateToDefaultUser = migrateToDefaultUser;
   window.fixDraftStatusCards = fixDraftStatusCards;
+  window.testUrlNormalization = testUrlNormalization;
+  window.getNormalizedUrl = getNormalizedUrl;
 } else {
   // Service Worker 환경에서는 self에 등록
   self.testUrlMatching = testUrlMatching;
   self.migrateToDefaultUser = migrateToDefaultUser;
   self.fixDraftStatusCards = fixDraftStatusCards;
+  self.testUrlNormalization = testUrlNormalization;
+  self.getNormalizedUrl = getNormalizedUrl;
 }
