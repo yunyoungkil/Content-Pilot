@@ -1284,6 +1284,45 @@
   color: #333;
 }
 
+/* 성과 카드 상세 정보 스타일 */
+.perf-card-details {
+  font-size: 12px;
+  color: #666;
+}
+
+.perf-detail-section {
+  margin-bottom: 8px;
+}
+
+.perf-detail-title {
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.perf-detail-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.perf-detail-badge {
+  display: inline-block;
+  background: #f0f0f0;
+  color: #555;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: help;
+  transition: background 0.2s;
+}
+
+.perf-detail-badge:hover {
+  background: #e0e0e0;
+}
+
 .perf-card-footer {
   padding-top: 12px;
   border-top: 1px solid #f1f3f5;

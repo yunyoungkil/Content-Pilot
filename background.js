@@ -6543,11 +6543,6 @@ async function updateSinglePerformanceMetric(contentInfo) {
     const adSenseAccountId = storageResult.adSenseAccountId;
     
     // [체크리스트 1-1] Google 인증 토큰 유효성 확인
-    console.log("[1단계: 사전 조건] Google 인증 토큰 확인", {
-      hasToken: !!googleAuthToken,
-      tokenLength: googleAuthToken?.length || 0,
-      hasAdSenseId: !!adSenseAccountId
-    });
     
     // Firebase에서 채널 데이터 가져오기 (chrome.storage.local이 아닌 Firebase에 저장됨)
     const userId = "default_user";
@@ -6637,15 +6632,6 @@ async function updateSinglePerformanceMetric(contentInfo) {
     }
     
     // [체크리스트 1-2] GA4 속성 ID 매핑 확인
-    console.log(`[1단계: 사전 조건] URL 매칭 결과:`, {
-      contentUrl: contentInfo.url,
-      myChannelsBlogs: myChannels.blogs,
-      matchedBlog: blogInfo,
-      gaPropertyId: gaPropertyId,
-      adSenseAccountId: adSenseAccountId,
-      hasGaPropertyId: !!gaPropertyId,
-      hasAdSenseAccountId: !!adSenseAccountId
-    }, logContext);
 
     if (!gaPropertyId || !adSenseAccountId) {
       const errorMsg = `성과 지표 수집에 필요한 ID가 없습니다. (GA: ${gaPropertyId || "없음"}, AdSense: ${adSenseAccountId || "없음"})`;
@@ -6677,6 +6663,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       ? analyticsData.value 
       : { error: analyticsData.reason?.message || "알 수 없는 오류", gaEarnings: 0 };
     
+    
     const adsenseResult = adsenseData.status === "fulfilled"
       ? adsenseData.value
       : { error: adsenseData.reason?.message || "알 수 없는 오류", estimatedEarnings: 0 };
@@ -6694,27 +6681,6 @@ async function updateSinglePerformanceMetric(contentInfo) {
       ? analyticsResult.pageviews
       : (adsenseResult.pageViews || 0); // AdSense는 pageViews (대문자 V)
     
-    // [체크리스트 3-2] 수익 파싱 확인
-    console.log("[3단계: 데이터 파싱] 수익 파싱", {
-      gaEarnings: analyticsResult.gaEarnings,
-      adsenseEarnings: adsenseResult.estimatedEarnings,
-      finalEarnings: finalEarnings,
-      "GA4 raw": analyticsResult.gaEarnings,
-      "AdSense raw": adsenseResult.estimatedEarnings,
-      "하이브리드 로직": analyticsResult.gaEarnings > 0 ? "GA4 사용" : "AdSense 사용",
-      "GA4 에러": analyticsResult.error || null,
-      "AdSense 에러": adsenseResult.error || null,
-      "최종 수익 소스": finalEarnings > 0 ? (analyticsResult.gaEarnings > 0 ? "GA4" : "AdSense") : "없음"
-    });
-    
-    // [수정 요청 1] 페이지뷰 파싱 확인
-    console.log("[3단계: 데이터 파싱] 페이지뷰 파싱", {
-      gaPageviews: analyticsResult.pageviews,
-      adsensePageViews: adsenseResult.pageViews,
-      finalPageviews: finalPageviews,
-      "GA4 raw (index 0)": analyticsResult.pageviews,
-      "하이브리드 로직": analyticsResult.pageviews > 0 ? "GA4 사용" : "AdSense 사용"
-    });
 
     const performanceData = {
       ...analyticsResult,
@@ -6730,9 +6696,23 @@ async function updateSinglePerformanceMetric(contentInfo) {
       pageRPM: analyticsResult.pageRPM || 0,
       pageCTR: analyticsResult.pageCTR || 0,
       
+      // [신규] 추가 메트릭 데이터 (디바이스, 국가, 랜딩 페이지, 이벤트, 검색어)
+      deviceBreakdown: analyticsResult.deviceBreakdown || null,
+      topCountries: analyticsResult.topCountries || null,
+      landingPages: analyticsResult.landingPages || null,
+      events: analyticsResult.events || null,
+      topSearchTerms: analyticsResult.topSearchTerms || null,
+      
       lastUpdatedAt: Date.now(),
       collectionDuration: Date.now() - startTime,
     };
+    
+    console.log(`[검색어 메트릭] performanceData에 검색어 포함 확인`, {
+      url: contentInfo.url,
+      hasTopSearchTerms: !!performanceData.topSearchTerms,
+      topSearchTermsCount: performanceData.topSearchTerms?.length || 0,
+      topSearchTerms: performanceData.topSearchTerms
+    });
 
     // 에러가 있는 경우 기록 (데이터 없음은 오류가 아님)
     // 실제 API 오류인지 확인: 401, 403, 계정/속성 찾을 수 없음 등
@@ -6793,44 +6773,9 @@ async function updateSinglePerformanceMetric(contentInfo) {
     }
     
     // [체크리스트 4-1] Firebase 저장 확인
-    console.log("[4단계: 데이터 저장] Firebase 저장", {
-      path: contentInfo.path,
-      updateData: {
-        estimatedEarnings: updateData.estimatedEarnings,
-        gaEarnings: updateData.gaEarnings,
-        adsenseEarnings: adsenseResult.estimatedEarnings,
-        finalEarnings: finalEarnings,
-        pageviews: updateData.pageviews,
-        engagementRate: updateData.engagementRate,
-        newUsers: updateData.newUsers,
-        avgEngagementTime: updateData.avgEngagementTime,
-        pageRPM: updateData.pageRPM,
-        collecting: updateData.collecting
-      }
-    });
     
     // [체크리스트 4-2] 데이터 병합 확인
-    console.log("[4단계: 데이터 저장] 데이터 병합", {
-      analyticsResult: {
-        pageviews: analyticsResult.pageviews,
-        gaEarnings: analyticsResult.gaEarnings,
-        engagementRate: analyticsResult.engagementRate,
-        newUsers: analyticsResult.newUsers,
-        avgEngagementTime: analyticsResult.avgEngagementTime,
-        pageRPM: analyticsResult.pageRPM
-      },
-      adsenseResult: {
-        estimatedEarnings: adsenseResult.estimatedEarnings
-      },
-      performanceData: {
-        estimatedEarnings: performanceData.estimatedEarnings,
-        pageviews: performanceData.pageviews,
-        engagementRate: performanceData.engagementRate,
-        newUsers: performanceData.newUsers,
-        avgEngagementTime: performanceData.avgEngagementTime,
-        pageRPM: performanceData.pageRPM
-      }
-    });
+    
     
     await firebase
       .database()
@@ -6842,7 +6787,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     console.log(`[G-14] 콘텐츠(${contentInfo.url}) 성과 지표 업데이트 완료 (${duration}ms)`, {
       ...logContext,
       duration,
-      hasErrors: !!(analyticsResult.error || adsenseResult.error),
+      hasErrors: !!(analyticsResult.error || adsenseResult.error)
     });
   } catch (error) {
     const duration = Date.now() - startTime;
@@ -6908,16 +6853,6 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
   // 필터 경로 선택: useEncodedPath가 true면 인코딩된 경로, false면 디코딩된 경로
   const filterPath = useEncodedPath ? normalizedRawPath : normalizedPath;
   
-  // [체크리스트 2-3] URL 필터 매칭 확인
-  console.log("[2단계: GA4 API] URL 필터", {
-    rawPath: rawPath,
-    decodedPath: decodedPath,
-    normalizedPath: normalizedPath,
-    normalizedRawPath: normalizedRawPath,
-    filterPath: filterPath,
-    useEncodedPath: useEncodedPath,
-    url: url
-  }); 
 
   try {
     // [요청 1] 핵심 성과 지표 (Metrics)
@@ -6991,16 +6926,115 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       })
     });
 
-    // 병렬 실행 (Publisher 메트릭은 오류가 나도 다른 요청은 계속 진행)
-    const [metricsRes, sourceRes, publisherRes] = await Promise.all([metricsRequest, sourceRequest, publisherRequest]);
-
-    // [체크리스트 2-1] API 요청 성공 여부 확인
-    console.log("[2단계: GA4 API] API 응답 상태", {
-      status: metricsRes.status,
-      ok: metricsRes.ok,
-      url: url,
-      propertyId: propertyId
+    // [요청 4] 디바이스 및 지역 정보
+    const deviceCountryRequest = fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [
+          { name: "deviceCategory" },
+          { name: "country" }
+        ],
+        metrics: [
+          { name: "activeUsers" },
+          { name: "totalAdRevenue" }
+        ],
+        dimensionFilter: {
+          filter: {
+            fieldName: "pagePath",
+            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
+          }
+        },
+        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+        limit: 10 // 상위 10개 조합만
+      })
     });
+
+    // [요청 5] 랜딩 페이지 정보
+    const landingPageRequest = fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "landingPage" }],
+        metrics: [
+          { name: "sessions" },
+          { name: "bounceRate" },
+          { name: "averageSessionDuration" }
+        ],
+        dimensionFilter: {
+          filter: {
+            fieldName: "pagePath",
+            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
+          }
+        },
+        orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+        limit: 5 // 상위 5개 랜딩 페이지만
+      })
+    });
+
+    // [요청 6] 스크롤/클릭 이벤트
+    const eventsRequest = fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "eventName" }],
+        metrics: [{ name: "eventCount" }],
+        dimensionFilter: {
+          andGroup: {
+            expressions: [
+              {
+                filter: {
+                  fieldName: "pagePath",
+                  stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
+                }
+              },
+              {
+                filter: {
+                  fieldName: "eventName",
+                  inListFilter: {
+                    values: ["scroll", "click"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      })
+    });
+
+    // [요청 7] 검색어 정보
+    const searchTermsRequest = fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "searchTerm" }],
+        metrics: [{ name: "activeUsers" }],
+        dimensionFilter: {
+          filter: {
+            fieldName: "pagePath",
+            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
+          }
+        },
+        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+        limit: 5 // 상위 5개 검색어만
+      })
+    });
+
+    // 병렬 실행 (모든 요청을 병렬로 처리)
+    const [metricsRes, sourceRes, publisherRes, deviceCountryRes, landingPageRes, eventsRes, searchTermsRes] = await Promise.all([
+      metricsRequest, 
+      sourceRequest, 
+      publisherRequest,
+      deviceCountryRequest,
+      landingPageRequest,
+      eventsRequest,
+      searchTermsRequest
+    ]);
+
 
     if (!metricsRes.ok) {
       // 에러 응답 본문 확인 (400, 401 등 상세 에러 파악용)
@@ -7085,24 +7119,10 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
     let adImpressions = 0;
     let adClicks = 0;
     
-    // Publisher 메트릭 요청 상태 상세 로깅
-    console.log("[2단계: GA4 API] Publisher 메트릭 요청 상태", {
-      ok: publisherRes.ok,
-      status: publisherRes.status,
-      statusText: publisherRes.statusText,
-      excludePublisherMetrics: excludePublisherMetrics
-    });
     
     if (publisherRes.ok) {
       try {
         publisherData = await publisherRes.json();
-        console.log("[2단계: GA4 API] Publisher 메트릭 응답 데이터", {
-          hasRows: publisherData.rows && publisherData.rows.length > 0,
-          rowCount: publisherData.rowCount || 0,
-          rowsLength: publisherData.rows?.length || 0,
-          firstRow: publisherData.rows?.[0] || null,
-          metricHeaders: publisherData.metricHeaders || []
-        });
         
         if (publisherData.rows && publisherData.rows.length > 0) {
           const publisherRow = publisherData.rows[0];
@@ -7111,12 +7131,6 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           adRevenue = parseFloat(publisherValues[0]?.value || "0"); // totalAdRevenue
           adImpressions = parseInt(publisherValues[1]?.value || "0", 10); // publisherAdImpressions
           adClicks = parseInt(publisherValues[2]?.value || "0", 10); // publisherAdClicks
-          console.log("[2단계: GA4 API] Publisher 메트릭 수집 성공", {
-            adRevenue: adRevenue,
-            adImpressions: adImpressions,
-            adClicks: adClicks,
-            rawValues: publisherValues.map(v => v.value)
-          });
         } else {
           console.warn("[2단계: GA4 API] Publisher 메트릭 응답에 데이터 없음 (rows가 비어있음)");
         }
@@ -7155,15 +7169,6 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       }
     }
 
-    // [체크리스트 2-2] API 응답 데이터 존재 여부 확인
-    console.log("[2단계: GA4 API] 응답 데이터", {
-      hasRows: metricsData.rows && metricsData.rows.length > 0,
-      rowCount: metricsData.rowCount || 0,
-      rowsLength: metricsData.rows?.length || 0,
-      firstRow: metricsData.rows?.[0] || null,
-      url: url,
-      publisherDataCollected: publisherData !== null
-    });
 
     // 데이터 파싱
     if (metricsData.rows && metricsData.rows.length > 0) {
@@ -7178,38 +7183,11 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       const newUsersIndex = excludeAverageEngagementTime ? 6 : 7; // newUsers
       const activeUsersIndex = excludeAverageEngagementTime ? 7 : 8; // activeUsers
 
-      // [체크리스트 2-4] Metrics 배열 순서 확인
-      console.log("[2단계: GA4 API] Metrics 인덱스", {
-        totalMetrics: values.length,
-        values: values,
-        "0-pageviews": values[0]?.value,
-        "1-avgSessionDuration": values[1]?.value,
-        "2-sessions": values[2]?.value,
-        "3-pagesPerSession": values[3]?.value,
-        "4-bounceRate": values[4]?.value,
-        [`${engagementRateIndex}-engagementRate`]: values[engagementRateIndex]?.value,
-        ...(excludeAverageEngagementTime ? {} : { [`${avgEngagementTimeIndex}-avgEngagementTime`]: values[avgEngagementTimeIndex]?.value }),
-        [`${newUsersIndex}-newUsers`]: values[newUsersIndex]?.value,
-        [`${activeUsersIndex}-activeUsers`]: values[activeUsersIndex]?.value,
-        "Publisher 메트릭 (별도 요청)": {
-          adRevenue: adRevenue,
-          adImpressions: adImpressions,
-          adClicks: adClicks
-        }
-      });
       
       // 파생 지표
       const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
       const pageCTR = adImpressions > 0 ? (adClicks / adImpressions) * 100 : 0;
       
-      // [체크리스트 3-6] RPM 계산 확인
-      console.log("[3단계: 데이터 파싱] RPM 계산", {
-        adRevenue: adRevenue,
-        adImpressions: adImpressions,
-        adClicks: adClicks,
-        pageRPM: pageRPM,
-        formula: adImpressions > 0 ? `(${adRevenue} / ${adImpressions}) * 1000` : "0 (노출수 없음)"
-      });
 
       // 유입 경로 파싱
       let topSource = "-";
@@ -7220,41 +7198,123 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         topSource = `${source} / ${medium}`;
       }
 
-      // [체크리스트 3-1~5] 각 지표별 파싱 확인
+      // 디바이스 및 지역 정보 파싱
+      const deviceCountryData = deviceCountryRes.ok ? await deviceCountryRes.json() : {};
+      const deviceBreakdown = { mobile: { users: 0, revenue: 0 }, desktop: { users: 0, revenue: 0 }, tablet: { users: 0, revenue: 0 } };
+      const topCountries = [];
+      
+      if (deviceCountryData.rows && deviceCountryData.rows.length > 0) {
+        deviceCountryData.rows.forEach(row => {
+          const device = row.dimensionValues[0]?.value || "unknown";
+          const country = row.dimensionValues[1]?.value || "unknown";
+          const users = parseInt(row.metricValues[0]?.value || "0", 10);
+          const revenue = parseFloat(row.metricValues[1]?.value || "0");
+          
+          // 디바이스별 집계
+          if (deviceBreakdown[device.toLowerCase()]) {
+            deviceBreakdown[device.toLowerCase()].users += users;
+            deviceBreakdown[device.toLowerCase()].revenue += revenue;
+          }
+          
+          // 국가별 집계 (상위 5개만)
+          if (topCountries.length < 5) {
+            topCountries.push({ country, users, revenue });
+          }
+        });
+      }
+
+      // 랜딩 페이지 정보 파싱
+      const landingPageData = landingPageRes.ok ? await landingPageRes.json() : {};
+      const landingPages = [];
+      
+      if (landingPageData.rows && landingPageData.rows.length > 0) {
+        landingPageData.rows.forEach(row => {
+          landingPages.push({
+            page: row.dimensionValues[0]?.value || "-",
+            sessions: parseInt(row.metricValues[0]?.value || "0", 10),
+            bounceRate: parseFloat(row.metricValues[1]?.value || "0"),
+            avgSessionDuration: parseFloat(row.metricValues[2]?.value || "0")
+          });
+        });
+      }
+
+      // 이벤트 정보 파싱
+      const eventsData = eventsRes.ok ? await eventsRes.json() : {};
+      const events = { scroll: 0, click: 0 };
+      
+      if (eventsData.rows && eventsData.rows.length > 0) {
+        eventsData.rows.forEach(row => {
+          const eventName = row.dimensionValues[0]?.value || "";
+          const eventCount = parseInt(row.metricValues[0]?.value || "0", 10);
+          
+          if (eventName === "scroll") {
+            events.scroll = eventCount;
+          } else if (eventName === "click") {
+            events.click = eventCount;
+          }
+        });
+      }
+
+      // 검색어 정보 파싱
+      const searchTermsData = searchTermsRes.ok ? await searchTermsRes.json() : {};
+      const topSearchTerms = [];
+      
+      console.log(`[검색어 메트릭] API 응답 상태: ${searchTermsRes.ok ? '성공' : '실패'}`, {
+        status: searchTermsRes.status,
+        statusText: searchTermsRes.statusText,
+        hasData: !!searchTermsData.rows,
+        rowsCount: searchTermsData.rows?.length || 0,
+        filterPath: filterPath,
+        fullResponse: searchTermsData
+      });
+      
+      if (searchTermsData.rows && searchTermsData.rows.length > 0) {
+        const filteredOut = [];
+        
+        searchTermsData.rows.forEach(row => {
+          const searchTerm = row.dimensionValues[0]?.value || "";
+          const users = parseInt(row.metricValues[0]?.value || "0", 10);
+          
+          if (searchTerm && searchTerm !== "(not set)") {
+            topSearchTerms.push({ term: searchTerm, users });
+          } else {
+            // 필터링된 검색어 기록
+            filteredOut.push({ 
+              searchTerm: searchTerm || "(빈 문자열)", 
+              users,
+              reason: !searchTerm ? "빈 문자열" : searchTerm === "(not set)" ? "(not set)" : "기타"
+            });
+          }
+        });
+        
+        console.log(`[검색어 메트릭] 검색어 수집 완료: ${topSearchTerms.length}개`, {
+          searchTerms: topSearchTerms,
+          totalRows: searchTermsData.rows.length,
+          filteredCount: topSearchTerms.length,
+          filteredOut: filteredOut.length > 0 ? filteredOut : undefined
+        });
+        
+        if (filteredOut.length > 0) {
+          console.warn(`[검색어 메트릭] 필터링된 검색어 ${filteredOut.length}개 (빈 문자열 또는 "(not set)")`, {
+            filteredOut: filteredOut,
+            note: "검색어가 빈 문자열이거나 '(not set)'인 경우는 검색어로 유입되지 않은 직접 방문 또는 검색어 추적이 안 된 경우입니다."
+          });
+        }
+      } else {
+        console.warn(`[검색어 메트릭] 검색어 데이터 없음 - 가능한 이유:`, {
+          hasRows: !!searchTermsData.rows,
+          rowsLength: searchTermsData.rows?.length || 0,
+          filterPath: filterPath,
+          note: "검색어 데이터가 없는 경우: 1) 해당 페이지로 검색어로 유입된 트래픽이 없음, 2) URL 쿼리 파라미터(?q=검색어)로 검색어를 추적하지 않음, 3) GA4에서 searchTerm 이벤트 매개변수를 사용하지 않음",
+          responseData: searchTermsData
+        });
+      }
+
+      // 데이터 파싱
       const pageviews = parseInt(values[0]?.value || "0", 10);
       const engagementRate = parseFloat(values[engagementRateIndex]?.value || "0");
       const avgEngagementTime = excludeAverageEngagementTime ? 0 : parseFloat(values[avgEngagementTimeIndex]?.value || "0");
       const newUsers = parseInt(values[newUsersIndex]?.value || "0", 10);
-      
-      console.log("[3단계: 데이터 파싱] 지표별 파싱 결과", {
-        "페이지뷰 (index 0)": {
-          rawValue: values[0]?.value,
-          parsed: pageviews,
-          isZero: pageviews === 0
-        },
-        "수익 (Publisher 메트릭 별도 요청)": {
-          parsed: adRevenue,
-          isZero: adRevenue === 0,
-          source: "publisherAdRevenue (별도 요청)"
-        },
-        [`참여율 (index ${engagementRateIndex})`]: {
-          rawValue: values[engagementRateIndex]?.value,
-          parsed: engagementRate,
-          isZero: engagementRate === 0
-        },
-        ...(excludeAverageEngagementTime ? {} : {
-          [`평균 참여시간 (index ${avgEngagementTimeIndex})`]: {
-            rawValue: values[avgEngagementTimeIndex]?.value,
-            parsed: avgEngagementTime,
-            isZero: avgEngagementTime === 0
-          }
-        }),
-        [`신규 방문자 (index ${newUsersIndex})`]: {
-          rawValue: values[newUsersIndex]?.value,
-          parsed: newUsers,
-          isZero: newUsers === 0
-        }
-      });
 
       const analyticsData = {
         pageviews: pageviews,
@@ -7276,13 +7336,31 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         activeUsers: parseInt(values[activeUsersIndex]?.value || "0", 10),
         
         // [신규] 유입 경로
-        topSource: topSource
+        topSource: topSource,
+        
+        // [신규] 디바이스 및 지역 정보
+        deviceBreakdown: deviceBreakdown,
+        topCountries: topCountries,
+        
+        // [신규] 랜딩 페이지 정보
+        landingPages: landingPages,
+        
+        // [신규] 이벤트 정보
+        events: events,
+        
+        // [신규] 검색어 정보
+        topSearchTerms: topSearchTerms
       };
       
       // 재방문자 계산
       analyticsData.returningUsers = Math.max(0, analyticsData.activeUsers - analyticsData.newUsers);
 
-      console.log(`[GA4] 데이터 수집 성공 (${url})`, analyticsData);
+      console.log(`[검색어 메트릭] analyticsData에 검색어 포함 확인`, {
+        hasTopSearchTerms: !!analyticsData.topSearchTerms,
+        topSearchTermsCount: analyticsData.topSearchTerms?.length || 0,
+        topSearchTerms: analyticsData.topSearchTerms
+      });
+
       return analyticsData;
     }
 
@@ -8924,8 +9002,12 @@ async function checkGA4AvailableMetrics(propertyId) {
       metric.apiName?.includes('publisher') || 
       metric.apiName?.includes('AdRevenue') ||
       metric.apiName?.includes('AdImpressions') ||
-      metric.apiName?.includes('AdClicks')
+      metric.apiName?.includes('AdClicks') ||
+      metric.apiName?.includes('totalAdRevenue')
     ) || [];
+
+    const hasPublisherAdRevenue = publisherMetrics.some(m => m.apiName === 'publisherAdRevenue');
+    const hasTotalAdRevenue = publisherMetrics.some(m => m.apiName === 'totalAdRevenue');
 
     console.log("📊 [GA4 메트릭 확인] 사용 가능한 Publisher 메트릭:", {
       totalMetrics: metadata.metrics?.length || 0,
@@ -8934,12 +9016,18 @@ async function checkGA4AvailableMetrics(propertyId) {
         uiName: m.uiName,
         description: m.description
       })),
-      hasPublisherAdRevenue: publisherMetrics.some(m => m.apiName === 'publisherAdRevenue'),
-      allMetrics: metadata.metrics?.map(m => m.apiName).filter(name => name?.includes('revenue') || name?.includes('earnings') || name?.includes('publisher')) || []
+      hasPublisherAdRevenue: hasPublisherAdRevenue,
+      hasTotalAdRevenue: hasTotalAdRevenue,
+      recommendedMetric: hasTotalAdRevenue ? 'totalAdRevenue' : (hasPublisherAdRevenue ? 'publisherAdRevenue' : 'none'),
+      allRevenueMetrics: metadata.metrics?.map(m => m.apiName).filter(name => 
+        name?.includes('revenue') || name?.includes('earnings') || name?.includes('publisher') || name?.includes('advertiser')
+      ) || []
     });
 
     return {
-      hasPublisherAdRevenue: publisherMetrics.some(m => m.apiName === 'publisherAdRevenue'),
+      hasPublisherAdRevenue: hasPublisherAdRevenue,
+      hasTotalAdRevenue: hasTotalAdRevenue,
+      recommendedMetric: hasTotalAdRevenue ? 'totalAdRevenue' : (hasPublisherAdRevenue ? 'publisherAdRevenue' : 'none'),
       publisherMetrics: publisherMetrics,
       allMetrics: metadata.metrics || []
     };

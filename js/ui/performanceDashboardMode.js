@@ -52,7 +52,9 @@ function loadPerformanceData(container) {
     // Firebase 직접 접근
     const kanbanRef = firebase.database().ref("kanban");
     kanbanRef.once("value", async (snapshot) => {
-      await processPerformanceData(snapshot.val() || {}, container);
+      const allCards = snapshot.val() || {};
+      
+      await processPerformanceData(allCards, container);
     });
   } else {
     // background.js를 통해 데이터 가져오기
@@ -82,12 +84,6 @@ async function processPerformanceData(allCards, container) {
   // [신규] 현재 활성 채널 ID 가져오기
   const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
-  // [체크리스트 5-1] Firebase 데이터 로드 확인
-  console.log("[5단계: UI 로드] Firebase 데이터 로드", {
-    allCards: allCards,
-    statusCount: Object.keys(allCards).length,
-    activeChannelId: activeChannelId
-  });
 
   // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
   for (const status in allCards) {
@@ -100,21 +96,6 @@ async function processPerformanceData(allCards, container) {
       const channelMatch = !activeChannelId || card.channelId === activeChannelId;
       const hasPublishedUrl = !!card.publishedUrl;
       
-      if (!hasPerformance || hasError || !hasPublishedUrl || !channelMatch) {
-        console.log("[5단계: UI 로드] 데이터 필터링", {
-          cardId: cardId,
-          title: card.title,
-          hasPerformance: hasPerformance,
-          hasError: hasError,
-          channelMatch: channelMatch,
-          hasPublishedUrl: hasPublishedUrl,
-          filtered: true,
-          reason: !hasPerformance ? "performance 없음" : 
-                  hasError ? "error 있음" : 
-                  !hasPublishedUrl ? "publishedUrl 없음" : 
-                  !channelMatch ? "channelId 불일치" : "기타"
-        });
-      }
       
       // [신규] 채널 필터링: 현재 활성 채널과 일치하는 카드만 포함
       if (activeChannelId && card.channelId !== activeChannelId) {
@@ -126,22 +107,14 @@ async function processPerformanceData(allCards, container) {
       
       if (card.publishedUrl && card.performance && !card.performance.error) {
         // [체크리스트 5-3] UI 렌더링 확인
-        console.log("[5단계: UI 로드] UI 렌더링 데이터", {
-          cardId: cardId,
-          title: card.title,
-          performance: {
-            estimatedEarnings: card.performance.estimatedEarnings,
-            gaEarnings: card.performance.gaEarnings,
-            pageviews: card.performance.pageviews,
-            engagementRate: card.performance.engagementRate,
-            newUsers: card.performance.newUsers,
-            avgEngagementTime: card.performance.avgEngagementTime,
-            pageRPM: card.performance.pageRPM,
-            lastUpdatedAt: card.performance.lastUpdatedAt
-          }
-        });
+        // 추가 메트릭 데이터 확인
+        const hasAdditionalMetrics = !!(card.performance.deviceBreakdown || 
+                                        card.performance.topCountries || 
+                                        card.performance.landingPages || 
+                                        card.performance.events);
         
-        allPerformanceData.push({
+        
+        const pushedData = {
           id: cardId,
           status: status,
           title: card.title || "제목 없음",
@@ -149,20 +122,13 @@ async function processPerformanceData(allCards, container) {
           performance: card.performance,
           createdAt: card.createdAt || 0,
           lastUpdatedAt: card.performance.lastUpdatedAt || 0,
-        });
+        };
+        
+        allPerformanceData.push(pushedData);
       }
     }
   }
 
-  console.log("[5단계: UI 로드] 최종 필터링 결과", {
-    totalCards: allPerformanceData.length,
-    cards: allPerformanceData.map(c => ({
-      id: c.id,
-      title: c.title,
-      earnings: c.performance.estimatedEarnings,
-      pageviews: c.performance.pageviews
-    }))
-  });
 
   renderPerformanceList(container);
 }
@@ -316,6 +282,8 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
  */
 function createPerformanceCard(item, index) {
   const perf = item.performance;
+  
+  
   // 수익 데이터: estimatedEarnings 우선, 없으면 gaEarnings, 없으면 0
   const earnings = perf.estimatedEarnings !== undefined && perf.estimatedEarnings !== null
     ? perf.estimatedEarnings
@@ -388,6 +356,97 @@ function createPerformanceCard(item, index) {
             <span class="metric-value">$${(perf.pageRPM || 0).toFixed(2)}</span>
           </div>
         </div>
+
+        ${(perf.deviceBreakdown && (perf.deviceBreakdown.mobile?.users > 0 || perf.deviceBreakdown.desktop?.users > 0 || perf.deviceBreakdown.tablet?.users > 0)) || 
+           (perf.topCountries && perf.topCountries.length > 0) || 
+           (perf.landingPages && perf.landingPages.length > 0) || 
+           (perf.events && (perf.events.scroll > 0 || perf.events.click > 0)) ||
+           (perf.topSearchTerms && perf.topSearchTerms.length > 0) ? `
+          <div class="perf-card-details" style="margin-top:12px; padding-top:12px; border-top:1px solid #e0e0e0;">
+            ${perf.deviceBreakdown && (perf.deviceBreakdown.mobile?.users > 0 || perf.deviceBreakdown.desktop?.users > 0 || perf.deviceBreakdown.tablet?.users > 0) ? `
+              <div class="perf-detail-section">
+                <div class="perf-detail-title">📱 디바이스</div>
+                <div class="perf-detail-content">
+                  ${perf.deviceBreakdown.mobile?.users > 0 ? `
+                    <span class="perf-detail-badge" title="모바일 사용자: ${perf.deviceBreakdown.mobile.users.toLocaleString()}명, 수익: $${perf.deviceBreakdown.mobile.revenue.toFixed(2)}">
+                      📱 모바일 ${perf.deviceBreakdown.mobile.users.toLocaleString()}명
+                    </span>
+                  ` : ''}
+                  ${perf.deviceBreakdown.desktop?.users > 0 ? `
+                    <span class="perf-detail-badge" title="데스크톱 사용자: ${perf.deviceBreakdown.desktop.users.toLocaleString()}명, 수익: $${perf.deviceBreakdown.desktop.revenue.toFixed(2)}">
+                      💻 데스크톱 ${perf.deviceBreakdown.desktop.users.toLocaleString()}명
+                    </span>
+                  ` : ''}
+                  ${perf.deviceBreakdown.tablet?.users > 0 ? `
+                    <span class="perf-detail-badge" title="태블릿 사용자: ${perf.deviceBreakdown.tablet.users.toLocaleString()}명, 수익: $${perf.deviceBreakdown.tablet.revenue.toFixed(2)}">
+                      📱 태블릿 ${perf.deviceBreakdown.tablet.users.toLocaleString()}명
+                    </span>
+                  ` : ''}
+                </div>
+              </div>
+            ` : ''}
+            
+            ${perf.topCountries && perf.topCountries.length > 0 ? `
+              <div class="perf-detail-section" style="margin-top:8px;">
+                <div class="perf-detail-title">🌍 주요 국가</div>
+                <div class="perf-detail-content">
+                  ${perf.topCountries.slice(0, 3).map(country => `
+                    <span class="perf-detail-badge" title="${country.country}: ${country.users.toLocaleString()}명, 수익: $${country.revenue.toFixed(2)}">
+                      ${country.country} ${country.users.toLocaleString()}명
+                    </span>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+            
+            ${perf.landingPages && perf.landingPages.length > 0 ? `
+              <div class="perf-detail-section" style="margin-top:8px;">
+                <div class="perf-detail-title">🚪 랜딩 페이지</div>
+                <div class="perf-detail-content">
+                  ${perf.landingPages.slice(0, 2).map(landing => {
+                    const shortPage = landing.page.length > 30 ? landing.page.substring(0, 30) + '...' : landing.page;
+                    return `
+                      <span class="perf-detail-badge" title="${landing.page}: ${landing.sessions}세션, 이탈률 ${(landing.bounceRate * 100).toFixed(1)}%">
+                        ${shortPage} (${landing.sessions}세션)
+                      </span>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            ` : ''}
+            
+            ${perf.events && (perf.events.scroll > 0 || perf.events.click > 0) ? `
+              <div class="perf-detail-section" style="margin-top:8px;">
+                <div class="perf-detail-title">🖱️ 상호작용</div>
+                <div class="perf-detail-content">
+                  ${perf.events.scroll > 0 ? `
+                    <span class="perf-detail-badge" title="스크롤 이벤트">
+                      📜 스크롤 ${perf.events.scroll.toLocaleString()}회
+                    </span>
+                  ` : ''}
+                  ${perf.events.click > 0 ? `
+                    <span class="perf-detail-badge" title="클릭 이벤트">
+                      🖱️ 클릭 ${perf.events.click.toLocaleString()}회
+                    </span>
+                  ` : ''}
+                </div>
+              </div>
+            ` : ''}
+            
+            ${perf.topSearchTerms && perf.topSearchTerms.length > 0 ? `
+              <div class="perf-detail-section" style="margin-top:8px;">
+                <div class="perf-detail-title">🔍 검색어</div>
+                <div class="perf-detail-content">
+                  ${perf.topSearchTerms.slice(0, 3).map(search => `
+                    <span class="perf-detail-badge" title="검색어: ${search.term}, 사용자: ${search.users.toLocaleString()}명">
+                      🔍 ${search.term} (${search.users.toLocaleString()}명)
+                    </span>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
 
         ${perf.lastUpdatedAt ? `
           <div class="perf-card-footer">
