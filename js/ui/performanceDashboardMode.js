@@ -50,12 +50,22 @@ function loadPerformanceData(container) {
   
   if (firebase) {
     // Firebase 직접 접근
-    const kanbanRef = firebase.database().ref("kanban");
+    const userId = 'default_user'; // CONSTANTS.USER_ID와 동일
+    const kanbanRef = firebase.database().ref(`kanban/${userId}`);
     kanbanRef.once("value", async (snapshot) => {
       const allCards = snapshot.val() || {};
       
       await processPerformanceData(allCards, container);
     });
+    
+    // [수정] Firebase 직접 접근 시에도 실시간 리스너 등록 (한 번만)
+    if (!window.performanceDashboardListenerAttached) {
+      kanbanRef.on("value", async (snapshot) => {
+        const allCards = snapshot.val() || {};
+        await processPerformanceData(allCards, container);
+      });
+      window.performanceDashboardListenerAttached = true;
+    }
   } else {
     // background.js를 통해 데이터 가져오기
     chrome.runtime.sendMessage({ action: "get_kanban_data" });
@@ -84,11 +94,24 @@ async function processPerformanceData(allCards, container) {
   // [신규] 현재 활성 채널 ID 가져오기
   const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
 
+  // 중복 방지를 위한 Set (cardId 기준)
+  const seenCardIds = new Set();
 
   // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
   for (const status in allCards) {
+    // [수정] done status만 포함하도록 필터링 (성과 대시보드는 발행 완료된 카드만 표시)
+    if (status !== 'done') {
+      continue;
+    }
+    
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
+      
+      // [수정] 중복 카드 제거 (같은 cardId가 여러 status에 있을 수 있음)
+      if (seenCardIds.has(cardId)) {
+        console.warn(`[Performance Dashboard] 중복 카드 발견 (건너뜀): ${cardId}, status: ${status}`);
+        continue;
+      }
       
       // [체크리스트 5-2] 데이터 필터링 확인
       const hasPerformance = !!card.performance;
@@ -113,6 +136,10 @@ async function processPerformanceData(allCards, container) {
                                         card.performance.landingPages || 
                                         card.performance.events);
         
+        // [수정] title이 없는 카드에 대한 경고
+        if (!card.title || card.title.trim() === '') {
+          console.warn(`[Performance Dashboard] 제목 없는 카드 발견: ${cardId}, status: ${status}`);
+        }
         
         const pushedData = {
           id: cardId,
@@ -125,10 +152,35 @@ async function processPerformanceData(allCards, container) {
         };
         
         allPerformanceData.push(pushedData);
+        seenCardIds.add(cardId); // 중복 방지
       }
     }
   }
 
+  // [디버깅] 실제 done status의 카드 수 확인
+  const doneCardsCount = allCards.done ? Object.keys(allCards.done).length : 0;
+  console.log(`[Performance Dashboard] 디버깅 정보:`);
+  console.log(`  - done status 실제 카드 수: ${doneCardsCount}개`);
+  console.log(`  - 성과 데이터 필터링 후: ${allPerformanceData.length}개`);
+  console.log(`  - 카드 목록:`, allPerformanceData.map(item => ({ id: item.id, title: item.title, status: item.status })));
+  
+  if (doneCardsCount !== allPerformanceData.length) {
+    console.warn(`[Performance Dashboard] ⚠️ 불일치 발견! done에 ${doneCardsCount}개가 있지만 ${allPerformanceData.length}개가 표시됩니다.`);
+    
+    // done의 모든 카드 확인
+    if (allCards.done) {
+      console.log(`  - done status의 모든 카드:`, Object.keys(allCards.done).map(cardId => {
+        const card = allCards.done[cardId];
+        return {
+          id: cardId,
+          title: card.title || "제목 없음",
+          hasPublishedUrl: !!card.publishedUrl,
+          hasPerformance: !!card.performance,
+          hasError: !!card.performance?.error
+        };
+      }));
+    }
+  }
 
   renderPerformanceList(container);
 }
@@ -138,6 +190,11 @@ async function processPerformanceData(allCards, container) {
  */
 function renderPerformanceList(container, sortBy = "earnings-desc") {
   const contentEl = container.querySelector("#perf-dashboard-content");
+  
+  // [수정] 이전 내용 완전히 제거 (중복 방지)
+  if (contentEl) {
+    contentEl.innerHTML = '';
+  }
   
   if (allPerformanceData.length === 0) {
     contentEl.innerHTML = `
@@ -275,6 +332,33 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
       ${sortedData.map((item, index) => createPerformanceCard(item, index)).join("")}
     </div>
   `;
+  
+  // [디버깅] 실제 렌더링된 카드 수 확인
+  setTimeout(() => {
+    const renderedCards = contentEl.querySelectorAll('.perf-card');
+    console.log(`[Performance Dashboard] 렌더링 확인:`);
+    console.log(`  - sortedData 길이: ${sortedData.length}`);
+    console.log(`  - 실제 DOM의 카드 수: ${renderedCards.length}`);
+    
+    if (sortedData.length !== renderedCards.length) {
+      console.warn(`[Performance Dashboard] ⚠️ 불일치! 데이터는 ${sortedData.length}개인데 DOM에는 ${renderedCards.length}개가 렌더링되었습니다.`);
+      
+      // 실제 렌더링된 카드의 ID 확인
+      const renderedIds = Array.from(renderedCards).map(card => card.dataset.cardId);
+      console.log(`  - 렌더링된 카드 ID:`, renderedIds);
+      console.log(`  - 데이터 카드 ID:`, sortedData.map(item => item.id));
+      
+      // 중복 확인
+      const idCounts = {};
+      renderedIds.forEach(id => {
+        idCounts[id] = (idCounts[id] || 0) + 1;
+      });
+      const duplicates = Object.entries(idCounts).filter(([id, count]) => count > 1);
+      if (duplicates.length > 0) {
+        console.warn(`  - 중복된 카드 ID:`, duplicates);
+      }
+    }
+  }, 100);
 }
 
 /**

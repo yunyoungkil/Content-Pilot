@@ -102,24 +102,57 @@ export function createAndShowPanel() {
         });
       }
 
-      // 1. 활성 채널 ID가 있으면 -> 대시보드로 정상 진입
+      // 1. 활성 채널 ID가 있으면 -> 채널이 실제로 존재하는지 확인
       if (res.activeChannelId) {
-        renderDashboard(mainArea); 
-        addDashboardEventListeners(mainArea);
-        
-        // 헤더 이벤트 리스너 초기화 (채널 선택기 등)
-        import("./header.js").then(module => {
-          module.addHeaderEventListeners(shadowRoot);
+        // 채널 목록을 확인하여 activeChannelId가 유효한지 검증
+        chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+          console.log("[Panel] activeChannelId 검증, get_channels_and_key 응답:", response);
+          const myBlogs = response?.data?.myChannels?.blogs || [];
+          console.log("[Panel] 채널 개수:", myBlogs.length);
+          
+          // activeChannelId가 실제 채널 목록에 있는지 확인
+          const isValidChannel = myBlogs.some(blog => {
+            const channelId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+            return channelId === res.activeChannelId;
+          });
+          
+          if (isValidChannel && myBlogs.length > 0) {
+            // 유효한 채널이 있으면 대시보드로 진입
+            console.log("[Panel] 유효한 activeChannelId 확인, 대시보드 표시");
+            renderDashboard(mainArea); 
+            addDashboardEventListeners(mainArea);
+            
+            // 헤더 이벤트 리스너 초기화 (채널 선택기 등)
+            import("./header.js").then(module => {
+              module.addHeaderEventListeners(shadowRoot);
+            });
+          } else {
+            // 유효하지 않은 activeChannelId이거나 채널이 없으면 초기화하고 채널 관리 화면으로 이동
+            console.log("[Panel] 유효하지 않은 activeChannelId 또는 채널 없음, activeChannelId 초기화");
+            chrome.storage.local.remove("activeChannelId", () => {
+              // 채널 관리 화면으로 이동
+              const navItems = shadowRoot.querySelectorAll(".cp-mode-tab");
+              navItems.forEach(item => item.classList.remove("active"));
+              
+              console.log("[Panel] renderChannelMode 호출 시작");
+              renderChannelMode(mainArea);
+              console.log("[Panel] renderChannelMode 호출 완료");
+              showOnboardingMessage(mainArea);
+            });
+          }
         });
         return;
       }
 
       // 2. 활성 채널 ID가 없으면 -> 채널 목록 확인 (비동기)
       chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+        console.log("[Panel] get_channels_and_key 응답:", response);
         const myBlogs = response?.data?.myChannels?.blogs || [];
+        console.log("[Panel] 채널 개수:", myBlogs.length, "채널 목록:", myBlogs);
 
         if (myBlogs.length > 0) {
           // 2-A. 채널은 있는데 선택이 안 된 경우 -> 첫 번째 채널 자동 선택 후 대시보드 이동
+          console.log("[Panel] 채널이 있음, 대시보드 표시");
           const firstId = myBlogs[0].id || (myBlogs[0].apiUrl ? btoa(myBlogs[0].apiUrl).replace(/=/g, "") : "");
           chrome.storage.local.set({ activeChannelId: firstId }, () => {
             renderDashboard(mainArea); 
@@ -139,7 +172,9 @@ export function createAndShowPanel() {
           navItems.forEach(item => item.classList.remove("active"));
           
           // 채널 모드 로드 및 온보딩 메시지 표시
+          console.log("[Panel] renderChannelMode 호출 시작");
           renderChannelMode(mainArea);
+          console.log("[Panel] renderChannelMode 호출 완료");
           showOnboardingMessage(mainArea);
         }
       });

@@ -362,6 +362,10 @@ function createKanbanCard(id, data, status) {
 
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;
+  // [수정] performance 필드가 있고 collecting이 false이며 collectingCompletedAt이 있으면 수집 완료로 간주
+  const isCollectionCompleted = performance && 
+    performance.collecting === false && 
+    performance.collectingCompletedAt;
   // 데이터 없음(0 값)은 오류가 아님 - error 필드가 없고, collectionErrors도 없어야 함
   const hasPerformance = performance && !performance.error && 
     (performance.pageviews > 0 || performance.estimatedEarnings > 0 || 
@@ -416,7 +420,14 @@ function createKanbanCard(id, data, status) {
         
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag error" title="${errorTooltip}">${errorMessage}</span>`;
       } else if (hasPerformance) {
+        // 데이터가 있는 경우 (실제 성과 데이터 있음)
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag connected">✅ 추적 중</span>`;
+      } else if (isCollectionCompleted) {
+        // [수정] 수집이 완료되었지만 데이터가 0인 경우 - 다른 스타일 적용
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag connected-no-data" title="수집 완료되었으나 아직 데이터가 없습니다">📊 추적 중 (데이터 없음)</span>`;
+      } else if (performance) {
+        // [수정] performance 필드가 있지만 수집이 아직 완료되지 않은 경우
+        metaInfoHtml += `<span class="kanban-card-meta performance-status-tag waiting">⏳ 추적 대기</span>`;
       } else {
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag waiting">⏳ 추적 대기</span>`;
       }

@@ -5,6 +5,10 @@ export function setupHighlighter() {
   window.__pilotHighlightInitialized = true;
 
   let lastHighlightedElement = null;
+  
+  // 로컬 변수로 상태 동기화 (성능 최적화)
+  let isScrapingActive = false;
+  let highlightToggleState = false;
 
   // 헬퍼 함수: 하이라이트 제거
   function clearHighlight() {
@@ -13,6 +17,27 @@ export function setupHighlighter() {
       lastHighlightedElement = null;
     }
   }
+
+  // 초기 상태 로드 (한 번만 호출)
+  chrome.storage.local.get(
+    ["isScrapingActive", "highlightToggleState"],
+    function (result) {
+      isScrapingActive = result.isScrapingActive || false;
+      highlightToggleState = result.highlightToggleState || false;
+    }
+  );
+
+  // chrome.storage.onChanged 리스너로 상태 동기화
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local") {
+      if (changes.isScrapingActive) {
+        isScrapingActive = changes.isScrapingActive.newValue || false;
+      }
+      if (changes.highlightToggleState) {
+        highlightToggleState = changes.highlightToggleState.newValue || false;
+      }
+    }
+  });
 
   document.addEventListener(
     "mouseout",
@@ -25,30 +50,24 @@ export function setupHighlighter() {
     true
   );
 
-  // 1. 하이라이트 표시 (mouseover)
+  // 1. 하이라이트 표시 (mouseover) - 로컬 변수만 참조 (성능 최적화)
   document.addEventListener(
     "mouseover",
     function (e) {
-      // isScrapingActive와 highlightToggleState 값을 모두 가져옴
-      chrome.storage.local.get(
-        ["isScrapingActive", "highlightToggleState"],
-        function (result) {
-          // e.altKey 대신 result.highlightToggleState를 확인
-          if (result.isScrapingActive && result.highlightToggleState) {
-            const target = e.target;
-            if (
-              target &&
-              !target.closest("#content-pilot-panel") &&
-              target !== document.body &&
-              lastHighlightedElement !== target
-            ) {
-              clearHighlight();
-              target.classList.add("pilot-highlight");
-              lastHighlightedElement = target;
-            }
-          }
+      // 로컬 변수만 참조하여 비동기 IPC 호출 제거
+      if (isScrapingActive && highlightToggleState) {
+        const target = e.target;
+        if (
+          target &&
+          !target.closest("#content-pilot-panel") &&
+          target !== document.body &&
+          lastHighlightedElement !== target
+        ) {
+          clearHighlight();
+          target.classList.add("pilot-highlight");
+          lastHighlightedElement = target;
         }
-      );
+      }
     },
     true
   );

@@ -17,32 +17,43 @@ import { showRecentScrapPreview } from "./js/ui/preview.js";
 import { showToast } from "./js/utils.js";
 import { renderDashboard } from "./js/ui/dashboardMode.js";
 
-// [PRD v3.2] Extension context 무효화 감지 및 자동 페이지 새로고침
+// [PRD v3.2] Extension context 무효화 감지 (자동 새로고침 제거 - 사용자 컨펌으로 변경)
+let extensionContextInvalidated = false;
+
 try {
   chrome.runtime.id; // 확장 프로그램이 유효한지 체크
 } catch (error) {
   console.warn(
-    "[Content Pilot] Extension context invalidated. Reloading page..."
+    "[Content Pilot] Extension context invalidated. Please reload the page manually."
   );
-  window.location.reload();
-  throw error; // 추가 실행 방지
+  extensionContextInvalidated = true;
+  // 사용자에게 알림 표시 (자동 새로고침 제거)
+  if (window.self === window.top) {
+    showToast("⚠️ 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해주세요.", 5000);
+  }
 }
 
-// Extension context 무효화 감지 (런타임 중)
+// Extension context 무효화 감지 (런타임 중) - 자동 새로고침 제거
 const checkExtensionContext = () => {
   try {
     chrome.runtime.id;
     return true;
   } catch (error) {
-    console.warn(
-      "[Content Pilot] Extension context invalidated during runtime. Reloading page..."
-    );
-    window.location.reload();
+    if (!extensionContextInvalidated) {
+      console.warn(
+        "[Content Pilot] Extension context invalidated during runtime. Please reload the page manually."
+      );
+      extensionContextInvalidated = true;
+      // 사용자에게 알림 표시 (자동 새로고침 제거)
+      if (window.self === window.top) {
+        showToast("⚠️ 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해주세요.", 5000);
+      }
+    }
     return false;
   }
 };
 
-// chrome.runtime API 호출을 래핑하여 안전하게 처리
+// chrome.runtime API 호출을 래핑하여 안전하게 처리 (자동 새로고침 제거)
 const safeRuntimeSendMessage = (...args) => {
   if (!checkExtensionContext()) return;
   try {
@@ -50,7 +61,13 @@ const safeRuntimeSendMessage = (...args) => {
   } catch (error) {
     console.error("[Content Pilot] Failed to send message:", error);
     if (error.message.includes("Extension context invalidated")) {
-      window.location.reload();
+      if (!extensionContextInvalidated) {
+        extensionContextInvalidated = true;
+        // 사용자에게 알림 표시 (자동 새로고침 제거)
+        if (window.self === window.top) {
+          showToast("⚠️ 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해주세요.", 5000);
+        }
+      }
     }
   }
 };

@@ -246,6 +246,23 @@ export function renderChannelMode(container) {
 
   // 상세 모달 열기
   function openDetailModal(index) {
+    console.log("[ChannelMode] openDetailModal 호출:", index);
+    console.log("[ChannelMode] 모달 요소 (외부 변수):", modal);
+    
+    // 모달 요소를 다시 찾기 (container가 업데이트되었을 수 있음)
+    const currentModal = container.querySelector("#channel-detail-modal");
+    console.log("[ChannelMode] 모달 요소 (재검색):", currentModal);
+    
+    const targetModal = currentModal || modal;
+    
+    if (!targetModal) {
+      console.error("[ChannelMode] 모달 요소를 찾을 수 없습니다!", {
+        container: container,
+        containerHTML: container.innerHTML.substring(0, 500)
+      });
+      return;
+    }
+    
     currentEditingIndex = index;
     const isNew = index === -1;
     const data = isNew ? { url: "", gaPropertyId: "", adSenseAccountId: "", competitors: [] } : myChannelsData[index];
@@ -273,7 +290,10 @@ export function renderChannelMode(container) {
       // 빈 입력칸 하나 추가 (UX)
       if (data.competitors.length === 0) addCompetitorInput("");
     }
-    if (modal) modal.style.display = "flex";
+    
+    console.log("[ChannelMode] 모달 표시 전:", targetModal.style.display);
+    targetModal.style.display = "flex";
+    console.log("[ChannelMode] 모달 표시 후:", targetModal.style.display, "모달 요소:", targetModal);
   }
 
   // Google 로그인 상태 확인
@@ -323,8 +343,16 @@ export function renderChannelMode(container) {
 
   // 이벤트 리스너
   const addChannelBtn = container.querySelector("#add-my-channel-btn");
+  console.log("[ChannelMode] 채널 추가 버튼 찾기:", addChannelBtn);
   if (addChannelBtn) {
-    addChannelBtn.addEventListener("click", () => openDetailModal(-1));
+    addChannelBtn.addEventListener("click", () => {
+      console.log("[ChannelMode] 채널 추가 버튼 클릭됨");
+      const modal = container.querySelector("#channel-detail-modal");
+      console.log("[ChannelMode] 모달 요소 찾기:", modal);
+      openDetailModal(-1);
+    });
+  } else {
+    console.error("[ChannelMode] 채널 추가 버튼을 찾을 수 없습니다!");
   }
   
   const addCompetitorBtn = container.querySelector("#modal-add-competitor-btn");

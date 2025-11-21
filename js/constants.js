@@ -18,4 +18,7 @@ export const EVENTS = {
   // ...추가
 };
 
+// 사용자 관련 상수
+export const USER_ID = "default_user";
+
 

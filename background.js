@@ -1,5 +1,10 @@
 // background.js (수정 완료된 최종 버전)
 
+// 상수 정의 'default_user'
+const CONSTANTS = {
+  USER_ID: 'default_user'
+};
+
 let creating; // Offscreen Document 생성 플래그
 let isKanbanListenerActive = false;
 
@@ -183,7 +188,7 @@ if (!firebase.apps.length) {
  * @param {string} urlToDelete - 삭제할 채널의 원본 입력 URL
  */
 async function deleteChannelData(urlToDelete) {
-  const userId = "default_user";
+  const userId = CONSTANTS.USER_ID;
   const channelsRef = firebase.database().ref(`channels/${userId}`);
   const channelsSnap = await channelsRef.once("value");
   const allChannels = channelsSnap.val();
@@ -231,13 +236,13 @@ async function deleteChannelData(urlToDelete) {
 
   // 2-2. /channel_meta/ 경로에서 메타 정보 삭제
   deletePromises.push(
-    firebase.database().ref(`channel_meta/${sourceIdToDelete}`).remove()
+    firebase.database().ref(`channel_meta/${userId}/${sourceIdToDelete}`).remove()
   );
 
   // 2-3. /channel_content/ 경로에서 관련 콘텐츠 모두 삭제
   const contentRef = firebase
     .database()
-    .ref(`channel_content/${platformToDelete}`);
+    .ref(`channel_content/${userId}/${platformToDelete}`);
   const contentPromise = contentRef
     .orderByChild("sourceId")
     .equalTo(sourceIdToDelete)
@@ -508,9 +513,10 @@ async function fetchAdSenseAccountId(token) {
 
 async function generateAndSendKeywords(data, sender) {
   const { cardId, status, title, description } = data;
+  const userId = CONSTANTS.USER_ID;
   const keywordsRef = firebase
     .database()
-    .ref(`kanban/${status}/${cardId}/recommendedKeywords`);
+    .ref(`kanban/${userId}/${status}/${cardId}/recommendedKeywords`);
 
   const searchQueryPrompt = `
         당신은 특정 주제에 대한 자료 조사를 시작하는 전문 콘텐츠 기획자입니다.
@@ -631,7 +637,8 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', channelId 
     // ▲▲▲ workspace 객체 생성 완료 ▲▲▲
 
     // Firebase에 저장
-    const newCardRef = firebase.database().ref(`kanban/${targetStatus}`).push();
+    const userId = CONSTANTS.USER_ID;
+    const newCardRef = firebase.database().ref(`kanban/${userId}/${targetStatus}`).push();
     const newCardKey = newCardRef.key;
     await newCardRef.set(newCard);
 
@@ -652,7 +659,8 @@ async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', channelId 
 }
 
 async function generateIdeaBriefing(cardId, title, description, options = {}) {
-  const cardRef = firebase.database().ref(`kanban/ideas/${cardId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/ideas/${cardId}`);
   const {
     generateOutline = true,
     generateKeywords = true,
@@ -913,7 +921,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const db = firebase.database();
       // 아이디어 카드가 어떤 status(컬럼)에 있는지 찾아야 함
-      db.ref("kanban")
+      const userId = CONSTANTS.USER_ID;
+      db.ref(`kanban/${userId}`)
         .once("value")
         .then((snapshot) => {
           const allCards = snapshot.val() || {};
@@ -928,10 +937,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ success: false, message: "Idea card not found." });
             return;
           }
-          db.ref(`kanban/${foundStatus}/${msg.ideaId}/draftContent`)
+          db.ref(`kanban/${userId}/${foundStatus}/${msg.ideaId}/draftContent`)
             .set(msg.draft)
             .then(() => {
-              db.ref(`kanban/${foundStatus}/${msg.ideaId}/updatedAt`).set(
+              db.ref(`kanban/${userId}/${foundStatus}/${msg.ideaId}/updatedAt`).set(
                 firebase.database.ServerValue.TIMESTAMP
               );
               sendResponse({
@@ -959,7 +968,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       try {
         // 아이디어가 어느 status에 있는지 찾기
-        const kanbanRef = firebase.database().ref("kanban");
+        const userId = CONSTANTS.USER_ID;
+        const kanbanRef = firebase.database().ref(`kanban/${userId}`);
         const snapshot = await kanbanRef.once("value");
         const allCards = snapshot.val() || {};
         let foundStatus = null;
@@ -976,7 +986,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // draftContent를 null로 업데이트
         await firebase
           .database()
-          .ref(`kanban/${foundStatus}/${cardId}/draftContent`)
+          .ref(`kanban/${userId}/${foundStatus}/${cardId}/draftContent`)
           .set(null);
         sendResponse({ success: true });
       } catch (error) {
@@ -1000,7 +1010,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         
         // status가 제공되지 않으면 찾기
         if (!foundStatus) {
-          const snapshot = await db.ref("kanban").once("value");
+          const userId = CONSTANTS.USER_ID;
+          const snapshot = await db.ref(`kanban/${userId}`).once("value");
           const allCards = snapshot.val() || {};
           for (const s in allCards) {
             if (allCards[s] && allCards[s][ideaId]) {
@@ -1015,7 +1026,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
         
-        const cardRef = db.ref(`kanban/${foundStatus}/${ideaId}`);
+        const userId = CONSTANTS.USER_ID;
+        const cardRef = db.ref(`kanban/${userId}/${foundStatus}/${ideaId}`);
         
         // 초안과 발행 정보 모두 삭제
         const updates = {
@@ -1027,6 +1039,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             thumbnailInfo: null
           }
         };
+        
+        // workspace.draft도 함께 삭제 (workspace 객체가 존재하는 경우)
+        const cardSnapshot = await cardRef.once("value");
+        const cardData = cardSnapshot.val();
+        if (cardData && cardData.workspace) {
+          updates.workspace = {
+            draft: null
+          };
+        }
         
         await cardRef.update(updates);
         
@@ -1058,7 +1079,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       let activeChannelName = null;
       if (userSelectedChannelId) {
         try {
-          const userId = "default_user";
+          const userId = CONSTANTS.USER_ID;
           const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
           const channelsData = channelsSnapshot.val() || {};
           const myBlogs = channelsData.myChannels?.blogs || [];
@@ -1107,7 +1128,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 저장용 데이터에서 임시 필드(_channelName) 분리 (DB에는 저장 안 함)
         const { _channelName, ...dataToSave } = cleanedScrapPayload;
 
-        const scrapRef = firebase.database().ref("scraps").push();
+        const userId = CONSTANTS.USER_ID;
+        const scrapRef = firebase.database().ref(`scraps/${userId}`).push();
         scrapRef
           .set(dataToSave)
           .then(() => {
@@ -1162,7 +1184,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
         
-        const scrapRef = firebase.database().ref(`scraps/${scrapId}`);
+        const userId = CONSTANTS.USER_ID;
+        const scrapRef = firebase.database().ref(`scraps/${userId}/${scrapId}`);
         const scrapSnap = await scrapRef.once("value");
         const scrapData = scrapSnap.val();
         
@@ -1206,9 +1229,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "cp_get_firebase_scraps") {
     const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
 
+    const userId = CONSTANTS.USER_ID;
     firebase
       .database()
-      .ref("scraps")
+      .ref(`scraps/${userId}`)
       .once("value", (snapshot) => {
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
@@ -1226,9 +1250,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "delete_scrap") {
     const scrapIdToDelete = msg.id;
     if (scrapIdToDelete) {
+      const userId = CONSTANTS.USER_ID;
       firebase
         .database()
-        .ref("scraps/" + scrapIdToDelete)
+        .ref(`scraps/${userId}/${scrapIdToDelete}`)
         .remove()
         .then(() => sendResponse({ success: true }))
         .catch((error) =>
@@ -1245,7 +1270,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     
     (async () => {
       try {
-        const scrapRef = firebase.database().ref(`scraps/${scrapId}`);
+        const userId = CONSTANTS.USER_ID;
+        const scrapRef = firebase.database().ref(`scraps/${userId}/${scrapId}`);
         const snapshot = await scrapRef.once("value");
         const scrapData = snapshot.val();
         
@@ -1283,9 +1309,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "get_all_scraps") {
     const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
 
+    const userId = CONSTANTS.USER_ID;
     firebase
       .database()
-      .ref("scraps")
+      .ref(`scraps/${userId}`)
       .once("value", (snapshot) => {
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
@@ -1313,9 +1340,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
     
+    const userId = CONSTANTS.USER_ID;
     firebase
       .database()
-      .ref(`scraps/${scrapId}`)
+      .ref(`scraps/${userId}/${scrapId}`)
       .once("value", (snapshot) => {
         const scrapData = snapshot.val();
         if (!scrapData) {
@@ -1433,7 +1461,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     };
 
     const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
-    const scrapRef = firebase.database().ref("scraps").push();
+    const userId = CONSTANTS.USER_ID;
+    const scrapRef = firebase.database().ref(`scraps/${userId}`).push();
     scrapRef
       .set(cleanedScrapPayload)
       .then(() => {
@@ -2009,7 +2038,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 채널 및 설정
   else if (msg.action === "save_channels_and_key") {
     const { youtubeApiKey, geminiApiKey, myChannels } = msg.data; // competitorChannels 제거됨
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
 
     (async () => {
       try {
@@ -2088,16 +2117,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "get_channels_and_key") {
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
+    console.log("[Background] get_channels_and_key 요청, 사용자 ID:", userId);
+    console.log("[Background] CONSTANTS.USER_ID 값:", CONSTANTS.USER_ID);
+    const firebasePath = `channels/${userId}`;
+    console.log("[Background] Firebase 경로:", firebasePath);
+    
     Promise.all([
       chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
-      firebase.database().ref(`channels/${userId}`).once("value"),
+      firebase.database().ref(firebasePath).once("value"),
     ])
       .then(([storage, snapshot]) => {
         const rawChannelData = snapshot.val() || {};
+        console.log("[Background] Firebase에서 읽어온 데이터:", rawChannelData);
         
         // 'myChannels.blogs' 배열을 그대로 전달 (competitors가 포함되어 있음)
         const myBlogs = rawChannelData.myChannels?.blogs || [];
+        console.log("[Background] 채널 개수:", myBlogs.length);
+        
         const responseData = {
           myChannels: {
             blogs: myBlogs, 
@@ -2109,14 +2146,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           youtubeApiKey: storage.youtubeApiKey,
           geminiApiKey: storage.geminiApiKey,
         };
+        console.log("[Background] 응답 데이터:", responseData);
         sendResponse({ success: true, data: responseData });
       })
       .catch((error) => {
+        console.error("[Background] get_channels_and_key 오류:", error);
         sendResponse({ success: false, error: error.message });
       });
     return true;
   } else if (msg.action === "get_my_channels") {
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
     firebase.database().ref(`channels/${userId}`).once("value")
       .then((snapshot) => {
         const rawChannelData = snapshot.val() || {};
@@ -2140,7 +2179,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: false, error: "cardId가 필요합니다." });
       return true;
     }
-    firebase.database().ref("kanban").once("value")
+    const userId = CONSTANTS.USER_ID;
+    firebase.database().ref(`kanban/${userId}`).once("value")
       .then((snapshot) => {
         const allCards = snapshot.val() || {};
         for (const status in allCards) {
@@ -2167,10 +2207,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "get_channel_content") {
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
     Promise.all([
-      firebase.database().ref("channel_content").once("value"),
-      firebase.database().ref("channel_meta").once("value"),
+      firebase.database().ref(`channel_content/${userId}`).once("value"),
+      firebase.database().ref(`channel_meta/${userId}`).once("value"),
       firebase.database().ref(`channels/${userId}`).once("value"),
     ])
       .then(([contentSnap, metaSnap, channelsSnap]) => {
@@ -2203,7 +2243,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "refresh_channel_data") {
     const { sourceId, platform } = msg;
 
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
     firebase
       .database()
       .ref(`channels/${userId}`)
@@ -2375,9 +2415,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return;
           }
           
+          const userId = CONSTANTS.USER_ID;
           await firebase
             .database()
-            .ref(`channel_content/youtubes/${cleanedData.videoId}`)
+            .ref(`channel_content/${userId}/youtubes/${cleanedData.videoId}`)
             .set(cleanedData);
 
           sendResponse({ success: true, data: cleanedData, platform: "youtube" });
@@ -2460,9 +2501,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return;
           }
           
+          const userId = CONSTANTS.USER_ID;
           await firebase
             .database()
-            .ref(`channel_content/blogs/${contentId}`)
+            .ref(`channel_content/${userId}/blogs/${contentId}`)
             .set(cleanedData);
 
           sendResponse({ success: true, data: cleanedData, platform: "blog" });
@@ -2504,9 +2546,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   } else if (msg.action === "clear_blog_content") {
+    const userId = CONSTANTS.USER_ID;
     firebase
       .database()
-      .ref("channel_content/blogs")
+      .ref(`channel_content/${userId}/blogs`)
       .remove()
       .then(() =>
         sendResponse({
@@ -2626,7 +2669,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!activeChannelId) throw new Error("채널 ID가 전달되지 않았습니다.");
 
         // 1. 채널 정보 가져오기 (경쟁사 목록 확인용)
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         const channelsSnap = await firebase.database().ref(`channels/${userId}/myChannels/blogs`).once("value");
         const myChannels = channelsSnap.val() || [];
         
@@ -2642,7 +2685,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const competitorUrls = (currentChannel.competitors || []).map(c => c.inputUrl || c);
 
         // 2. 콘텐츠 데이터 가져오기 (내 콘텐츠 & 경쟁사 콘텐츠)
-        const contentSnap = await firebase.database().ref("channel_content").once("value");
+        const contentSnap = await firebase.database().ref(`channel_content/${userId}`).once("value");
         const allContent = contentSnap.val() || {};
         const blogs = Object.values(allContent.blogs || {}).filter(item => item !== null);
         
@@ -3583,7 +3626,7 @@ ${decayContent.map((item, idx) =>
     // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
     firebase
       .database()
-      .ref("kanban")
+      .ref(`kanban/${CONSTANTS.USER_ID}`)
       .once("value", (snapshot) => {
         if (sender.tab?.id) {
           chrome.tabs
@@ -3599,7 +3642,7 @@ ${decayContent.map((item, idx) =>
     if (!isKanbanListenerActive) {
       firebase
         .database()
-        .ref("kanban")
+        .ref(`kanban/${CONSTANTS.USER_ID}`)
         .on("value", (snapshot) => {
           const allCards = snapshot.val() || {};
 
@@ -3625,7 +3668,7 @@ ${decayContent.map((item, idx) =>
     // ▼▼▼ [신규 추가] 모든 칸반 데이터를 직접 반환하는 액션 ▼▼▼
     firebase
       .database()
-      .ref("kanban")
+      .ref(`kanban/${CONSTANTS.USER_ID}`)
       .once("value", (snapshot) => {
         sendResponse({ success: true, data: snapshot.val() || {} });
       })
@@ -3636,13 +3679,14 @@ ${decayContent.map((item, idx) =>
     // ▲▲▲ [신규 추가] ▲▲▲
   } else if (msg.action === "move_kanban_card") {
     const { cardId, originalStatus, newStatus } = msg.data;
+    const userId = CONSTANTS.USER_ID;
     const originalRef = firebase
       .database()
-      .ref(`kanban/${originalStatus}/${cardId}`);
+      .ref(`kanban/${userId}/${originalStatus}/${cardId}`);
     originalRef.once("value", (snapshot) => {
       const cardData = snapshot.val();
       if (cardData) {
-        const newRef = firebase.database().ref(`kanban/${newStatus}/${cardId}`);
+        const newRef = firebase.database().ref(`kanban/${userId}/${newStatus}/${cardId}`);
         originalRef
           .remove()
           .then(() => newRef.set(cardData))
@@ -3665,20 +3709,36 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
     cardRef
       .update({
         publishedUrl: url,
         performanceTracked: true,
       })
-      .then(() => {
+      .then(async () => {
         console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
         sendResponse({ success: true });
+        
+        // GA4 데이터 수집 시작 (비동기로 실행, 완료를 기다리지 않음)
+        console.log(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 시작: ${url}`);
         updateSinglePerformanceMetric({
           id: cardId,
-          path: `kanban/${status}/${cardId}`,
+          path: `kanban/${userId}/${status}/${cardId}`,
           url: url,
+        }).then(() => {
+          console.log(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 완료`);
+        }).catch((error) => {
+          console.error(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 실패:`, error.message);
         });
+        
+        // 해당 카드의 AdSense 등록 상태 확인 (단일 카드 모드)
+        try {
+          await checkAdSenseRegistrationStatus(null, url, cardId, status);
+          console.log(`[AdSense] 카드 ${cardId}의 등록 상태 확인 완료`);
+        } catch (error) {
+          console.warn(`[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`, error.message);
+        }
       })
       .catch((error) => sendResponse({ success: false, error: error.message }));
 
@@ -3786,7 +3846,8 @@ ${decayContent.map((item, idx) =>
 
               // 스크랩 저장 및 ID 확보
               const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
-              const scrapRef = firebase.database().ref("scraps").push();
+              const userId = CONSTANTS.USER_ID;
+        const scrapRef = firebase.database().ref(`scraps/${userId}`).push();
               const scrapId = scrapRef.key;
               
               await scrapRef.set(cleanedScrapPayload);
@@ -3889,7 +3950,8 @@ ${decayContent.map((item, idx) =>
     }
     
     // linkedScraps와 workspace.linkedScraps 모두 업데이트
-    const cardRef = firebase.database().ref(`kanban/${status}/${ideaId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${ideaId}`);
     cardRef.once("value").then((snapshot) => {
       const cardData = snapshot.val();
       if (!cardData) {
@@ -3975,7 +4037,8 @@ ${decayContent.map((item, idx) =>
     }
 
     // linkedScraps와 workspace.linkedScraps 모두에서 제거
-    const cardRef = firebase.database().ref(`kanban/${status}/${ideaId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${ideaId}`);
     cardRef.once("value").then((snapshot) => {
       const cardData = snapshot.val();
       if (!cardData) {
@@ -4627,9 +4690,10 @@ ${decayContent.map((item, idx) =>
     const { cardId, status, title } = msg.data;
 
     (async () => {
+      const userId = CONSTANTS.USER_ID;
       const keywordsRef = firebase
         .database()
-        .ref(`kanban/${status}/${cardId}/recommendedKeywords`);
+        .ref(`kanban/${userId}/${status}/${cardId}/recommendedKeywords`);
       const snapshot = await keywordsRef.once("value");
       const keywords = snapshot.val();
 
@@ -4663,20 +4727,36 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
     cardRef
       .update({
         publishedUrl: url,
         performanceTracked: true,
       })
-      .then(() => {
+      .then(async () => {
         console.log(`[G-16] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료.`);
         sendResponse({ success: true });
+        
+        // GA4 데이터 수집 시작 (비동기로 실행, 완료를 기다리지 않음)
+        console.log(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 시작: ${url}`);
         updateSinglePerformanceMetric({
           id: cardId,
-          path: `kanban/${status}/${cardId}`,
+          path: `kanban/${userId}/${status}/${cardId}`,
           url: url,
+        }).then(() => {
+          console.log(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 완료`);
+        }).catch((error) => {
+          console.error(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 실패:`, error.message);
         });
+        
+        // 해당 카드의 AdSense 등록 상태 확인 (단일 카드 모드)
+        try {
+          await checkAdSenseRegistrationStatus(null, url, cardId, status);
+          console.log(`[AdSense] 카드 ${cardId}의 등록 상태 확인 완료`);
+        } catch (error) {
+          console.warn(`[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`, error.message);
+        }
       })
       .catch((error) => sendResponse({ success: false, error: error.message }));
 
@@ -4688,7 +4768,8 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const currentRef = firebase.database().ref(`kanban/${status}/${ideaId}`);
+    const userId = CONSTANTS.USER_ID;
+    const currentRef = firebase.database().ref(`kanban/${userId}/${status}/${ideaId}`);
     const newStatus = "in-progress";
 
     currentRef
@@ -4732,7 +4813,8 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
     cardRef
       .remove()
       .then(() => {
@@ -4767,7 +4849,8 @@ ${decayContent.map((item, idx) =>
       return true;
     }
 
-    const cardRef = firebase.database().ref(`kanban/${status}/${cardId}`);
+    const userId = CONSTANTS.USER_ID;
+    const cardRef = firebase.database().ref(`kanban/${userId}/${status}/${cardId}`);
     cardRef
       .update(updates)
       .then(() => {
@@ -4802,7 +4885,7 @@ ${decayContent.map((item, idx) =>
           return;
         }
 
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
         const channelsData = channelsSnapshot.val() || {};
         const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
@@ -4854,7 +4937,7 @@ ${decayContent.map((item, idx) =>
     (async () => {
       try {
         const db = firebase.database();
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         
         // 1. 채널 목록 확인
         const channelsSnap = await db.ref(`channels/${userId}/myChannels/blogs`).once("value");
@@ -4870,8 +4953,8 @@ ${decayContent.map((item, idx) =>
         }
         
         // 2. 고아 데이터 확인
-        const kanbanSnap = await db.ref("kanban").once("value");
-        const scrapsSnap = await db.ref("scraps").once("value");
+        const kanbanSnap = await db.ref(`kanban/${userId}`).once("value");
+        const scrapsSnap = await db.ref(`scraps/${userId}`).once("value");
         const kanban = kanbanSnap.val() || {};
         const scraps = scrapsSnap.val() || {};
         
@@ -4924,7 +5007,7 @@ ${decayContent.map((item, idx) =>
     // 채널 데이터 구조 자동 수정
     (async () => {
       try {
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         const db = firebase.database();
         const channelsSnapshot = await db.ref(`channels/${userId}`).once("value");
         const channelsData = channelsSnapshot.val() || {};
@@ -5184,7 +5267,7 @@ ${decayContent.map((item, idx) =>
           }
         } else if (checkId === "ga4_access") {
           // GA4 속성 접근 테스트
-          const userId = "default_user";
+          const userId = CONSTANTS.USER_ID;
           const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
           const channelsData = channelsSnapshot.val() || {};
           const myChannels = channelsData.myChannels || { blogs: [] };
@@ -5434,7 +5517,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // --- 4. 데이터 수집 함수들 ---
 async function fetchAllChannelData() {
-  const userId = "default_user";
+  const userId = CONSTANTS.USER_ID;
   // .once('value')는 Promise를 반환하므로 await를 사용합니다.
   const snapshot = await firebase
     .database()
@@ -5521,7 +5604,8 @@ async function fetchRssFeed(url, channelType) {
 
     const finalTitle = channelTitle || url;
     const sourceId = btoa(url).replace(/=/g, "");
-    firebase.database().ref(`channel_meta/${sourceId}`).set({
+    const userId = CONSTANTS.USER_ID;
+    firebase.database().ref(`channel_meta/${userId}/${sourceId}`).set({
       title: finalTitle,
       type: "blog",
       source: url,
@@ -5564,9 +5648,10 @@ async function fetchRssFeed(url, channelType) {
       const fullLink = itemLink.replace(/\s/g, "");
       const linkForId = fullLink.split("?")[0];
       const contentId = btoa(linkForId).replace(/=/g, "");
+      const userId = CONSTANTS.USER_ID;
       const contentRef = firebase
         .database()
-        .ref(`channel_content/blogs/${contentId}`);
+        .ref(`channel_content/${userId}/blogs/${contentId}`);
 
       const existingDataSnap = await contentRef.once("value");
 
@@ -5746,7 +5831,8 @@ async function checkDuplicateUrl(targetUrl) {
 
   const db = firebase.database();
   // 전체 칸반 데이터 조회
-  const snapshot = await db.ref("kanban").once("value");
+  const userId = CONSTANTS.USER_ID;
+  const snapshot = await db.ref(`kanban/${userId}`).once("value");
   const allCards = snapshot.val() || {};
 
   // 모든 상태(status) 순회
@@ -5868,7 +5954,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
     console.error(`YouTube 채널 정보 조회 실패 (${channelId}):`, error);
   }
 
-  const userId = "default_user";
+  const userId = CONSTANTS.USER_ID;
   const channelDataSnap = await firebase
     .database()
     .ref(`channels/${userId}`)
@@ -5881,7 +5967,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
   const storedChannel = allChannels.find((c) => c.apiUrl === channelId);
   const inputUrl = storedChannel ? storedChannel.inputUrl : channelId;
 
-  firebase.database().ref(`channel_meta/${channelId}`).set({
+  firebase.database().ref(`channel_meta/${userId}/${channelId}`).set({
     title: channelTitle,
     type: "youtube",
     source: channelId,
@@ -5917,7 +6003,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
         const { id, snippet, statistics } = item;
         const existingDataSnap = await firebase
           .database()
-          .ref(`channel_content/youtubes/${id}`)
+          .ref(`channel_content/${userId}/youtubes/${id}`)
           .once("value");
         const existingData = existingDataSnap.val();
         let tags =
@@ -5951,7 +6037,7 @@ async function fetchYoutubeChannel(channelId, channelType) {
         const cleanedVideoData = cleanDataForFirebase(video);
         firebase
           .database()
-          .ref(`channel_content/youtubes/${cleanedVideoData.videoId}`)
+          .ref(`channel_content/${userId}/youtubes/${cleanedVideoData.videoId}`)
           .set(cleanedVideoData);
       }
       console.log(`YouTube 채널 상세 정보 수집 성공: ${channelId}`);
@@ -6043,7 +6129,8 @@ async function analyzePerformanceData(targetChannelId = null) {
       // 하위 호환성을 위해 유지
     }
 
-    const kanbanRef = firebase.database().ref("kanban");
+    const userId = CONSTANTS.USER_ID;
+    const kanbanRef = firebase.database().ref(`kanban/${userId}`);
     const snapshot = await kanbanRef.once("value");
     const allCards = snapshot.val() || {};
     
@@ -6184,7 +6271,8 @@ ${top5ByPageviews.map((item, idx) =>
  */
 async function getUserFeedbackPatterns() {
   try {
-    const kanbanRef = firebase.database().ref("kanban");
+    const userId = CONSTANTS.USER_ID;
+    const kanbanRef = firebase.database().ref(`kanban/${userId}`);
     const snapshot = await kanbanRef.once("value");
     const allCards = snapshot.val() || {};
     
@@ -6360,7 +6448,8 @@ async function runAutomatedRenewalChecks() {
     }
 
     // 2. 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
-    const ideasSnap = await firebase.database().ref("kanban/ideas").once("value");
+    const userId = CONSTANTS.USER_ID;
+    const ideasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
     const ideas = ideasSnap.val() || {};
     const existingRenewalCards = Object.values(ideas).filter(
       idea => idea.origin?.type === 'my_post_renewal'
@@ -6410,7 +6499,8 @@ async function runAutomatedRenewalChecks() {
 }
 
 async function updateAllPerformanceMetrics() {
-  const kanbanRef = firebase.database().ref("kanban");
+  const userId = CONSTANTS.USER_ID;
+  const kanbanRef = firebase.database().ref(`kanban/${userId}`);
   const snapshot = await kanbanRef.once("value");
   const allCards = snapshot.val() || {};
 
@@ -6436,7 +6526,7 @@ async function updateAllPerformanceMetrics() {
       if (card.performanceTracked && card.publishedUrl && isValidUrl(card.publishedUrl)) {
         tasks.push({
           id: cardId,
-          path: `kanban/${status}/${cardId}`,
+          path: `kanban/${userId}/${status}/${cardId}`,
           url: card.publishedUrl,
         });
       } else if (card.performanceTracked && card.publishedUrl && !isValidUrl(card.publishedUrl)) {
@@ -6475,9 +6565,24 @@ async function updateAllPerformanceMetrics() {
  */
 async function updateSinglePerformanceMetric(contentInfo) {
   const startTime = Date.now();
+  const userId = CONSTANTS.USER_ID;
+  
+  // path에 사용자 ID가 포함되어 있지 않으면 추가
+  let firebasePath = contentInfo.path;
+  if (!firebasePath.includes(`/${userId}/`)) {
+    // kanban/{status}/{cardId} 형식을 kanban/{userId}/{status}/{cardId}로 변환
+    if (firebasePath.startsWith('kanban/')) {
+      const pathParts = firebasePath.split('/');
+      if (pathParts.length >= 3 && pathParts[0] === 'kanban') {
+        firebasePath = `kanban/${userId}/${pathParts.slice(1).join('/')}`;
+      }
+    }
+  }
+  
   const logContext = {
     cardId: contentInfo.id,
     url: contentInfo.url,
+    path: firebasePath,
     timestamp: new Date().toISOString(),
   };
 
@@ -6487,7 +6592,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
     await firebase
       .database()
-      .ref(contentInfo.path)
+      .ref(firebasePath)
       .child("performance")
       .update({
         lastUpdatedAt: Date.now(),
@@ -6508,7 +6613,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       console.warn(`[성과 지표 수집 실패] ${errorMsg}`, logContext);
       await firebase
         .database()
-        .ref(contentInfo.path)
+        .ref(firebasePath)
         .child("performance")
         .update({
           lastUpdatedAt: Date.now(),
@@ -6525,7 +6630,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     // 수집 시작 상태를 Firebase에 저장
     await firebase
       .database()
-      .ref(contentInfo.path)
+      .ref(firebasePath)
       .child("performance")
       .update({
         collecting: true,
@@ -6545,7 +6650,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     // [체크리스트 1-1] Google 인증 토큰 유효성 확인
     
     // Firebase에서 채널 데이터 가져오기 (chrome.storage.local이 아닌 Firebase에 저장됨)
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
     const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
     const channelsData = channelsSnapshot.val() || {};
     const myChannels = channelsData.myChannels || { blogs: [] };
@@ -6557,7 +6662,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       // Firebase에 에러 상태 저장 (수집 완료 상태 포함)
       await firebase
         .database()
-        .ref(contentInfo.path)
+        .ref(firebasePath)
         .child("performance")
         .update({
           lastUpdatedAt: Date.now(),
@@ -6640,7 +6745,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
       // Firebase에 에러 상태 저장 (수집 완료 상태 포함)
       await firebase
         .database()
-        .ref(contentInfo.path)
+        .ref(firebasePath)
         .child("performance")
         .update({
           lastUpdatedAt: Date.now(),
@@ -6779,7 +6884,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     
     await firebase
       .database()
-      .ref(contentInfo.path)
+      .ref(firebasePath)
       .child("performance")
       .update(updateData);
 
@@ -6805,7 +6910,7 @@ async function updateSinglePerformanceMetric(contentInfo) {
     try {
       await firebase
         .database()
-        .ref(contentInfo.path)
+        .ref(firebasePath)
         .child("performance")
         .update({
           lastUpdatedAt: Date.now(),
@@ -7805,6 +7910,7 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
 async function runAutomatedRenewalTestV2() {
   console.log("=============== 🧪 테스트 시작 V2: 자동 리뉴얼 ===============");
   
+  const userId = CONSTANTS.USER_ID;
   const MOCK_CARD_ID = "test-card-renewal-002"; // 새 ID로 구분
   const MOCK_CARD_PATH = `kanban/done/${MOCK_CARD_ID}`;
   
@@ -7814,12 +7920,12 @@ async function runAutomatedRenewalTestV2() {
 
   // --- 사전 준비: 기존 테스트 데이터 삭제 ---
   await firebase.database().ref(MOCK_CARD_PATH).remove();
-  const ideasSnap = await firebase.database().ref("kanban/ideas").once("value");
+  const ideasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
   const ideas = ideasSnap.val() || {};
   for (const ideaId in ideas) {
     // 이제 이 로직이 정상적으로 작동하여 이전 테스트 카드를 삭제함
     if (ideas[ideaId].title === MOCK_IDEA_TITLE) {
-      await firebase.database().ref(`kanban/ideas/${ideaId}`).remove();
+      await firebase.database().ref(`kanban/${userId}/ideas/${ideaId}`).remove();
     }
   }
   console.log("테스트 V2: 기존 데이터 정리 완료.");
@@ -7858,7 +7964,7 @@ async function runAutomatedRenewalTestV2() {
   
   await new Promise(resolve => setTimeout(resolve, 3000)); // Firebase 전파 대기
 
-  const newIdeasSnap = await firebase.database().ref("kanban/ideas").once("value");
+  const newIdeasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
   const newIdeas = newIdeasSnap.val() || {};
   
   const foundIdea = Object.values(newIdeas).find(
@@ -7881,10 +7987,13 @@ async function runAutomatedRenewalTestV2() {
  * 5가지 핵심 영역(20개 검사 항목)을 순차적으로 점검합니다.
  */
 async function runFullSystemDiagnosis() {
+  const userId = CONSTANTS.USER_ID;
   console.log("🚀 [System Check] 전체 시스템 정밀 진단 시작...");
+  console.log(`📌 현재 사용자 ID: ${userId}`);
   
   const diagnosisResults = {
     startTime: Date.now(),
+    userId: userId,
     checks: [],
     errors: [],
     warnings: []
@@ -8043,7 +8152,7 @@ async function runFullSystemDiagnosis() {
         diagnosisResults.warnings.push("활성 채널 미선택");
       } else {
         // 실제 채널 목록에 존재하는지 확인
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
         const channelsData = channelsSnapshot.val() || {};
         const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
@@ -8079,14 +8188,15 @@ async function runFullSystemDiagnosis() {
     try {
       sendDiagnosticLog("data_orphan", "running", "고아 데이터(채널 ID 누락) 스캔 중...");
       
-      const scrapsSnap = await firebase.database().ref("scraps").once("value");
+      const userId = CONSTANTS.USER_ID;
+      const scrapsSnap = await firebase.database().ref(`scraps/${userId}`).once("value");
       const scraps = scrapsSnap.val() || {};
       let orphanScraps = 0;
       Object.values(scraps).forEach(s => {
         if (s.channelId === undefined || s.channelId === null) orphanScraps++;
       });
       
-      const kanbanSnap = await firebase.database().ref("kanban").once("value");
+      const kanbanSnap = await firebase.database().ref(`kanban/${userId}`).once("value");
       const kanban = kanbanSnap.val() || {};
       let orphanKanban = 0;
       for (const status in kanban) {
@@ -8099,10 +8209,10 @@ async function runFullSystemDiagnosis() {
       
       if (totalOrphans > 0) {
         sendDiagnosticLog("data_orphan", "warn", 
-          `마이그레이션 필요 데이터 발견 (스크랩: ${orphanScraps}개, 칸반: ${orphanKanban}개)`);
-        diagnosisResults.warnings.push(`고아 데이터 ${totalOrphans}개 발견`);
+          `마이그레이션 필요 데이터 발견 (사용자 ID: ${userId}, 스크랩: ${orphanScraps}개, 칸반: ${orphanKanban}개)`);
+        diagnosisResults.warnings.push(`고아 데이터 ${totalOrphans}개 발견 (사용자 ID: ${userId})`);
       } else {
-        sendDiagnosticLog("data_orphan", "pass", "고아 데이터 없음");
+        sendDiagnosticLog("data_orphan", "pass", `고아 데이터 없음 (사용자 ID: ${userId})`);
       }
     } catch (e) {
       sendDiagnosticLog("data_orphan", "fail", `고아 데이터 스캔 오류: ${e.message}`);
@@ -8111,7 +8221,7 @@ async function runFullSystemDiagnosis() {
     // 2-3. 채널 데이터 구조
     try {
       sendDiagnosticLog("data_structure", "running", "채널 데이터 구조 확인...");
-      const userId = "default_user";
+      const userId = CONSTANTS.USER_ID;
       const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
       const channelsData = channelsSnapshot.val() || {};
       
@@ -8134,7 +8244,7 @@ async function runFullSystemDiagnosis() {
         diagnosisResults.warnings.push("데이터 구조 불완전");
       } else {
         sendDiagnosticLog("data_structure", "pass", 
-          `채널 데이터 구조 정상 (채널 중심 아키텍처: ${myBlogs.length}개 채널, ${myBlogs.filter(b => b.competitors?.length > 0).length}개에 경쟁사 포함)`);
+          `채널 데이터 구조 정상 (사용자 ID: ${userId}, 채널 중심 아키텍처: ${myBlogs.length}개 채널, ${myBlogs.filter(b => b.competitors?.length > 0).length}개에 경쟁사 포함)`);
       }
     } catch (e) {
       sendDiagnosticLog("data_structure", "fail", `구조 확인 오류: ${e.message}`);
@@ -8166,7 +8276,7 @@ async function runFullSystemDiagnosis() {
     // 3-2. 데이터 최신성
     try {
       sendDiagnosticLog("data_freshness", "running", "데이터 최신성 확인...");
-      const userId = "default_user";
+      const userId = CONSTANTS.USER_ID;
       const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
       const channelsData = channelsSnapshot.val() || {};
       const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
@@ -8307,7 +8417,7 @@ async function runFullSystemDiagnosis() {
       try {
         sendDiagnosticLog("ga4_access", "running", "GA4 권한 확인...");
         
-        const userId = "default_user";
+        const userId = CONSTANTS.USER_ID;
         const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
         const channelsData = channelsSnapshot.val() || {};
         const myChannels = channelsData.myChannels || { blogs: [] };
@@ -8406,7 +8516,7 @@ async function runFullSystemDiagnosis() {
       try {
         sendDiagnosticLog("url_filtering", "running", "URL 필터링 테스트 (BEGINS_WITH/CONTAINS)...");
       
-      const userId = "default_user";
+      const userId = CONSTANTS.USER_ID;
       const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
       const channelsData = channelsSnapshot.val() || {};
       const myChannels = channelsData.myChannels || { blogs: [] };
@@ -8458,7 +8568,14 @@ async function runFullSystemDiagnosis() {
     diagnosisResults.duration = diagnosisResults.endTime - diagnosisResults.startTime;
     
     sendDiagnosticLog("complete", "done", 
-      `진단 완료 (소요 시간: ${Math.round(diagnosisResults.duration / 1000)}초, 오류: ${diagnosisResults.errors.length}개, 경고: ${diagnosisResults.warnings.length}개)`);
+      `진단 완료 (사용자 ID: ${userId}, 소요 시간: ${Math.round(diagnosisResults.duration / 1000)}초, 오류: ${diagnosisResults.errors.length}개, 경고: ${diagnosisResults.warnings.length}개)`);
+    
+    console.log(`\n📊 [진단 요약]`);
+    console.log(`   사용자 ID: ${userId}`);
+    console.log(`   Firebase 경로: kanban/${userId}, scraps/${userId}, channels/${userId}, channel_content/${userId}, channel_meta/${userId}`);
+    console.log(`   총 검사 항목: ${diagnosisResults.checks.length}개`);
+    console.log(`   오류: ${diagnosisResults.errors.length}개`);
+    console.log(`   경고: ${diagnosisResults.warnings.length}개`);
     
     return diagnosisResults;
     
@@ -8479,7 +8596,7 @@ async function runFullSystemDiagnosis() {
 async function runDataMigration(targetChannelId = null) {
   console.log("🚀 [Migration] 데이터 마이그레이션 시작...");
   const db = firebase.database();
-  const userId = "default_user";
+  const userId = CONSTANTS.USER_ID;
 
   try {
     // 1-1. 내 채널 목록 확인
@@ -8511,7 +8628,8 @@ async function runDataMigration(targetChannelId = null) {
     let updatedCount = 0;
 
     // 1-3. 칸반 데이터 마이그레이션
-    const kanbanSnap = await db.ref("kanban").once("value");
+    const userId = CONSTANTS.USER_ID;
+    const kanbanSnap = await db.ref(`kanban/${userId}`).once("value");
     const kanban = kanbanSnap.val() || {};
     
     for (const status in kanban) {
@@ -8519,14 +8637,14 @@ async function runDataMigration(targetChannelId = null) {
         // channelId가 undefined이거나 null인 고아 데이터 처리
         const card = kanban[status][id];
         if (card.channelId === undefined || card.channelId === null) {
-          await db.ref(`kanban/${status}/${id}`).update({ channelId: targetChannelId });
+          await db.ref(`kanban/${userId}/${status}/${id}`).update({ channelId: targetChannelId });
           updatedCount++;
         }
       }
     }
 
     // 1-4. 스크랩 데이터 마이그레이션
-    const scrapsSnap = await db.ref("scraps").once("value");
+    const scrapsSnap = await db.ref(`scraps/${userId}`).once("value");
     const scraps = scrapsSnap.val() || {};
 
     for (const id in scraps) {
@@ -8534,7 +8652,7 @@ async function runDataMigration(targetChannelId = null) {
       // channelId가 undefined이거나 null인 고아 데이터 처리
       if (scrap.channelId === undefined || scrap.channelId === null) {
         // 스크랩은 기본적으로 '공용(null)'이 안전하지만, 단일 채널 사용자면 귀속시킴
-        await db.ref(`scraps/${id}`).update({ channelId: targetChannelId }); 
+        await db.ref(`scraps/${userId}/${id}`).update({ channelId: targetChannelId }); 
         updatedCount++;
       }
     }
@@ -8575,7 +8693,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         try {
           // 마이그레이션 필요 여부 확인
           const db = firebase.database();
-          const userId = "default_user";
+          const userId = CONSTANTS.USER_ID;
           const channelsSnap = await db.ref(`channels/${userId}/myChannels/blogs`).once("value");
           const myBlogs = channelsSnap.val() || [];
           
@@ -8651,9 +8769,14 @@ function normalizeAdSenseUrl(url) {
 /**
  * [최종 업그레이드 v7] 애드센스 등록 여부 확인 (유연한 매칭 적용)
  * - 정확한 일치뿐만 아니라, '포함(Contains)' 관계도 인정하여 서브도메인 문제를 해결합니다.
+ * @param {string|null} retryToken - 재시도용 토큰
+ * @param {string|null} targetUrl - 특정 URL만 체크할 경우 (null이면 전체 체크)
+ * @param {string|null} targetCardId - 특정 카드 ID만 업데이트할 경우 (null이면 전체 업데이트)
+ * @param {string|null} targetStatus - 특정 카드의 상태 (targetCardId와 함께 사용)
  */
-async function checkAdSenseRegistrationStatus(retryToken = null) {
-  console.log(`🚀 [AdSense] 등록 확인 v7 (유연한 매칭) 시작...`);
+async function checkAdSenseRegistrationStatus(retryToken = null, targetUrl = null, targetCardId = null, targetStatus = null) {
+  const isSingleCardCheck = targetUrl && targetCardId && targetStatus;
+  console.log(`🚀 [AdSense] 등록 확인 v7 (유연한 매칭) 시작...${isSingleCardCheck ? ` [단일 카드: ${targetCardId}]` : ' [전체 카드]'}`);
   
   let token = retryToken;
   let accountId = null;
@@ -8744,16 +8867,30 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
     
     if (registeredUrls.size > 0) {
       const db = firebase.database();
-      const snapshot = await db.ref("kanban").once("value");
+      const userId = CONSTANTS.USER_ID;
+      const snapshot = await db.ref(`kanban/${userId}`).once("value");
       const allCards = snapshot.val() || {};
       const updates = {};
       const normalizer = typeof normalizeAdSenseUrl === 'function' ? normalizeAdSenseUrl : (u) => u.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
       const urlList = [...registeredUrls]; // 배열로 변환
 
-      for (const status in allCards) {
-        for (const cardId in allCards[status]) {
-          const card = allCards[status][cardId];
+      // 단일 카드 체크 모드인 경우 해당 카드만 처리
+      const statusesToCheck = isSingleCardCheck ? [targetStatus] : Object.keys(allCards);
+
+      for (const status of statusesToCheck) {
+        const cardsToCheck = isSingleCardCheck ? { [targetCardId]: allCards[status]?.[targetCardId] } : (allCards[status] || {});
+        
+        for (const cardId in cardsToCheck) {
+          // 단일 카드 모드인 경우 해당 카드만 처리
+          if (isSingleCardCheck && cardId !== targetCardId) continue;
+          
+          const card = cardsToCheck[cardId];
+          if (!card) continue;
+          
           if (card.publishedUrl) {
+            // 단일 카드 모드인 경우 targetUrl과 일치하는지 확인
+            if (isSingleCardCheck && card.publishedUrl !== targetUrl) continue;
+            
             let normUrl = "";
             try { normUrl = normalizer(decodeURIComponent(card.publishedUrl)); } 
             catch(e) { normUrl = normalizer(card.publishedUrl); }
@@ -8803,7 +8940,8 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
             }
             
             if (needsUpdate) {
-              updates[`kanban/${status}/${cardId}/adSenseRegistered`] = isReg;
+              const userId = CONSTANTS.USER_ID;
+              updates[`kanban/${userId}/${status}/${cardId}/adSenseRegistered`] = isReg;
               updatedCount++;
               console.log(`🔄 [상태 업데이트] 카드 ${cardId}: ${currentStatus} → ${isReg}`, {
                 url: normUrl,
@@ -8867,7 +9005,7 @@ async function checkAdSenseRegistrationStatus(retryToken = null) {
           });
         });
         await chrome.storage.local.set({ googleAuthToken: newToken });
-        return checkAdSenseRegistrationStatus(newToken);
+        return checkAdSenseRegistrationStatus(newToken, targetUrl, targetCardId, targetStatus);
       } catch (err) { throw new Error("재로그인 필요"); }
     }
     throw e;
@@ -9047,7 +9185,7 @@ async function runGA4DeepDiagnosis() {
     return;
   }
   
-  const userId = "default_user";
+  const userId = CONSTANTS.USER_ID;
   const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
   const channelsData = channelsSnapshot.val() || {};
   const myChannels = channelsData.myChannels || { blogs: [] };
@@ -9182,7 +9320,7 @@ async function testUrlMatching(url) {
     }
 
     // 3. Firebase에서 채널 데이터 가져오기
-    const userId = "default_user";
+    const userId = CONSTANTS.USER_ID;
     const channelsSnapshot = await firebase.database().ref(`channels/${userId}`).once("value");
     const channelsData = channelsSnapshot.val() || {};
     const myChannels = channelsData.myChannels || { blogs: [] };
@@ -9379,10 +9517,382 @@ async function testUrlMatching(url) {
   }
 }
 
+/**
+ * Firebase 기존 데이터를 default_user 경로로 선택적으로 이동하는 함수
+ * 콘솔에서 사용: migrateToDefaultUser({ kanban: true, scraps: true })
+ * 
+ * @param {Object} options - 이동할 필드 선택 옵션
+ * @param {boolean} [options.kanban=false] - kanban 데이터 이동
+ * @param {boolean} [options.scraps=false] - scraps 데이터 이동
+ * @param {boolean} [options.channel_content=false] - channel_content 데이터 이동
+ * @param {boolean} [options.channel_meta=false] - channel_meta 데이터 이동
+ * @param {boolean} [options.dryRun=false] - 실제 이동 없이 미리보기만
+ * @returns {Promise<Object>} 이동 결과
+ */
+async function migrateToDefaultUser(options = {}) {
+  const userId = CONSTANTS.USER_ID;
+  const db = firebase.database();
+  
+  const {
+    kanban = false,
+    scraps = false,
+    channel_content = false,
+    channel_meta = false,
+    dryRun = false
+  } = options;
+  
+  console.log('🚀 Firebase 데이터 마이그레이션 시작');
+  console.log('================================================');
+  console.log('대상 사용자 ID:', userId);
+  console.log('이동 옵션:', { kanban, scraps, channel_content, channel_meta });
+  console.log('드라이런 모드:', dryRun ? '✅ (실제 이동 없음)' : '❌ (실제 이동)');
+  console.log('================================================\n');
+  
+  const results = {
+    kanban: { moved: 0, skipped: 0, errors: [] },
+    scraps: { moved: 0, skipped: 0, errors: [] },
+    channel_content: { moved: 0, skipped: 0, errors: [] },
+    channel_meta: { moved: 0, skipped: 0, errors: [] }
+  };
+  
+  try {
+    // 1. Kanban 데이터 마이그레이션
+    if (kanban) {
+      console.log('\n📋 [1/4] Kanban 데이터 마이그레이션 중...');
+      try {
+        const oldKanbanSnap = await db.ref('kanban').once('value');
+        const oldKanban = oldKanbanSnap.val();
+        
+        if (!oldKanban || typeof oldKanban !== 'object') {
+          console.log('ℹ️ 이동할 Kanban 데이터가 없습니다.');
+          results.kanban.skipped = 1;
+        } else {
+          // 이미 사용자 ID 구조인지 확인
+          if (oldKanban[userId]) {
+            console.log(`ℹ️ Kanban 데이터가 이미 ${userId} 경로에 존재합니다. 건너뜁니다.`);
+            results.kanban.skipped = 1;
+          } else {
+            // 기존 구조: kanban/{status}/{cardId} 또는 kanban/ideas/{ideaId}
+            const newKanbanData = {};
+            let totalCards = 0;
+            
+            for (const key in oldKanban) {
+              if (key !== userId) { // userId 키는 제외
+                newKanbanData[key] = oldKanban[key];
+                if (oldKanban[key] && typeof oldKanban[key] === 'object') {
+                  totalCards += Object.keys(oldKanban[key]).length;
+                }
+              }
+            }
+            
+            console.log(`📊 마이그레이션할 데이터: ${Object.keys(newKanbanData).length}개 컬럼, 총 ${totalCards}개 카드`);
+            
+            if (Object.keys(newKanbanData).length > 0) {
+              if (dryRun) {
+                console.log('🔍 [드라이런] 실제 이동은 하지 않습니다.');
+                console.log('   이동될 경로:', `kanban/${userId}`);
+                console.log('   이동될 데이터 키:', Object.keys(newKanbanData));
+              } else {
+                await db.ref(`kanban/${userId}`).set(newKanbanData);
+                console.log(`✅ Kanban 데이터 이동 완료: ${Object.keys(newKanbanData).length}개 컬럼, ${totalCards}개 카드`);
+              }
+              results.kanban.moved = Object.keys(newKanbanData).length;
+            } else {
+              console.log('ℹ️ 이동할 Kanban 데이터가 없습니다.');
+              results.kanban.skipped = 1;
+            }
+          }
+        }
+      } catch (error) {
+        results.kanban.errors.push(error.message);
+        console.error('❌ Kanban 마이그레이션 오류:', error);
+      }
+    } else {
+      console.log('\n📋 [1/4] Kanban 데이터 마이그레이션: 건너뜀');
+    }
+    
+    // 2. Scraps 데이터 마이그레이션
+    if (scraps) {
+      console.log('\n📝 [2/4] Scraps 데이터 마이그레이션 중...');
+      try {
+        const oldScrapsSnap = await db.ref('scraps').once('value');
+        const oldScraps = oldScrapsSnap.val();
+        
+        if (!oldScraps || typeof oldScraps !== 'object') {
+          console.log('ℹ️ 이동할 Scraps 데이터가 없습니다.');
+          results.scraps.skipped = 1;
+        } else {
+          // 이미 사용자 ID 구조인지 확인
+          if (oldScraps[userId]) {
+            console.log(`ℹ️ Scraps 데이터가 이미 ${userId} 경로에 존재합니다. 건너뜁니다.`);
+            results.scraps.skipped = 1;
+          } else {
+            // 기존 구조: scraps/{scrapId}
+            const newScrapsData = {};
+            
+            for (const scrapId in oldScraps) {
+              if (scrapId !== userId) { // userId 키는 제외
+                newScrapsData[scrapId] = oldScraps[scrapId];
+              }
+            }
+            
+            console.log(`📊 마이그레이션할 데이터: ${Object.keys(newScrapsData).length}개 스크랩`);
+            
+            if (Object.keys(newScrapsData).length > 0) {
+              if (dryRun) {
+                console.log('🔍 [드라이런] 실제 이동은 하지 않습니다.');
+                console.log('   이동될 경로:', `scraps/${userId}`);
+                console.log('   이동될 스크랩 개수:', Object.keys(newScrapsData).length);
+              } else {
+                await db.ref(`scraps/${userId}`).set(newScrapsData);
+                console.log(`✅ Scraps 데이터 이동 완료: ${Object.keys(newScrapsData).length}개 스크랩`);
+              }
+              results.scraps.moved = Object.keys(newScrapsData).length;
+            } else {
+              console.log('ℹ️ 이동할 Scraps 데이터가 없습니다.');
+              results.scraps.skipped = 1;
+            }
+          }
+        }
+      } catch (error) {
+        results.scraps.errors.push(error.message);
+        console.error('❌ Scraps 마이그레이션 오류:', error);
+      }
+    } else {
+      console.log('\n📝 [2/4] Scraps 데이터 마이그레이션: 건너뜀');
+    }
+    
+    // 3. Channel Content 데이터 마이그레이션
+    if (channel_content) {
+      console.log('\n📰 [3/4] Channel Content 데이터 마이그레이션 중...');
+      try {
+        const oldContentSnap = await db.ref('channel_content').once('value');
+        const oldContent = oldContentSnap.val();
+        
+        if (!oldContent || typeof oldContent !== 'object') {
+          console.log('ℹ️ 이동할 Channel Content 데이터가 없습니다.');
+          results.channel_content.skipped = 1;
+        } else {
+          // 이미 사용자 ID 구조인지 확인
+          if (oldContent[userId]) {
+            console.log(`ℹ️ Channel Content 데이터가 이미 ${userId} 경로에 존재합니다. 건너뜁니다.`);
+            results.channel_content.skipped = 1;
+          } else {
+            // 기존 구조: channel_content/{platform}/{contentId}
+            const newContentData = {};
+            let totalContent = 0;
+            
+            for (const platform in oldContent) {
+              if (platform !== userId) { // userId 키는 제외
+                newContentData[platform] = oldContent[platform];
+                if (oldContent[platform] && typeof oldContent[platform] === 'object') {
+                  totalContent += Object.keys(oldContent[platform]).length;
+                }
+              }
+            }
+            
+            console.log(`📊 마이그레이션할 데이터: ${Object.keys(newContentData).length}개 플랫폼, 총 ${totalContent}개 콘텐츠`);
+            
+            if (Object.keys(newContentData).length > 0) {
+              if (dryRun) {
+                console.log('🔍 [드라이런] 실제 이동은 하지 않습니다.');
+                console.log('   이동될 경로:', `channel_content/${userId}`);
+                console.log('   이동될 플랫폼:', Object.keys(newContentData));
+              } else {
+                await db.ref(`channel_content/${userId}`).set(newContentData);
+                console.log(`✅ Channel Content 데이터 이동 완료: ${Object.keys(newContentData).length}개 플랫폼, ${totalContent}개 콘텐츠`);
+              }
+              results.channel_content.moved = Object.keys(newContentData).length;
+            } else {
+              console.log('ℹ️ 이동할 Channel Content 데이터가 없습니다.');
+              results.channel_content.skipped = 1;
+            }
+          }
+        }
+      } catch (error) {
+        results.channel_content.errors.push(error.message);
+        console.error('❌ Channel Content 마이그레이션 오류:', error);
+      }
+    } else {
+      console.log('\n📰 [3/4] Channel Content 데이터 마이그레이션: 건너뜀');
+    }
+    
+    // 4. Channel Meta 데이터 마이그레이션
+    if (channel_meta) {
+      console.log('\n📊 [4/4] Channel Meta 데이터 마이그레이션 중...');
+      try {
+        const oldMetaSnap = await db.ref('channel_meta').once('value');
+        const oldMeta = oldMetaSnap.val();
+        
+        if (!oldMeta || typeof oldMeta !== 'object') {
+          console.log('ℹ️ 이동할 Channel Meta 데이터가 없습니다.');
+          results.channel_meta.skipped = 1;
+        } else {
+          // 이미 사용자 ID 구조인지 확인
+          if (oldMeta[userId]) {
+            console.log(`ℹ️ Channel Meta 데이터가 이미 ${userId} 경로에 존재합니다. 건너뜁니다.`);
+            results.channel_meta.skipped = 1;
+          } else {
+            // 기존 구조: channel_meta/{sourceId}
+            const newMetaData = {};
+            
+            for (const sourceId in oldMeta) {
+              if (sourceId !== userId) { // userId 키는 제외
+                newMetaData[sourceId] = oldMeta[sourceId];
+              }
+            }
+            
+            console.log(`📊 마이그레이션할 데이터: ${Object.keys(newMetaData).length}개 메타데이터`);
+            
+            if (Object.keys(newMetaData).length > 0) {
+              if (dryRun) {
+                console.log('🔍 [드라이런] 실제 이동은 하지 않습니다.');
+                console.log('   이동될 경로:', `channel_meta/${userId}`);
+                console.log('   이동될 메타데이터 개수:', Object.keys(newMetaData).length);
+              } else {
+                await db.ref(`channel_meta/${userId}`).set(newMetaData);
+                console.log(`✅ Channel Meta 데이터 이동 완료: ${Object.keys(newMetaData).length}개 메타데이터`);
+              }
+              results.channel_meta.moved = Object.keys(newMetaData).length;
+            } else {
+              console.log('ℹ️ 이동할 Channel Meta 데이터가 없습니다.');
+              results.channel_meta.skipped = 1;
+            }
+          }
+        }
+      } catch (error) {
+        results.channel_meta.errors.push(error.message);
+        console.error('❌ Channel Meta 마이그레이션 오류:', error);
+      }
+    } else {
+      console.log('\n📊 [4/4] Channel Meta 데이터 마이그레이션: 건너뜀');
+    }
+    
+    // 결과 요약
+    console.log('\n================================================');
+    console.log('📊 마이그레이션 결과 요약:');
+    if (kanban) {
+      console.log(`  Kanban: ${results.kanban.moved}개 이동, ${results.kanban.skipped}개 건너뜀${results.kanban.errors.length > 0 ? `, ${results.kanban.errors.length}개 오류` : ''}`);
+    }
+    if (scraps) {
+      console.log(`  Scraps: ${results.scraps.moved}개 이동, ${results.scraps.skipped}개 건너뜀${results.scraps.errors.length > 0 ? `, ${results.scraps.errors.length}개 오류` : ''}`);
+    }
+    if (channel_content) {
+      console.log(`  Channel Content: ${results.channel_content.moved}개 플랫폼 이동, ${results.channel_content.skipped}개 건너뜀${results.channel_content.errors.length > 0 ? `, ${results.channel_content.errors.length}개 오류` : ''}`);
+    }
+    if (channel_meta) {
+      console.log(`  Channel Meta: ${results.channel_meta.moved}개 이동, ${results.channel_meta.skipped}개 건너뜀${results.channel_meta.errors.length > 0 ? `, ${results.channel_meta.errors.length}개 오류` : ''}`);
+    }
+    console.log('================================================');
+    
+    if (dryRun) {
+      console.log('🔍 드라이런 모드로 실행되었습니다. 실제 이동은 하지 않았습니다.');
+      console.log('💡 실제 이동을 하려면 dryRun: false로 설정하거나 dryRun 옵션을 제거하세요.');
+    } else {
+      console.log('✅ 마이그레이션 완료!');
+    }
+    
+    return results;
+  } catch (error) {
+    console.error('❌ 마이그레이션 중 치명적 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 잘못된 'draft' status의 카드를 올바른 status로 이동하는 함수
+ * 콘솔에서 사용: fixDraftStatusCards({ targetStatus: 'ideas' })
+ * 
+ * @param {Object} options - 옵션
+ * @param {string} [options.targetStatus='ideas'] - 이동할 status ('ideas', 'in-progress', 'done')
+ * @param {boolean} [options.dryRun=false] - 실제 이동 없이 미리보기만
+ * @returns {Promise<Object>} 수정 결과
+ */
+async function fixDraftStatusCards(options = {}) {
+  const { targetStatus = 'ideas', dryRun = false } = options;
+  const userId = CONSTANTS.USER_ID;
+  const db = firebase.database();
+  
+  const validStatuses = ['ideas', 'in-progress', 'done'];
+  if (!validStatuses.includes(targetStatus)) {
+    throw new Error(`잘못된 status입니다. 'ideas', 'in-progress', 'done' 중 하나를 선택하세요.`);
+  }
+  
+  console.log('🔧 [draft status 수정] 시작...');
+  console.log(`대상 status: ${targetStatus}`);
+  console.log(`드라이런 모드: ${dryRun ? '✅ (실제 이동 없음)' : '❌ (실제 이동)'}`);
+  console.log('================================================\n');
+  
+  try {
+    const draftRef = db.ref(`kanban/${userId}/draft`);
+    const snapshot = await draftRef.once('value');
+    const draftCards = snapshot.val() || {};
+    
+    const cardIds = Object.keys(draftCards);
+    
+    if (cardIds.length === 0) {
+      console.log('ℹ️ draft status에 카드가 없습니다.');
+      return { moved: 0, skipped: 0, errors: [] };
+    }
+    
+    console.log(`📋 발견된 카드: ${cardIds.length}개`);
+    cardIds.forEach((cardId, idx) => {
+      const card = draftCards[cardId];
+      console.log(`  ${idx + 1}. ${cardId}: "${card.title || '제목 없음'}"`);
+    });
+    console.log('');
+    
+    if (dryRun) {
+      console.log('✅ [드라이런] 실제 이동 없이 미리보기만 수행했습니다.');
+      return { moved: 0, skipped: cardIds.length, errors: [] };
+    }
+    
+    // 각 카드를 targetStatus로 이동
+    const results = { moved: 0, skipped: 0, errors: [] };
+    
+    for (const cardId of cardIds) {
+      try {
+        const cardData = draftCards[cardId];
+        const targetRef = db.ref(`kanban/${userId}/${targetStatus}/${cardId}`);
+        
+        // 기존 위치에서 삭제하고 새 위치에 저장
+        await draftRef.child(cardId).remove();
+        await targetRef.set(cardData);
+        
+        console.log(`✅ 이동 완료: ${cardId} → ${targetStatus}`);
+        results.moved++;
+      } catch (error) {
+        console.error(`❌ 이동 실패: ${cardId}`, error);
+        results.errors.push({ cardId, error: error.message });
+      }
+    }
+    
+    // draft 폴더가 비어있으면 삭제
+    const remainingSnapshot = await draftRef.once('value');
+    if (!remainingSnapshot.val() || Object.keys(remainingSnapshot.val()).length === 0) {
+      await draftRef.remove();
+      console.log('🗑️ 빈 draft 폴더를 삭제했습니다.');
+    }
+    
+    console.log('\n================================================');
+    console.log('✅ [draft status 수정] 완료!');
+    console.log(`이동: ${results.moved}개, 오류: ${results.errors.length}개`);
+    
+    return results;
+  } catch (error) {
+    console.error('❌ [draft status 수정] 오류:', error);
+    throw error;
+  }
+}
+
 // 전역 함수로 등록 (콘솔에서 직접 호출 가능)
 if (typeof window !== 'undefined') {
   window.testUrlMatching = testUrlMatching;
+  window.migrateToDefaultUser = migrateToDefaultUser;
+  window.fixDraftStatusCards = fixDraftStatusCards;
 } else {
   // Service Worker 환경에서는 self에 등록
   self.testUrlMatching = testUrlMatching;
+  self.migrateToDefaultUser = migrateToDefaultUser;
+  self.fixDraftStatusCards = fixDraftStatusCards;
 }
