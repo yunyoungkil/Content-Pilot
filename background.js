@@ -6840,6 +6840,10 @@ async function updateAllPerformanceMetrics() {
   const snapshot = await kanbanRef.once("value");
   const allCards = snapshot.val() || {};
 
+  // [최적화] 마지막 업데이트로부터 경과 시간 체크 (API Quota 절약)
+  const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6시간 (밀리초)
+  const now = Date.now();
+
   // [체크리스트 2-2] URL 유효성 검사 함수
   const isValidUrl = (url) => {
     if (!url || typeof url !== 'string') return false;
@@ -6851,15 +6855,39 @@ async function updateAllPerformanceMetrics() {
     }
   };
 
+  // [최적화] 마지막 업데이트 시간 확인 함수
+  const shouldUpdateCard = (card) => {
+    // performance.lastUpdatedAt이 없으면 업데이트 필요
+    if (!card.performance?.lastUpdatedAt) {
+      return true;
+    }
+    
+    const lastUpdated = card.performance.lastUpdatedAt;
+    const timeSinceUpdate = now - lastUpdated;
+    
+    // 6시간 이상 지났으면 업데이트 필요
+    return timeSinceUpdate >= UPDATE_INTERVAL_MS;
+  };
+
   // [체크리스트 2-2] 배치 처리: 한 번에 처리할 카드 수 제한 (API Quota 방지)
   const BATCH_SIZE = 5; // 한 번에 5개씩 처리
   const tasks = [];
+  let skippedCount = 0; // 건너뛴 카드 수
   
   for (const status in allCards) {
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
+      
       // [체크리스트 2-2] URL 유효성 검사 강화
       if (card.performanceTracked && card.publishedUrl && isValidUrl(card.publishedUrl)) {
+        // [최적화] 마지막 업데이트로부터 6시간이 지나지 않았으면 건너뛰기
+        if (!shouldUpdateCard(card)) {
+          const timeSinceUpdate = Math.floor((now - card.performance.lastUpdatedAt) / (60 * 60 * 1000));
+          console.log(`[성과 지표 수집] 건너뛰기: ${cardId} (${timeSinceUpdate}시간 전 업데이트됨, 6시간 미경과)`);
+          skippedCount++;
+          continue;
+        }
+        
         tasks.push({
           id: cardId,
           path: `kanban/${userId}/${status}/${cardId}`,
@@ -6872,7 +6900,12 @@ async function updateAllPerformanceMetrics() {
   }
 
   // 배치 처리: 한 번에 BATCH_SIZE개씩 처리
-  console.log(`[성과 지표 수집] 총 ${tasks.length}개 카드 수집 시작 (배치 크기: ${BATCH_SIZE})`);
+  console.log(`[성과 지표 수집] 총 ${tasks.length}개 카드 수집 시작 (${skippedCount}개 건너뜀, 배치 크기: ${BATCH_SIZE})`);
+  
+  if (tasks.length === 0) {
+    console.log("[성과 지표 수집] 업데이트할 카드가 없습니다. (모든 카드가 최근에 업데이트됨)");
+    return;
+  }
   
   for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
     const batch = tasks.slice(i, i + BATCH_SIZE);
