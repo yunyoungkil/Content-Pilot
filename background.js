@@ -6699,8 +6699,12 @@ async function updateSinglePerformanceMetric(contentInfo) {
       gaEarnings: analyticsResult.gaEarnings,
       adsenseEarnings: adsenseResult.estimatedEarnings,
       finalEarnings: finalEarnings,
-      "GA4 raw (index 5)": analyticsResult.gaEarnings,
-      "하이브리드 로직": analyticsResult.gaEarnings > 0 ? "GA4 사용" : "AdSense 사용"
+      "GA4 raw": analyticsResult.gaEarnings,
+      "AdSense raw": adsenseResult.estimatedEarnings,
+      "하이브리드 로직": analyticsResult.gaEarnings > 0 ? "GA4 사용" : "AdSense 사용",
+      "GA4 에러": analyticsResult.error || null,
+      "AdSense 에러": adsenseResult.error || null,
+      "최종 수익 소스": finalEarnings > 0 ? (analyticsResult.gaEarnings > 0 ? "GA4" : "AdSense") : "없음"
     });
     
     // [수정 요청 1] 페이지뷰 파싱 확인
@@ -6929,16 +6933,11 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           { name: "sessions" },                 // 2: 세션
           { name: "screenPageViewsPerSession" },// 3: 세션당 페이지수
           { name: "bounceRate" },               // 4: 이탈률
-          // Publisher 메트릭은 AdSense 연결 시에만 사용 가능
-          ...(excludePublisherMetrics ? [] : [
-            { name: "publisherAdRevenue" },       // 5: 수익
-            { name: "publisherAdImpressions" },   // 6: 노출수
-            { name: "publisherAdClicks" }         // 7: 클릭수
-          ]),
-          { name: "engagementRate" },           // 8: 참여율
-          ...(excludeAverageEngagementTime ? [] : [{ name: "averageEngagementTime" }]),    // 9: 평균 참여 시간 (선택적)
-          { name: "newUsers" },                 // 10: 신규 방문자
-          { name: "activeUsers" }               // 11: 활성 사용자
+          // Publisher 메트릭은 별도 요청으로 분리하여 오류 시에도 다른 메트릭은 정상 수집
+          { name: "engagementRate" },           // 5: 참여율
+          ...(excludeAverageEngagementTime ? [] : [{ name: "averageEngagementTime" }]),    // 6: 평균 참여 시간 (선택적)
+          { name: "newUsers" },                 // 7: 신규 방문자
+          { name: "activeUsers" }               // 8: 활성 사용자
         ],
         dimensionFilter: {
           filter: {
@@ -6968,8 +6967,32 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       })
     });
 
-    // 병렬 실행
-    const [metricsRes, sourceRes] = await Promise.all([metricsRequest, sourceRequest]);
+    // [요청 3] Publisher 메트릭 (수익 데이터) - 별도 요청으로 분리하여 오류 시에도 다른 메트릭은 정상 수집
+    // 참고: GA4 API 스키마 문서 (https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema)
+    // 주의: publisherAdRevenue가 없을 수 있으므로 totalAdRevenue를 우선 시도
+    // 사용 가능한 메트릭: totalAdRevenue, publisherAdClicks, publisherAdImpressions
+    const publisherRequest = excludePublisherMetrics ? Promise.resolve({ ok: false, status: 400 }) : fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "pagePath" }],
+        metrics: [
+          { name: "totalAdRevenue" },           // 수익 (publisherAdRevenue 대신 사용)
+          { name: "publisherAdImpressions" },   // 노출수
+          { name: "publisherAdClicks" }         // 클릭수
+        ],
+        dimensionFilter: {
+          filter: {
+            fieldName: "pagePath",
+            stringFilter: { matchType: "BEGINS_WITH", value: filterPath }
+          }
+        }
+      })
+    });
+
+    // 병렬 실행 (Publisher 메트릭은 오류가 나도 다른 요청은 계속 진행)
+    const [metricsRes, sourceRes, publisherRes] = await Promise.all([metricsRequest, sourceRequest, publisherRequest]);
 
     // [체크리스트 2-1] API 요청 성공 여부 확인
     console.log("[2단계: GA4 API] API 응답 상태", {
@@ -6995,8 +7018,12 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       if (metricsRes.status === 400) {
         // 인코딩된 경로로 재시도 (한글 경로가 인코딩되어 저장된 경우)
         // 단, 메트릭 오류가 아닌 경우에만 시도 (메트릭 오류는 별도 처리)
-        const isMetricErrorCheck = errorBody?.error?.message?.includes('Did you mean') || errorBody?.error?.message?.includes('metric');
-        if (retryCount === 0 && !useEncodedPath && rawPath !== normalizedPath && !isMetricErrorCheck) {
+        const errorMsg = errorBody?.error?.message || 'Invalid filter path';
+        const isMetricError = errorMsg.includes('Did you mean') || errorMsg.includes('metric');
+        const isAverageEngagementTimeError = errorMsg.includes('averageEngagementTime');
+        
+        // 인코딩된 경로로 재시도 (메트릭 오류가 아닌 경우)
+        if (retryCount === 0 && !useEncodedPath && rawPath !== normalizedPath && !isMetricError) {
           console.warn(`[GA4] 400 에러 발생, 인코딩된 경로로 재시도...`, {
             originalFilter: filterPath,
             retryFilter: normalizedRawPath
@@ -7004,21 +7031,9 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           // 인코딩된 경로로 재시도
           return getAnalyticsData(token, propertyId, url, retryCount + 1, true, excludePublisherMetrics, excludeAverageEngagementTime);
         }
-        // 에러 메시지에서 메트릭 이름 문제를 확인
-        const errorMsg = errorBody?.error?.message || 'Invalid filter path';
-        const isMetricError = errorMsg.includes('Did you mean') || errorMsg.includes('metric');
-        const isPublisherMetricError = errorMsg.includes('publisherAdRevenue') || errorMsg.includes('publisherAdImpressions') || errorMsg.includes('publisherAdClicks');
-        const isAverageEngagementTimeError = errorMsg.includes('averageEngagementTime');
-        
-        // 메트릭 오류는 재시도 로직에서 자동 처리되므로 로그 제거
-        
-        // Publisher 메트릭 오류인 경우, Publisher 메트릭을 제외하고 재시도
-        if (isPublisherMetricError && !excludePublisherMetrics && retryCount < 3) {
-          console.warn(`[GA4] Publisher 메트릭 오류 감지, Publisher 메트릭을 제외하고 재시도...`);
-          return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, true, excludeAverageEngagementTime);
-        }
         
         // averageEngagementTime 오류인 경우, 해당 메트릭을 제외하고 재시도
+        // (Publisher 메트릭은 별도 요청으로 분리되어 있으므로 여기서 처리하지 않음)
         if (isAverageEngagementTimeError && !excludeAverageEngagementTime && retryCount < 3) {
           console.warn(`[GA4] averageEngagementTime 메트릭 오류 감지, 해당 메트릭을 제외하고 재시도...`);
           return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, true);
@@ -7029,8 +7044,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           gaEarnings: 0, 
           error: `Bad Request (400): ${errorMsg}`,
           errorDetails: errorBody,
-          isMetricError: isMetricError,
-          isPublisherMetricError: isPublisherMetricError
+          isMetricError: isMetricError
         };
       }
       
@@ -7064,6 +7078,82 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
 
     const metricsData = await metricsRes.json();
     const sourceData = await sourceRes.ok ? await sourceRes.json() : {};
+    
+    // Publisher 메트릭 응답 파싱 (오류가 나도 무시하고 계속 진행)
+    let publisherData = null;
+    let adRevenue = 0;
+    let adImpressions = 0;
+    let adClicks = 0;
+    
+    // Publisher 메트릭 요청 상태 상세 로깅
+    console.log("[2단계: GA4 API] Publisher 메트릭 요청 상태", {
+      ok: publisherRes.ok,
+      status: publisherRes.status,
+      statusText: publisherRes.statusText,
+      excludePublisherMetrics: excludePublisherMetrics
+    });
+    
+    if (publisherRes.ok) {
+      try {
+        publisherData = await publisherRes.json();
+        console.log("[2단계: GA4 API] Publisher 메트릭 응답 데이터", {
+          hasRows: publisherData.rows && publisherData.rows.length > 0,
+          rowCount: publisherData.rowCount || 0,
+          rowsLength: publisherData.rows?.length || 0,
+          firstRow: publisherData.rows?.[0] || null,
+          metricHeaders: publisherData.metricHeaders || []
+        });
+        
+        if (publisherData.rows && publisherData.rows.length > 0) {
+          const publisherRow = publisherData.rows[0];
+          const publisherValues = publisherRow.metricValues;
+          // totalAdRevenue를 사용 (publisherAdRevenue 대신)
+          adRevenue = parseFloat(publisherValues[0]?.value || "0"); // totalAdRevenue
+          adImpressions = parseInt(publisherValues[1]?.value || "0", 10); // publisherAdImpressions
+          adClicks = parseInt(publisherValues[2]?.value || "0", 10); // publisherAdClicks
+          console.log("[2단계: GA4 API] Publisher 메트릭 수집 성공", {
+            adRevenue: adRevenue,
+            adImpressions: adImpressions,
+            adClicks: adClicks,
+            rawValues: publisherValues.map(v => v.value)
+          });
+        } else {
+          console.warn("[2단계: GA4 API] Publisher 메트릭 응답에 데이터 없음 (rows가 비어있음)");
+        }
+      } catch (e) {
+        console.warn("[2단계: GA4 API] Publisher 메트릭 파싱 실패 (무시하고 계속 진행)", e);
+      }
+    } else {
+      // 에러 응답 본문 확인
+      let publisherErrorBody = null;
+      try {
+        publisherErrorBody = await publisherRes.clone().json();
+        const errorMessage = publisherErrorBody?.error?.message || '';
+        const isPublisherMetricNotSupported = errorMessage.includes('publisherAdRevenue is not a valid metric') || 
+                                               errorMessage.includes('publisherAdClicks');
+        
+        if (isPublisherMetricNotSupported) {
+          console.log("[2단계: GA4 API] Publisher 메트릭 미지원 (이 GA4 속성에서는 사용 불가)", {
+            status: publisherRes.status,
+            errorMessage: errorMessage,
+            note: "GA4 API 스키마 문서 참고: publisherAdRevenue는 AdSense가 연결된 속성에서만 사용 가능합니다. AdSense API를 통해 수익 데이터를 수집합니다.",
+            reference: "https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema"
+          });
+        } else {
+          console.warn("[2단계: GA4 API] Publisher 메트릭 요청 실패 (무시하고 계속 진행)", {
+            status: publisherRes.status,
+            statusText: publisherRes.statusText,
+            error: publisherErrorBody?.error || null,
+            errorMessage: errorMessage
+          });
+        }
+      } catch (e) {
+        console.warn("[2단계: GA4 API] Publisher 메트릭 요청 실패 (에러 응답 파싱 실패)", {
+          status: publisherRes.status,
+          statusText: publisherRes.statusText
+        });
+      }
+    }
 
     // [체크리스트 2-2] API 응답 데이터 존재 여부 확인
     console.log("[2단계: GA4 API] 응답 데이터", {
@@ -7071,7 +7161,8 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       rowCount: metricsData.rowCount || 0,
       rowsLength: metricsData.rows?.length || 0,
       firstRow: metricsData.rows?.[0] || null,
-      url: url
+      url: url,
+      publisherDataCollected: publisherData !== null
     });
 
     // 데이터 파싱
@@ -7079,25 +7170,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       const row = metricsData.rows[0]; // 가장 관련성 높은 첫 번째 행 사용
       const values = row.metricValues;
 
-      // Publisher 메트릭과 averageEngagementTime이 없을 때 인덱스 조정
-      // excludePublisherMetrics가 true면 인덱스가 3개씩 앞당겨짐
-      // excludeAverageEngagementTime이 true면 인덱스가 1개씩 앞당겨짐
+      // Publisher 메트릭은 별도 요청으로 분리되었으므로 인덱스 조정
+      // averageEngagementTime이 없을 때 인덱스 조정
       const baseIndex = 0; // screenPageViews
-      const adRevenueIndex = excludePublisherMetrics ? -1 : 5; // publisherAdRevenue
-      const adImpressionsIndex = excludePublisherMetrics ? -1 : 6; // publisherAdImpressions
-      const adClicksIndex = excludePublisherMetrics ? -1 : 7; // publisherAdClicks
-      const engagementRateIndex = excludePublisherMetrics ? 5 : 8; // engagementRate
-      const avgEngagementTimeIndex = excludeAverageEngagementTime ? -1 : (excludePublisherMetrics ? 6 : 9); // averageEngagementTime
-      const newUsersIndex = excludeAverageEngagementTime 
-        ? (excludePublisherMetrics ? 6 : 9) 
-        : (excludePublisherMetrics ? 7 : 10); // newUsers
-      const activeUsersIndex = excludeAverageEngagementTime 
-        ? (excludePublisherMetrics ? 7 : 10) 
-        : (excludePublisherMetrics ? 8 : 11); // activeUsers
+      const engagementRateIndex = 5; // engagementRate
+      const avgEngagementTimeIndex = excludeAverageEngagementTime ? -1 : 6; // averageEngagementTime
+      const newUsersIndex = excludeAverageEngagementTime ? 6 : 7; // newUsers
+      const activeUsersIndex = excludeAverageEngagementTime ? 7 : 8; // activeUsers
 
       // [체크리스트 2-4] Metrics 배열 순서 확인
       console.log("[2단계: GA4 API] Metrics 인덱스", {
-        excludePublisherMetrics: excludePublisherMetrics,
         totalMetrics: values.length,
         values: values,
         "0-pageviews": values[0]?.value,
@@ -7105,21 +7187,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         "2-sessions": values[2]?.value,
         "3-pagesPerSession": values[3]?.value,
         "4-bounceRate": values[4]?.value,
-        ...(excludePublisherMetrics ? {} : {
-          "5-earnings": values[5]?.value,
-          "6-adImpressions": values[6]?.value,
-          "7-adClicks": values[7]?.value
-        }),
         [`${engagementRateIndex}-engagementRate`]: values[engagementRateIndex]?.value,
         ...(excludeAverageEngagementTime ? {} : { [`${avgEngagementTimeIndex}-avgEngagementTime`]: values[avgEngagementTimeIndex]?.value }),
         [`${newUsersIndex}-newUsers`]: values[newUsersIndex]?.value,
-        [`${activeUsersIndex}-activeUsers`]: values[activeUsersIndex]?.value
+        [`${activeUsersIndex}-activeUsers`]: values[activeUsersIndex]?.value,
+        "Publisher 메트릭 (별도 요청)": {
+          adRevenue: adRevenue,
+          adImpressions: adImpressions,
+          adClicks: adClicks
+        }
       });
-
-      // 기본 데이터 (Publisher 메트릭이 없으면 0)
-      const adRevenue = excludePublisherMetrics ? 0 : parseFloat(values[adRevenueIndex]?.value || "0");
-      const adImpressions = excludePublisherMetrics ? 0 : parseInt(values[adImpressionsIndex]?.value || "0", 10);
-      const adClicks = excludePublisherMetrics ? 0 : parseInt(values[adClicksIndex]?.value || "0", 10);
       
       // 파생 지표
       const pageRPM = adImpressions > 0 ? (adRevenue / adImpressions) * 1000 : 0;
@@ -7127,7 +7204,6 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       
       // [체크리스트 3-6] RPM 계산 확인
       console.log("[3단계: 데이터 파싱] RPM 계산", {
-        excludePublisherMetrics: excludePublisherMetrics,
         adRevenue: adRevenue,
         adImpressions: adImpressions,
         adClicks: adClicks,
@@ -7151,19 +7227,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
       const newUsers = parseInt(values[newUsersIndex]?.value || "0", 10);
       
       console.log("[3단계: 데이터 파싱] 지표별 파싱 결과", {
-        excludePublisherMetrics: excludePublisherMetrics,
         "페이지뷰 (index 0)": {
           rawValue: values[0]?.value,
           parsed: pageviews,
           isZero: pageviews === 0
         },
-        ...(excludePublisherMetrics ? {} : {
-          "수익 (index 5)": {
-            rawValue: values[5]?.value,
-            parsed: adRevenue,
-            isZero: adRevenue === 0
-          }
-        }),
+        "수익 (Publisher 메트릭 별도 요청)": {
+          parsed: adRevenue,
+          isZero: adRevenue === 0,
+          source: "publisherAdRevenue (별도 요청)"
+        },
         [`참여율 (index ${engagementRateIndex})`]: {
           rawValue: values[engagementRateIndex]?.value,
           parsed: engagementRate,
@@ -7510,7 +7583,11 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
               pageViews: pageViews,
               ctr: parseFloat(ctr.toFixed(2)),
             };
-            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, adsenseData);
+            console.log(`[AdSense] 성과 지표 수집 완료 (${url}, 필터: ${filterStrategy.name}):`, {
+              ...adsenseData,
+              rawRow: row.map(cell => ({ value: cell.value, label: cell.label })),
+              note: "GA4에서 publisherAdRevenue를 사용할 수 없으므로 AdSense API 데이터를 사용합니다."
+            });
             break; // 성공하면 루프 종료
           }
         }
@@ -8807,6 +8884,71 @@ async function runAdSenseDeepDiagnosis() {
  * - 최근 28일간 조회수가 가장 높은 페이지 20개를 가져와서 보여줍니다.
  * - 내 글의 주소가 GA4에는 어떻게 저장되어 있는지(인코딩 여부 등) 확인할 수 있습니다.
  */
+/**
+ * GA4 Metadata API를 사용하여 사용 가능한 메트릭 목록을 확인합니다.
+ * 특히 Publisher 메트릭(publisherAdRevenue 등)이 사용 가능한지 확인합니다.
+ */
+async function checkGA4AvailableMetrics(propertyId) {
+  const token = await new Promise((resolve) => {
+    chrome.storage.local.get(['googleAuthToken'], (result) => {
+      resolve(result.googleAuthToken);
+    });
+  });
+
+  if (!token) {
+    console.error("❌ [GA4 메트릭 확인] 인증 토큰이 없습니다.");
+    return null;
+  }
+
+  try {
+    // Metadata API를 사용하여 사용 가능한 메트릭 목록 조회
+    const metadataUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}/metadata`;
+    const response = await fetch(metadataUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error(`❌ [GA4 메트릭 확인] API 오류 (${response.status}):`, errorData);
+      return null;
+    }
+
+    const metadata = await response.json();
+    
+    // Publisher 메트릭 확인
+    const publisherMetrics = metadata.metrics?.filter(metric => 
+      metric.apiName?.includes('publisher') || 
+      metric.apiName?.includes('AdRevenue') ||
+      metric.apiName?.includes('AdImpressions') ||
+      metric.apiName?.includes('AdClicks')
+    ) || [];
+
+    console.log("📊 [GA4 메트릭 확인] 사용 가능한 Publisher 메트릭:", {
+      totalMetrics: metadata.metrics?.length || 0,
+      publisherMetrics: publisherMetrics.map(m => ({
+        apiName: m.apiName,
+        uiName: m.uiName,
+        description: m.description
+      })),
+      hasPublisherAdRevenue: publisherMetrics.some(m => m.apiName === 'publisherAdRevenue'),
+      allMetrics: metadata.metrics?.map(m => m.apiName).filter(name => name?.includes('revenue') || name?.includes('earnings') || name?.includes('publisher')) || []
+    });
+
+    return {
+      hasPublisherAdRevenue: publisherMetrics.some(m => m.apiName === 'publisherAdRevenue'),
+      publisherMetrics: publisherMetrics,
+      allMetrics: metadata.metrics || []
+    };
+  } catch (error) {
+    console.error("❌ [GA4 메트릭 확인] 오류:", error);
+    return null;
+  }
+}
+
 async function runGA4DeepDiagnosis() {
   console.log("🔍 [GA4 진단] 시작...");
   
@@ -8831,6 +8973,27 @@ async function runGA4DeepDiagnosis() {
   
   const propertyId = firstBlog.gaPropertyId;
   console.log(`📡 [GA4 진단] 속성 ID: ${propertyId} (대상 채널: ${firstBlog.inputUrl || firstBlog.url})`);
+
+  // 1-1. Metadata API로 사용 가능한 메트릭 확인 (Publisher 메트릭 포함)
+  console.log("📋 [GA4 진단] 사용 가능한 메트릭 확인 중...");
+  const metricsInfo = await checkGA4AvailableMetrics(propertyId);
+  if (metricsInfo) {
+    if (metricsInfo.hasTotalAdRevenue) {
+      console.log("✅ [GA4 진단] totalAdRevenue 메트릭 사용 가능 (권장)");
+    } else if (metricsInfo.hasPublisherAdRevenue) {
+      console.log("✅ [GA4 진단] publisherAdRevenue 메트릭 사용 가능");
+    } else {
+      console.warn("⚠️ [GA4 진단] 수익 메트릭 사용 불가 - AdSense 연결 확인 필요");
+      console.log("💡 [GA4 진단] AdSense가 연결되어 있어도 Publisher 메트릭이 활성화되지 않았을 수 있습니다.");
+      console.log("💡 [GA4 진단] GA4 관리 > 제품 연결 > AdSense 연결 상태를 확인하세요.");
+    }
+    if (metricsInfo.publisherMetrics && metricsInfo.publisherMetrics.length > 0) {
+      console.log("📊 [GA4 진단] 사용 가능한 Publisher 메트릭:", metricsInfo.publisherMetrics.map(m => m.apiName));
+    }
+    if (metricsInfo.recommendedMetric && metricsInfo.recommendedMetric !== 'none') {
+      console.log(`💡 [GA4 진단] 권장 메트릭: ${metricsInfo.recommendedMetric}`);
+    }
+  }
 
   // 2. API 호출 (최근 28일간 조회수 상위 20개 페이지 조회)
   try {
