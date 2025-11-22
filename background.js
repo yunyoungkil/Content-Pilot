@@ -9147,6 +9147,12 @@ async function runDataMigration(targetChannelId = null) {
   console.log("🚀 [Migration] 데이터 마이그레이션 시작...");
   const db = firebase.database();
   const userId = CONSTANTS.USER_ID;
+  
+  // 백업 경로 생성 (타임스탬프 기반)
+  const timestamp = Date.now();
+  const backupPath = `backup/${timestamp}`;
+  let backupData = {};
+  let rollbackNeeded = false;
 
   try {
     // 1-1. 내 채널 목록 확인
@@ -9175,35 +9181,93 @@ async function runDataMigration(targetChannelId = null) {
       console.log(`[Migration] 사용자 선택 채널 ID: ${targetChannelId}`);
     }
 
-    let updatedCount = 0;
-
-    // 1-3. 칸반 데이터 마이그레이션
-    const userId = CONSTANTS.USER_ID;
+    // ========== [백업 단계] ==========
+    console.log(`📦 [Backup] 데이터 백업 시작... (경로: ${backupPath})`);
+    
+    // 칸반 데이터 백업
     const kanbanSnap = await db.ref(`kanban/${userId}`).once("value");
     const kanban = kanbanSnap.val() || {};
+    if (kanban && Object.keys(kanban).length > 0) {
+      backupData.kanban = kanban;
+    }
     
+    // 스크랩 데이터 백업
+    const scrapsSnap = await db.ref(`scraps/${userId}`).once("value");
+    const scraps = scrapsSnap.val() || {};
+    if (scraps && Object.keys(scraps).length > 0) {
+      backupData.scraps = scraps;
+    }
+    
+    // 백업 데이터를 Firebase에 저장
+    if (Object.keys(backupData).length > 0) {
+      await db.ref(backupPath).set(backupData);
+      console.log(`%c📦 [Backup] 데이터 백업 완료 (경로: ${backupPath})`, 'color: #2e7d32; font-weight: bold');
+      rollbackNeeded = true;
+    } else {
+      console.log("[Backup] 백업할 데이터가 없습니다.");
+    }
+
+    // ========== [마이그레이션 단계] ==========
+    // 먼저 총 데이터 수 계산 (진행률 계산용)
+    let totalItems = 0;
+    const itemsToMigrate = [];
+    
+    // 칸반 데이터 카운트 및 수집
     for (const status in kanban) {
       for (const id in kanban[status]) {
-        // channelId가 undefined이거나 null인 고아 데이터 처리
         const card = kanban[status][id];
         if (card.channelId === undefined || card.channelId === null) {
-          await db.ref(`kanban/${userId}/${status}/${id}`).update({ channelId: targetChannelId });
-          updatedCount++;
+          itemsToMigrate.push({ type: 'kanban', status, id, card });
+          totalItems++;
         }
       }
     }
-
-    // 1-4. 스크랩 데이터 마이그레이션
-    const scrapsSnap = await db.ref(`scraps/${userId}`).once("value");
-    const scraps = scrapsSnap.val() || {};
-
+    
+    // 스크랩 데이터 카운트 및 수집
     for (const id in scraps) {
       const scrap = scraps[id];
-      // channelId가 undefined이거나 null인 고아 데이터 처리
       if (scrap.channelId === undefined || scrap.channelId === null) {
-        // 스크랩은 기본적으로 '공용(null)'이 안전하지만, 단일 채널 사용자면 귀속시킴
-        await db.ref(`scraps/${userId}/${id}`).update({ channelId: targetChannelId }); 
+        itemsToMigrate.push({ type: 'scraps', id, scrap });
+        totalItems++;
+      }
+    }
+    
+    console.log(`[Migration] 총 ${totalItems}개 데이터 마이그레이션 예정`);
+    
+    if (totalItems === 0) {
+      console.log("[Migration] 마이그레이션할 데이터가 없습니다.");
+      // 백업 데이터 정리 (마이그레이션 불필요 시)
+      if (rollbackNeeded) {
+        await db.ref(backupPath).remove();
+        console.log("[Backup] 마이그레이션 불필요로 백업 데이터 정리 완료");
+      }
+      return;
+    }
+
+    // 1-3. 칸반 데이터 마이그레이션
+    let updatedCount = 0;
+    let processedCount = 0;
+    
+    for (const item of itemsToMigrate) {
+      try {
+        if (item.type === 'kanban') {
+          await db.ref(`kanban/${userId}/${item.status}/${item.id}`).update({ channelId: targetChannelId });
+        } else if (item.type === 'scraps') {
+          await db.ref(`scraps/${userId}/${item.id}`).update({ channelId: targetChannelId });
+        }
+        
         updatedCount++;
+        processedCount++;
+        
+        // 진행률 계산 및 로그 출력
+        const progress = Math.round((processedCount / totalItems) * 100);
+        if (processedCount % 10 === 0 || processedCount === totalItems) {
+          console.log(`[Migration] 진행률: ${progress}% (${processedCount}/${totalItems})`);
+        }
+      } catch (itemError) {
+        console.error(`[Migration] 개별 항목 처리 실패:`, itemError);
+        // 개별 항목 실패는 계속 진행하되, 전체 롤백을 위해 플래그 설정
+        throw new Error(`마이그레이션 중 오류 발생: ${itemError.message}`);
       }
     }
 
@@ -9211,9 +9275,36 @@ async function runDataMigration(targetChannelId = null) {
     
     // 마이그레이션 완료 상태 저장 (일회성 실행 보장)
     await chrome.storage.local.set({ migration_completed: true });
+    
+    // 성공 시 백업 데이터는 유지 (수동 복구 가능하도록)
+    console.log(`[Backup] 마이그레이션 성공. 백업 데이터는 ${backupPath}에 보관됩니다.`);
   
   } catch (error) {
     console.error("❌ [Migration] 오류 발생:", error);
+    
+    // ========== [롤백 단계] ==========
+    if (rollbackNeeded && Object.keys(backupData).length > 0) {
+      console.log("🔄 [Rollback] 데이터 복구 시작...");
+      try {
+        // 백업 데이터로 원상 복구
+        if (backupData.kanban) {
+          await db.ref(`kanban/${userId}`).set(backupData.kanban);
+          console.log("[Rollback] 칸반 데이터 복구 완료");
+        }
+        
+        if (backupData.scraps) {
+          await db.ref(`scraps/${userId}`).set(backupData.scraps);
+          console.log("[Rollback] 스크랩 데이터 복구 완료");
+        }
+        
+        console.log(`%c✅ [Rollback] 데이터 복구 완료 (백업 경로: ${backupPath})`, 'color: #2e7d32; font-weight: bold');
+      } catch (rollbackError) {
+        console.error("❌ [Rollback] 복구 실패:", rollbackError);
+        console.error(`[Rollback] 수동 복구 필요. 백업 경로: ${backupPath}`);
+        throw new Error(`마이그레이션 실패 및 자동 복구 실패. 백업 경로: ${backupPath}`);
+      }
+    }
+    
     throw error; // 에러를 상위로 전파하여 UI에서 처리할 수 있도록
   }
 }
