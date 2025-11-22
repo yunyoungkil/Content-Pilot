@@ -6008,6 +6008,11 @@ chrome.runtime.onInstalled.addListener(() => {
     delayInMinutes: 5,
     periodInMinutes: 360,
   });
+  
+  // [신규] 설치/업데이트 시 재활용 후보 배지 확인
+  checkAndUpdateRenewalBadge().catch(error => {
+    console.error("[배지] 설치 시 배지 확인 실패:", error);
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -6020,6 +6025,11 @@ chrome.runtime.onStartup.addListener(() => {
       });
     }
   });
+  
+  // [신규] 브라우저 시작 시 재활용 후보 배지 확인
+  checkAndUpdateRenewalBadge().catch(error => {
+    console.error("[배지] 시작 시 배지 확인 실패:", error);
+  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -6029,6 +6039,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   } else if (alarm.name === "update-performance-metrics") {
     console.log("알람 발생: 발행된 콘텐츠의 성과 지표를 업데이트합니다...");
     updateAllPerformanceMetrics();
+    // [신규] 성과 지표 업데이트 후 재활용 후보 배지 확인
+    // (updateAllPerformanceMetrics 내부에서 runAutomatedRenewalChecks가 호출되므로
+    //  배지는 자동으로 업데이트됨, 하지만 안전을 위해 여기서도 확인)
+    checkAndUpdateRenewalBadge().catch(error => {
+      console.error("[배지] 알람 트리거 후 배지 확인 실패:", error);
+    });
   }
 });
 
@@ -7315,6 +7331,68 @@ ${trends}
 /**
  * 성과 분석 기반으로 재활용 후보를 찾아 자동으로 아이디어를 생성하는 함수
  */
+/**
+ * 확장 프로그램 아이콘에 배지 표시/제거
+ * @param {number|null} count - 재활용 후보 개수 (null이면 배지 제거)
+ */
+async function updateRenewalBadge(count) {
+  try {
+    if (count === null || count === 0) {
+      // 배지 제거
+      await chrome.action.setBadgeText({ text: '' });
+      console.log("[배지] 재활용 후보 없음 - 배지 제거");
+    } else {
+      // 배지 표시 (최대 99까지)
+      const badgeText = count > 99 ? '99+' : String(count);
+      await chrome.action.setBadgeText({ text: badgeText });
+      await chrome.action.setBadgeBackgroundColor({ color: '#FF0000' }); // 빨간색
+      console.log(`[배지] 재활용 후보 ${count}개 발견 - 배지 표시: "${badgeText}"`);
+    }
+  } catch (error) {
+    console.error("[배지] 배지 업데이트 실패:", error);
+  }
+}
+
+/**
+ * 재활용 후보 개수를 계산하여 배지 업데이트
+ */
+async function checkAndUpdateRenewalBadge() {
+  try {
+    const { decayContent } = await analyzePerformanceData();
+    
+    if (!decayContent || decayContent.length === 0) {
+      await updateRenewalBadge(null);
+      return 0;
+    }
+
+    // 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
+    const userId = CONSTANTS.USER_ID;
+    const ideasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
+    const ideas = ideasSnap.val() || {};
+    const existingRenewalCards = Object.values(ideas).filter(
+      idea => idea.origin?.type === 'my_post_renewal'
+    );
+
+    // 아직 생성되지 않은 후보 개수 계산
+    let pendingCount = 0;
+    for (const post of decayContent) {
+      const alreadyExists = existingRenewalCards.some(
+        idea => idea.origin?.originalCardId === post.cardId
+      );
+      if (!alreadyExists) {
+        pendingCount++;
+      }
+    }
+
+    await updateRenewalBadge(pendingCount);
+    return pendingCount;
+  } catch (error) {
+    console.error("[배지] 재활용 후보 확인 실패:", error);
+    await updateRenewalBadge(null);
+    return 0;
+  }
+}
+
 async function runAutomatedRenewalChecks() {
   console.log("[자동 재활용] 성과 분석 기반 재활용 후보 탐색 시작...");
   
@@ -7324,6 +7402,8 @@ async function runAutomatedRenewalChecks() {
 
     if (!decayContent || decayContent.length === 0) {
       console.log("[자동 재활용] 재활용 후보가 없습니다.");
+      // 배지 제거
+      await updateRenewalBadge(null);
       return;
     }
 
@@ -7336,6 +7416,8 @@ async function runAutomatedRenewalChecks() {
     );
 
     let createdCount = 0;
+    let pendingCount = 0; // 생성되지 않은 후보 개수
+    
     for (const post of decayContent) {
       // 3. 중복 검사: 원본 카드 ID로 이미 생성된 자동 제안이 있는지 확인
       const alreadyExists = existingRenewalCards.some(
@@ -7346,6 +7428,8 @@ async function runAutomatedRenewalChecks() {
         console.log(`[자동 재활용] 건너뛰기: "${post.title}" (이미 제안됨)`);
         continue;
       }
+
+      pendingCount++; // 아직 생성되지 않은 후보
 
       // 4. '아이디어 카드' 객체 생성
       const ideaData = {
@@ -7366,6 +7450,7 @@ async function runAutomatedRenewalChecks() {
       
       if (result.success) {
         createdCount++;
+        pendingCount--; // 생성 완료되면 대기 중인 개수 감소
         console.log(`[자동 재활용] 아이디어 생성 완료: "${ideaData.title}" (ID: ${result.firebaseKey})`);
       } else {
         console.error(`[자동 재활용] 아이디어 생성 실패: "${ideaData.title}" - ${result.error}`);
@@ -7373,8 +7458,13 @@ async function runAutomatedRenewalChecks() {
     }
 
     console.log(`[자동 재활용] 완료: ${createdCount}개의 재활용 아이디어가 생성되었습니다.`);
+    
+    // [신규] 배지 업데이트: 생성되지 않은 후보 개수 표시
+    await updateRenewalBadge(pendingCount);
   } catch (error) {
     console.error("[자동 재활용] 오류 발생:", error);
+    // 오류 발생 시에도 배지 업데이트 시도
+    await updateRenewalBadge(null);
   }
 }
 
