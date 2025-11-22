@@ -20,7 +20,8 @@
   ],
   "host_permissions": ["*://*/*"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "dist/background.bundle.js",
+    "type": "module"
   },
   "content_scripts": [
     {

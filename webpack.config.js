@@ -4,11 +4,12 @@ const path = require("path");
 module.exports = {
   mode: "development",
   entry: {
-    content: './content.js'
+    content: './content.js',
+    background: './background.js'
   },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: 'bundle.js',
+    filename: '[name].bundle.js',
     publicPath: '', // Chrome Extension에서는 상대 경로 사용
     chunkFilename: '[name].bundle.js', // 청크 파일명 명시
   },

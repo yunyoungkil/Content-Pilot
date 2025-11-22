@@ -1,4 +1,94 @@
-// background.js (수정 완료된 최종 버전)
+// background.js (모듈화된 진입점)
+// 이벤트 리스너만 연결하는 진입점 역할
+
+// 서비스 모듈 import
+// Firebase는 manifest.json의 importScripts로 전역에 로드됨
+import { fetchGaProperties as fetchGaPropertiesFromService, fetchAdSenseAccountId as fetchAdSenseAccountIdFromService } from './js/services/authService.js';
+import { uploadImageToFirebaseStorage as uploadImageToFirebaseStorageFromService, firebaseConfig, dataURLtoBlob } from './js/services/firebaseService.js';
+import { callGeminiAPI as callGeminiAPIFromService } from './js/services/aiService.js';
+
+// Firebase 초기화 (모듈로 import)
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, push, set, update, remove, onValue, get, serverTimestamp } from 'firebase/database';
+
+let firebaseInitialized = false;
+let firebaseApp = null;
+let firebaseDatabase = null;
+
+function initializeFirebase() {
+  if (firebaseInitialized) {
+    return true;
+  }
+  
+  try {
+    if (!firebaseApp) {
+      firebaseApp = initializeApp(firebaseConfig);
+    }
+    if (!firebaseDatabase) {
+      firebaseDatabase = getDatabase(firebaseApp);
+    }
+    firebaseInitialized = true;
+    console.log('[System] Firebase 초기화 완료');
+    
+    // 전역 변수로도 사용 가능하도록 설정 (하위 호환성)
+    // 기존 코드에서 firebase.database().ref()를 사용할 수 있도록
+    const createRefWrapper = (dbRef) => {
+      return {
+        once: (eventType) => get(dbRef).then(snapshot => ({ val: () => snapshot.val(), exists: () => snapshot.exists() })),
+        set: (value) => set(dbRef, value),
+        update: (values) => update(dbRef, values),
+        remove: () => remove(dbRef),
+        push: () => {
+          const newRef = push(dbRef);
+          return {
+            set: (value) => set(newRef, value),
+            key: newRef.key
+          };
+        },
+        child: (childPath) => createRefWrapper(ref(firebaseDatabase, `${dbRef.path}/${childPath}`)),
+        on: (eventType, callback) => {
+          const unsubscribe = onValue(dbRef, (snapshot) => {
+            callback({ val: () => snapshot.val(), exists: () => snapshot.exists() });
+          });
+          return unsubscribe;
+        }
+      };
+    };
+    
+    const firebaseCompat = {
+      app: firebaseApp,
+      apps: [firebaseApp],
+      initializeApp: () => firebaseApp,
+      database: () => ({
+        ref: (path) => createRefWrapper(ref(firebaseDatabase, path)),
+        ServerValue: {
+          TIMESTAMP: serverTimestamp()
+        }
+      })
+    };
+    
+    if (typeof self !== 'undefined') {
+      self.firebase = firebaseCompat;
+    }
+    if (typeof globalThis !== 'undefined') {
+      globalThis.firebase = firebaseCompat;
+    }
+    // 전역 변수로도 설정
+    if (typeof window !== 'undefined') {
+      window.firebase = firebaseCompat;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[System] Firebase 초기화 오류:', error);
+    return false;
+  }
+}
+
+// 즉시 초기화
+initializeFirebase();
+
+console.log('[System] 모든 서비스 모듈 로드 완료');
 
 // 상수 정의 'default_user'
 const CONSTANTS = {
@@ -47,22 +137,7 @@ function convertBlobToBase64(blob) {
   });
 }
 
-/**
- * Base64 데이터 URL을 Blob으로 변환하는 헬퍼 함수
- * @param {string} dataUrl - Base64 데이터 URL (예: "data:image/png;base64,...")
- * @returns {Blob} Blob 객체
- */
-function dataURLtoBlob(dataUrl) {
-  const arr = dataUrl.split(',');
-  const mime = arr[0].match(/:(.*?);/)[1];
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new Blob([u8arr], { type: mime });
-}
+// dataURLtoBlob은 이미 상단에서 import됨
 
 /**
  * Firebase Storage에 이미지를 업로드하고 다운로드 URL을 반환하는 함수
@@ -77,109 +152,10 @@ function dataURLtoBlob(dataUrl) {
  * @param {string} path - Storage 경로 (예: "thumbnails/userId/timestamp.png")
  * @returns {Promise<string>} 다운로드 URL
  */
+// uploadImageToFirebaseStorage는 firebaseService.js에서 import됨
+// 하위 호환성을 위해 래퍼 함수 유지
 async function uploadImageToFirebaseStorage(dataUrl, path) {
-  try {
-    // Base64 데이터 URL을 Blob으로 변환
-    const blob = dataURLtoBlob(dataUrl);
-    
-    // Google OAuth 토큰 가져오기 (Firebase Storage 인증용)
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: false }, (authToken) => {
-        if (chrome.runtime.lastError) {
-          // interactive: false로 실패하면 interactive: true로 재시도
-          chrome.identity.getAuthToken({ interactive: true }, (authToken2) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else {
-              resolve(authToken2);
-            }
-          });
-        } else {
-          resolve(authToken);
-        }
-      });
-    });
-    
-    // Firebase Storage REST API를 사용하여 업로드
-    const bucket = firebaseConfig.storageBucket;
-    const encodedPath = encodeURIComponent(path);
-    
-    // 업로드 엔드포인트
-    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
-    
-    console.log('[Firebase Storage] 업로드 시작:', path);
-    console.log('[Firebase Storage] 파일 크기:', blob.size, 'bytes');
-    console.log('[Firebase Storage] 버킷:', bucket);
-    
-    // Blob을 Firebase Storage에 업로드
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': blob.type || 'image/png'
-      },
-      body: blob
-    });
-    
-    if (!uploadResponse.ok) {
-      const errorData = await uploadResponse.json().catch(() => ({}));
-      const errorMessage = errorData.error?.message || uploadResponse.statusText;
-      
-      // 403 오류인 경우 상세한 오류 정보 로깅
-      if (uploadResponse.status === 403) {
-        console.error('[Firebase Storage] 403 Permission denied 오류 상세:');
-        console.error('[Firebase Storage] - 오류 메시지:', errorMessage);
-        console.error('[Firebase Storage] - 전체 오류 응답:', errorData);
-        console.error('[Firebase Storage] - 업로드 경로:', path);
-        console.error('[Firebase Storage] - 버킷:', bucket);
-        console.error('[Firebase Storage] ⚠️ Firebase Storage 보안 규칙을 확인하세요.');
-        console.error('[Firebase Storage] ⚠️ Google OAuth 토큰이 Firebase Storage에 접근할 수 있는 권한이 있는지 확인하세요.');
-        console.error('[Firebase Storage] 💡 해결 방법:');
-        console.error('[Firebase Storage]    1. Firebase Console > Storage > Rules에서 업로드 권한 확인');
-        console.error('[Firebase Storage]    2. 또는 Firebase Authentication을 사용하여 Firebase ID 토큰 발급');
-        console.error('[Firebase Storage]    3. 현재는 Base64 fallback으로 동작합니다.');
-      }
-      
-      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorMessage}`);
-    }
-    
-    const uploadResult = await uploadResponse.json();
-    console.log('[Firebase Storage] 업로드 완료:', uploadResult);
-    
-    // 다운로드 URL 생성
-    // Firebase Storage 다운로드 URL 형식: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token={token}
-    const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
-    
-    // Firebase Realtime Database에 메타데이터 저장 (참고용)
-    const userId = CONSTANTS.USER_ID;
-    const timestamp = Date.now();
-    const db = firebase.database();
-    const imageDataRef = db.ref(`thumbnail_images/${userId}/${timestamp}`);
-    const storagePath = `gs://${bucket}/${path}`;
-    
-    await imageDataRef.set({
-      path: path,
-      storagePath: storagePath,
-      downloadURL: downloadURL,
-      timestamp: timestamp,
-      size: blob.size
-    });
-    
-    console.log('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
-    console.log('[Firebase Storage] 다운로드 URL:', downloadURL);
-    console.log('[Firebase Storage] Storage 경로:', storagePath);
-    
-    return downloadURL;
-  } catch (error) {
-    console.error('[Firebase Storage] 업로드 실패:', error);
-    // 403 오류인 경우 추가 정보 제공
-    if (error.message.includes('403') || error.message.includes('Permission denied')) {
-      console.error('[Firebase Storage] 💡 403 오류 해결 방법:');
-      console.error('[Firebase Storage]    - Firebase Console에서 Storage 보안 규칙 확인');
-      console.error('[Firebase Storage]    - 현재는 Base64 데이터로 fallback하여 동작합니다.');
-    }
-    throw error;
-  }
+  return await uploadImageToFirebaseStorageFromService(dataUrl, path, CONSTANTS.USER_ID);
 }
 
 /**
@@ -298,25 +274,8 @@ async function getOffscreenDocument() {
   }
 }
 
-importScripts(
-  "../lib/firebase-app-compat.js",
-  "../lib/firebase-database-compat.js"
-);
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY",
-  authDomain: "content-pilot-7eb03.firebaseapp.com",
-  databaseURL:
-    "https://content-pilot-7eb03-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "content-pilot-7eb03",
-  storageBucket: "content-pilot-7eb03.firebasestorage.app",
-  messagingSenderId: "1062923832161",
-  appId: "1:1062923832161:web:12dc37c0bfd2fb1ac05320",
-};
-
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
+// Firebase 초기화는 firebaseService.js에서 처리됨
+// firebase와 firebaseConfig는 firebaseService.js에서 import됨
 
 /**
  * 지정된 URL의 채널과 관련된 모든 데이터를 Firebase에서 삭제하는 통합 함수.
@@ -633,25 +592,10 @@ ${text.substring(0, 2000)}
   }
 }
 
+// fetchGaProperties는 authService.js에서 import됨
+// 하위 호환성을 위해 래퍼 함수 유지
 async function fetchGaProperties(token) {
-  const API_URL =
-    "https://analyticsadmin.googleapis.com/v1beta/accountSummaries";
-  const response = await fetch(API_URL, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error("GA4 속성 목록을 가져오는데 실패했습니다.");
-
-  const data = await response.json();
-  const properties = [];
-  data.accountSummaries?.forEach((account) => {
-    account.propertySummaries?.forEach((prop) => {
-      properties.push({
-        id: prop.property.split("/")[1], // "properties/12345"에서 숫자만 추출
-        name: prop.displayName,
-      });
-    });
-  });
-  return properties;
+  return await fetchGaPropertiesFromService(token);
 }
 
 // ▼▼▼ [추가] 애드센스 계정 ID를 가져오는 함수 ▼▼▼
@@ -1162,23 +1106,40 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 안전한 sendResponse 헬퍼 함수 (중복 호출 방지)
+  const createSafeResponse = () => {
+    let responded = false;
+    return (response) => {
+      if (!responded) {
+        responded = true;
+        try {
+          sendResponse(response);
+        } catch (e) {
+          // 채널이 이미 닫힌 경우 조용히 무시
+          console.warn("[onMessage] sendResponse 실패 (채널이 닫힘):", e.message);
+        }
+      }
+    };
+  };
+  
   // [추가] 확장 프로그램 컨텍스트 유효성 확인용 ping 핸들러
   if (msg.action === "ping") {
     sendResponse({ success: true });
-    return true;
+    return false; // 동기 응답이므로 false 반환
   }
   // 썸네일용 Gemini 슬로건 생성 (draft 전체와 outline 리스트를 함께 보냄)
   if (
     msg.action === "gemini_generate_thumbnail_texts" &&
     Array.isArray(msg.data?.outlines)
   ) {
+    const safeSendResponse = createSafeResponse();
     (async () => {
       try {
         const { geminiApiKey } = await chrome.storage.local.get([
           "geminiApiKey",
         ]);
         if (!geminiApiKey) {
-          sendResponse({ success: false, error: "Gemini API 키가 없습니다." });
+          safeSendResponse({ success: false, error: "Gemini API 키가 없습니다." });
           return;
         }
         const outlines = msg.data.outlines;
@@ -1203,7 +1164,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const data = await res.json();
         if (!res.ok) {
           console.error("[Gemini 슬로건] API 오류 응답:", data);
-          sendResponse({ success: false, error: "Gemini API 오류", data });
+          safeSendResponse({ success: false, error: "Gemini API 오류", data });
           return;
         }
         // Gemini 응답에서 배열 파싱
@@ -1224,12 +1185,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!Array.isArray(slogans) || slogans.length !== outlines.length) {
           slogans = Array(outlines.length).fill("");
         }
-        sendResponse({ success: true, slogans });
+        safeSendResponse({ success: true, slogans });
       } catch (e) {
-        sendResponse({ success: false, error: e.message });
+        safeSendResponse({ success: false, error: e.message });
       }
     })();
-    return true;
+    return true; // 비동기 응답을 위해 true 반환
   }
   // 워크스페이스 draft 저장
   if (
@@ -1564,13 +1525,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   } else if (msg.action === "cp_get_firebase_scraps") {
+    const safeSendResponse = createSafeResponse();
     const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
-
     const userId = CONSTANTS.USER_ID;
-    firebase
-      .database()
-      .ref(`scraps/${userId}`)
-      .once("value", (snapshot) => {
+    const startTime = Date.now();
+    
+    const scrapsRef = ref(firebaseDatabase, `scraps/${userId}`);
+    get(scrapsRef)
+      .then((snapshot) => {
+        const loadTime = Date.now() - startTime;
+        console.log(`[cp_get_firebase_scraps] Firebase 데이터 로드 완료 (${loadTime}ms)`);
+        
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
 
@@ -1581,7 +1546,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                  scrap.channelId === targetChannelId; // 전용 스크랩
         });
 
-        sendResponse({ data: filteredScraps });
+        safeSendResponse({ data: filteredScraps });
+      })
+      .catch((error) => {
+        console.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
+        safeSendResponse({ data: [] });
       });
     return true;
   } else if (msg.action === "delete_scrap") {
@@ -1608,8 +1577,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       try {
         const userId = CONSTANTS.USER_ID;
-        const scrapRef = firebase.database().ref(`scraps/${userId}/${scrapId}`);
-        const snapshot = await scrapRef.once("value");
+        const scrapRef = ref(firebaseDatabase, `scraps/${userId}/${scrapId}`);
+        const snapshot = await get(scrapRef);
         const scrapData = snapshot.val();
         
         if (!scrapData) {
@@ -1644,13 +1613,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     
     return true;
   } else if (msg.action === "get_all_scraps") {
+    const safeSendResponse = createSafeResponse();
     const targetChannelId = msg.channelId || null; // UI에서 보낸 활성 채널 ID
-
     const userId = CONSTANTS.USER_ID;
-    firebase
-      .database()
-      .ref(`scraps/${userId}`)
-      .once("value", (snapshot) => {
+    const startTime = Date.now();
+    
+    const scrapsRef = ref(firebaseDatabase, `scraps/${userId}`);
+    get(scrapsRef)
+      .then((snapshot) => {
+        const loadTime = Date.now() - startTime;
+        console.log(`[get_all_scraps] Firebase 데이터 로드 완료 (${loadTime}ms)`);
+        
         const val = snapshot.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
 
@@ -1664,38 +1637,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                  scrap.channelId === targetChannelId; // 전용 스크랩
         });
 
-        sendResponse({
+        safeSendResponse({
           success: true,
           scraps: filteredScraps.sort((a, b) => b.timestamp - a.timestamp),
+        });
+      })
+      .catch((error) => {
+        console.error('[get_all_scraps] Firebase 로드 오류:', error);
+        safeSendResponse({
+          success: false,
+          scraps: [],
+          error: error.message
         });
       });
     return true;
   } else if (msg.action === "get_scrap_detail") {
+    const safeSendResponse = createSafeResponse();
     const { scrapId, channelId } = msg;
     if (!scrapId) {
-      sendResponse({ success: false, error: "스크랩 ID가 없습니다." });
+      safeSendResponse({ success: false, error: "스크랩 ID가 없습니다." });
       return true;
     }
     
     const userId = CONSTANTS.USER_ID;
-    firebase
-      .database()
-      .ref(`scraps/${userId}/${scrapId}`)
-      .once("value", (snapshot) => {
+    const scrapRef = ref(firebaseDatabase, `scraps/${userId}/${scrapId}`);
+    get(scrapRef)
+      .then((snapshot) => {
         const scrapData = snapshot.val();
         if (!scrapData) {
-          sendResponse({ success: false, error: "스크랩을 찾을 수 없습니다." });
+          safeSendResponse({ success: false, error: "스크랩을 찾을 수 없습니다." });
           return;
         }
         
         // 채널 ID 필터링 (필요한 경우)
         if (channelId !== undefined && scrapData.channelId !== undefined && 
             scrapData.channelId !== null && scrapData.channelId !== channelId) {
-          sendResponse({ success: false, error: "접근 권한이 없습니다." });
+          safeSendResponse({ success: false, error: "접근 권한이 없습니다." });
           return;
         }
         
-        sendResponse({
+        safeSendResponse({
           success: true,
           data: {
             id: scrapId,
@@ -1710,7 +1691,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })
       .catch((error) => {
         console.error("[스크랩 상세 조회 실패]", error);
-        sendResponse({ success: false, error: error.message });
+        safeSendResponse({ success: false, error: error.message });
       });
     
     return true;
@@ -2549,13 +2530,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "get_channel_content") {
+    const safeSendResponse = createSafeResponse();
     const userId = CONSTANTS.USER_ID;
+    const startTime = Date.now();
+    
+    // [최적화] 병렬 쿼리 실행 및 성능 로깅
     Promise.all([
-      firebase.database().ref(`channel_content/${userId}`).once("value"),
-      firebase.database().ref(`channel_meta/${userId}`).once("value"),
-      firebase.database().ref(`channels/${userId}`).once("value"),
+      get(ref(firebaseDatabase, `channel_content/${userId}`)),
+      get(ref(firebaseDatabase, `channel_meta/${userId}`)),
+      get(ref(firebaseDatabase, `channels/${userId}`)),
     ])
       .then(([contentSnap, metaSnap, channelsSnap]) => {
+        const loadTime = Date.now() - startTime;
+        console.log(`[get_channel_content] Firebase 데이터 로드 완료 (${loadTime}ms)`);
+        
         const content = contentSnap.val() || {};
         const metas = metaSnap.val() || {};
         const channels = channelsSnap.val() || {
@@ -2563,6 +2551,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           competitorChannels: {},
         };
 
+        // [최적화] 필터링을 서버 측에서 수행 (불필요한 데이터 제거)
         const blogs = Object.values(content.blogs || {}).filter(
           (item) => item !== null
         );
@@ -2577,9 +2566,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           channels: channels,
         };
 
-        sendResponse({ success: true, data: responseData });
+        safeSendResponse({ success: true, data: responseData });
       })
-      .catch((error) => sendResponse({ success: false, error: error.message }));
+      .catch((error) => {
+        console.error('[get_channel_content] 오류:', error);
+        safeSendResponse({ success: false, error: error.message });
+      });
 
     return true;
   } else if (msg.action === "refresh_channel_data") {
@@ -4083,11 +4075,16 @@ ${decayContent.map((item, idx) =>
 
   // 칸반 보드 및 워크스페이스
   if (msg.action === "get_kanban_data") {
+    // [최적화] 성능 로깅 추가
+    const startTime = Date.now();
+    
     // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
-    firebase
-      .database()
-      .ref(`kanban/${CONSTANTS.USER_ID}`)
-      .once("value", (snapshot) => {
+    const kanbanRef = ref(firebaseDatabase, `kanban/${CONSTANTS.USER_ID}`);
+    get(kanbanRef)
+      .then((snapshot) => {
+        const loadTime = Date.now() - startTime;
+        console.log(`[get_kanban_data] Firebase 데이터 로드 완료 (${loadTime}ms)`);
+        
         if (sender.tab?.id) {
           chrome.tabs
             .sendMessage(sender.tab.id, {
@@ -4096,44 +4093,50 @@ ${decayContent.map((item, idx) =>
             })
             .catch((e) => {}); // 오류는 무시
         }
+      })
+      .catch((error) => {
+        console.error('[get_kanban_data] Firebase 로드 오류:', error);
       });
 
     // 2. 실시간 리스너가 아직 등록되지 않았다면, 한 번만 등록합니다.
     if (!isKanbanListenerActive) {
-      firebase
-        .database()
-        .ref(`kanban/${CONSTANTS.USER_ID}`)
-        .on("value", (snapshot) => {
-          const allCards = snapshot.val() || {};
+      onValue(kanbanRef, (snapshot) => {
+        const allCards = snapshot.val() || {};
 
-          // 모든 탭에 데이터 변경 사항을 브로드캐스트합니다.
-          chrome.tabs.query({}, (tabs) => {
-            tabs.forEach((tab) => {
-              if (tab.id) {
-                chrome.tabs
-                  .sendMessage(tab.id, {
-                    action: "kanban_data_updated",
-                    data: allCards,
-                  })
-                  .catch((e) => {});
-              }
-            });
+        // 모든 탭에 데이터 변경 사항을 브로드캐스트합니다.
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs
+                .sendMessage(tab.id, {
+                  action: "kanban_data_updated",
+                  data: allCards,
+                })
+                .catch((e) => {});
+            }
           });
         });
+      });
       isKanbanListenerActive = true;
       console.log("Firebase 칸반 데이터 실시간 리스너를 활성화했습니다.");
     }
     return true; // 비동기 응답을 위해 true 반환
   } else if (msg.action === "get_all_kanban_data") {
     // ▼▼▼ [신규 추가] 모든 칸반 데이터를 직접 반환하는 액션 ▼▼▼
-    firebase
-      .database()
-      .ref(`kanban/${CONSTANTS.USER_ID}`)
-      .once("value", (snapshot) => {
-        sendResponse({ success: true, data: snapshot.val() || {} });
+    const safeSendResponse = createSafeResponse();
+    const userId = CONSTANTS.USER_ID;
+    const startTime = Date.now();
+    
+    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    get(kanbanRef)
+      .then((snapshot) => {
+        const loadTime = Date.now() - startTime;
+        console.log(`[get_all_kanban_data] Firebase 데이터 로드 완료 (${loadTime}ms)`);
+        safeSendResponse({ success: true, data: snapshot.val() || {} });
       })
       .catch((error) => {
-        sendResponse({ success: false, error: error.message });
+        console.error('[get_all_kanban_data] 오류:', error);
+        safeSendResponse({ success: false, error: error.message });
       });
     return true; // 비동기 응답을 위해 true 반환
     // ▲▲▲ [신규 추가] ▲▲▲
@@ -4379,6 +4382,7 @@ ${decayContent.map((item, idx) =>
       }
     };
 
+    const safeSendResponse = createSafeResponse();
     // 비동기로 브리핑 데이터 생성 (옵션에 따라 필요한 것만 생성)
     generateIdeaBriefing(cardId, title, description || "", {
       generateOutline: generateOutline !== false, // 기본값 true
@@ -4388,11 +4392,11 @@ ${decayContent.map((item, idx) =>
       onProgress: sendProgress // 진행률 콜백 전달
     })
       .then(() => {
-        sendResponse({ success: true });
+        safeSendResponse({ success: true });
       })
       .catch((error) => {
         console.error("브리핑 데이터 생성 실패:", error);
-        sendResponse({ success: false, error: error.message });
+        safeSendResponse({ success: false, error: error.message });
       });
 
     return true; // 비동기 응답을 위해 true 반환
@@ -6955,60 +6959,10 @@ async function sendErrorToUI(errorType, message) {
   }
 }
 
+// callGeminiAPI는 aiService.js에서 import됨
+// 하위 호환성을 위해 래퍼 함수 유지
 async function callGeminiAPI(prompt) {
-  try {
-    const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
-    if (!geminiApiKey) {
-      const errorMsg = "Gemini API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
-      await sendErrorToUI("API_KEY_MISSING", errorMsg);
-      return `오류: ${errorMsg}`;
-    }
-
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
-
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage =
-        errorData.error?.message ||
-        "자세한 내용은 서비스 워커 콘솔을 확인하세요.";
-      
-      // 에러 타입별 처리
-      let errorType = "API_ERROR";
-      if (response.status === 401) {
-        errorType = "UNAUTHORIZED";
-      } else if (response.status === 403) {
-        errorType = "FORBIDDEN";
-      } else if (response.status === 429) {
-        errorType = "QUOTA_EXCEEDED";
-      }
-      
-      await sendErrorToUI(errorType, `Gemini API 호출 실패: ${errorMessage}`);
-      return `오류: Gemini API 호출에 실패했습니다.\n상태: ${response.status}\n원인: ${errorMessage}`;
-    }
-
-    const responseData = await response.json();
-
-    if (
-      !responseData.candidates ||
-      !responseData.candidates[0]?.content?.parts[0]?.text
-    ) {
-      await sendErrorToUI("API_ERROR", "AI로부터 예상치 못한 형식의 응답을 받았습니다.");
-      return "오류: AI로부터 예상치 못한 형식의 응답을 받았습니다.";
-    }
-
-    return responseData.candidates[0].content.parts[0].text;
-  } catch (error) {
-    await sendErrorToUI("API_ERROR", `AI 분석 중 예외가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
-    return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
-  }
+  return await callGeminiAPIFromService(prompt);
 }
 
 // ▼▼▼ [추가] AI 재학습 및 진화를 위한 함수들 ▼▼▼
@@ -7020,15 +6974,26 @@ async function callGeminiAPI(prompt) {
  */
 async function analyzePerformanceData(targetChannelId = null) {
   try {
+    // Firebase 로드 확인 및 초기화
+    if (!initializeFirebase()) {
+      console.error('[analyzePerformanceData] Firebase가 로드되지 않았습니다.');
+      return { analysis: null, decayContent: null };
+    }
+    
     if (!targetChannelId) {
       // targetChannelId가 없으면 기존 동작 유지 (전체 채널 분석)
       // 하위 호환성을 위해 유지
     }
 
     const userId = CONSTANTS.USER_ID;
-    const kanbanRef = firebase.database().ref(`kanban/${userId}`);
-    const snapshot = await kanbanRef.once("value");
+    // [최적화] 필요한 상태만 가져오기 (performance 데이터가 있는 카드만)
+    // 하지만 Firebase Realtime Database는 부분 쿼리가 제한적이므로
+    // 전체를 가져오되, 필요한 필드만 처리하도록 최적화
+    const startTime = Date.now();
+    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    const snapshot = await get(kanbanRef);
     const allCards = snapshot.val() || {};
+    console.log(`[analyzePerformanceData] Firebase 데이터 로드 완료 (${Date.now() - startTime}ms)`);
     
     const performanceData = [];
     const now = Date.now();
@@ -7358,6 +7323,13 @@ async function updateRenewalBadge(count) {
  */
 async function checkAndUpdateRenewalBadge() {
   try {
+    // Firebase 로드 확인 및 초기화
+    if (!initializeFirebase()) {
+      console.error('[checkAndUpdateRenewalBadge] Firebase가 로드되지 않았습니다.');
+      await updateRenewalBadge(null);
+      return 0;
+    }
+    
     const { decayContent } = await analyzePerformanceData();
     
     if (!decayContent || decayContent.length === 0) {
@@ -7367,7 +7339,8 @@ async function checkAndUpdateRenewalBadge() {
 
     // 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
     const userId = CONSTANTS.USER_ID;
-    const ideasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
+    const ideasRef = ref(firebaseDatabase, `kanban/${userId}/ideas`);
+    const ideasSnap = await get(ideasRef);
     const ideas = ideasSnap.val() || {};
     const existingRenewalCards = Object.values(ideas).filter(
       idea => idea.origin?.type === 'my_post_renewal'
@@ -7469,10 +7442,16 @@ async function runAutomatedRenewalChecks() {
 }
 
 async function updateAllPerformanceMetrics() {
-  const userId = CONSTANTS.USER_ID;
-  const kanbanRef = firebase.database().ref(`kanban/${userId}`);
-  const snapshot = await kanbanRef.once("value");
-  const allCards = snapshot.val() || {};
+  // Firebase 로드 확인 및 초기화
+  if (!initializeFirebase()) {
+    console.error('[updateAllPerformanceMetrics] Firebase가 로드되지 않았습니다.');
+    return;
+  }
+  
+    const userId = CONSTANTS.USER_ID;
+    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    const snapshot = await get(kanbanRef);
+    const allCards = snapshot.val() || {};
 
   // [최적화] 마지막 업데이트로부터 경과 시간 체크 (API Quota 절약)
   const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6시간 (밀리초)
@@ -7567,6 +7546,12 @@ async function updateAllPerformanceMetrics() {
  * @param {object} contentInfo - { id, path, url }
  */
 async function updateSinglePerformanceMetric(contentInfo) {
+  // Firebase 로드 확인 및 초기화
+  if (!initializeFirebase()) {
+    console.error('[updateSinglePerformanceMetric] Firebase가 로드되지 않았습니다.');
+    return;
+  }
+  
   const startTime = Date.now();
   const userId = CONSTANTS.USER_ID;
   
