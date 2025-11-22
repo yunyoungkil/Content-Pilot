@@ -7689,15 +7689,101 @@ async function updateSinglePerformanceMetric(contentInfo) {
     // 🚨 [핵심 수정] 수익 데이터 우선순위 결정 로직
     // GA4 수익 데이터가 있으면(0보다 크면) 그것을 사용하고, 없으면 기존 AdSense API 값을 사용
     // AdSense API는 개별 URL 채널 설정이 없으면 0을 반환하는 경우가 많기 때문입니다.
-    const finalEarnings = (analyticsResult.gaEarnings && analyticsResult.gaEarnings > 0)
-      ? analyticsResult.gaEarnings
-      : (adsenseResult.estimatedEarnings || 0);
+    const gaEarnings = analyticsResult.gaEarnings || 0;
+    const adsenseEarnings = adsenseResult.estimatedEarnings || 0;
+    
+    // [신규] 데이터 불일치 감지 및 신뢰도 점수 계산
+    let dataWarning = null;
+    let dataConfidenceScore = 1.0; // 1.0 = 완전 신뢰, 0.0 = 신뢰 불가
+    let finalEarnings;
+    
+    // 두 값이 모두 0보다 큰 경우에만 불일치 검사
+    if (gaEarnings > 0 && adsenseEarnings > 0) {
+      const largerValue = Math.max(gaEarnings, adsenseEarnings);
+      const smallerValue = Math.min(gaEarnings, adsenseEarnings);
+      const difference = largerValue - smallerValue;
+      const differencePercent = (difference / largerValue) * 100;
+      
+      // 20% 이상 차이가 나면 경고
+      if (differencePercent >= 20) {
+        dataWarning = {
+          type: "EARNINGS_MISMATCH",
+          message: `소스 간 데이터 불일치: GA4 $${gaEarnings.toFixed(2)} vs AdSense $${adsenseEarnings.toFixed(2)}`,
+          gaValue: gaEarnings,
+          adsenseValue: adsenseEarnings,
+          differencePercent: differencePercent.toFixed(1)
+        };
+        
+        // 신뢰도 점수 계산: 차이가 클수록 낮은 점수
+        // 20% 차이 = 0.8점, 50% 차이 = 0.5점, 100% 차이 = 0.0점
+        dataConfidenceScore = Math.max(0, 1 - (differencePercent / 100));
+        
+        // [보수적 선택] 더 낮은 값을 사용 (신뢰도 향상)
+        finalEarnings = smallerValue;
+        console.warn(`[성과 지표] 수익 데이터 불일치 감지 (${differencePercent.toFixed(1)}% 차이): GA4 $${gaEarnings.toFixed(2)} vs AdSense $${adsenseEarnings.toFixed(2)} → 보수적 값 선택: $${finalEarnings.toFixed(2)}`);
+      } else {
+        // 차이가 20% 미만이면 GA4 값 사용 (기존 로직)
+        finalEarnings = gaEarnings;
+        // 신뢰도 점수: 차이가 작을수록 높은 점수
+        dataConfidenceScore = 1 - (differencePercent / 100) * 0.2; // 최대 0.2점 감소
+      }
+    } else if (gaEarnings > 0) {
+      // GA4만 있는 경우
+      finalEarnings = gaEarnings;
+      dataConfidenceScore = 0.9; // 단일 소스이므로 약간 낮은 신뢰도
+    } else if (adsenseEarnings > 0) {
+      // AdSense만 있는 경우
+      finalEarnings = adsenseEarnings;
+      dataConfidenceScore = 0.9; // 단일 소스이므로 약간 낮은 신뢰도
+    } else {
+      // 둘 다 없는 경우
+      finalEarnings = 0;
+      dataConfidenceScore = 0.5; // 데이터 없음
+    }
     
     // [수정 요청 1] 페이지뷰 하이브리드 로직 추가 (수익 로직 참고)
     // GA4 페이지뷰 데이터가 있으면(0보다 크면) 그것을 사용하고, 없으면 AdSense API 값을 사용
-    const finalPageviews = (analyticsResult.pageviews && analyticsResult.pageviews > 0)
-      ? analyticsResult.pageviews
-      : (adsenseResult.pageViews || 0); // AdSense는 pageViews (대문자 V)
+    const gaPageviews = analyticsResult.pageviews || 0;
+    const adsensePageviews = adsenseResult.pageViews || 0; // AdSense는 pageViews (대문자 V)
+    
+    // 페이지뷰도 동일한 불일치 검사 적용
+    let finalPageviews;
+    if (gaPageviews > 0 && adsensePageviews > 0) {
+      const largerValue = Math.max(gaPageviews, adsensePageviews);
+      const smallerValue = Math.min(gaPageviews, adsensePageviews);
+      const difference = largerValue - smallerValue;
+      const differencePercent = (difference / largerValue) * 100;
+      
+      if (differencePercent >= 20) {
+        // 페이지뷰 불일치도 경고에 추가
+        if (!dataWarning) {
+          dataWarning = { type: "MULTIPLE_MISMATCH", mismatches: [] };
+        }
+        if (dataWarning.type === "EARNINGS_MISMATCH") {
+          // 수익 불일치가 이미 있으면 여러 불일치로 변환
+          const existingWarning = { ...dataWarning };
+          dataWarning = {
+            type: "MULTIPLE_MISMATCH",
+            mismatches: [
+              { metric: "수익", gaValue: existingWarning.gaValue, adsenseValue: existingWarning.adsenseValue, differencePercent: existingWarning.differencePercent },
+              { metric: "페이지뷰", gaValue: gaPageviews, adsenseValue: adsensePageviews, differencePercent: differencePercent.toFixed(1) }
+            ]
+          };
+        } else {
+          dataWarning.mismatches.push({ metric: "페이지뷰", gaValue: gaPageviews, adsenseValue: adsensePageviews, differencePercent: differencePercent.toFixed(1) });
+        }
+        
+        // 보수적 값 선택
+        finalPageviews = smallerValue;
+        console.warn(`[성과 지표] 페이지뷰 데이터 불일치 감지 (${differencePercent.toFixed(1)}% 차이): GA4 ${gaPageviews} vs AdSense ${adsensePageviews} → 보수적 값 선택: ${finalPageviews}`);
+      } else {
+        finalPageviews = gaPageviews;
+      }
+    } else if (gaPageviews > 0) {
+      finalPageviews = gaPageviews;
+    } else {
+      finalPageviews = adsensePageviews;
+    }
     
 
     const performanceData = {
@@ -7720,6 +7806,10 @@ async function updateSinglePerformanceMetric(contentInfo) {
       landingPages: analyticsResult.landingPages || null,
       events: analyticsResult.events || null,
       topSearchTerms: analyticsResult.topSearchTerms || null,
+      
+      // [신규] 데이터 신뢰도 및 경고 정보
+      dataWarning: dataWarning,
+      dataConfidenceScore: dataConfidenceScore,
       
       lastUpdatedAt: Date.now(),
       collectionDuration: Date.now() - startTime,

@@ -411,22 +411,58 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     };
     
     // [수정] 콜백에서 url과 altText 두 가지를 받음
-    openThumbnailMaker(draftData, (dataUrl, altText) => {
-      const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
-      if (editorIframe && editorIframe.contentWindow) {
-        editorIframe.contentWindow.postMessage({
-          action: "insert-image",
-          data: { 
-            url: dataUrl,
-            alt: altText || draftData.seoTitle || "썸네일 이미지" // [핵심] 에디터로 Alt 텍스트 전달
+    openThumbnailMaker(
+      draftData, 
+      // 1. [onInsert] 본문 삽입 콜백
+      (dataUrl, altText) => {
+        const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage({
+            action: "insert-image",
+            data: { 
+              url: dataUrl,
+              alt: altText || draftData.seoTitle || "썸네일 이미지" // [핵심] 에디터로 Alt 텍스트 전달
+            }
+          }, "*");
+          showToast("✅ 썸네일이 본문에 삽입되었습니다!");
+        } else {
+          console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
+          showToast("❌ 에디터를 찾을 수 없습니다.");
+        }
+      },
+      // 2. [onSave] 자동 저장 콜백 (신규 추가)
+      (newThumbnailInfo) => {
+        // 메모리 업데이트
+        if (!ideaData.publishInfo) ideaData.publishInfo = {};
+        ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+
+        // Firebase 업데이트 (중첩 객체로 전달 - 점(.) 사용 안 함)
+        // 기존 publishInfo를 유지하면서 thumbnailInfo만 업데이트
+        const publishInfoUpdates = {
+          ...(ideaData.publishInfo || {}), // 기존 publishInfo 필드 유지
+          thumbnailInfo: newThumbnailInfo
+        };
+        
+        chrome.runtime.sendMessage({
+          action: "update_kanban_card",
+          data: {
+            cardId: ideaData.id,
+            status: ideaData.status || "ideas",
+            updates: {
+              publishInfo: publishInfoUpdates
+            }
           }
-        }, "*");
-        showToast("✅ 썸네일이 본문에 삽입되었습니다!");
-      } else {
-        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
-        showToast("❌ 에디터를 찾을 수 없습니다.");
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("[Thumbnail] 저장 오류:", chrome.runtime.lastError);
+          } else if (response && response.success) {
+            console.log("[Thumbnail] 작업 상태 자동 저장됨:", newThumbnailInfo);
+          } else {
+            console.error("[Thumbnail] 저장 실패:", response?.error);
+          }
+        });
       }
-    });
+    );
   };
 }
 

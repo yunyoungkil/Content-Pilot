@@ -388,6 +388,30 @@ function createPerformanceCard(item, index) {
     ? 'border: 2px solid #FFA500; box-shadow: 0 0 8px rgba(255, 165, 0, 0.3);'
     : '';
   
+  // [신규] 데이터 불일치 경고 표시
+  const hasDataWarning = perf.dataWarning && perf.dataWarning !== null;
+  let warningBadge = '';
+  let warningTooltip = '';
+  
+  if (hasDataWarning) {
+    if (perf.dataWarning.type === "EARNINGS_MISMATCH") {
+      warningTooltip = perf.dataWarning.message || `소스 간 데이터 불일치: GA4 $${perf.dataWarning.gaValue?.toFixed(2) || 'N/A'} vs AdSense $${perf.dataWarning.adsenseValue?.toFixed(2) || 'N/A'}`;
+      warningBadge = `<span class="data-warning-badge" style="background: #FF6B6B; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: help;" title="${warningTooltip}">⚠️ 데이터 불일치</span>`;
+    } else if (perf.dataWarning.type === "MULTIPLE_MISMATCH") {
+      const mismatchMessages = perf.dataWarning.mismatches?.map(m => 
+        `${m.metric}: GA4 ${m.gaValue} vs AdSense ${m.adsenseValue} (${m.differencePercent}% 차이)`
+      ).join(', ') || '여러 지표에서 데이터 불일치';
+      warningTooltip = `소스 간 데이터 불일치: ${mismatchMessages}`;
+      warningBadge = `<span class="data-warning-badge" style="background: #FF6B6B; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: help;" title="${warningTooltip}">⚠️ 데이터 불일치</span>`;
+    }
+  }
+  
+  // 신뢰도 점수 표시 (낮은 경우에만)
+  const confidenceScore = perf.dataConfidenceScore !== undefined ? perf.dataConfidenceScore : 1.0;
+  const confidenceBadge = confidenceScore < 0.8 
+    ? `<span class="confidence-badge" style="background: #FFA500; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: help;" title="데이터 신뢰도: ${(confidenceScore * 100).toFixed(0)}%">📊 신뢰도 ${(confidenceScore * 100).toFixed(0)}%</span>`
+    : '';
+  
   // 소스 아이콘 처리
   let sourceIcon = "🌐";
   if (topSource.includes("google")) sourceIcon = "🇬";
@@ -401,8 +425,10 @@ function createPerformanceCard(item, index) {
       <div class="perf-card-content">
         <div class="perf-card-header">
           <h3 class="perf-card-title">${item.title}</h3>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
             ${collectingBadge}
+            ${warningBadge}
+            ${confidenceBadge}
             <span class="source-badge" title="주력 유입 경로: ${topSource}">${sourceIcon} ${topSource.split('/')[0]}</span>
             <a href="${item.publishedUrl}" target="_blank" class="perf-card-link">🔗</a>
           </div>

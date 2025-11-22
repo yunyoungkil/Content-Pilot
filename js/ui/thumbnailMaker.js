@@ -5,14 +5,21 @@ import { showToast } from "../utils.js";
 /**
  * 썸네일 제작 모달을 엽니다.
  * @param {Object} draftData - 초안 생성 시 확보된 데이터 (thumbnailInfo 포함)
- * @param {Function} onInsert - '본문에 삽입' 클릭 시 실행할 콜백 (dataUrl 전달)
+ * @param {Function} onInsert - '본문에 삽입' 클릭 시 실행할 콜백 (dataUrl, altText 전달)
+ * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
  */
-export function openThumbnailMaker(draftData, onInsert) {
+export function openThumbnailMaker(draftData, onInsert, onSave) {
   // 1. 기존 데이터에서 썸네일 정보 추출 (없으면 기본값)
   const thumbInfo = draftData.thumbnailInfo || {
     thumbnailText: draftData.seoTitle || "제목을 입력하세요",
     thumbnailPromptEn: "Abstract modern background, minimalistic, professional, 4k, soft lighting",
-    thumbnailPromptKo: "심플하고 모던한 배경"
+    thumbnailPromptKo: "심플하고 모던한 배경",
+    // [신규] 저장된 스타일 정보가 있으면 불러오기
+    fontFamily: "'Pretendard', sans-serif",
+    textColor: "auto",
+    ratio: "16:9",
+    subtitle: "",
+    bgImage: null // Base64 이미지 데이터
   };
 
   console.log("[ThumbnailMaker] 초기화 데이터:", thumbInfo);
@@ -41,10 +48,10 @@ export function openThumbnailMaker(draftData, onInsert) {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
           <label style="font-size:11px;color:#888;white-space:nowrap;">비율</label>
           <select id="tm-ratio" style="flex:1;padding:6px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
-            <option value="16:9">🖥️ 유튜브 (16:9)</option>
-            <option value="1:1">🟦 인스타 (1:1)</option>
-            <option value="9:16">📱 쇼츠/릴스 (9:16)</option>
-            <option value="4:3">📄 블로그 (4:3)</option>
+            <option value="16:9" ${thumbInfo.ratio === "16:9" ? "selected" : ""}>🖥️ 유튜브 (16:9)</option>
+            <option value="1:1" ${thumbInfo.ratio === "1:1" ? "selected" : ""}>🟦 인스타 (1:1)</option>
+            <option value="9:16" ${thumbInfo.ratio === "9:16" ? "selected" : ""}>📱 쇼츠/릴스 (9:16)</option>
+            <option value="4:3" ${thumbInfo.ratio === "4:3" ? "selected" : ""}>📄 블로그 (4:3)</option>
           </select>
         </div>
         
@@ -55,27 +62,27 @@ export function openThumbnailMaker(draftData, onInsert) {
         
         <div>
           <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">서브 타이틀 (선택)</label>
-          <input id="tm-subtitle" type="text" placeholder="부제목을 입력하세요" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
+          <input id="tm-subtitle" type="text" value="${(thumbInfo.subtitle || "").replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" placeholder="부제목을 입력하세요" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
         </div>
 
         <div style="display:flex;gap:10px;">
           <div style="flex:1;">
             <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글꼴 (Font)</label>
             <select id="tm-font-family" style="width:100%;padding:8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
-              <option value="'Pretendard', sans-serif">깔끔한 고딕 (기본)</option>
-              <option value="'Noto Serif KR', serif">진지한 명조</option>
-              <option value="'Black Han Sans', sans-serif">강력한 제목용</option>
-              <option value="'Nanum Pen Script', cursive">친근한 손글씨</option>
+              <option value="'Pretendard', sans-serif" ${thumbInfo.fontFamily === "'Pretendard', sans-serif" || !thumbInfo.fontFamily ? "selected" : ""}>깔끔한 고딕 (기본)</option>
+              <option value="'Noto Serif KR', serif" ${thumbInfo.fontFamily === "'Noto Serif KR', serif" ? "selected" : ""}>진지한 명조</option>
+              <option value="'Black Han Sans', sans-serif" ${thumbInfo.fontFamily === "'Black Han Sans', sans-serif" ? "selected" : ""}>강력한 제목용</option>
+              <option value="'Nanum Pen Script', cursive" ${thumbInfo.fontFamily === "'Nanum Pen Script', cursive" ? "selected" : ""}>친근한 손글씨</option>
             </select>
           </div>
           <div style="flex:1;">
             <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글자 색상</label>
             <select id="tm-text-color" style="width:100%;padding:8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
-              <option value="auto">✨ 자동 (가독성)</option>
-              <option value="#FFFFFF">⚪ 흰색</option>
-              <option value="#000000">⚫ 검은색</option>
-              <option value="#FFD700">🟡 노란색 (강조)</option>
-              <option value="#FF4444">🔴 빨간색 (경고)</option>
+              <option value="auto" ${thumbInfo.textColor === "auto" || !thumbInfo.textColor ? "selected" : ""}>✨ 자동 (가독성)</option>
+              <option value="#FFFFFF" ${thumbInfo.textColor === "#FFFFFF" ? "selected" : ""}>⚪ 흰색</option>
+              <option value="#000000" ${thumbInfo.textColor === "#000000" ? "selected" : ""}>⚫ 검은색</option>
+              <option value="#FFD700" ${thumbInfo.textColor === "#FFD700" ? "selected" : ""}>🟡 노란색 (강조)</option>
+              <option value="#FF4444" ${thumbInfo.textColor === "#FF4444" ? "selected" : ""}>🔴 빨간색 (경고)</option>
             </select>
           </div>
         </div>
@@ -159,7 +166,25 @@ export function openThumbnailMaker(draftData, onInsert) {
   // 3. 캔버스 및 상태 초기화
   const canvas = modal.querySelector("#tm-preview");
   const ctx = canvas.getContext("2d");
-  let currentBgImage = null; // 생성된 배경 이미지 데이터 (Base64)
+  // [신규] 저장된 배경 이미지가 있으면 불러오기
+  let currentBgImage = thumbInfo.bgImage || null;
+  
+  // [신규] 저장된 비율에 맞게 캔버스 크기 조정
+  const savedRatio = thumbInfo.ratio || "16:9";
+  const [w, h] = savedRatio.split(":").map(Number);
+  if (w === 16 && h === 9) { 
+    canvas.width = 1280; 
+    canvas.height = 720; 
+  } else if (w === 1 && h === 1) { 
+    canvas.width = 1080; 
+    canvas.height = 1080; 
+  } else if (w === 9 && h === 16) { 
+    canvas.width = 720; 
+    canvas.height = 1280; 
+  } else if (w === 4 && h === 3) { 
+    canvas.width = 1024; 
+    canvas.height = 768; 
+  }
   
   // [실행 취소/다시 실행] 상태 히스토리 관리
   const history = {
@@ -168,7 +193,32 @@ export function openThumbnailMaker(draftData, onInsert) {
     maxHistory: 20 // 최대 20개 상태 저장
   };
   
-  // 상태 저장 함수
+  // [신규] 자동 저장 함수 (디바운스 적용)
+  let saveTimeout;
+  const triggerAutoSave = () => {
+    if (!onSave) return; // onSave 콜백이 없으면 저장하지 않음
+    
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      const currentInfo = {
+        thumbnailText: document.getElementById("tm-title").value,
+        subtitle: document.getElementById("tm-subtitle")?.value || "",
+        thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
+        thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
+        // 스타일 정보 저장
+        fontFamily: document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif",
+        textColor: document.getElementById("tm-text-color")?.value || "auto",
+        ratio: document.getElementById("tm-ratio")?.value || "16:9",
+        // 배경 이미지도 저장 (Base64)
+        bgImage: currentBgImage
+      };
+      
+      onSave(currentInfo);
+      console.log("[ThumbnailMaker] 자동 저장 완료:", currentInfo);
+    }, 500); // 0.5초 뒤 저장
+  };
+  
+  // 상태 저장 함수 (Undo/Redo용)
   const saveState = () => {
     // 복원 중이면 상태 저장하지 않음
     if (isRestoring) return;
@@ -198,6 +248,9 @@ export function openThumbnailMaker(draftData, onInsert) {
     
     // Undo/Redo 버튼 상태 업데이트
     updateUndoRedoButtons();
+    
+    // 자동 저장도 트리거
+    triggerAutoSave();
   };
   
   // 상태 복원 함수 (상태 저장 없이 복원만 수행)
@@ -393,7 +446,7 @@ export function openThumbnailMaker(draftData, onInsert) {
     reader.onload = (event) => {
       currentBgImage = event.target.result; // Base64 데이터
       updatePreview(); // 캔버스 다시 그리기
-      saveState(); // 업로드 후 상태 저장
+      saveState(); // 업로드 후 상태 저장 (내부에서 triggerAutoSave 호출)
       showToast("✅ 배경 이미지가 업로드되었습니다!");
     };
     reader.onerror = () => {
@@ -497,23 +550,14 @@ export function openThumbnailMaker(draftData, onInsert) {
   });
   
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
-  let titleTimeout;
   document.getElementById("tm-title").addEventListener("input", () => {
     updatePreview();
-    // 디바운싱: 입력이 끝난 후 상태 저장 (500ms 후)
-    clearTimeout(titleTimeout);
-    titleTimeout = setTimeout(() => {
-      saveState();
-    }, 500);
+    saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)
   });
   
-  let subtitleTimeout;
   document.getElementById("tm-subtitle")?.addEventListener("input", () => {
     updatePreview();
-    clearTimeout(subtitleTimeout);
-    subtitleTimeout = setTimeout(() => {
-      saveState();
-    }, 500);
+    saveState();
   });
   
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
