@@ -122,8 +122,23 @@ const renderHelpers = {
       fontFamily = styles.fontFamily || "Arial";
     }
 
-    // 2. 폰트 설정
-    ctx.font = `${fontWeight} ${actualFontSize}px ${fontFamily}`;
+    // 2. [텍스트 오버플로우 방지] 텍스트가 캔버스를 벗어나지 않도록 폰트 크기 조정
+    let finalFontSize = actualFontSize;
+    const maxWidth = canvasWidth * 0.9; // 캔버스 너비의 90%를 최대 너비로 설정
+    const padding = canvasWidth * 0.05; // 좌우 여백 5%
+    
+    // 초기 폰트 설정으로 텍스트 너비 측정
+    ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
+    let textWidth = ctx.measureText(text).width;
+    
+    // 텍스트가 캔버스를 벗어나면 폰트 크기 줄이기
+    if (textWidth > maxWidth) {
+      const ratio = maxWidth / textWidth;
+      finalFontSize = Math.floor(finalFontSize * ratio * 0.95); // 5% 여유 공간 추가
+      ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
+      textWidth = ctx.measureText(text).width;
+      console.log(`[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (텍스트 너비: ${textWidth.toFixed(0)}px, 최대: ${maxWidth.toFixed(0)}px)`);
+    }
 
     // 3. 정렬 및 기준선 설정 (JSON의 align, baseline 완벽 적용)
     ctx.textAlign = styles.align || "left";
@@ -141,8 +156,8 @@ const renderHelpers = {
         ctx, 
         actualX, 
         actualY, 
-        ctx.measureText(text).width, 
-        actualFontSize
+        textWidth, 
+        finalFontSize
       );
       if (adjustedColor) {
         textColor = adjustedColor;

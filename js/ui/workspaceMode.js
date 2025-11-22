@@ -373,6 +373,63 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 // 2. 헬퍼 함수들 (반드시 최상위 레벨에 있어야 함)
 // -----------------------------------------------------------------------------
 
+/**
+ * 썸네일 만들기 버튼을 렌더링하는 헬퍼 함수
+ * 초안이 있거나 썸네일 정보가 저장되어 있으면 버튼을 표시
+ */
+function renderThumbnailButton(workspaceEl, ideaData) {
+  const buttonContainer = workspaceEl.querySelector("#workspace-title-header")?.nextElementSibling;
+  // 이미 버튼이 있으면 중단
+  if (!buttonContainer || buttonContainer.querySelector("#btn-create-thumbnail")) return;
+
+  // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
+  // 단, publishInfo에 썸네일 정보가 저장되어 있다면 표시 가능
+  const hasDraft = !!ideaData.draftContent || !!ideaData.workspace?.draft;
+  const hasThumbInfo = !!ideaData.publishInfo?.thumbnailInfo;
+  
+  if (!hasDraft && !hasThumbInfo) return;
+
+  const thumbBtn = document.createElement("button");
+  thumbBtn.id = "btn-create-thumbnail";
+  thumbBtn.style.cssText = "padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;";
+  thumbBtn.textContent = "🎨 썸네일 만들기";
+  
+  // '초안 삭제' 버튼이 있다면 그 앞에, 없으면 컨테이너 끝에 추가
+  const deleteBtn = buttonContainer.querySelector("#delete-draft-in-workspace");
+  if (deleteBtn) {
+    buttonContainer.insertBefore(thumbBtn, deleteBtn);
+  } else {
+    buttonContainer.appendChild(thumbBtn);
+  }
+
+  // 이벤트 연결
+  thumbBtn.onclick = () => {
+    const draftData = {
+      seoTitle: ideaData.seoTitle || ideaData.title,
+      // 저장된 썸네일 정보가 있으면 우선 사용
+      thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null
+    };
+    
+    // [수정] 콜백에서 url과 altText 두 가지를 받음
+    openThumbnailMaker(draftData, (dataUrl, altText) => {
+      const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+      if (editorIframe && editorIframe.contentWindow) {
+        editorIframe.contentWindow.postMessage({
+          action: "insert-image",
+          data: { 
+            url: dataUrl,
+            alt: altText || draftData.seoTitle || "썸네일 이미지" // [핵심] 에디터로 Alt 텍스트 전달
+          }
+        }, "*");
+        showToast("✅ 썸네일이 본문에 삽입되었습니다!");
+      } else {
+        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
+        showToast("❌ 에디터를 찾을 수 없습니다.");
+      }
+    });
+  };
+}
+
 function createScrapCard(scrap, isLinked) {
   const textContent = scrap.text || "(내용 없음)";
   const cleanedTitle = textContent.replace(/\s+/g, " ").trim();
@@ -881,6 +938,9 @@ export function renderWorkspace(container, ideaData) {
   const workspaceEl = container.querySelector(".workspace-container");
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
   
+  // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
+  renderThumbnailButton(workspaceEl, ideaData);
+  
   if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
       setTimeout(() => showPublishInfo(container.querySelector(".workspace-container"), ideaData.publishInfo?.permalink, ideaData.publishInfo?.tags, ideaData.seoTitle, ideaData), 200);
   }
@@ -1383,37 +1443,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             buttonContainer.appendChild(deleteBtn);
                         }
                         
-                        // 썸네일 만들기 버튼 동적 추가
-                        if (buttonContainer && !buttonContainer.querySelector("#btn-create-thumbnail")) {
-                            const thumbBtn = document.createElement("button");
-                            thumbBtn.id = "btn-create-thumbnail";
-                            thumbBtn.style.cssText = "padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s;";
-                            thumbBtn.textContent = "🎨 썸네일 만들기";
-                            buttonContainer.appendChild(thumbBtn);
-                            
-                            // 썸네일 만들기 버튼 클릭 이벤트
-                            thumbBtn.onclick = () => {
-                                const draftData = {
-                                    seoTitle: response.seoTitle || ideaData.seoTitle || ideaData.title,
-                                    thumbnailInfo: response.thumbnailInfo || ideaData.publishInfo?.thumbnailInfo
-                                };
-                                
-                                openThumbnailMaker(draftData, (dataUrl) => {
-                                    // [콜백] 생성된 이미지를 에디터에 삽입
-                                    const editorIframe = document.querySelector("#quill-editor-iframe");
-                                    if (editorIframe && editorIframe.contentWindow) {
-                                        editorIframe.contentWindow.postMessage({
-                                            action: "insert-image",
-                                            data: { url: dataUrl }
-                                        }, "*");
-                                        showToast("✅ 썸네일이 본문에 삽입되었습니다!");
-                                    } else {
-                                        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
-                                        showToast("❌ 에디터를 찾을 수 없습니다.");
-                                    }
-                                });
-                            };
-                        }
+                        // [수정] 중복 코드를 제거하고 헬퍼 함수 호출
+                        renderThumbnailButton(workspaceEl, ideaData);
                         
                         showToast("✅ AI 초안이 생성되었습니다!");
                     } else {

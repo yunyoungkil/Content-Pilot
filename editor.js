@@ -432,14 +432,23 @@ function initializeEditor() {
           quillEditor.insertEmbed(imageRange.index, "image", data.url);
           quillEditor.setSelection(imageRange.index + 1);
           
-          // 삽입된 이미지에 referrerpolicy 설정 (네이버 블로그 이미지 403 에러 방지)
+          // 이미지 속성 설정 (비동기 처리)
           setTimeout(() => {
             try {
+              // 방금 삽입된 이미지를 찾음 (src가 일치하는)
               const insertedImg = quillEditor.root.querySelector(`img[src="${data.url}"]`);
               if (insertedImg) {
+                // 1. [SEO 핵심] Alt 텍스트 및 Title 설정
+                if (data.alt) {
+                    insertedImg.setAttribute("alt", data.alt);
+                    insertedImg.setAttribute("title", data.alt); // 툴팁용
+                }
+
+                // 2. (기존 코드) 외부 이미지 정책 설정
                 insertedImg.setAttribute("referrerpolicy", "no-referrer");
                 insertedImg.setAttribute("crossorigin", "anonymous");
-                // 네이버 블로그 이미지의 경우 원본 URL로 변경 시도
+                
+                // 3. (기존 코드) 네이버 블로그 호환 처리
                 if (data.url.includes("postfiles.pstatic.net")) {
                   // type=w966 같은 파라미터 제거하여 원본 URL 시도
                   const originalUrl = data.url.split("?")[0];
@@ -447,6 +456,9 @@ function initializeEditor() {
                     insertedImg.src = originalUrl;
                   }
                 }
+                
+                // [디버깅] 설정 확인
+                console.log("[Editor] 이미지 삽입 완료:", { src: data.url, alt: insertedImg.getAttribute('alt') });
               }
             } catch (e) {
               console.log("이미지 속성 설정 실패:", e);
