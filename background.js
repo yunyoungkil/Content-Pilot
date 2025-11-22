@@ -6322,8 +6322,39 @@ async function processRssItem(itemText, sourceId, channelType) {
 
 async function fetchRssFeed(url, channelType) {
   try {
-    const response = await fetch(url);
+    const userId = CONSTANTS.USER_ID;
+    const sourceId = btoa(url).replace(/=/g, "");
+    
+    // [최적화] Firebase에서 저장된 ETag와 Last-Modified 가져오기
+    const metaRef = ref(firebaseDatabase, `channel_meta/${userId}/${sourceId}`);
+    const metaSnap = await get(metaRef);
+    const existingMeta = metaSnap.val() || {};
+    const lastEtag = existingMeta.lastEtag || null;
+    const lastModified = existingMeta.lastModified || null;
+    
+    // [최적화] 조건부 요청 헤더 설정
+    const headers = {};
+    if (lastEtag) {
+      headers['If-None-Match'] = lastEtag;
+    }
+    if (lastModified) {
+      headers['If-Modified-Since'] = lastModified;
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    // [최적화] 304 Not Modified 응답 처리
+    if (response.status === 304) {
+      console.log(`⚡ [캐시] ${url} - 변경되지 않음 (304), 캐시된 데이터 사용 (API 호출 생략)`);
+      return; // 파싱 로직 건너뛰기
+    }
+    
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
+    // [최적화] 새로운 ETag와 Last-Modified 저장
+    const newEtag = response.headers.get('ETag');
+    const newLastModified = response.headers.get('Last-Modified');
+    
     const text = await response.text();
 
     let channelTitle = null;
@@ -6353,14 +6384,25 @@ async function fetchRssFeed(url, channelType) {
     }
 
     const finalTitle = channelTitle || url;
-    const sourceId = btoa(url).replace(/=/g, "");
-    const userId = CONSTANTS.USER_ID;
-    firebase.database().ref(`channel_meta/${userId}/${sourceId}`).set({
+    
+    // [최적화] ETag와 Last-Modified를 포함하여 메타데이터 저장 (기존 데이터 병합)
+    const metaData = {
+      ...existingMeta, // 기존 메타데이터 유지
       title: finalTitle,
       type: "blog",
       source: url,
       fetchedAt: Date.now(),
-    });
+    };
+    
+    // ETag와 Last-Modified가 있으면 저장
+    if (newEtag) {
+      metaData.lastEtag = newEtag;
+    }
+    if (newLastModified) {
+      metaData.lastModified = newLastModified;
+    }
+    
+    await set(metaRef, metaData);
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
 
