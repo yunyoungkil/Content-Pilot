@@ -358,9 +358,33 @@ const renderHelpers = {
         img.crossOrigin = "anonymous";
         
         img.onload = () => {
-          // 이미지를 캔버스 전체에 맞춰 그리기 (cover 방식)
-          ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
-          console.log(`[Background Render] ✅ 이미지 배경 렌더링 완료: ${canvasWidth}x${canvasHeight}`);
+          // 이미지 비율을 유지하면서 캔버스를 채우기 (cover 방식)
+          const imgAspect = img.width / img.height;
+          const canvasAspect = canvasWidth / canvasHeight;
+          
+          let drawWidth, drawHeight, drawX, drawY;
+          
+          if (imgAspect > canvasAspect) {
+            // 이미지가 더 넓음 - 높이에 맞춤
+            drawHeight = canvasHeight;
+            drawWidth = canvasHeight * imgAspect;
+            drawX = (canvasWidth - drawWidth) / 2;
+            drawY = 0;
+          } else {
+            // 이미지가 더 높음 - 너비에 맞춤
+            drawWidth = canvasWidth;
+            drawHeight = canvasWidth / imgAspect;
+            drawX = 0;
+            drawY = (canvasHeight - drawHeight) / 2;
+          }
+          
+          // 배경을 먼저 채우기 (이미지가 채우지 못하는 부분)
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          
+          // 이미지를 비율 유지하면서 그리기
+          ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+          console.log(`[Background Render] ✅ 이미지 배경 렌더링 완료: ${canvasWidth}x${canvasHeight} (원본: ${img.width}x${img.height}, 비율 유지)`);
           resolve();
         };
         
@@ -485,13 +509,47 @@ const renderHelpers = {
       ctx.save();
 
       // [FR-R3] Base64 이미지 데이터가 있으면 실제 렌더링
-      if (layer.src && layer.src.startsWith("data:image")) {
+      if (layer.src && (layer.src.startsWith("data:image") || layer.src.startsWith("http://") || layer.src.startsWith("https://"))) {
         const img = new Image();
+        img.crossOrigin = "anonymous";
         img.onload = () => {
-          ctx.drawImage(img, actualX, actualY, actualW, actualH);
+          // 이미지 비율을 유지하면서 그리기
+          const imgAspect = img.width / img.height;
+          const targetAspect = actualW / actualH;
+          
+          let drawWidth, drawHeight, drawX, drawY;
+          
+          if (imgAspect > targetAspect) {
+            // 이미지가 더 넓음 - 높이에 맞춤
+            drawHeight = actualH;
+            drawWidth = actualH * imgAspect;
+            drawX = actualX + (actualW - drawWidth) / 2;
+            drawY = actualY;
+          } else {
+            // 이미지가 더 높음 - 너비에 맞춤
+            drawWidth = actualW;
+            drawHeight = actualW / imgAspect;
+            drawX = actualX;
+            drawY = actualY + (actualH - drawHeight) / 2;
+          }
+          
+          // 배경을 먼저 채우기 (이미지가 채우지 못하는 부분)
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(actualX, actualY, actualW, actualH);
+          
+          // 이미지를 비율 유지하면서 그리기
+          ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
           console.log(
-            `[Image Render] ✅ 이미지 로드 성공: ${actualW}x${actualH}`
+            `[Image Render] ✅ 이미지 로드 성공: ${actualW}x${actualH} (원본: ${img.width}x${img.height}, 비율 유지)`
           );
+          ctx.restore();
+          resolve();
+        };
+        img.onerror = (e) => {
+          console.error("[Image Render] ❌ 이미지 로드 실패:", e, layer.src);
+          // 실패 시 기본 배경
+          ctx.fillStyle = "#F0F0F0";
+          ctx.fillRect(actualX, actualY, actualW, actualH);
           ctx.restore();
           resolve();
         };
