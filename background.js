@@ -109,6 +109,7 @@ async function uploadImageToFirebaseStorage(dataUrl, path) {
     
     console.log('[Firebase Storage] 업로드 시작:', path);
     console.log('[Firebase Storage] 파일 크기:', blob.size, 'bytes');
+    console.log('[Firebase Storage] 버킷:', bucket);
     
     // Blob을 Firebase Storage에 업로드
     const uploadResponse = await fetch(uploadUrl, {
@@ -122,7 +123,24 @@ async function uploadImageToFirebaseStorage(dataUrl, path) {
     
     if (!uploadResponse.ok) {
       const errorData = await uploadResponse.json().catch(() => ({}));
-      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorData.error?.message || uploadResponse.statusText}`);
+      const errorMessage = errorData.error?.message || uploadResponse.statusText;
+      
+      // 403 오류인 경우 상세한 오류 정보 로깅
+      if (uploadResponse.status === 403) {
+        console.error('[Firebase Storage] 403 Permission denied 오류 상세:');
+        console.error('[Firebase Storage] - 오류 메시지:', errorMessage);
+        console.error('[Firebase Storage] - 전체 오류 응답:', errorData);
+        console.error('[Firebase Storage] - 업로드 경로:', path);
+        console.error('[Firebase Storage] - 버킷:', bucket);
+        console.error('[Firebase Storage] ⚠️ Firebase Storage 보안 규칙을 확인하세요.');
+        console.error('[Firebase Storage] ⚠️ Google OAuth 토큰이 Firebase Storage에 접근할 수 있는 권한이 있는지 확인하세요.');
+        console.error('[Firebase Storage] 💡 해결 방법:');
+        console.error('[Firebase Storage]    1. Firebase Console > Storage > Rules에서 업로드 권한 확인');
+        console.error('[Firebase Storage]    2. 또는 Firebase Authentication을 사용하여 Firebase ID 토큰 발급');
+        console.error('[Firebase Storage]    3. 현재는 Base64 fallback으로 동작합니다.');
+      }
+      
+      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorMessage}`);
     }
     
     const uploadResult = await uploadResponse.json();
@@ -154,6 +172,12 @@ async function uploadImageToFirebaseStorage(dataUrl, path) {
     return downloadURL;
   } catch (error) {
     console.error('[Firebase Storage] 업로드 실패:', error);
+    // 403 오류인 경우 추가 정보 제공
+    if (error.message.includes('403') || error.message.includes('Permission denied')) {
+      console.error('[Firebase Storage] 💡 403 오류 해결 방법:');
+      console.error('[Firebase Storage]    - Firebase Console에서 Storage 보안 규칙 확인');
+      console.error('[Firebase Storage]    - 현재는 Base64 데이터로 fallback하여 동작합니다.');
+    }
     throw error;
   }
 }
@@ -692,6 +716,11 @@ async function generateAndSendKeywords(data, sender) {
         cardId, // 모달 재현을 위해 cardId, status, title 전달
         status,
         cardTitle: title,
+      }, () => {
+        if (chrome.runtime.lastError) {
+          // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+          console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+        }
       });
     }
   } catch (error) {
@@ -701,6 +730,11 @@ async function generateAndSendKeywords(data, sender) {
         action: "search_queries_recommended",
         success: false,
         error: error.message,
+      }, () => {
+        if (chrome.runtime.lastError) {
+          // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+          console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+        }
       });
     }
   }
@@ -1118,6 +1152,11 @@ chrome.action.onClicked.addListener((tab) => {
   if (tab.id) {
     chrome.tabs.sendMessage(tab.id, {
       action: "open_content_pilot_panel",
+    }, () => {
+      if (chrome.runtime.lastError) {
+        // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+        console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+      }
     });
   }
 });
@@ -1422,7 +1461,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               chrome.tabs.sendMessage(
                 sender.tab.id,
                 { action: "cp_show_preview", data: previewData },
-                { frameId: 0 }
+                { frameId: 0 },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+                    console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+                  }
+                }
               );
             }
           })
@@ -1434,7 +1479,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               chrome.tabs.sendMessage(
                 sender.tab.id,
                 { action: "cp_show_toast", message: "❌ 스크랩 실패" },
-                { frameId: 0 }
+                { frameId: 0 },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+                    console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+                  }
+                }
               );
             }
           });
@@ -1447,7 +1498,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           chrome.tabs.sendMessage(
             sender.tab.id,
             { action: "cp_show_toast", message: "❌ 스크랩 처리 실패" },
-            { frameId: 0 }
+            { frameId: 0 },
+            () => {
+              if (chrome.runtime.lastError) {
+                // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+                console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+              }
+            }
           );
         }
       }
@@ -2385,7 +2442,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           chrome.tabs.query({}, (tabs) => {
             tabs.forEach((tab) => {
               if (tab.id) {
-                chrome.tabs.sendMessage(tab.id, { action: "cp_data_refreshed" }).catch(() => {});
+                chrome.tabs.sendMessage(tab.id, { action: "cp_data_refreshed" }, () => {
+                  if (chrome.runtime.lastError) {
+                    // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+                    console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+                  }
+                });
               }
             });
           });
@@ -3210,8 +3272,10 @@ ${decayContent.map((item, idx) =>
           prompt = "",
           style = "none",
           aspect = "1:1",
-          count = 3,
+          count = 1, // 기본값을 1로 변경 (썸네일 생성 시 1장만)
         } = msg.data || {};
+        
+        console.log(`[AI Image Gen] 요청 받음: count=${count}, prompt 길이=${prompt.length}`);
         // 1. Gemini API 키를 안전하게 가져오기
         const { geminiApiKey } = await chrome.storage.local.get([
           "geminiApiKey",
@@ -4306,7 +4370,12 @@ ${decayContent.map((item, idx) =>
           action: "briefing_progress",
           cardId: cardId,
           progress: progress
-        }).catch(() => {}); // 오류 무시
+        }, () => {
+          if (chrome.runtime.lastError) {
+            // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+            console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+          }
+        });
       }
     };
 
@@ -5136,6 +5205,11 @@ Use a 16:9 aspect ratio with a realistic style. The image should be suitable for
             cardId,
             status,
             cardTitle: title,
+          }, () => {
+            if (chrome.runtime.lastError) {
+              // 수신자가 없거나 탭이 닫힌 경우 조용히 무시
+              console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+            }
           });
         }
       } else {
@@ -6136,7 +6210,14 @@ async function processRssItem(itemText, sourceId, channelType) {
             html: postHtml,
             baseUrl: fullLink,
           },
-          (response) => resolve(response)
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+              resolve({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              resolve(response);
+            }
+          }
         );
       });
 

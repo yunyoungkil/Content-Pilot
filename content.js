@@ -11,6 +11,26 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
   }
 }
 
+// [Permissions Policy Fix] iframe 내부에서 web-share API 사용 방지
+// 브라우저의 "Potential permissions policy violation: web-share is not allowed" 경고 방지
+// iframe 내부에서는 web-share를 사용하지 않도록 명시적으로 체크
+if (window.self !== window.top && typeof navigator !== 'undefined' && navigator.share) {
+  // iframe 내부에서는 web-share를 사용하지 않도록 래퍼 함수로 감싸기
+  try {
+    const originalShare = navigator.share;
+    Object.defineProperty(navigator, 'share', {
+      value: function() {
+        // iframe 내부에서는 web-share를 사용하지 않음
+        return Promise.reject(new DOMException('Web Share API is not allowed in iframes', 'NotAllowedError'));
+      },
+      writable: false,
+      configurable: true
+    });
+  } catch (e) {
+    // 이미 정의된 경우 무시 (조용히 실패)
+  }
+}
+
 import { setupHighlighter } from "./js/core/highlighter.js";
 import { createAndShowPanel, isPanelVisible } from "./js/ui/panel.js";
 import { showRecentScrapPreview } from "./js/ui/preview.js";

@@ -390,10 +390,62 @@ const renderHelpers = {
         
         img.onerror = (e) => {
           console.error("[Background Render] ❌ 이미지 로드 실패:", e);
-          // 실패 시 기본 배경
-          ctx.fillStyle = "#F0F0F0";
-          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-          resolve();
+          
+          // Firebase Storage URL인 경우 CORS 오류일 수 있으므로 Base64로 변환 시도
+          if (imageValue.includes('firebasestorage.googleapis.com')) {
+            console.log("[Background Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...");
+            chrome.runtime.sendMessage({
+              action: "fetch_image_as_base64",
+              url: imageValue
+            }, (response) => {
+              if (response && response.success && response.dataUrl) {
+                // Base64로 변환 성공 - 다시 이미지 로드
+                const img2 = new Image();
+                img2.onload = () => {
+                  const imgAspect = img2.width / img2.height;
+                  const canvasAspect = canvasWidth / canvasHeight;
+                  
+                  let drawWidth, drawHeight, drawX, drawY;
+                  
+                  if (imgAspect > canvasAspect) {
+                    drawHeight = canvasHeight;
+                    drawWidth = canvasHeight * imgAspect;
+                    drawX = (canvasWidth - drawWidth) / 2;
+                    drawY = 0;
+                  } else {
+                    drawWidth = canvasWidth;
+                    drawHeight = canvasWidth / imgAspect;
+                    drawX = 0;
+                    drawY = (canvasHeight - drawHeight) / 2;
+                  }
+                  
+                  ctx.fillStyle = "#000000";
+                  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                  ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
+                  console.log("[Background Render] ✅ Base64 변환 후 이미지 로드 성공");
+                  resolve();
+                };
+                img2.onerror = () => {
+                  console.error("[Background Render] ❌ Base64 변환 후에도 이미지 로드 실패");
+                  ctx.fillStyle = "#F0F0F0";
+                  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                  resolve();
+                };
+                img2.src = response.dataUrl;
+              } else {
+                // Base64 변환 실패 - 기본 배경
+                console.error("[Background Render] ❌ Base64 변환 실패:", response?.error);
+                ctx.fillStyle = "#F0F0F0";
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                resolve();
+              }
+            });
+          } else {
+            // Firebase Storage가 아닌 경우 기본 배경
+            ctx.fillStyle = "#F0F0F0";
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            resolve();
+          }
         };
         
         img.src = imageValue;
@@ -546,27 +598,89 @@ const renderHelpers = {
           resolve();
         };
         img.onerror = (e) => {
-          console.error("[Image Render] ❌ 이미지 로드 실패:", e, layer.src);
-          // 실패 시 기본 배경
-          ctx.fillStyle = "#F0F0F0";
-          ctx.fillRect(actualX, actualY, actualW, actualH);
-          ctx.restore();
-          resolve();
-        };
-        img.onerror = (e) => {
           console.error("[Image Render] ❌ 이미지 로드 실패:", e);
-          // 플레이스홀더 렌더링
-          ctx.fillStyle = "#DDDDDD";
-          ctx.fillRect(actualX, actualY, actualW, actualH);
-          ctx.strokeStyle = "#999999";
-          ctx.strokeRect(actualX, actualY, actualW, actualH);
-          ctx.fillStyle = "#666666";
-          ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
-          ctx.restore();
-          resolve();
+          
+          // Firebase Storage URL인 경우 CORS 오류일 수 있으므로 Base64로 변환 시도
+          if (layer.src && layer.src.includes('firebasestorage.googleapis.com')) {
+            console.log("[Image Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...");
+            chrome.runtime.sendMessage({
+              action: "fetch_image_as_base64",
+              url: layer.src
+            }, (response) => {
+              if (response && response.success && response.dataUrl) {
+                // Base64로 변환 성공 - 다시 이미지 로드
+                const img2 = new Image();
+                img2.onload = () => {
+                  const imgAspect = img2.width / img2.height;
+                  const targetAspect = actualW / actualH;
+                  
+                  let drawWidth, drawHeight, drawX, drawY;
+                  
+                  if (imgAspect > targetAspect) {
+                    drawHeight = actualH;
+                    drawWidth = actualH * imgAspect;
+                    drawX = actualX + (actualW - drawWidth) / 2;
+                    drawY = actualY;
+                  } else {
+                    drawWidth = actualW;
+                    drawHeight = actualW / imgAspect;
+                    drawX = actualX;
+                    drawY = actualY + (actualH - drawHeight) / 2;
+                  }
+                  
+                  ctx.fillStyle = "#000000";
+                  ctx.fillRect(actualX, actualY, actualW, actualH);
+                  ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
+                  console.log("[Image Render] ✅ Base64 변환 후 이미지 로드 성공");
+                  ctx.restore();
+                  resolve();
+                };
+                img2.onerror = () => {
+                  console.error("[Image Render] ❌ Base64 변환 후에도 이미지 로드 실패");
+                  // 플레이스홀더 렌더링
+                  ctx.fillStyle = "#DDDDDD";
+                  ctx.fillRect(actualX, actualY, actualW, actualH);
+                  ctx.strokeStyle = "#999999";
+                  ctx.strokeRect(actualX, actualY, actualW, actualH);
+                  ctx.fillStyle = "#666666";
+                  ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
+                  ctx.textAlign = "center";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
+                  ctx.restore();
+                  resolve();
+                };
+                img2.src = response.dataUrl;
+              } else {
+                // Base64 변환 실패 - 플레이스홀더
+                console.error("[Image Render] ❌ Base64 변환 실패:", response?.error);
+                ctx.fillStyle = "#DDDDDD";
+                ctx.fillRect(actualX, actualY, actualW, actualH);
+                ctx.strokeStyle = "#999999";
+                ctx.strokeRect(actualX, actualY, actualW, actualH);
+                ctx.fillStyle = "#666666";
+                ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
+                ctx.restore();
+                resolve();
+              }
+            });
+          } else {
+            // Firebase Storage가 아닌 경우 플레이스홀더
+            ctx.fillStyle = "#DDDDDD";
+            ctx.fillRect(actualX, actualY, actualW, actualH);
+            ctx.strokeStyle = "#999999";
+            ctx.strokeRect(actualX, actualY, actualW, actualH);
+            ctx.fillStyle = "#666666";
+            ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
+            ctx.restore();
+            resolve();
+          }
         };
         img.src = layer.src;
       } else {
