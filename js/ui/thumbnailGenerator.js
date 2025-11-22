@@ -278,22 +278,26 @@ const renderHelpers = {
    * @param {number} canvasHeight - 캔버스 높이
    */
   drawBackground: (ctx, background, canvasWidth, canvasHeight) => {
-    if (!background) {
-      console.warn("[Background Render] ⚠️ 배경 정보 없음, 흰색으로 대체");
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-      return;
-    }
+    // 모든 경우에 Promise 반환 (비동기 일관성)
+    return new Promise((resolve) => {
+      if (!background) {
+        console.warn("[Background Render] ⚠️ 배경 정보 없음, 흰색으로 대체");
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        resolve();
+        return;
+      }
 
-    console.log(
-      `[Background Render] 배경 타입: ${background.type}, 값: ${background.value}`
-    );
+      console.log(
+        `[Background Render] 배경 타입: ${background.type}, 값: ${background.value}`
+      );
 
-    if (background.type === "solid") {
-      ctx.fillStyle = background.value || "#FFFFFF";
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-      console.log(`[Background Render] ✅ 단색 배경: ${ctx.fillStyle}`);
-    } else if (background.type === "gradient") {
+      if (background.type === "solid") {
+        ctx.fillStyle = background.value || "#FFFFFF";
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        console.log(`[Background Render] ✅ 단색 배경: ${ctx.fillStyle}`);
+        resolve();
+      } else if (background.type === "gradient") {
       // 그라디언트 배경 (linear-gradient 파싱)
       console.log(`[Background Render] 그라디언트 파싱: ${background.value}`);
       const gradientMatch = (background.value || "").match(
@@ -301,7 +305,23 @@ const renderHelpers = {
       );
       if (gradientMatch) {
         const parts = gradientMatch[1].split(",").map((s) => s.trim());
-        const colors = parts.filter((p) => p.startsWith("#"));
+        // 색상 값 추출 (퍼센트나 숫자 제거)
+        const colors = parts
+          .map((p) => {
+            // #으로 시작하는 색상 값 찾기
+            const colorMatch = p.match(/#[0-9a-fA-F]{3,8}/);
+            if (colorMatch) {
+              return colorMatch[0];
+            }
+            // rgb/rgba 형식도 지원
+            const rgbMatch = p.match(/(rgba?\([^)]+\))/);
+            if (rgbMatch) {
+              return rgbMatch[1];
+            }
+            return null;
+          })
+          .filter((c) => c !== null);
+        
         if (colors.length >= 2) {
           const gradient = ctx.createLinearGradient(0, 0, canvasWidth, 0);
           gradient.addColorStop(0, colors[0]);
@@ -316,26 +336,58 @@ const renderHelpers = {
         } else {
           ctx.fillStyle = "#FFFFFF";
           ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-          console.warn(`[Background Render] ⚠️ 그라디언트 색상 부족`);
+          console.warn(`[Background Render] ⚠️ 그라디언트 색상 부족 (찾은 색상: ${colors.length}개)`);
         }
+        resolve();
       } else {
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         console.warn(`[Background Render] ⚠️ 그라디언트 파싱 실패`);
+        resolve();
       }
     } else if (background.type === "image") {
+      // 이미지 배경 렌더링 (Base64 데이터 URL 지원)
+      const imageValue = background.value || "";
       console.log(
-        `[Background Render] 이미지 배경: ${background.value} (현재 미구현)`
+        `[Background Render] 이미지 배경 렌더링 시작: ${imageValue.substring(0, 50)}...`
       );
-      ctx.fillStyle = "#F0F0F0";
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      
+      if (imageValue.startsWith("data:image/") || imageValue.startsWith("http://") || imageValue.startsWith("https://")) {
+        // 비동기 이미지 로드
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        
+        img.onload = () => {
+          // 이미지를 캔버스 전체에 맞춰 그리기 (cover 방식)
+          ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+          console.log(`[Background Render] ✅ 이미지 배경 렌더링 완료: ${canvasWidth}x${canvasHeight}`);
+          resolve();
+        };
+        
+        img.onerror = (e) => {
+          console.error("[Background Render] ❌ 이미지 로드 실패:", e);
+          // 실패 시 기본 배경
+          ctx.fillStyle = "#F0F0F0";
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          resolve();
+        };
+        
+        img.src = imageValue;
+      } else {
+        console.warn("[Background Render] ⚠️ 유효하지 않은 이미지 URL");
+        ctx.fillStyle = "#F0F0F0";
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        resolve();
+      }
     } else {
       console.warn(
         `[Background Render] ⚠️ 알 수 없는 배경 타입: ${background.type}`
       );
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      resolve();
     }
+    });
   },
 
   /**
@@ -509,8 +561,8 @@ export async function renderTemplateFromData(
     `[Template Renderer] 📊 레이어 개수: ${templateData.layers?.length || 0}`
   );
 
-  // 1. 배경 렌더링
-  renderHelpers.drawBackground(
+  // 1. 배경 렌더링 (비동기 지원)
+  await renderHelpers.drawBackground(
     ctx,
     templateData.background,
     canvasWidth,

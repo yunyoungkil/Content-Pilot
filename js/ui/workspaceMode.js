@@ -1,5 +1,6 @@
 import { shortenLink, showToast } from "../utils.js";
 import { marked } from "marked";
+import { openThumbnailMaker } from "./thumbnailMaker.js";
 
 // -----------------------------------------------------------------------------
 // 1. 이미지 갤러리 관련 함수들
@@ -1380,6 +1381,38 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             deleteBtn.className = "draft-delete-btn";
                             deleteBtn.textContent = "❌ 초안 삭제";
                             buttonContainer.appendChild(deleteBtn);
+                        }
+                        
+                        // 썸네일 만들기 버튼 동적 추가
+                        if (buttonContainer && !buttonContainer.querySelector("#btn-create-thumbnail")) {
+                            const thumbBtn = document.createElement("button");
+                            thumbBtn.id = "btn-create-thumbnail";
+                            thumbBtn.style.cssText = "padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s;";
+                            thumbBtn.textContent = "🎨 썸네일 만들기";
+                            buttonContainer.appendChild(thumbBtn);
+                            
+                            // 썸네일 만들기 버튼 클릭 이벤트
+                            thumbBtn.onclick = () => {
+                                const draftData = {
+                                    seoTitle: response.seoTitle || ideaData.seoTitle || ideaData.title,
+                                    thumbnailInfo: response.thumbnailInfo || ideaData.publishInfo?.thumbnailInfo
+                                };
+                                
+                                openThumbnailMaker(draftData, (dataUrl) => {
+                                    // [콜백] 생성된 이미지를 에디터에 삽입
+                                    const editorIframe = document.querySelector("#quill-editor-iframe");
+                                    if (editorIframe && editorIframe.contentWindow) {
+                                        editorIframe.contentWindow.postMessage({
+                                            action: "insert-image",
+                                            data: { url: dataUrl }
+                                        }, "*");
+                                        showToast("✅ 썸네일이 본문에 삽입되었습니다!");
+                                    } else {
+                                        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
+                                        showToast("❌ 에디터를 찾을 수 없습니다.");
+                                    }
+                                });
+                            };
                         }
                         
                         showToast("✅ AI 초안이 생성되었습니다!");

@@ -48,6 +48,117 @@ function convertBlobToBase64(blob) {
 }
 
 /**
+ * Base64 데이터 URL을 Blob으로 변환하는 헬퍼 함수
+ * @param {string} dataUrl - Base64 데이터 URL (예: "data:image/png;base64,...")
+ * @returns {Blob} Blob 객체
+ */
+function dataURLtoBlob(dataUrl) {
+  const arr = dataUrl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
+/**
+ * Firebase Storage에 이미지를 업로드하고 다운로드 URL을 반환하는 함수
+ * @param {string} dataUrl - Base64 데이터 URL 또는 Blob
+ * @param {string} path - Storage 경로 (예: "thumbnails/userId/timestamp.png")
+ * @returns {Promise<string>} 다운로드 URL
+ */
+/**
+ * Firebase Storage에 이미지를 업로드하고 다운로드 URL을 반환하는 함수
+ * Firebase Storage REST API를 사용 (Service Worker 환경 호환)
+ * @param {string} dataUrl - Base64 데이터 URL
+ * @param {string} path - Storage 경로 (예: "thumbnails/userId/timestamp.png")
+ * @returns {Promise<string>} 다운로드 URL
+ */
+async function uploadImageToFirebaseStorage(dataUrl, path) {
+  try {
+    // Base64 데이터 URL을 Blob으로 변환
+    const blob = dataURLtoBlob(dataUrl);
+    
+    // Google OAuth 토큰 가져오기 (Firebase Storage 인증용)
+    const token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken({ interactive: false }, (authToken) => {
+        if (chrome.runtime.lastError) {
+          // interactive: false로 실패하면 interactive: true로 재시도
+          chrome.identity.getAuthToken({ interactive: true }, (authToken2) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(authToken2);
+            }
+          });
+        } else {
+          resolve(authToken);
+        }
+      });
+    });
+    
+    // Firebase Storage REST API를 사용하여 업로드
+    const bucket = firebaseConfig.storageBucket;
+    const encodedPath = encodeURIComponent(path);
+    
+    // 업로드 엔드포인트
+    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
+    
+    console.log('[Firebase Storage] 업로드 시작:', path);
+    console.log('[Firebase Storage] 파일 크기:', blob.size, 'bytes');
+    
+    // Blob을 Firebase Storage에 업로드
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': blob.type || 'image/png'
+      },
+      body: blob
+    });
+    
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorData.error?.message || uploadResponse.statusText}`);
+    }
+    
+    const uploadResult = await uploadResponse.json();
+    console.log('[Firebase Storage] 업로드 완료:', uploadResult);
+    
+    // 다운로드 URL 생성
+    // Firebase Storage 다운로드 URL 형식: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token={token}
+    const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
+    
+    // Firebase Realtime Database에 메타데이터 저장 (참고용)
+    const userId = CONSTANTS.USER_ID;
+    const timestamp = Date.now();
+    const db = firebase.database();
+    const imageDataRef = db.ref(`thumbnail_images/${userId}/${timestamp}`);
+    const storagePath = `gs://${bucket}/${path}`;
+    
+    await imageDataRef.set({
+      path: path,
+      storagePath: storagePath,
+      downloadURL: downloadURL,
+      timestamp: timestamp,
+      size: blob.size
+    });
+    
+    console.log('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
+    console.log('[Firebase Storage] 다운로드 URL:', downloadURL);
+    console.log('[Firebase Storage] Storage 경로:', storagePath);
+    
+    return downloadURL;
+  } catch (error) {
+    console.error('[Firebase Storage] 업로드 실패:', error);
+    throw error;
+  }
+}
+
+/**
  * FR-V-Validate (PRD v2.5): AI가 반환한 템플릿 데이터를 검증하는 함수
  * Firebase 저장 전에 필수 필드와 데이터 타입을 확인하여 불완전한 데이터를 차단합니다.
  * @param {Object} data - AI가 반환한 템플릿 JSON 객체
@@ -3114,46 +3225,142 @@ ${decayContent.map((item, idx) =>
         }
 
         // 2. 프롬프트 및 옵션 구성
-        const model = "gemini-2.5-flash";
-        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiApiKey}`;
+        // Gemini 2.5 Flash Image 모델 사용 (이미지 생성 전용)
+        const model = "gemini-2.5-flash-image";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+        
+        // 이미지 생성 프롬프트 (그대로 사용)
+        const imagePrompt = prompt;
         // 3. 여러 장 요청: Gemini는 1회 1장만 반환하므로 count만큼 반복 호출
         const images = [];
+        const userId = CONSTANTS.USER_ID;
+        const timestamp = Date.now();
+        
         for (let i = 0; i < count; i++) {
           const res = await fetch(API_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
+              contents: [{ parts: [{ text: imagePrompt }] }],
             }),
           });
           const data = await res.json();
+          
+          console.log(`[AI Image Gen] 응답 ${i + 1}/${count}:`, {
+            ok: res.ok,
+            status: res.status,
+            hasCandidates: !!data.candidates,
+            candidatesLength: data.candidates?.length,
+            firstCandidate: data.candidates?.[0],
+            error: data.error
+          });
+          
           if (!res.ok || !data.candidates) {
+            console.error("[AI Image Gen] API 오류:", data);
             sendResponse({
               success: false,
-              error: data.error?.message || "Gemini 이미지 생성 실패",
+              error: data.error?.message || `Gemini 이미지 생성 실패 (${res.status})`,
             });
             return;
           }
+          
+          // Gemini 응답 구조 확인: candidates[0].content.parts에서 이미지 데이터 찾기
           let found = false;
-          for (const part of data.candidates[0].content.parts) {
-            if (part.inlineData && part.inlineData.data) {
-              images.push(`data:image/png;base64,${part.inlineData.data}`);
-              found = true;
+          const candidate = data.candidates[0];
+          let base64Image = null;
+          
+          if (candidate && candidate.content && candidate.content.parts) {
+            for (const part of candidate.content.parts) {
+              console.log("[AI Image Gen] Part 구조:", {
+                hasInlineData: !!part.inlineData,
+                hasText: !!part.text,
+                inlineDataKeys: part.inlineData ? Object.keys(part.inlineData) : [],
+                partKeys: Object.keys(part)
+              });
+              
+              // Gemini 이미지 생성 API 응답 구조 (문서 참고)
+              // part.inlineData.data에 Base64 인코딩된 이미지 데이터가 포함됨
+              if (part.inlineData) {
+                if (part.inlineData.data) {
+                  // mimeType이 있으면 사용, 없으면 기본값 'png'
+                  const mimeType = part.inlineData.mimeType || 'image/png';
+                  base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
+                  found = true;
+                  console.log(`[AI Image Gen] ✅ 이미지 데이터 발견 (${mimeType})`);
+                } else {
+                  console.warn("[AI Image Gen] inlineData는 있지만 data가 없음:", part.inlineData);
+                }
+              }
+              
+              // 텍스트 응답도 확인 (일부 경우 텍스트 설명이 포함될 수 있음)
+              if (part.text && !found) {
+                console.log("[AI Image Gen] 텍스트 응답:", part.text.substring(0, 100));
+                // Base64 이미지 데이터가 텍스트로 포함되어 있을 수 있음
+                const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+                if (base64Match) {
+                  base64Image = base64Match[0];
+                  found = true;
+                  console.log("[AI Image Gen] ✅ 텍스트에서 Base64 이미지 발견");
+                }
+              }
             }
           }
+          
           if (!found) {
+            console.error("[AI Image Gen] 이미지 데이터를 찾을 수 없음. 전체 응답:", JSON.stringify(data, null, 2));
             sendResponse({
               success: false,
-              error: "이미지 생성 결과가 없습니다.",
+              error: "이미지 생성 결과가 없습니다. Gemini API가 이미지 생성 기능을 지원하지 않을 수 있습니다.",
             });
             return;
           }
+          
+          // Firebase Storage에 업로드
+          try {
+            const storagePath = `thumbnails/${userId}/${timestamp}_${i}.png`;
+            const downloadURL = await uploadImageToFirebaseStorage(base64Image, storagePath);
+            images.push(downloadURL); // Base64 대신 Firebase Storage URL 사용
+            console.log(`[AI Image Gen] ✅ 이미지 ${i + 1} Firebase Storage 업로드 완료: ${downloadURL}`);
+          } catch (uploadError) {
+            console.error(`[AI Image Gen] Firebase Storage 업로드 실패 (이미지 ${i + 1}):`, uploadError);
+            // 업로드 실패 시 Base64를 그대로 사용 (fallback)
+            images.push(base64Image);
+            console.warn(`[AI Image Gen] Base64로 fallback (이미지 ${i + 1})`);
+          }
         }
+        console.log(`[AI Image Gen] ✅ 총 ${images.length}개 이미지 생성 및 업로드 완료`);
         sendResponse({ success: true, images });
       } catch (e) {
         sendResponse({
           success: false,
           error: e?.message || "Gemini 호출 오류",
+        });
+      }
+    })();
+    return true;
+  } else if (msg.action === "upload_thumbnail_to_storage") {
+    // 썸네일 이미지를 Firebase Storage에 업로드
+    (async () => {
+      try {
+        const { dataUrl, filename } = msg.data || {};
+        if (!dataUrl) {
+          sendResponse({
+            success: false,
+            error: "이미지 데이터가 없습니다.",
+          });
+          return;
+        }
+        
+        const userId = CONSTANTS.USER_ID;
+        const storagePath = `thumbnails/${userId}/${filename || `thumbnail_${Date.now()}.png`}`;
+        const downloadURL = await uploadImageToFirebaseStorage(dataUrl, storagePath);
+        
+        sendResponse({ success: true, url: downloadURL });
+      } catch (e) {
+        console.error("[Upload Thumbnail] 오류:", e);
+        sendResponse({
+          success: false,
+          error: e?.message || "이미지 업로드 실패",
         });
       }
     })();
@@ -4869,11 +5076,17 @@ ${decayContent.map((item, idx) =>
           }
         }
         
-        // 썸네일 정보가 없으면 기본값 생성
+        // 썸네일 정보가 없으면 기본값 생성 (Gemini 이미지 생성 API 최적화)
         if (!thumbnailInfo) {
+          // Gemini 2.5 Flash Image 모델에 최적화된 프롬프트
+          // 문서 참고: https://ai.google.dev/gemini-api/docs/image-generation
+          const thumbnailPromptEn = `Create a high-quality, eye-catching cover image for a blog post titled "${seoTitle || title}". 
+The image should have vibrant colors, professional composition, modern design, and a compelling visual narrative that captures the essence of the topic. 
+Use a 16:9 aspect ratio with a realistic style. The image should be suitable for use as a thumbnail and should draw the viewer's attention.`;
+          
           thumbnailInfo = {
-            thumbnailPromptEn: `High-quality thumbnail image for "${seoTitle || title}", modern design, professional layout, eye-catching composition, 16:9 aspect ratio`,
-            thumbnailPromptKo: `"${seoTitle || title}"에 대한 고품질 썸네일 이미지, 현대적인 디자인, 전문적인 레이아웃, 눈에 띄는 구도`,
+            thumbnailPromptEn: thumbnailPromptEn.trim(),
+            thumbnailPromptKo: `"${seoTitle || title}"에 대한 고품질 썸네일 이미지, 생생한 색상, 전문적인 구성, 현대적인 디자인, 눈길을 사로잡는 시각적 내러티브, 16:9 비율, 사실적인 스타일`,
             thumbnailText: (seoTitle || title || '').substring(0, 12)
           };
         }
