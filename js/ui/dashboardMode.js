@@ -249,6 +249,13 @@ async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis
     }
 
     try {
+        // 에러 메시지인 경우 파싱 시도하지 않음
+        if (analysisText && (analysisText.trim().startsWith("오류:") || analysisText.trim().startsWith("오류："))) {
+            console.warn("[renderAnalysisResult] API 오류 응답 감지, 파싱 건너뜀:", analysisText.substring(0, 100));
+            container.innerHTML = `<p class="ai-ideas-placeholder">API 호출 중 오류가 발생했습니다. API 키를 확인해주세요.</p>`;
+            return;
+        }
+        
         // JSON 코드 블록에서 추출 시도
         let jsonText = analysisText;
         const codeBlockMatch = analysisText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);

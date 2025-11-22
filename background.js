@@ -402,6 +402,9 @@ async function extractKeywords(text) {
     ]);
   if (!isKeywordExtractionEnabled || !geminiApiKey) {
     console.warn("키워드 추출 기능이 비활성화되었거나 API 키가 없습니다.");
+    if (!geminiApiKey) {
+      await sendErrorToUI("API_KEY_MISSING", "Gemini API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.");
+    }
     return null;
   }
 
@@ -438,6 +441,19 @@ ${text.substring(0, 2000)}
 
     if (!response.ok) {
       console.error("Gemini API 오류 응답:", responseData);
+      
+      // 에러 타입별 처리
+      let errorType = "API_ERROR";
+      if (response.status === 401) {
+        errorType = "UNAUTHORIZED";
+      } else if (response.status === 403) {
+        errorType = "FORBIDDEN";
+      } else if (response.status === 429) {
+        errorType = "QUOTA_EXCEEDED";
+      }
+      
+      const errorMessage = responseData.error?.message || `HTTP ${response.status}`;
+      await sendErrorToUI(errorType, `키워드 추출 실패: ${errorMessage}`);
       throw new Error(`Gemini API 호출 실패: ${response.status}`);
     }
     if (!responseData.candidates || responseData.candidates.length === 0) {
@@ -474,6 +490,10 @@ ${text.substring(0, 2000)}
     return null;
   } catch (error) {
     console.error("❌ Gemini 키워드 추출 중 전체 오류:", error);
+    // 네트워크 오류나 기타 예외의 경우
+    if (!error.message.includes("Gemini API 호출 실패")) {
+      await sendErrorToUI("API_ERROR", `키워드 추출 중 오류가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
+    }
     return null;
   }
 }
@@ -534,8 +554,20 @@ async function generateAndSendKeywords(data, sender) {
 
   try {
     const resultText = await callGeminiAPI(searchQueryPrompt);
+    
+    // 에러 메시지인 경우 파싱 시도하지 않음
+    if (resultText && (resultText.trim().startsWith("오류:") || resultText.trim().startsWith("오류："))) {
+      console.warn("[generateRecommendedKeywords] API 오류 응답 감지, 파싱 건너뜀:", resultText.substring(0, 100));
+      return;
+    }
+    
     // Gemini API 응답에서 배열 부분만 정확히 파싱
-    const keywords = JSON.parse(resultText.match(/\[.*\]/s)[0]);
+    const arrayMatch = resultText.match(/\[.*\]/s);
+    if (!arrayMatch) {
+      console.warn("[generateRecommendedKeywords] 배열 형식을 찾지 못했습니다:", resultText.substring(0, 100));
+      return;
+    }
+    const keywords = JSON.parse(arrayMatch[0]);
 
     // Firebase에 새로운 키워드를 덮어쓰기
     await keywordsRef.set(keywords);
@@ -804,6 +836,12 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
     
     results.forEach(({ type, result }) => {
       if (!result) return;
+      
+      // 에러 메시지인 경우 파싱 시도하지 않음
+      if (result.trim().startsWith("오류:") || result.trim().startsWith("오류：")) {
+        console.warn(`[generateBriefingData] ${type} API 오류 응답 감지, 파싱 건너뜀:`, result.substring(0, 100));
+        return;
+      }
       
       try {
         const jsonMatch = result.match(/\[[\s\S]*?\]/);
@@ -6411,11 +6449,76 @@ async function summarizeText(text) {
   }
 }
 
+/**
+ * [Global Error Dispatcher] 백그라운드 에러를 프론트엔드에 Toast 메시지로 전파
+ * @param {string} errorType - 에러 타입 (TOKEN_EXPIRED, QUOTA_EXCEEDED, API_KEY_MISSING, API_ERROR, UNAUTHORIZED, FORBIDDEN)
+ * @param {string} message - 에러 메시지
+ */
+async function sendErrorToUI(errorType, message) {
+  try {
+    // 현재 활성 탭 찾기
+    const tabs = await new Promise((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, resolve);
+    });
+    
+    if (tabs && tabs.length > 0 && tabs[0].id) {
+      // 에러 타입별 친절한 메시지 생성
+      let userFriendlyMessage = message;
+      let icon = "⚠️";
+      
+      switch (errorType) {
+        case "TOKEN_EXPIRED":
+          userFriendlyMessage = "🔑 인증 토큰이 만료되었습니다. 잠시 후 자동으로 갱신됩니다.";
+          icon = "🔑";
+          break;
+        case "QUOTA_EXCEEDED":
+          userFriendlyMessage = "📊 API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
+          icon = "📊";
+          break;
+        case "API_KEY_MISSING":
+          userFriendlyMessage = "🔑 API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+          icon = "🔑";
+          break;
+        case "UNAUTHORIZED":
+          userFriendlyMessage = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
+          icon = "🔴";
+          break;
+        case "FORBIDDEN":
+          userFriendlyMessage = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
+          icon = "🔴";
+          break;
+        case "API_ERROR":
+          userFriendlyMessage = `⚠️ ${message || "API 호출 중 오류가 발생했습니다."}`;
+          icon = "⚠️";
+          break;
+        default:
+          userFriendlyMessage = `⚠️ ${message || "오류가 발생했습니다."}`;
+          icon = "⚠️";
+      }
+      
+      // 활성 탭에 메시지 전송
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: "show_error_toast",
+        errorType: errorType,
+        message: userFriendlyMessage,
+        icon: icon
+      }).catch((err) => {
+        // 탭이 닫혔거나 메시지를 받을 수 없는 경우 조용히 실패
+        console.warn("[sendErrorToUI] 메시지 전송 실패 (탭이 닫혔거나 콘텐츠 스크립트가 로드되지 않음):", err);
+      });
+    }
+  } catch (error) {
+    console.error("[sendErrorToUI] 에러 전송 실패:", error);
+  }
+}
+
 async function callGeminiAPI(prompt) {
   try {
     const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
     if (!geminiApiKey) {
-      return "오류: Gemini API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+      const errorMsg = "Gemini API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+      await sendErrorToUI("API_KEY_MISSING", errorMsg);
+      return `오류: ${errorMsg}`;
     }
 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
@@ -6433,6 +6536,18 @@ async function callGeminiAPI(prompt) {
       const errorMessage =
         errorData.error?.message ||
         "자세한 내용은 서비스 워커 콘솔을 확인하세요.";
+      
+      // 에러 타입별 처리
+      let errorType = "API_ERROR";
+      if (response.status === 401) {
+        errorType = "UNAUTHORIZED";
+      } else if (response.status === 403) {
+        errorType = "FORBIDDEN";
+      } else if (response.status === 429) {
+        errorType = "QUOTA_EXCEEDED";
+      }
+      
+      await sendErrorToUI(errorType, `Gemini API 호출 실패: ${errorMessage}`);
       return `오류: Gemini API 호출에 실패했습니다.\n상태: ${response.status}\n원인: ${errorMessage}`;
     }
 
@@ -6442,11 +6557,13 @@ async function callGeminiAPI(prompt) {
       !responseData.candidates ||
       !responseData.candidates[0]?.content?.parts[0]?.text
     ) {
+      await sendErrorToUI("API_ERROR", "AI로부터 예상치 못한 형식의 응답을 받았습니다.");
       return "오류: AI로부터 예상치 못한 형식의 응답을 받았습니다.";
     }
 
     return responseData.candidates[0].content.parts[0].text;
   } catch (error) {
+    await sendErrorToUI("API_ERROR", `AI 분석 중 예외가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
     return "오류: AI 분석 중 예외가 발생했습니다. 개발자 콘솔을 확인해주세요.";
   }
 }
@@ -7520,7 +7637,16 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         // 에러 응답 파싱 실패는 조용히 처리
       }
 
-      if (metricsRes.status === 401) throw new Error("UNAUTHORIZED");
+      if (metricsRes.status === 401) {
+        await sendErrorToUI("TOKEN_EXPIRED", "Google Analytics 인증 토큰이 만료되었습니다.");
+        throw new Error("UNAUTHORIZED");
+      }
+      
+      // 403 Forbidden 처리
+      if (metricsRes.status === 403) {
+        await sendErrorToUI("FORBIDDEN", "Google Analytics 접근 권한이 없습니다. 계정 권한을 확인해주세요.");
+        return { pageviews: 0, gaEarnings: 0, error: "Forbidden (403): Access denied" };
+      }
       
       // 400 Bad Request 처리: 필터 경로 문제일 수 있음
       if (metricsRes.status === 400) {
@@ -7547,6 +7673,8 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, true);
         }
         
+        // 재시도 실패 시 사용자에게 알림
+        await sendErrorToUI("API_ERROR", `Google Analytics 요청 오류 (400): ${errorMsg}`);
         return { 
           pageviews: 0, 
           gaEarnings: 0, 
@@ -7565,6 +7693,7 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, excludeAverageEngagementTime);
         } else {
           console.error(`[GA4] Quota 제한 초과, 재시도 실패 (${retryCount}회 시도)`);
+          await sendErrorToUI("QUOTA_EXCEEDED", "Google Analytics API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.");
           return { pageviews: 0, gaEarnings: 0, error: "Quota limit exceeded" };
         }
       }
@@ -7577,11 +7706,14 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
           return getAnalyticsData(token, propertyId, url, retryCount + 1, useEncodedPath, excludePublisherMetrics, excludeAverageEngagementTime);
         } else {
           console.error(`[GA4] 서버 오류, 재시도 실패 (${retryCount}회 시도)`);
+          await sendErrorToUI("API_ERROR", `Google Analytics 서버 오류가 발생했습니다 (${metricsRes.status}). 잠시 후 다시 시도해주세요.`);
           return { pageviews: 0, gaEarnings: 0, error: `Server error (${metricsRes.status})` };
         }
       }
       // 데이터가 없거나 오류인 경우
-      return { pageviews: 0, gaEarnings: 0, error: `HTTP ${metricsRes.status}: ${errorBody?.error?.message || metricsRes.statusText}` };
+      const errorMsg = errorBody?.error?.message || metricsRes.statusText;
+      await sendErrorToUI("API_ERROR", `Google Analytics 데이터 수집 실패 (${metricsRes.status}): ${errorMsg}`);
+      return { pageviews: 0, gaEarnings: 0, error: `HTTP ${metricsRes.status}: ${errorMsg}` };
     }
 
     const metricsData = await metricsRes.json();
@@ -7850,7 +7982,13 @@ async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncod
         });
         await chrome.storage.local.set({ googleAuthToken: newToken });
         return getAnalyticsData(newToken, propertyId, url, retryCount + 1);
-      } catch (e) {}
+      } catch (e) {
+        // 토큰 갱신 실패 시 사용자에게 알림
+        await sendErrorToUI("TOKEN_EXPIRED", "인증 토큰 갱신에 실패했습니다. 다시 로그인해주세요.");
+      }
+    } else if (error.message !== "UNAUTHORIZED") {
+      // UNAUTHORIZED가 아닌 다른 에러인 경우 사용자에게 알림
+      await sendErrorToUI("API_ERROR", `Google Analytics 데이터 수집 중 오류가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
     }
     return { pageviews: 0, gaEarnings: 0 };
   }
@@ -8105,7 +8243,27 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
               return getAdsenseData(newToken, accountId, url, retryCount + 1);
             } catch (tokenError) {
               console.error("[AdSense 토큰 갱신 실패]", tokenError);
+              await sendErrorToUI("TOKEN_EXPIRED", "AdSense 인증 토큰 갱신에 실패했습니다. 다시 로그인해주세요.");
               throw new Error(`AdSense API 오류 (401): 토큰 갱신 실패 - ${tokenError.message}`);
+            }
+          }
+          
+          // 403 Forbidden 처리
+          if (response.status === 403) {
+            await sendErrorToUI("FORBIDDEN", "AdSense 접근 권한이 없습니다. 계정 권한을 확인해주세요.");
+            throw new Error(`AdSense API 오류 (403): ${errorData.error?.message || response.statusText}`);
+          }
+          
+          // 429 Quota 제한 처리
+          if (response.status === 429) {
+            if (retryCount < MAX_RETRIES) {
+              const delay = Math.pow(2, retryCount) * 1000;
+              console.warn(`[AdSense] Quota 제한 감지 (429), ${delay}ms 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              return getAdsenseData(token, accountId, url, retryCount + 1);
+            } else {
+              await sendErrorToUI("QUOTA_EXCEEDED", "AdSense API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.");
+              throw new Error(`AdSense API 오류 (429): 할당량 초과`);
             }
           }
           
@@ -8245,16 +8403,39 @@ async function getAdsenseData(token, accountId, url, retryCount = 0) {
         return getAdsenseData(newToken, accountId, url, retryCount + 1);
       } catch (tokenError) {
         console.error("[AdSense 토큰 갱신 실패]", tokenError);
+        await sendErrorToUI("TOKEN_EXPIRED", "AdSense 인증 토큰 갱신에 실패했습니다. 다시 로그인해주세요.");
         // 토큰 갱신 실패해도 일반 재시도 로직으로 진행
       }
     }
 
-    // 재시도 로직
-    if (retryCount < MAX_RETRIES) {
+    // 403 Forbidden 처리
+    if (error.message.includes('403')) {
+      await sendErrorToUI("FORBIDDEN", "AdSense 접근 권한이 없습니다. 계정 권한을 확인해주세요.");
+    }
+    
+    // 429 Quota 제한 처리
+    if (error.message.includes('429')) {
+      if (retryCount < MAX_RETRIES) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.warn(`[AdSense] Quota 제한 감지 (429), ${delay}ms 후 재시도 (${retryCount + 1}/${MAX_RETRIES})...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return getAdsenseData(token, accountId, url, retryCount + 1);
+      } else {
+        await sendErrorToUI("QUOTA_EXCEEDED", "AdSense API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.");
+      }
+    }
+
+    // 재시도 로직 (401, 403, 429가 아닌 경우)
+    if (!error.message.includes('401') && !error.message.includes('403') && !error.message.includes('429') && retryCount < MAX_RETRIES) {
       const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
       console.log(`[AdSense] ${delay}ms 후 재시도...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return getAdsenseData(token, accountId, url, retryCount + 1);
+    }
+
+    // 최종 실패 시 (재시도 모두 실패한 경우)
+    if (retryCount >= MAX_RETRIES && !error.message.includes('404')) {
+      await sendErrorToUI("API_ERROR", `AdSense 데이터 수집 중 오류가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
     }
 
     // 최종 실패 시 기본값 반환

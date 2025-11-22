@@ -1043,7 +1043,7 @@ function generateSimilarIdea(cardId, status, cardData) {
     action: 'call_gemini',
     prompt: prompt
   }, (response) => {
-    if (response && response.text && !response.text.includes('오류')) {
+    if (response && response.text && !response.text.trim().startsWith('오류:') && !response.text.trim().startsWith('오류：')) {
       try {
         // JSON 파싱
         let ideasText = response.text.trim();

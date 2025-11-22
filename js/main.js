@@ -12,6 +12,22 @@ export function initialize() {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.action === "open_content_pilot_panel") {
         createAndShowPanel();
+      } else if (msg.action === "show_error_toast") {
+        // 에러 타입별 아이콘 매핑
+        const iconMap = {
+          "TOKEN_EXPIRED": "🔑",
+          "QUOTA_EXCEEDED": "📊",
+          "API_KEY_MISSING": "🔑",
+          "UNAUTHORIZED": "🔐",
+          "FORBIDDEN": "🚫",
+          "API_ERROR": "⚠️"
+        };
+        
+        const icon = msg.icon || iconMap[msg.errorType] || "⚠️";
+        const message = msg.message || "오류가 발생했습니다.";
+        
+        // 아이콘과 메시지를 함께 표시
+        showToast(`${icon} ${message}`);
       }
     });
 
