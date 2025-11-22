@@ -844,9 +844,126 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
       }
       
       try {
-        const jsonMatch = result.match(/\[[\s\S]*?\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+        // JSON 배열 추출 (여러 방법 시도)
+        let jsonText = null;
+        let parsed = null;
+        
+        // 방법 1: 코드 블록에서 추출
+        const codeBlockMatch = result.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+        if (codeBlockMatch) {
+          jsonText = codeBlockMatch[1].trim();
+          try {
+            parsed = JSON.parse(jsonText);
+            if (Array.isArray(parsed)) {
+              // 성공적으로 파싱됨
+            } else {
+              parsed = null;
+            }
+          } catch (e) {
+            parsed = null;
+          }
+        }
+        
+        // 방법 2: 순수 JSON 배열 찾기 (방법 1이 실패한 경우)
+        if (!parsed) {
+          // 첫 번째 '[' 부터 마지막 ']' 까지 추출
+          const firstBracket = result.indexOf('[');
+          const lastBracket = result.lastIndexOf(']');
+          
+          if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+            jsonText = result.substring(firstBracket, lastBracket + 1);
+            
+            // 불완전한 문자열 수정 시도
+            // 닫히지 않은 따옴표를 찾아서 수정
+            let fixedJson = '';
+            let inString = false;
+            let escapeNext = false;
+            let bracketCount = 0;
+            
+            for (let i = 0; i < jsonText.length; i++) {
+              const char = jsonText[i];
+              
+              if (escapeNext) {
+                fixedJson += char;
+                escapeNext = false;
+                continue;
+              }
+              
+              if (char === '\\') {
+                escapeNext = true;
+                fixedJson += char;
+                continue;
+              }
+              
+              if (char === '"') {
+                inString = !inString;
+                fixedJson += char;
+                continue;
+              }
+              
+              if (inString) {
+                fixedJson += char;
+                continue;
+              }
+              
+              if (char === '[') {
+                bracketCount++;
+                fixedJson += char;
+              } else if (char === ']') {
+                bracketCount--;
+                fixedJson += char;
+                if (bracketCount === 0) {
+                  // 배열이 완성되었으므로 여기서 종료
+                  break;
+                }
+              } else {
+                fixedJson += char;
+              }
+            }
+            
+            // 닫히지 않은 대괄호가 있으면 추가
+            while (bracketCount > 0) {
+              fixedJson += ']';
+              bracketCount--;
+            }
+            
+            // 닫히지 않은 문자열이 있으면 닫기
+            if (inString) {
+              fixedJson += '"';
+            }
+            
+            jsonText = fixedJson;
+            
+            try {
+              parsed = JSON.parse(jsonText);
+              if (!Array.isArray(parsed)) {
+                parsed = null;
+              }
+            } catch (e) {
+              parsed = null;
+            }
+          }
+        }
+        
+        // 방법 3: 정규식으로 간단하게 추출 (fallback)
+        if (!parsed) {
+          const simpleMatch = result.match(/\[[\s\S]*\]/);
+          if (simpleMatch) {
+            jsonText = simpleMatch[0];
+            try {
+              parsed = JSON.parse(jsonText);
+              if (!Array.isArray(parsed)) {
+                parsed = null;
+              }
+            } catch (e) {
+              // 파싱 실패 시 null 유지
+              parsed = null;
+            }
+          }
+        }
+        
+        // 파싱 성공 시 업데이트
+        if (parsed && Array.isArray(parsed)) {
           if (type === 'outline') {
             updates.outline = parsed;
           } else if (type === 'mainKeywords') {
@@ -856,9 +973,12 @@ async function generateIdeaBriefing(cardId, title, description, options = {}) {
           } else if (type === 'longTail') {
             updates.longTailKeywords = parsed;
           }
+        } else {
+          console.warn(`[generateBriefingData] ${type} JSON 파싱 실패. 원본 응답:`, result.substring(0, 300));
         }
       } catch (e) {
         console.error(`${type} 파싱 오류:`, e);
+        console.error(`[generateBriefingData] ${type} 원본 응답:`, result.substring(0, 500));
       }
     });
     
@@ -4367,9 +4487,15 @@ ${decayContent.map((item, idx) =>
       const longTailKeywords = ideaData.longTailKeywords || [];
       const tags = (ideaData.tags || []).filter((t) => t !== "#AI-추천");
       
-      // 4. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
+      // 4. 페르소나 자동 선택
+      const selectedPersona = selectPersona(ideaData);
+      console.log(`🤖 [AI] 선택된 페르소나: ${selectedPersona.name} (톤: ${selectedPersona.tone})`);
+      
+      // 5. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
       const prompt = `
-            당신은 특정 주제에 대한 전문 작가입니다. 아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
+            ${selectedPersona.systemPrompt}
+            
+            아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
             ### 1. 아이디어 제목 (참고용)
             - ${ideaData.title}
@@ -9135,6 +9261,115 @@ async function runFullSystemDiagnosis() {
     diagnosisResults.errors.push(`치명적 오류: ${error.message}`);
     return diagnosisResults;
   }
+}
+
+// ▼▼▼ [동적 페르소나 프롬프트 시스템] ▼▼▼
+
+/**
+ * [동적 페르소나 프롬프트 템플릿]
+ * 채널 성격에 따라 다른 톤앤매너를 적용합니다.
+ */
+const PROMPT_TEMPLATES = {
+  professional: {
+    name: "전문가 작가",
+    systemPrompt: `당신은 특정 주제에 대한 전문 작가입니다. 전문적이고 신뢰할 수 있는 톤으로 작성해주세요.
+- 객관적이고 사실 기반의 정보 제공
+- 전문 용어를 적절히 사용하되, 초보자도 이해할 수 있도록 설명
+- 정중하고 격식 있는 문체 사용
+- "~입니다", "~합니다" 같은 존댓말 사용
+- 통계, 데이터, 근거를 명확히 제시`,
+    tone: "전문적"
+  },
+  friendly: {
+    name: "친근한 리뷰어",
+    systemPrompt: `당신은 독자와 친근하게 소통하는 리뷰어입니다. 편안하고 친근한 톤으로 작성해주세요.
+- 구어체와 친근한 표현 사용 ("~했어요", "~거예요", "~네요")
+- 독자와의 대화하듯이 자연스러운 문체
+- 경험담과 개인적인 느낌을 자연스럽게 포함
+- 이모티콘은 사용하지 않되, 따뜻하고 친근한 어조 유지
+- "~해보셨어요?", "~아시나요?" 같은 친근한 질문 활용`,
+    tone: "친근한"
+  },
+  critical: {
+    name: "비판적 분석가",
+    systemPrompt: `당신은 비판적 사고를 가진 분석가입니다. 날카롭고 명확한 분석을 제공해주세요.
+- 객관적이고 비판적인 시각으로 문제점 분석
+- 장단점을 균형있게 제시
+- "~하지만", "~그러나" 같은 대조적 표현 활용
+- 명확하고 단호한 문체 사용
+- 근거 있는 비판과 개선 방안 제시`,
+    tone: "비판적"
+  }
+};
+
+/**
+ * [페르소나 자동 선택 함수]
+ * 아이디어 카드의 tags, channelType, description을 분석하여 적절한 페르소나를 선택합니다.
+ */
+function selectPersona(ideaData) {
+  const tags = (ideaData.tags || []).map(t => t.toLowerCase());
+  const description = (ideaData.description || "").toLowerCase();
+  const title = (ideaData.title || "").toLowerCase();
+  const allText = `${title} ${description} ${tags.join(" ")}`;
+  
+  // 키워드 기반 페르소나 선택
+  const friendlyKeywords = ["후기", "리뷰", "사용기", "체험", "추천", "좋아", "만족", "인기", "베스트", "추천", "리뷰어", "후기작성"];
+  const criticalKeywords = ["비교", "분석", "문제", "단점", "장단점", "비판", "개선", "한계", "주의", "주의사항", "문제점"];
+  const professionalKeywords = ["가이드", "튜토리얼", "방법", "설명", "정보", "정리", "요약", "분석", "데이터", "통계", "연구"];
+  
+  let friendlyScore = 0;
+  let criticalScore = 0;
+  let professionalScore = 0;
+  
+  // 키워드 매칭 점수 계산
+  friendlyKeywords.forEach(keyword => {
+    if (allText.includes(keyword)) friendlyScore += 2;
+  });
+  
+  criticalKeywords.forEach(keyword => {
+    if (allText.includes(keyword)) criticalScore += 2;
+  });
+  
+  professionalKeywords.forEach(keyword => {
+    if (allText.includes(keyword)) professionalScore += 2;
+  });
+  
+  // 태그 기반 추가 점수
+  if (tags.some(t => t.includes("후기") || t.includes("리뷰") || t.includes("체험"))) {
+    friendlyScore += 3;
+  }
+  if (tags.some(t => t.includes("비교") || t.includes("분석") || t.includes("비판"))) {
+    criticalScore += 3;
+  }
+  if (tags.some(t => t.includes("가이드") || t.includes("튜토리얼") || t.includes("정보"))) {
+    professionalScore += 3;
+  }
+  
+  // channelType 기반 선택 (향후 확장 가능)
+  // if (ideaData.channelType === "review") friendlyScore += 5;
+  // if (ideaData.channelType === "news") professionalScore += 5;
+  // if (ideaData.channelType === "analysis") criticalScore += 5;
+  
+  // 최고 점수 페르소나 선택
+  let selectedPersona = "professional"; // 기본값
+  let maxScore = professionalScore;
+  
+  if (friendlyScore > maxScore) {
+    maxScore = friendlyScore;
+    selectedPersona = "friendly";
+  }
+  
+  if (criticalScore > maxScore) {
+    maxScore = criticalScore;
+    selectedPersona = "critical";
+  }
+  
+  // 점수가 모두 0이면 기본값(professional) 사용
+  if (maxScore === 0) {
+    selectedPersona = "professional";
+  }
+  
+  return PROMPT_TEMPLATES[selectedPersona];
 }
 
 // ▼▼▼ [6단계] 데이터 마이그레이션 및 신규 사용자 처리 ▼▼▼
