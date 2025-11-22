@@ -4488,14 +4488,17 @@ ${decayContent.map((item, idx) =>
       const tags = (ideaData.tags || []).filter((t) => t !== "#AI-추천");
       
       // 4. 페르소나 자동 선택
-      const selectedPersona = selectPersona(ideaData);
-      console.log(`🤖 [AI] 선택된 페르소나: ${selectedPersona.name} (톤: ${selectedPersona.tone})`);
+      const persona = selectPersona(ideaData);
       
       // 5. 모든 정보를 종합하여 '마스터 프롬프트'를 생성합니다.
       const prompt = `
-            ${selectedPersona.systemPrompt}
+            ${persona.systemPrompt}
             
-            아래 제공된 모든 정보를 활용하여, SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
+            [작성 요청]
+            아래 정보를 바탕으로 블로그 포스트 초안을 작성해주세요.
+            톤앤매너: ${persona.tone}
+            
+            SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
             ### 1. 아이디어 제목 (참고용)
             - ${ideaData.title}
@@ -9269,107 +9272,59 @@ async function runFullSystemDiagnosis() {
  * [동적 페르소나 프롬프트 템플릿]
  * 채널 성격에 따라 다른 톤앤매너를 적용합니다.
  */
+/**
+ * [AI Brain v2.0] 동적 페르소나 프롬프트 템플릿
+ * 채널 성격과 콘텐츠 주제에 따라 AI의 말투와 분석 깊이를 조절합니다.
+ */
 const PROMPT_TEMPLATES = {
   professional: {
     name: "전문가 작가",
-    systemPrompt: `당신은 특정 주제에 대한 전문 작가입니다. 전문적이고 신뢰할 수 있는 톤으로 작성해주세요.
-- 객관적이고 사실 기반의 정보 제공
-- 전문 용어를 적절히 사용하되, 초보자도 이해할 수 있도록 설명
-- 정중하고 격식 있는 문체 사용
-- "~입니다", "~합니다" 같은 존댓말 사용
-- 통계, 데이터, 근거를 명확히 제시`,
-    tone: "전문적"
+    systemPrompt: `당신은 해당 분야의 10년 차 전문가이자 전문 칼럼니스트입니다.
+- 신뢰감 있고 정제된 비즈니스 톤을 사용하세요 ("~입니다", "~합니다").
+- 객관적인 사실, 통계, 전문 용어를 적절히 섞어 깊이 있는 정보를 제공하세요.
+- 독자가 '진짜 전문가가 썼구나'라고 느끼도록 논리적인 구조로 작성하세요.`,
+    tone: "전문적/신뢰감"
   },
   friendly: {
     name: "친근한 리뷰어",
-    systemPrompt: `당신은 독자와 친근하게 소통하는 리뷰어입니다. 편안하고 친근한 톤으로 작성해주세요.
-- 구어체와 친근한 표현 사용 ("~했어요", "~거예요", "~네요")
-- 독자와의 대화하듯이 자연스러운 문체
-- 경험담과 개인적인 느낌을 자연스럽게 포함
-- 이모티콘은 사용하지 않되, 따뜻하고 친근한 어조 유지
-- "~해보셨어요?", "~아시나요?" 같은 친근한 질문 활용`,
-    tone: "친근한"
+    systemPrompt: `당신은 구독자와 소통하는 것을 좋아하는 인기 블로거입니다.
+- 옆집 언니/오빠처럼 친근하고 편안한 구어체를 사용하세요 ("~했어요", "~거예요").
+- 자신의 경험담을 이야기하듯 감성적인 표현을 풍부하게 사용하세요.
+- 독자의 공감을 이끌어내는 질문을 던지며 소통하듯 작성하세요.`,
+    tone: "친근함/감성적"
   },
   critical: {
-    name: "비판적 분석가",
-    systemPrompt: `당신은 비판적 사고를 가진 분석가입니다. 날카롭고 명확한 분석을 제공해주세요.
-- 객관적이고 비판적인 시각으로 문제점 분석
-- 장단점을 균형있게 제시
-- "~하지만", "~그러나" 같은 대조적 표현 활용
-- 명확하고 단호한 문체 사용
-- 근거 있는 비판과 개선 방안 제시`,
-    tone: "비판적"
+    name: "냉철한 분석가",
+    systemPrompt: `당신은 제품과 서비스를 날카롭게 분석하는 IT/테크 리뷰어입니다.
+- 장점뿐만 아니라 단점과 한계점도 명확히 지적하는 비판적 시각을 유지하세요.
+- "솔직히 말해서", "아쉬운 점은" 같은 직설적인 표현을 두려워하지 마세요.
+- 구매를 고민하는 독자에게 확실한 가이드라인(사라/마라)을 제시하세요.`,
+    tone: "분석적/직설적"
   }
 };
 
 /**
- * [페르소나 자동 선택 함수]
- * 아이디어 카드의 tags, channelType, description을 분석하여 적절한 페르소나를 선택합니다.
+ * [AI Brain v2.0] 페르소나 자동 선택 로직
+ * 아이디어의 태그와 설명을 분석하여 가장 적합한 페르소나를 결정합니다.
  */
 function selectPersona(ideaData) {
-  const tags = (ideaData.tags || []).map(t => t.toLowerCase());
-  const description = (ideaData.description || "").toLowerCase();
-  const title = (ideaData.title || "").toLowerCase();
-  const allText = `${title} ${description} ${tags.join(" ")}`;
+  const text = `${ideaData.title} ${ideaData.description} ${(ideaData.tags || []).join(' ')}`.toLowerCase();
   
-  // 키워드 기반 페르소나 선택
-  const friendlyKeywords = ["후기", "리뷰", "사용기", "체험", "추천", "좋아", "만족", "인기", "베스트", "추천", "리뷰어", "후기작성"];
-  const criticalKeywords = ["비교", "분석", "문제", "단점", "장단점", "비판", "개선", "한계", "주의", "주의사항", "문제점"];
-  const professionalKeywords = ["가이드", "튜토리얼", "방법", "설명", "정보", "정리", "요약", "분석", "데이터", "통계", "연구"];
+  // 키워드 스코어링
+  let scores = { professional: 0, friendly: 0, critical: 0 };
   
-  let friendlyScore = 0;
-  let criticalScore = 0;
-  let professionalScore = 0;
+  // 친근한 키워드
+  if (/후기|리뷰|일상|여행|맛집|추천|솔직|내돈내산/.test(text)) scores.friendly += 3;
+  // 전문적 키워드
+  if (/가이드|사용법|강좌|정리|뉴스|소식|트렌드|통계/.test(text)) scores.professional += 3;
+  // 비판적 키워드
+  if (/비교|장단점|분석|문제점|해결|vs/.test(text)) scores.critical += 3;
+
+  // 최고 점수 페르소나 선택 (동점일 경우 professional 기본)
+  const selectedKey = Object.keys(scores).reduce((a, b) => scores[a] >= scores[b] ? a : b);
   
-  // 키워드 매칭 점수 계산
-  friendlyKeywords.forEach(keyword => {
-    if (allText.includes(keyword)) friendlyScore += 2;
-  });
-  
-  criticalKeywords.forEach(keyword => {
-    if (allText.includes(keyword)) criticalScore += 2;
-  });
-  
-  professionalKeywords.forEach(keyword => {
-    if (allText.includes(keyword)) professionalScore += 2;
-  });
-  
-  // 태그 기반 추가 점수
-  if (tags.some(t => t.includes("후기") || t.includes("리뷰") || t.includes("체험"))) {
-    friendlyScore += 3;
-  }
-  if (tags.some(t => t.includes("비교") || t.includes("분석") || t.includes("비판"))) {
-    criticalScore += 3;
-  }
-  if (tags.some(t => t.includes("가이드") || t.includes("튜토리얼") || t.includes("정보"))) {
-    professionalScore += 3;
-  }
-  
-  // channelType 기반 선택 (향후 확장 가능)
-  // if (ideaData.channelType === "review") friendlyScore += 5;
-  // if (ideaData.channelType === "news") professionalScore += 5;
-  // if (ideaData.channelType === "analysis") criticalScore += 5;
-  
-  // 최고 점수 페르소나 선택
-  let selectedPersona = "professional"; // 기본값
-  let maxScore = professionalScore;
-  
-  if (friendlyScore > maxScore) {
-    maxScore = friendlyScore;
-    selectedPersona = "friendly";
-  }
-  
-  if (criticalScore > maxScore) {
-    maxScore = criticalScore;
-    selectedPersona = "critical";
-  }
-  
-  // 점수가 모두 0이면 기본값(professional) 사용
-  if (maxScore === 0) {
-    selectedPersona = "professional";
-  }
-  
-  return PROMPT_TEMPLATES[selectedPersona];
+  console.log(`🤖 [AI Persona] 선택된 페르소나: ${PROMPT_TEMPLATES[selectedKey].name} (근거: ${text.substring(0, 30)}...)`);
+  return PROMPT_TEMPLATES[selectedKey];
 }
 
 // ▼▼▼ [6단계] 데이터 마이그레이션 및 신규 사용자 처리 ▼▼▼

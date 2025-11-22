@@ -9,6 +9,53 @@
  */
 
 /**
+ * [Visual Engine v2.0] 자동 색상 보정 (Auto Color Grading)
+ * 배경이 어두우면 텍스트를 밝게, 배경이 밝으면 텍스트를 어둡게 자동 조정합니다.
+ * @param {CanvasRenderingContext2D} ctx - 캔버스 컨텍스트
+ * @param {number} x - 텍스트 X 좌표
+ * @param {number} y - 텍스트 Y 좌표
+ * @param {number} width - 텍스트 너비
+ * @param {number} height - 텍스트 높이
+ * @returns {string|null} 조정된 색상 (#FFFFFF 또는 #000000), 실패 시 null
+ */
+function adjustTextColorForBackground(ctx, x, y, width, height) {
+  // 텍스트가 그려질 영역의 배경 밝기 분석
+  try {
+    // 텍스트 영역 주변 샘플링 (텍스트 위치 기준으로 약간 확장)
+    const samplePadding = Math.max(10, height * 0.2);
+    const sampleX = Math.max(0, x - samplePadding);
+    const sampleY = Math.max(0, y - samplePadding);
+    const sampleWidth = Math.min(ctx.canvas.width - sampleX, width + samplePadding * 2);
+    const sampleHeight = Math.min(ctx.canvas.height - sampleY, height + samplePadding * 2);
+    
+    const imageData = ctx.getImageData(sampleX, sampleY, sampleWidth, sampleHeight);
+    const data = imageData.data;
+    let r, g, b, avg;
+    let colorSum = 0;
+    let pixelCount = 0;
+
+    for (let i = 0, len = data.length; i < len; i += 4) {
+      r = data[i];
+      g = data[i + 1];
+      b = data[i + 2];
+      // 알파 채널은 무시 (투명도 고려)
+      avg = Math.floor((r + g + b) / 3);
+      colorSum += avg;
+      pixelCount++;
+    }
+
+    if (pixelCount === 0) return null;
+    
+    const brightness = Math.floor(colorSum / pixelCount);
+    // 밝기(0~255)가 128보다 낮으면(어두우면) 흰색 텍스트, 높으면 검은색 텍스트 리턴
+    return brightness < 128 ? "#FFFFFF" : "#000000";
+  } catch (e) {
+    console.warn("[Color Adjust] 색상 보정 실패:", e);
+    return null; // 오류 시 null 반환 (기본 색상 사용)
+  }
+}
+
+/**
  * [PRD v3.2 TR-1] 캔버스 렌더링 헬퍼 함수
  */
 const renderHelpers = {
@@ -82,8 +129,28 @@ const renderHelpers = {
     ctx.textAlign = styles.align || "left";
     ctx.textBaseline = styles.baseline || "alphabetic";
 
-    // 4. 색상 설정
-    ctx.fillStyle = styles.fill || "#000000";
+    // 4. 색상 설정 (자동 색상 보정 적용)
+    // 배경 이미지가 있는 경우 텍스트 색상을 자동으로 조정
+    let textColor = styles.fill || "#000000";
+    
+    // 배경 이미지가 있는 경우 색상 보정 적용
+    // (배경 레이어가 이미지 타입이고 텍스트 위치와 겹치는 경우)
+    if (layer.autoColorAdjust !== false) {
+      // 텍스트가 그려질 영역의 배경 밝기 분석
+      const adjustedColor = adjustTextColorForBackground(
+        ctx, 
+        actualX, 
+        actualY, 
+        ctx.measureText(text).width, 
+        actualFontSize
+      );
+      if (adjustedColor) {
+        textColor = adjustedColor;
+        console.log(`[Text Render] 🎨 자동 색상 보정: ${textColor}`);
+      }
+    }
+    
+    ctx.fillStyle = textColor;
 
     // 5. 그림자 설정 (PRD v2.7: 하위 호환성 처리 + 명시적 초기화)
     if (styles.shadow) {
@@ -118,9 +185,11 @@ const renderHelpers = {
     console.log(`[Text Render] ✏️ fillText("${text}", ${actualX}, ${actualY})`);
     ctx.fillText(text, actualX, actualY);
 
-    // 7. 외곽선 (stroke)
+    // 7. 외곽선 (stroke) - 자동 색상 보정 적용
     if (styles.stroke) {
-      ctx.strokeStyle = styles.strokeColor || "#000000";
+      // stroke 색상도 자동 조정 (fill과 동일한 색상 사용)
+      const strokeColor = textColor || styles.strokeColor || "#000000";
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = styles.strokeWidth || 1;
       ctx.strokeText(text, actualX, actualY);
     }
