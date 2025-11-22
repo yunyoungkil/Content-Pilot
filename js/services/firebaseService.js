@@ -1,10 +1,16 @@
 // js/services/firebaseService.js
-// Firebase Storage 관련 서비스
+// Firebase 초기화 및 헬퍼 함수 제공 (단일 진실 공급원)
 
-// Firebase는 background.js에서 직접 로드됩니다.
-// ES Modules에서는 importScripts()를 사용할 수 없으므로,
-// firebaseService.js에서는 Firebase가 이미 로드되어 있다고 가정합니다.
+// Firebase v9+ 모듈 API import
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, push, set, update, remove, onValue, get, serverTimestamp } from 'firebase/database';
 
+// 상수 정의
+export const CONSTANTS = {
+  USER_ID: 'default_user'
+};
+
+// Firebase 설정
 export const firebaseConfig = {
   apiKey: "AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY",
   authDomain: "content-pilot-7eb03.firebaseapp.com",
@@ -15,6 +21,124 @@ export const firebaseConfig = {
   messagingSenderId: "1062923832161",
   appId: "1:1062923832161:web:12dc37c0bfd2fb1ac05320",
 };
+
+// Firebase 초기화 상태
+let firebaseInitialized = false;
+let firebaseApp = null;
+let firebaseDatabase = null;
+
+/**
+ * Firebase 초기화 함수 (단일 진실 공급원)
+ * @returns {boolean} 초기화 성공 여부
+ */
+export function initializeFirebase() {
+  if (firebaseInitialized) {
+    return true;
+  }
+  
+  try {
+    if (!firebaseApp) {
+      firebaseApp = initializeApp(firebaseConfig);
+    }
+    if (!firebaseDatabase) {
+      firebaseDatabase = getDatabase(firebaseApp);
+    }
+    firebaseInitialized = true;
+    console.log('🔥 [firebaseService] Firebase 초기화 완료');
+    
+    // 하위 호환성을 위한 전역 firebase 객체 생성
+    const createRefWrapper = (dbRef) => {
+      return {
+        once: (eventType) => get(dbRef).then(snapshot => ({ 
+          val: () => snapshot.val(), 
+          exists: () => snapshot.exists() 
+        })),
+        set: (value) => set(dbRef, value),
+        update: (values) => update(dbRef, values),
+        remove: () => remove(dbRef),
+        push: (value) => {
+          const newRef = push(dbRef);
+          if (value) {
+            set(newRef, value);
+          }
+          return {
+            set: (val) => set(newRef, val),
+            key: newRef.key
+          };
+        },
+        child: (childPath) => {
+          const childRef = ref(firebaseDatabase, `${dbRef.path}/${childPath}`);
+          return createRefWrapper(childRef);
+        },
+        on: (eventType, callback) => {
+          const unsubscribe = onValue(dbRef, (snapshot) => {
+            callback({ 
+              val: () => snapshot.val(), 
+              exists: () => snapshot.exists() 
+            });
+          });
+          return unsubscribe;
+        }
+      };
+    };
+    
+    const firebaseCompat = {
+      app: firebaseApp,
+      apps: [firebaseApp],
+      initializeApp: () => firebaseApp,
+      database: () => ({
+        ref: (path) => createRefWrapper(ref(firebaseDatabase, path)),
+        ServerValue: {
+          TIMESTAMP: serverTimestamp()
+        }
+      })
+    };
+    
+    // 전역 변수로 설정 (하위 호환성)
+    if (typeof self !== 'undefined') {
+      self.firebase = firebaseCompat;
+    }
+    if (typeof globalThis !== 'undefined') {
+      globalThis.firebase = firebaseCompat;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[firebaseService] Firebase 초기화 오류:', error);
+    return false;
+  }
+}
+
+/**
+ * Firebase Database 인스턴스 가져오기
+ * @returns {object} Firebase Database 인스턴스
+ */
+export function getDb() {
+  if (!firebaseInitialized) {
+    initializeFirebase();
+  }
+  return firebaseDatabase;
+}
+
+/**
+ * 사용자별 Firebase 참조 가져오기
+ * @param {string} path - 경로 (예: "kanban", "channels")
+ * @returns {object} Firebase 참조
+ */
+export function getUserRef(path) {
+  if (!firebaseInitialized) {
+    initializeFirebase();
+  }
+  return ref(firebaseDatabase, `${path}/${CONSTANTS.USER_ID}`);
+}
+
+/**
+ * Firebase v9+ 모듈 API 직접 export
+ */
+export { ref, push, set, update, remove, onValue, get, serverTimestamp };
+
+// 즉시 초기화
+initializeFirebase();
 
 /**
  * Base64 데이터 URL을 Blob으로 변환하는 헬퍼 함수
@@ -114,22 +238,22 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
     const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
     
     // Firebase Realtime Database에 메타데이터 저장 (참고용)
-    // firebase는 전역 변수로 사용 (manifest.json의 importScripts로 로드됨)
-    if (typeof firebase !== 'undefined' && firebase.database) {
+    // firebaseService의 getDb() 사용
+    try {
       const timestamp = Date.now();
-      const db = firebase.database();
-      const imageDataRef = db.ref(`thumbnail_images/${userId}/${timestamp}`);
+      const db = getDb();
+      const imageDataRef = ref(db, `thumbnail_images/${userId}/${timestamp}`);
       const storagePath = `gs://${bucket}/${path}`;
       
-      await imageDataRef.set({
+      await set(imageDataRef, {
         path: path,
         storagePath: storagePath,
         downloadURL: downloadURL,
         timestamp: timestamp,
         size: blob.size
       });
-    } else {
-      console.warn('[Firebase Storage] Firebase가 로드되지 않아 메타데이터를 저장하지 않습니다.');
+    } catch (error) {
+      console.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
     }
     
     console.log('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');

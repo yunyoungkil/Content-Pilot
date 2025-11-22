@@ -2,98 +2,38 @@
 // 이벤트 리스너만 연결하는 진입점 역할
 
 // 서비스 모듈 import
-// Firebase는 manifest.json의 importScripts로 전역에 로드됨
 import { fetchGaProperties as fetchGaPropertiesFromService, fetchAdSenseAccountId as fetchAdSenseAccountIdFromService } from './js/services/authService.js';
-import { uploadImageToFirebaseStorage as uploadImageToFirebaseStorageFromService, firebaseConfig, dataURLtoBlob } from './js/services/firebaseService.js';
+import { 
+  uploadImageToFirebaseStorage as uploadImageToFirebaseStorageFromService, 
+  dataURLtoBlob,
+  getDb,
+  getUserRef,
+  ref,
+  push,
+  set,
+  update,
+  remove,
+  onValue,
+  get,
+  serverTimestamp,
+  CONSTANTS,
+  initializeFirebase
+} from './js/services/firebaseService.js';
 import { callGeminiAPI as callGeminiAPIFromService } from './js/services/aiService.js';
 
-// Firebase 초기화 (모듈로 import)
-import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, push, set, update, remove, onValue, get, serverTimestamp } from 'firebase/database';
-
-let firebaseInitialized = false;
-let firebaseApp = null;
+// Firebase는 firebaseService.js에서 초기화됨
+// firebaseDatabase는 getDb()를 통해 접근
 let firebaseDatabase = null;
 
-function initializeFirebase() {
-  if (firebaseInitialized) {
-    return true;
+// Firebase Database 인스턴스 가져오기 (lazy initialization)
+function getFirebaseDatabase() {
+  if (!firebaseDatabase) {
+    firebaseDatabase = getDb();
   }
-  
-  try {
-    if (!firebaseApp) {
-      firebaseApp = initializeApp(firebaseConfig);
-    }
-    if (!firebaseDatabase) {
-      firebaseDatabase = getDatabase(firebaseApp);
-    }
-    firebaseInitialized = true;
-    console.log('[System] Firebase 초기화 완료');
-    
-    // 전역 변수로도 사용 가능하도록 설정 (하위 호환성)
-    // 기존 코드에서 firebase.database().ref()를 사용할 수 있도록
-    const createRefWrapper = (dbRef) => {
-      return {
-        once: (eventType) => get(dbRef).then(snapshot => ({ val: () => snapshot.val(), exists: () => snapshot.exists() })),
-        set: (value) => set(dbRef, value),
-        update: (values) => update(dbRef, values),
-        remove: () => remove(dbRef),
-        push: () => {
-          const newRef = push(dbRef);
-          return {
-            set: (value) => set(newRef, value),
-            key: newRef.key
-          };
-        },
-        child: (childPath) => createRefWrapper(ref(firebaseDatabase, `${dbRef.path}/${childPath}`)),
-        on: (eventType, callback) => {
-          const unsubscribe = onValue(dbRef, (snapshot) => {
-            callback({ val: () => snapshot.val(), exists: () => snapshot.exists() });
-          });
-          return unsubscribe;
-        }
-      };
-    };
-    
-    const firebaseCompat = {
-      app: firebaseApp,
-      apps: [firebaseApp],
-      initializeApp: () => firebaseApp,
-      database: () => ({
-        ref: (path) => createRefWrapper(ref(firebaseDatabase, path)),
-        ServerValue: {
-          TIMESTAMP: serverTimestamp()
-        }
-      })
-    };
-    
-    if (typeof self !== 'undefined') {
-      self.firebase = firebaseCompat;
-    }
-    if (typeof globalThis !== 'undefined') {
-      globalThis.firebase = firebaseCompat;
-    }
-    // 전역 변수로도 설정
-    if (typeof window !== 'undefined') {
-      window.firebase = firebaseCompat;
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('[System] Firebase 초기화 오류:', error);
-    return false;
-  }
+  return firebaseDatabase;
 }
 
-// 즉시 초기화
-initializeFirebase();
-
-console.log('[System] 모든 서비스 모듈 로드 완료');
-
-// 상수 정의 'default_user'
-const CONSTANTS = {
-  USER_ID: 'default_user'
-};
+console.log('🚀 [System] Service Worker (Module) Started');
 
 let creating; // Offscreen Document 생성 플래그
 let isKanbanListenerActive = false;
@@ -1530,7 +1470,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const userId = CONSTANTS.USER_ID;
     const startTime = Date.now();
     
-    const scrapsRef = ref(firebaseDatabase, `scraps/${userId}`);
+    const db = getFirebaseDatabase();
+    const scrapsRef = ref(db, `scraps/${userId}`);
     get(scrapsRef)
       .then((snapshot) => {
         const loadTime = Date.now() - startTime;
@@ -1577,7 +1518,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       try {
         const userId = CONSTANTS.USER_ID;
-        const scrapRef = ref(firebaseDatabase, `scraps/${userId}/${scrapId}`);
+        const db = getFirebaseDatabase();
+        const scrapRef = ref(db, `scraps/${userId}/${scrapId}`);
         const snapshot = await get(scrapRef);
         const scrapData = snapshot.val();
         
@@ -1618,7 +1560,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const userId = CONSTANTS.USER_ID;
     const startTime = Date.now();
     
-    const scrapsRef = ref(firebaseDatabase, `scraps/${userId}`);
+    const db = getFirebaseDatabase();
+    const scrapsRef = ref(db, `scraps/${userId}`);
     get(scrapsRef)
       .then((snapshot) => {
         const loadTime = Date.now() - startTime;
@@ -1660,7 +1603,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     
     const userId = CONSTANTS.USER_ID;
-    const scrapRef = ref(firebaseDatabase, `scraps/${userId}/${scrapId}`);
+        const db = getFirebaseDatabase();
+        const scrapRef = ref(db, `scraps/${userId}/${scrapId}`);
     get(scrapRef)
       .then((snapshot) => {
         const scrapData = snapshot.val();
@@ -2535,10 +2479,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const startTime = Date.now();
     
     // [최적화] 병렬 쿼리 실행 및 성능 로깅
+    const db = getFirebaseDatabase();
     Promise.all([
-      get(ref(firebaseDatabase, `channel_content/${userId}`)),
-      get(ref(firebaseDatabase, `channel_meta/${userId}`)),
-      get(ref(firebaseDatabase, `channels/${userId}`)),
+      get(ref(db, `channel_content/${userId}`)),
+      get(ref(db, `channel_meta/${userId}`)),
+      get(ref(db, `channels/${userId}`)),
     ])
       .then(([contentSnap, metaSnap, channelsSnap]) => {
         const loadTime = Date.now() - startTime;
@@ -4079,7 +4024,8 @@ ${decayContent.map((item, idx) =>
     const startTime = Date.now();
     
     // 1. 요청한 탭에 현재 데이터를 즉시 보냅니다.
-    const kanbanRef = ref(firebaseDatabase, `kanban/${CONSTANTS.USER_ID}`);
+    const db = getFirebaseDatabase();
+    const kanbanRef = ref(db, `kanban/${CONSTANTS.USER_ID}`);
     get(kanbanRef)
       .then((snapshot) => {
         const loadTime = Date.now() - startTime;
@@ -4127,7 +4073,8 @@ ${decayContent.map((item, idx) =>
     const userId = CONSTANTS.USER_ID;
     const startTime = Date.now();
     
-    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    const db = getFirebaseDatabase();
+    const kanbanRef = ref(db, `kanban/${userId}`);
     get(kanbanRef)
       .then((snapshot) => {
         const loadTime = Date.now() - startTime;
@@ -6326,7 +6273,8 @@ async function fetchRssFeed(url, channelType) {
     const sourceId = btoa(url).replace(/=/g, "");
     
     // [최적화] Firebase에서 저장된 ETag와 Last-Modified 가져오기
-    const metaRef = ref(firebaseDatabase, `channel_meta/${userId}/${sourceId}`);
+    const db = getFirebaseDatabase();
+    const metaRef = ref(db, `channel_meta/${userId}/${sourceId}`);
     const metaSnap = await get(metaRef);
     const existingMeta = metaSnap.val() || {};
     const lastEtag = existingMeta.lastEtag || null;
@@ -7032,7 +6980,8 @@ async function analyzePerformanceData(targetChannelId = null) {
     // 하지만 Firebase Realtime Database는 부분 쿼리가 제한적이므로
     // 전체를 가져오되, 필요한 필드만 처리하도록 최적화
     const startTime = Date.now();
-    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    const db = getFirebaseDatabase();
+    const kanbanRef = ref(db, `kanban/${userId}`);
     const snapshot = await get(kanbanRef);
     const allCards = snapshot.val() || {};
     console.log(`[analyzePerformanceData] Firebase 데이터 로드 완료 (${Date.now() - startTime}ms)`);
@@ -7381,7 +7330,8 @@ async function checkAndUpdateRenewalBadge() {
 
     // 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
     const userId = CONSTANTS.USER_ID;
-    const ideasRef = ref(firebaseDatabase, `kanban/${userId}/ideas`);
+    const db = getFirebaseDatabase();
+    const ideasRef = ref(db, `kanban/${userId}/ideas`);
     const ideasSnap = await get(ideasRef);
     const ideas = ideasSnap.val() || {};
     const existingRenewalCards = Object.values(ideas).filter(
@@ -7424,7 +7374,9 @@ async function runAutomatedRenewalChecks() {
 
     // 2. 중복 방지를 위해 현재 '아이디어' 탭 목록 조회
     const userId = CONSTANTS.USER_ID;
-    const ideasSnap = await firebase.database().ref(`kanban/${userId}/ideas`).once("value");
+    const db = getFirebaseDatabase();
+    const ideasRef = ref(db, `kanban/${userId}/ideas`);
+    const ideasSnap = await get(ideasRef);
     const ideas = ideasSnap.val() || {};
     const existingRenewalCards = Object.values(ideas).filter(
       idea => idea.origin?.type === 'my_post_renewal'
@@ -7491,7 +7443,8 @@ async function updateAllPerformanceMetrics() {
   }
   
     const userId = CONSTANTS.USER_ID;
-    const kanbanRef = ref(firebaseDatabase, `kanban/${userId}`);
+    const db = getFirebaseDatabase();
+    const kanbanRef = ref(db, `kanban/${userId}`);
     const snapshot = await get(kanbanRef);
     const allCards = snapshot.val() || {};
 
