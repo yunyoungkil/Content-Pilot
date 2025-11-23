@@ -318,6 +318,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })());
   }
 
+  if (msg.action === "get_kanban_card_status") {
+    return handleAsync((async () => {
+      const { cardId } = msg;
+      const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
+      const allCards = snap.val() || {};
+      for (const status in allCards) {
+        if (allCards[status][cardId]) {
+          return { success: true, status, data: allCards[status][cardId] };
+        }
+      }
+      return { success: false, error: "카드를 찾을 수 없습니다." };
+    })());
+  }
+
   if (msg.action === "save_idea_draft") {
     const { ideaId, draft } = msg;
     return handleAsync((async () => {

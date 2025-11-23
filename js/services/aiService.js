@@ -62,39 +62,91 @@ export async function getEmergingTopics(channelContext) {
 }
 
 // 5. 초안 생성 (메인 로직)
-export async function generateDraftFromIdea(ideaData) {
-  const persona = selectPersona(ideaData);
-  
-  // 데이터 준비 (analyticsService 활용)
-  const performanceData = await analyzePerformanceData(ideaData.channelId); // 성과 데이터 가져오기
-  const feedback = await getUserFeedbackPatterns(); // 피드백 패턴 가져오기
-  
-  // 프롬프트 구성
-  const performanceInfo = performanceData.decayContent && performanceData.decayContent.length > 0
-    ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
-    : '';
-  
-  const prompt = `
-    ${persona.systemPrompt}
-    [작성 요청]
-    주제: ${ideaData.title}
-    톤앤매너: ${persona.tone}
-    핵심요약: ${ideaData.description}
-    목차: ${(ideaData.outline || []).join(', ')}
-    
-    [참고 데이터]
-    ${performanceInfo ? `${performanceInfo}\n` : ''}${feedback ? `독자 선호 패턴: ${feedback}` : ''}
-    
-    위 정보를 바탕으로 SEO 최적화된 블로그 포스트 초안을 마크다운 형식으로 작성해주세요.
-    - h1 태그로 제목 시작
-    - 본문 중간에 [이미지 생성 프롬프트] 삽입
-    - 맨 마지막에 <썸네일정보>{"thumbnailText": "..."}</썸네일정보> JSON 포함
-  `;
+function formatDraftForReadability(draftText) {
+  if (!draftText) return draftText;
+  let html = draftText;
+  // 마크다운 링크 변환 [text](url) -> <a href="url">text</a>
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="text-decoration: none; color: #1a73e8;">$1</a>');
+  // 구분선 변환
+  html = html.replace(/\n\s*---\s*\n/gi, '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n');
+  // (참고 자료 X) 제거
+  html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
+  return html;
+}
 
-  const draftText = await callGeminiAPI(prompt);
-  
-  // 결과 반환 (후처리는 background.js 라우터나 여기서 수행)
-  return { success: true, draft: draftText };
+export async function generateDraftFromIdea(ideaData) {
+  try {
+    const persona = selectPersona(ideaData);
+    
+    // 데이터 준비 (analyticsService 활용)
+    const performanceData = await analyzePerformanceData(ideaData.channelId);
+    const feedback = await getUserFeedbackPatterns();
+    
+    // 프롬프트 구성
+    const performanceInfo = performanceData.decayContent && performanceData.decayContent.length > 0
+      ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
+      : '';
+    
+    const prompt = `
+      ${persona.systemPrompt}
+      [작성 요청]
+      주제: ${ideaData.title}
+      톤앤매너: ${persona.tone}
+      핵심요약: ${ideaData.description}
+      목차: ${(ideaData.outline || []).join(', ')}
+      
+      [참고 데이터]
+      ${performanceInfo ? `${performanceInfo}\n` : ''}${feedback ? `독자 선호 패턴: ${feedback}` : ''}
+      
+      위 정보를 바탕으로 SEO 최적화된 블로그 포스트 초안을 마크다운 형식으로 작성해주세요.
+      - h1 태그로 제목 시작
+      - 본문 중간에 [이미지 생성 프롬프트] 삽입
+      - 맨 마지막에 <썸네일정보>{"thumbnailText": "..."}</썸네일정보> JSON 포함
+    `;
+
+    const rawDraft = await callGeminiAPI(prompt);
+    
+    // 1. 마크다운 클리닝
+    let cleanedDraft = rawDraft
+      .replace(/^```markdown\s*\n?/i, '')
+      .replace(/^```\s*\n?/i, '')
+      .replace(/\n?```\s*$/i, '')
+      .trim();
+    
+    // 2. 가독성 포맷팅
+    let formattedDraft = formatDraftForReadability(cleanedDraft);
+
+    // 3. SEO 제목 추출 (h1 태그)
+    let seoTitle = ideaData.title;
+    const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || cleanedDraft.match(/^#\s+(.+)$/m);
+    if (h1Match && h1Match[1]) seoTitle = h1Match[1].trim();
+
+    // 4. 썸네일 정보 추출
+    let thumbnailInfo = null;
+    const thumbMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
+    if (thumbMatch) {
+      try {
+        thumbnailInfo = JSON.parse(thumbMatch[1]);
+        // 본문에서 태그 제거
+        formattedDraft = formattedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
+        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
+      } catch(e) {
+        console.warn('[generateDraftFromIdea] 썸네일 정보 파싱 실패:', e);
+      }
+    }
+    
+    return { 
+      success: true, 
+      draft: formattedDraft,
+      seoTitle: seoTitle,
+      thumbnailInfo: thumbnailInfo,
+      tags: (ideaData.tags || []).join(', ')
+    };
+
+  } catch (e) {
+    console.error('[generateDraftFromIdea] 오류:', e);
+    return { success: false, error: e.message };
+  }
 }
 
 // 6. 아이디어 브리핑

@@ -211,22 +211,180 @@ export async function fetchImageAsBase64(url) {
 
 // 7. 단건 저장
 export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
-    // TODO: background.js 로직과 동일하게 구현: URL 파싱 -> 중복 체크 -> fetch -> parse -> save
-    // 코드량 관계로 핵심 로직 생략, 실제 파일에는 background.js의 해당 핸들러 내용을 넣으세요.
-    return { success: true };
+  try {
+    if (!url || typeof url !== "string") throw new Error("유효한 URL이 필요합니다.");
+
+    // 1. 중복 검사
+    const duplicateCheck = await checkDuplicateUrl(url);
+    if (duplicateCheck.exists) {
+      const statusMap = { "ideas": "기획", "in-progress": "작성 중", "done": "발행 완료" };
+      return {
+        success: false,
+        code: "DUPLICATE_FOUND",
+        message: `이미 '${statusMap[duplicateCheck.status] || duplicateCheck.status}' 단계에 있는 포스팅입니다.`,
+        cardInfo: duplicateCheck
+      };
+    }
+
+    // 2. 플랫폼 판별 및 ID 추출
+    let platform = "blog";
+    let videoId = null;
+    const urlObj = new URL(url);
+    if (urlObj.hostname.includes("youtube.com") || urlObj.hostname.includes("youtu.be")) {
+      platform = "youtube";
+      if (urlObj.pathname.includes("/watch")) videoId = urlObj.searchParams.get("v");
+      else if (urlObj.hostname.includes("youtu.be")) videoId = urlObj.pathname.substring(1);
+      
+      if (!videoId) throw new Error("YouTube ID를 찾을 수 없습니다.");
+    }
+
+    // 3. 데이터 수집 및 저장
+    const userId = CONSTANTS.USER_ID;
+    const db = getDb();
+
+    if (platform === "youtube") {
+      const { youtubeApiKey } = await chrome.storage.local.get("youtubeApiKey");
+      if (!youtubeApiKey) throw new Error("YouTube API 키가 없습니다.");
+
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?key=${youtubeApiKey}&id=${videoId}&part=snippet,statistics`);
+      const data = await res.json();
+      if (!data.items?.length) throw new Error("비디오 정보를 찾을 수 없습니다.");
+
+      const apiItem = data.items[0];
+      const normalized = {
+        videoId: apiItem.id,
+        title: apiItem.snippet.title,
+        description: apiItem.snippet.description,
+        publishedAt: new Date(apiItem.snippet.publishedAt).getTime(),
+        thumbnail: apiItem.snippet.thumbnails.default?.url,
+        viewCount: parseInt(apiItem.statistics.viewCount || 0),
+        likeCount: parseInt(apiItem.statistics.likeCount || 0),
+        commentCount: parseInt(apiItem.statistics.commentCount || 0),
+        channelId: apiItem.snippet.channelId,
+        sourceId: sourceId || channelId,
+        channelType: "myChannels",
+        fetchedAt: Date.now()
+      };
+      
+      const tags = await extractKeywords(normalized.description);
+      normalized.tags = tags || null;
+
+      await set(ref(db, `channel_content/${userId}/youtubes/${videoId}`), cleanDataForFirebase(normalized));
+      return { success: true, data: normalized, platform };
+
+    } else {
+      // 블로그 수집
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await res.text();
+      
+      const parsed = await parseBlogPage(url, html);
+      if (!parsed.success) throw new Error(parsed.error || "파싱 실패");
+
+      const tags = await extractKeywords(parsed.cleanText);
+      let title = "제목 없음";
+      const titleMatch = html.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
+      if (titleMatch) title = titleMatch[1].trim();
+
+      const contentId = btoa(url.split('?')[0]).replace(/=/g, '');
+      
+      const finalData = {
+        title,
+        fullLink: url,
+        pubDate: Date.now(),
+        description: parsed.description,
+        thumbnail: parsed.thumbnail,
+        cleanText: parsed.cleanText,
+        sourceId: sourceId || channelId,
+        channelType: "myChannels",
+        fetchedAt: Date.now(),
+        ...parsed.metrics,
+        tags: tags || null
+      };
+
+      await set(ref(db, `channel_content/${userId}/blogs/${contentId}`), cleanDataForFirebase(finalData));
+      return { success: true, data: finalData, platform };
+    }
+
+  } catch (e) {
+    console.error("[fetchAndSaveSinglePost] 오류:", e);
+    return { success: false, error: e.message };
+  }
 }
 
-export async function deleteChannelData(url) {
-    // TODO: delete logic
+export async function deleteChannelData(urlToDelete) {
+  try {
+    const userId = CONSTANTS.USER_ID;
+    const db = getDb();
+    const channelsRef = ref(db, `channels/${userId}`);
+    const snap = await get(channelsRef);
+    const allChannels = snap.val();
+    if (!allChannels) throw new Error("채널 정보 없음");
+
+    let sourceIdToDelete = null;
+    let platformToDelete = null;
+    let channelFound = false;
+
+    // 채널 찾기 및 삭제
+    for (const type of ["myChannels", "competitorChannels"]) {
+      for (const platform of ["blogs", "youtubes"]) {
+        const list = allChannels[type]?.[platform] || [];
+        const idx = list.findIndex(c => c.inputUrl === urlToDelete);
+        if (idx > -1) {
+          const info = list[idx];
+          sourceIdToDelete = platform === "blogs" ? btoa(info.apiUrl).replace(/=/g, "") : info.apiUrl;
+          platformToDelete = platform;
+          list.splice(idx, 1); // 배열에서 제거
+          channelFound = true;
+          break;
+        }
+      }
+      if (channelFound) break;
+    }
+
+    if (!channelFound) return { success: true, message: "삭제할 채널을 찾지 못함" };
+
+    // DB 업데이트
+    await Promise.all([
+      set(channelsRef, allChannels), // 목록 업데이트
+      remove(ref(db, `channel_meta/${userId}/${sourceIdToDelete}`)) // 메타 삭제
+    ]);
+
     return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
 export async function refreshChannelData(sourceId, platform) {
-    // TODO: refresh logic
-    return { success: true };
+  try {
+    let apiUrl = sourceId;
+    if (platform === 'blog') {
+      try { 
+        apiUrl = atob(sourceId.replace(/_/g, '/').replace(/-/g, '+')); 
+      } catch(e) {
+        // Base64 디코딩 실패 시 원본 사용
+      }
+    }
+    
+    if (platform === 'blog') {
+      await fetchRssFeed(apiUrl, "manual_refresh");
+    } else if (platform === 'youtube') {
+      await fetchYoutubeChannel(apiUrl, "manual_refresh");
+    }
+
+    return { success: true, message: "새로고침 완료" };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
-export async function extractKeywords(text) { return []; }
+export async function extractKeywords(text) { 
+  // 간단한 키워드 추출 (필요시 AI Service의 callGeminiAPI 사용)
+  if (!text || text.length < 10) return [];
+  // 기본적으로 빈 배열 반환 (나중에 AI 기반 추출로 확장 가능)
+  return []; 
+}
 export async function summarizeText(text) { 
   // 간단한 요약 로직 (필요시 AI Service의 callGeminiAPI 사용)
   if (!text || text.length < 200) return text;

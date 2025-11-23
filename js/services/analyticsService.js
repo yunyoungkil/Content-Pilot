@@ -291,9 +291,43 @@ export async function analyzePerformanceData(targetChannelId = null) {
   }
   
   candidates.sort((a, b) => b.earnings - a.earnings);
-  // 분석 텍스트 생성은 aiService에서 수행하도록 여기선 데이터만 반환
+  
+  // 텍스트 분석 생성
+  let analysisText = null;
+  if (candidates.length > 0) {
+    const avgEarnings = candidates.reduce((sum, c) => sum + c.earnings, 0) / candidates.length;
+    const avgPageviews = candidates.reduce((sum, c) => sum + c.pageviews, 0) / candidates.length;
+    
+    const topTags = {};
+    candidates.slice(0, 5).forEach(c => {
+      // tags는 문자열 배열이거나 문자열일 수 있음
+      const tags = Array.isArray(c.tags) ? c.tags : (c.tags ? [c.tags] : []);
+      tags.forEach(tag => {
+        topTags[tag] = (topTags[tag] || 0) + 1;
+      });
+    });
+    const mostCommonTag = Object.keys(topTags).sort((a, b) => topTags[b] - topTags[a])[0] || '특정 주제';
+    
+    analysisText = `
+과거 발행 콘텐츠 분석 (${candidates.length}개):
+
+- 평균 수익: $${avgEarnings.toFixed(2)}
+- 평균 조회수: ${Math.round(avgPageviews).toLocaleString()}
+
+[상위 성과 콘텐츠]
+
+${candidates.slice(0, 3).map((c, i) => `${i+1}. ${c.title} ($${c.earnings.toFixed(2)})`).join('\n')}
+
+[인사이트]
+
+상위 콘텐츠들은 주로 '${mostCommonTag}'와 관련된 내용을 다루고 있습니다.
+    `.trim();
+  } else {
+    analysisText = "분석할 성과 데이터가 없습니다.";
+  }
+  
   return { 
-    analysis: null, 
+    analysis: analysisText,
     decayContent: candidates.slice(0, 5) 
   };
 }
