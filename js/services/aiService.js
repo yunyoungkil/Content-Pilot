@@ -4,6 +4,7 @@ import { getDb, CONSTANTS, uploadImageToFirebaseStorage, cleanDataForFirebase } 
 import { ref, update, get } from 'firebase/database';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
+import { Logger } from '../utils.js';
 
 // 1. Gemini API 호출 (Core)
 export async function callGeminiAPI(prompt) {
@@ -131,12 +132,11 @@ async function selectPersona(ideaData) {
 }
 
 /**
- * 보라색 콘솔 로그 출력
+ * 보라색 콘솔 로그 출력 (Logger.biz 사용)
  */
 function logPersona(persona) {
   const personaName = persona.name || persona.tone || 'Unknown';
-  console.log(`%c🎭 [Persona: ${personaName}]`, 'color: #9b59b6; font-weight: bold; font-size: 14px;');
-  console.log(`%c톤앤매너: ${persona.tone}`, 'color: #8e44ad; font-size: 12px;');
+  Logger.biz(`🎭 [Persona: ${personaName}]`, `톤앤매너: ${persona.tone}`);
 }
 
 // 3. 키워드 갭 분석 (AI 분석)

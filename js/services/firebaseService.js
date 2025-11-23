@@ -234,11 +234,11 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
     
     // Firebase Realtime Database에 메타데이터 저장 (참고용)
     // firebaseService의 getDb() 사용
+    const storagePath = `gs://${bucket}/${path}`;
     try {
       const timestamp = Date.now();
       const db = getDb();
       const imageDataRef = ref(db, `thumbnail_images/${userId}/${timestamp}`);
-      const storagePath = `gs://${bucket}/${path}`;
       
       await set(imageDataRef, {
         path: path,

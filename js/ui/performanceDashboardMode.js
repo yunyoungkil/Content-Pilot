@@ -1,9 +1,10 @@
 // js/ui/performanceDashboardMode.js
 // 성과 대시보드 모드 UI
 
-import { showToast } from "../utils.js";
+import { showToast, Logger } from "../utils.js";
 
 let allPerformanceData = [];
+let previousDayStats = null; // 전일 통계 저장
 
 /**
  * 성과 대시보드 렌더링
@@ -109,7 +110,7 @@ async function processPerformanceData(allCards, container) {
       
       // [수정] 중복 카드 제거 (같은 cardId가 여러 status에 있을 수 있음)
       if (seenCardIds.has(cardId)) {
-        console.warn(`[Performance Dashboard] 중복 카드 발견 (건너뜀): ${cardId}, status: ${status}`);
+        Logger.warn(`[Performance Dashboard] 중복 카드 발견 (건너뜀): ${cardId}, status: ${status}`);
         continue;
       }
       
@@ -138,7 +139,7 @@ async function processPerformanceData(allCards, container) {
         
         // [수정] title이 없는 카드에 대한 경고
         if (!card.title || card.title.trim() === '') {
-          console.warn(`[Performance Dashboard] 제목 없는 카드 발견: ${cardId}, status: ${status}`);
+          Logger.warn(`[Performance Dashboard] 제목 없는 카드 발견: ${cardId}, status: ${status}`);
         }
         
         const pushedData = {
@@ -159,17 +160,17 @@ async function processPerformanceData(allCards, container) {
 
   // [디버깅] 실제 done status의 카드 수 확인
   const doneCardsCount = allCards.done ? Object.keys(allCards.done).length : 0;
-  console.log(`[Performance Dashboard] 디버깅 정보:`);
-  console.log(`  - done status 실제 카드 수: ${doneCardsCount}개`);
-  console.log(`  - 성과 데이터 필터링 후: ${allPerformanceData.length}개`);
-  console.log(`  - 카드 목록:`, allPerformanceData.map(item => ({ id: item.id, title: item.title, status: item.status })));
+  Logger.debug(`[Performance Dashboard] 디버깅 정보:`);
+  Logger.debug(`  - done status 실제 카드 수: ${doneCardsCount}개`);
+  Logger.debug(`  - 성과 데이터 필터링 후: ${allPerformanceData.length}개`);
+  Logger.debug(`  - 카드 목록:`, allPerformanceData.map(item => ({ id: item.id, title: item.title, status: item.status })));
   
   if (doneCardsCount !== allPerformanceData.length) {
-    console.warn(`[Performance Dashboard] ⚠️ 불일치 발견! done에 ${doneCardsCount}개가 있지만 ${allPerformanceData.length}개가 표시됩니다.`);
+    Logger.warn(`[Performance Dashboard] ⚠️ 불일치 발견! done에 ${doneCardsCount}개가 있지만 ${allPerformanceData.length}개가 표시됩니다.`);
     
     // done의 모든 카드 확인
     if (allCards.done) {
-      console.log(`  - done status의 모든 카드:`, Object.keys(allCards.done).map(cardId => {
+      Logger.debug(`  - done status의 모든 카드:`, Object.keys(allCards.done).map(cardId => {
         const card = allCards.done[cardId];
         return {
           id: cardId,
@@ -258,6 +259,41 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   const totalSessions = sortedData.reduce((sum, item) => sum + (item.performance.sessions || 0), 0);
   const avgEarnings = sortedData.length > 0 ? totalEarnings / sortedData.length : 0;
   const avgPageviews = sortedData.length > 0 ? totalPageviews / sortedData.length : 0;
+  
+  // 오늘 발행된 콘텐츠 수 계산 (목표 달성 체크용)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayPublishedCount = sortedData.filter(item => {
+    const publishedDate = item.createdAt ? new Date(item.createdAt) : null;
+    if (!publishedDate) return false;
+    publishedDate.setHours(0, 0, 0, 0);
+    return publishedDate.getTime() === today.getTime();
+  }).length;
+  
+  // 전일 대비 성장률 계산
+  const growthRates = calculateGrowthRates(totalEarnings, totalPageviews, totalSessions, sortedData.length);
+  
+  // 목표 달성 체크 (일일 글 작성 목표: 1일 1포)
+  const dailyGoal = 1; // 기본 목표: 1일 1포
+  const goalAchieved = todayPublishedCount >= dailyGoal;
+  
+  // 목표 달성 시 축하 애니메이션
+  if (goalAchieved && !window.goalAchievedToday) {
+    window.goalAchievedToday = true;
+    setTimeout(() => {
+      triggerConfettiAnimation();
+      showToast(`🎉 축하합니다! 오늘 ${todayPublishedCount}개의 콘텐츠를 발행했습니다!`, 5000);
+    }, 500);
+  }
+  
+  // 전일 통계 저장 (다음 렌더링 시 비교용)
+  previousDayStats = {
+    earnings: totalEarnings,
+    pageviews: totalPageviews,
+    sessions: totalSessions,
+    contentCount: sortedData.length,
+    timestamp: Date.now()
+  };
 
   // 상위 5개 콘텐츠 추출 (차트용)
   const top5ForChart = sortedData.slice(0, 5);
@@ -267,20 +303,21 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   contentEl.innerHTML = `
     <div class="perf-stats-summary">
       <div class="perf-stat-card">
-        <div class="stat-label">총 수익</div>
-        <div class="stat-value">$${totalEarnings.toFixed(2)}</div>
+        <div class="stat-label">총 수익 ${growthRates.earnings.arrow} ${growthRates.earnings.percent !== null ? `<span class="growth-rate ${growthRates.earnings.isPositive ? 'positive' : 'negative'}">${growthRates.earnings.percent}%</span>` : ''}</div>
+        <div class="stat-value ${growthRates.earnings.isPositive ? 'growth-positive' : ''}">$${totalEarnings.toFixed(2)}</div>
       </div>
       <div class="perf-stat-card">
-        <div class="stat-label">총 페이지뷰</div>
-        <div class="stat-value">${totalPageviews.toLocaleString()}</div>
+        <div class="stat-label">총 페이지뷰 ${growthRates.pageviews.arrow} ${growthRates.pageviews.percent !== null ? `<span class="growth-rate ${growthRates.pageviews.isPositive ? 'positive' : 'negative'}">${growthRates.pageviews.percent}%</span>` : ''}</div>
+        <div class="stat-value ${growthRates.pageviews.isPositive ? 'growth-positive' : ''}">${totalPageviews.toLocaleString()}</div>
       </div>
       <div class="perf-stat-card">
-        <div class="stat-label">총 세션</div>
-        <div class="stat-value">${totalSessions.toLocaleString()}</div>
+        <div class="stat-label">총 세션 ${growthRates.sessions.arrow} ${growthRates.sessions.percent !== null ? `<span class="growth-rate ${growthRates.sessions.isPositive ? 'positive' : 'negative'}">${growthRates.sessions.percent}%</span>` : ''}</div>
+        <div class="stat-value ${growthRates.sessions.isPositive ? 'growth-positive' : ''}">${totalSessions.toLocaleString()}</div>
       </div>
-      <div class="perf-stat-card">
-        <div class="stat-label">발행 콘텐츠</div>
+      <div class="perf-stat-card ${goalAchieved ? 'goal-achieved' : ''}">
+        <div class="stat-label">발행 콘텐츠 ${goalAchieved ? '🎯' : ''}</div>
         <div class="stat-value">${sortedData.length}개</div>
+        ${goalAchieved ? `<div class="goal-badge">오늘 ${todayPublishedCount}개 발행! 🎉</div>` : ''}
       </div>
     </div>
     ${sortedData.length > 0 ? `
@@ -336,17 +373,17 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   // [디버깅] 실제 렌더링된 카드 수 확인
   setTimeout(() => {
     const renderedCards = contentEl.querySelectorAll('.perf-card');
-    console.log(`[Performance Dashboard] 렌더링 확인:`);
-    console.log(`  - sortedData 길이: ${sortedData.length}`);
-    console.log(`  - 실제 DOM의 카드 수: ${renderedCards.length}`);
+    Logger.debug(`[Performance Dashboard] 렌더링 확인:`);
+    Logger.debug(`  - sortedData 길이: ${sortedData.length}`);
+    Logger.debug(`  - 실제 DOM의 카드 수: ${renderedCards.length}`);
     
     if (sortedData.length !== renderedCards.length) {
-      console.warn(`[Performance Dashboard] ⚠️ 불일치! 데이터는 ${sortedData.length}개인데 DOM에는 ${renderedCards.length}개가 렌더링되었습니다.`);
+      Logger.warn(`[Performance Dashboard] ⚠️ 불일치! 데이터는 ${sortedData.length}개인데 DOM에는 ${renderedCards.length}개가 렌더링되었습니다.`);
       
       // 실제 렌더링된 카드의 ID 확인
       const renderedIds = Array.from(renderedCards).map(card => card.dataset.cardId);
-      console.log(`  - 렌더링된 카드 ID:`, renderedIds);
-      console.log(`  - 데이터 카드 ID:`, sortedData.map(item => item.id));
+      Logger.debug(`  - 렌더링된 카드 ID:`, renderedIds);
+      Logger.debug(`  - 데이터 카드 ID:`, sortedData.map(item => item.id));
       
       // 중복 확인
       const idCounts = {};
@@ -355,7 +392,7 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
       });
       const duplicates = Object.entries(idCounts).filter(([id, count]) => count > 1);
       if (duplicates.length > 0) {
-        console.warn(`  - 중복된 카드 ID:`, duplicates);
+        Logger.warn(`  - 중복된 카드 ID:`, duplicates);
       }
     }
   }, 100);
@@ -566,6 +603,202 @@ function createPerformanceCard(item, index) {
       </div>
     </div>
   `;
+}
+
+/**
+ * 전일 대비 성장률 계산
+ */
+function calculateGrowthRates(currentEarnings, currentPageviews, currentSessions, currentContentCount) {
+  // localStorage에서 전일 통계 가져오기
+  const storedStats = localStorage.getItem('performance_previous_day_stats');
+  let previousStats = null;
+  
+  if (storedStats) {
+    try {
+      previousStats = JSON.parse(storedStats);
+      // 24시간 이내 데이터만 유효
+      const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+      if (previousStats.timestamp < oneDayAgo) {
+        previousStats = null;
+      }
+    } catch (e) {
+      previousStats = null;
+    }
+  }
+  
+  // 전일 통계가 없으면 null 반환
+  if (!previousStats) {
+    // 현재 통계 저장 (다음 렌더링 시 비교용)
+    localStorage.setItem('performance_previous_day_stats', JSON.stringify({
+      earnings: currentEarnings,
+      pageviews: currentPageviews,
+      sessions: currentSessions,
+      contentCount: currentContentCount,
+      timestamp: Date.now()
+    }));
+    
+    return {
+      earnings: { percent: null, arrow: '', isPositive: false },
+      pageviews: { percent: null, arrow: '', isPositive: false },
+      sessions: { percent: null, arrow: '', isPositive: false }
+    };
+  }
+  
+  // 성장률 계산
+  const calculateGrowth = (current, previous) => {
+    if (previous === 0) return { percent: current > 0 ? 100 : 0, isPositive: current > 0 };
+    const percent = ((current - previous) / previous) * 100;
+    return {
+      percent: Math.abs(percent).toFixed(1),
+      isPositive: percent > 0
+    };
+  };
+  
+  const earningsGrowth = calculateGrowth(currentEarnings, previousStats.earnings);
+  const pageviewsGrowth = calculateGrowth(currentPageviews, previousStats.pageviews);
+  const sessionsGrowth = calculateGrowth(currentSessions, previousStats.sessions);
+  
+  // 현재 통계 저장
+  localStorage.setItem('performance_previous_day_stats', JSON.stringify({
+    earnings: currentEarnings,
+    pageviews: currentPageviews,
+    sessions: currentSessions,
+    contentCount: currentContentCount,
+    timestamp: Date.now()
+  }));
+  
+  return {
+    earnings: {
+      percent: earningsGrowth.percent,
+      arrow: earningsGrowth.isPositive ? '🔺' : earningsGrowth.percent === '0.0' ? '' : '🔻',
+      isPositive: earningsGrowth.isPositive
+    },
+    pageviews: {
+      percent: pageviewsGrowth.percent,
+      arrow: pageviewsGrowth.isPositive ? '🔺' : pageviewsGrowth.percent === '0.0' ? '' : '🔻',
+      isPositive: pageviewsGrowth.isPositive
+    },
+    sessions: {
+      percent: sessionsGrowth.percent,
+      arrow: sessionsGrowth.isPositive ? '🔺' : sessionsGrowth.percent === '0.0' ? '' : '🔻',
+      isPositive: sessionsGrowth.isPositive
+    }
+  };
+}
+
+/**
+ * Confetti 애니메이션 (목표 달성 시)
+ */
+function triggerConfettiAnimation() {
+  // Confetti 컨테이너 생성
+  const confettiContainer = document.createElement('div');
+  confettiContainer.id = 'confetti-container';
+  confettiContainer.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+  `;
+  document.body.appendChild(confettiContainer);
+  
+  // Confetti 파티클 생성
+  const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
+  const particleCount = 150;
+  
+  for (let i = 0; i < particleCount; i++) {
+    const particle = document.createElement('div');
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const size = Math.random() * 10 + 5;
+    const startX = Math.random() * window.innerWidth;
+    const startY = -10;
+    const endY = window.innerHeight + 10;
+    const duration = Math.random() * 2 + 2;
+    const delay = Math.random() * 0.5;
+    const rotation = Math.random() * 720 + 360; // 360~1080도 회전
+    
+    particle.style.cssText = `
+      position: absolute;
+      width: ${size}px;
+      height: ${size}px;
+      background: ${color};
+      left: ${startX}px;
+      top: ${startY}px;
+      border-radius: ${Math.random() > 0.5 ? '50%' : '0'};
+      opacity: 0.9;
+      animation: confetti-fall ${duration}s ease-out ${delay}s forwards;
+      transform: rotate(${rotation}deg);
+    `;
+    
+    confettiContainer.appendChild(particle);
+  }
+  
+  // CSS 애니메이션 추가 (한 번만)
+  if (!document.getElementById('confetti-styles')) {
+    const style = document.createElement('style');
+    style.id = 'confetti-styles';
+    style.textContent = `
+      @keyframes confetti-fall {
+        0% {
+          transform: translateY(0) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(${window.innerHeight + 100}px) rotate(720deg);
+          opacity: 0;
+        }
+      }
+      .growth-rate.positive {
+        color: #4CAF50;
+        font-weight: 600;
+        animation: growth-blink 1s ease-in-out 3;
+      }
+      .growth-rate.negative {
+        color: #F44336;
+        font-weight: 600;
+      }
+      .growth-positive {
+        animation: growth-blink 1s ease-in-out 3;
+      }
+      @keyframes growth-blink {
+        0%, 100% { color: inherit; }
+        50% { color: #4CAF50; }
+      }
+      .goal-achieved {
+        border: 2px solid #FFD700 !important;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.5) !important;
+        animation: goal-pulse 2s ease-in-out infinite;
+      }
+      @keyframes goal-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      .goal-badge {
+        margin-top: 8px;
+        padding: 4px 8px;
+        background: linear-gradient(135deg, #FFD700, #FFA500);
+        color: white;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        animation: badge-bounce 0.5s ease-out;
+      }
+      @keyframes badge-bounce {
+        0% { transform: scale(0); }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  // 3초 후 confetti 제거
+  setTimeout(() => {
+    confettiContainer.remove();
+  }, 5000);
 }
 
 /**

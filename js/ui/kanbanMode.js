@@ -9,7 +9,24 @@ let currentlyDragging = { cardId: null, originalStatus: null };
 let kanbanContainer = null;
 let sortOrder = "desc";
 
-export { renderKanban, updateKanbanUI, addKanbanEventListeners };
+/**
+ * Kanban 모드 정리 함수
+ * 모드 전환 시 호출되어 메모리 누수 방지
+ */
+function destroyKanbanMode() {
+    // 드래그 중이 아닐 때만 초기화 (드래그 중에는 데이터 보존)
+    if (!currentlyDragging.cardId) {
+        allKanbanData = {};
+    }
+    // 드래그 상태는 유지 (드래그 완료 후 초기화)
+    // currentlyDragging은 dragend에서 초기화됨
+    kanbanContainer = null;
+    // sortOrder는 유지 (사용자 설정 보존)
+    
+    // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+}
+
+export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMode };
 /**
  * 칸반 보드 UI의 기본 골격을 렌더링하는 함수
  */
@@ -141,6 +158,13 @@ async function updateKanbanUI(allCards) {
   rootEl
     .querySelectorAll(".kanban-col-cards")
     .forEach((col) => (col.innerHTML = ""));
+
+  // [UI 모듈 독립성 강화] 카드 렌더링 후 이벤트 리스너가 등록되어 있는지 확인
+  // addKanbanEventListeners가 이미 호출되었는지 확인
+  if (rootEl && !rootEl.dataset.listenersAttached) {
+    // 이벤트 리스너가 아직 등록되지 않았다면 등록
+    addKanbanEventListeners(kanbanContainer);
+  }
 
   // 채널이 선택되지 않았을 때 온보딩 메시지 표시
   if (!activeChannelId) {
@@ -550,6 +574,15 @@ function createKanbanCard(id, data, status) {
 }
 
 function addKanbanEventListeners(container) {
+  const root = container.querySelector("#cp-kanban-board-root");
+  if (!root) return;
+
+  // [UI 모듈 독립성 강화] 중복 등록 방지
+  if (root.dataset.listenersAttached === 'true') {
+    return; // 이미 등록됨
+  }
+  root.dataset.listenersAttached = 'true';
+
   // K-3: 초안 삭제 버튼 클릭 이벤트 리스너 완전 제거
   const sortControls = container.querySelector(".kanban-sort-controls");
   if (sortControls) {
@@ -580,9 +613,6 @@ function addKanbanEventListeners(container) {
       chrome.runtime.sendMessage({ action: "get_kanban_data" });
     }
   });
-
-  const root = container.querySelector("#cp-kanban-board-root");
-  if (!root) return;
 
   // ▼▼▼ [추가] "+ 카드 추가" 버튼 클릭 이벤트 리스너 ▼▼▼
   root.addEventListener("click", (e) => {

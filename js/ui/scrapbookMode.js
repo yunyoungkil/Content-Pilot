@@ -8,6 +8,19 @@ let allScraps = [];
 // ▼▼▼ [추가] 스크랩북만의 독립적인 태그 필터 변수 ▼▼▼
 let activeScrapbookTagFilter = null;
 
+/**
+ * Scrapbook 모드 정리 함수
+ * 모드 전환 시 호출되어 메모리 누수 방지
+ */
+export function destroyScrapbookMode() {
+    // 전역 변수 초기화
+    selectedScrapId = null;
+    allScraps = [];
+    activeScrapbookTagFilter = null;
+    
+    // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+}
+
 // 스크랩북 모드 UI 렌더링 함수
 export function renderScrapbook(container) {
   // [체크리스트 4-1] 완전 초기화: 이전 채널의 모든 스크랩 제거

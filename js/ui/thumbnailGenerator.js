@@ -9,6 +9,107 @@
  */
 
 /**
+ * [Smart Text Fitting] 텍스트 길이에 따라 폰트 크기를 자동 조절
+ * 텍스트가 캔버스 영역에 완벽하게 맞도록 폰트 크기를 조정합니다.
+ * @param {CanvasRenderingContext2D} ctx - 캔버스 컨텍스트
+ * @param {string} text - 렌더링할 텍스트
+ * @param {number} maxWidth - 최대 너비 (픽셀)
+ * @param {number} maxHeight - 최대 높이 (픽셀)
+ * @param {string} fontFamily - 폰트 패밀리
+ * @param {string} fontWeight - 폰트 굵기
+ * @param {number} initialFontSize - 초기 폰트 크기
+ * @param {number} minFontSize - 최소 폰트 크기 (기본값: 12)
+ * @returns {Object} { fontSize, textWidth, textHeight, lines } - 최적화된 폰트 정보
+ */
+function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight, initialFontSize, minFontSize = 12) {
+  if (!text || text.trim().length === 0) {
+    return { fontSize: initialFontSize, textWidth: 0, textHeight: 0, lines: [] };
+  }
+  
+  let fontSize = Math.min(initialFontSize, maxHeight * 0.8); // 최대 높이의 80%를 초기값으로
+  let textWidth = 0;
+  let textHeight = 0;
+  let lines = [];
+  
+  // 이진 탐색으로 최적 폰트 크기 찾기
+  let low = minFontSize;
+  let high = Math.min(initialFontSize, maxHeight * 0.8);
+  let bestSize = minFontSize;
+  
+  while (low <= high) {
+    const testSize = Math.floor((low + high) / 2);
+    ctx.font = `${fontWeight} ${testSize}px ${fontFamily}`;
+    
+    // 텍스트를 여러 줄로 나누기 (단어 단위)
+    const words = text.split(/\s+/);
+    const testLines = [];
+    let currentLine = '';
+    
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      const metrics = ctx.measureText(testLine);
+      
+      if (metrics.width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) {
+          testLines.push(currentLine);
+          currentLine = word;
+        } else {
+          // 단어 하나가 너무 길면 강제로 자름
+          testLines.push(word.substring(0, Math.floor(word.length * maxWidth / metrics.width)));
+          currentLine = '';
+        }
+      }
+    }
+    if (currentLine) {
+      testLines.push(currentLine);
+    }
+    
+    const lineHeight = testSize * 1.2; // 줄 간격
+    const totalHeight = testLines.length * lineHeight;
+    const maxLineWidth = Math.max(...testLines.map(line => ctx.measureText(line).width));
+    
+    if (maxLineWidth <= maxWidth && totalHeight <= maxHeight) {
+      bestSize = testSize;
+      low = testSize + 1;
+      lines = testLines;
+      textWidth = maxLineWidth;
+      textHeight = totalHeight;
+    } else {
+      high = testSize - 1;
+    }
+  }
+  
+  // 최종 폰트 크기로 다시 측정
+  ctx.font = `${fontWeight} ${bestSize}px ${fontFamily}`;
+  if (lines.length === 0) {
+    // 줄 나누기 실패 시 단일 줄로 처리
+    const metrics = ctx.measureText(text);
+    if (metrics.width > maxWidth) {
+      // 텍스트가 너무 길면 크기 조정
+      const ratio = maxWidth / metrics.width;
+      bestSize = Math.max(minFontSize, Math.floor(bestSize * ratio * 0.95));
+      ctx.font = `${fontWeight} ${bestSize}px ${fontFamily}`;
+      textWidth = ctx.measureText(text).width;
+      textHeight = bestSize * 1.2;
+      lines = [text];
+    } else {
+      textWidth = metrics.width;
+      textHeight = bestSize * 1.2;
+      lines = [text];
+    }
+  }
+  
+  return {
+    fontSize: bestSize,
+    textWidth,
+    textHeight,
+    lines
+  };
+}
+
+/**
  * [Visual Engine v2.0] 자동 색상 보정 (Auto Color Grading)
  * 배경이 어두우면 텍스트를 밝게, 배경이 밝으면 텍스트를 어둡게 자동 조정합니다.
  * @param {CanvasRenderingContext2D} ctx - 캔버스 컨텍스트
@@ -122,22 +223,31 @@ const renderHelpers = {
       fontFamily = styles.fontFamily || "Arial";
     }
 
-    // 2. [텍스트 오버플로우 방지] 텍스트가 캔버스를 벗어나지 않도록 폰트 크기 조정
-    let finalFontSize = actualFontSize;
+    // 2. [Smart Text Fitting] 텍스트 길이에 따라 폰트 크기 자동 조절
     const maxWidth = canvasWidth * 0.9; // 캔버스 너비의 90%를 최대 너비로 설정
-    const padding = canvasWidth * 0.05; // 좌우 여백 5%
+    const maxHeight = canvasHeight * 0.4; // 최대 높이 설정 (여러 줄 텍스트 지원)
     
-    // 초기 폰트 설정으로 텍스트 너비 측정
+    // fitTextToCanvas 함수로 최적 폰트 크기 계산
+    const fitResult = fitTextToCanvas(
+      ctx,
+      text,
+      maxWidth,
+      maxHeight,
+      fontFamily,
+      fontWeight,
+      actualFontSize,
+      12 // 최소 폰트 크기
+    );
+    
+    const finalFontSize = fitResult.fontSize;
+    let textWidth = fitResult.textWidth;
+    const textLines = fitResult.lines;
+    
+    // 최종 폰트 설정
     ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
-    let textWidth = ctx.measureText(text).width;
     
-    // 텍스트가 캔버스를 벗어나면 폰트 크기 줄이기
-    if (textWidth > maxWidth) {
-      const ratio = maxWidth / textWidth;
-      finalFontSize = Math.floor(finalFontSize * ratio * 0.95); // 5% 여유 공간 추가
-      ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
-      textWidth = ctx.measureText(text).width;
-      console.log(`[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (텍스트 너비: ${textWidth.toFixed(0)}px, 최대: ${maxWidth.toFixed(0)}px)`);
+    if (finalFontSize !== actualFontSize) {
+      console.log(`[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (${textLines.length}줄)`);
     }
 
     // 3. 정렬 및 기준선 설정 (JSON의 align, baseline 완벽 적용)
@@ -196,17 +306,44 @@ const renderHelpers = {
       `[Text Render] 스타일 적용: font="${ctx.font}", align="${ctx.textAlign}", baseline="${ctx.textBaseline}", fill="${ctx.fillStyle}"`
     );
 
-    // 7. 텍스트 그리기
-    console.log(`[Text Render] ✏️ fillText("${text}", ${actualX}, ${actualY})`);
-    ctx.fillText(text, actualX, actualY);
+    // 7. 텍스트 그리기 (여러 줄 지원)
+    const lineHeight = finalFontSize * 1.2;
+    const totalTextHeight = textLines.length * lineHeight;
+    let startY = actualY;
+    
+    // baseline이 middle인 경우 수직 중앙 정렬
+    if (ctx.textBaseline === 'middle') {
+      startY = actualY - (totalTextHeight / 2) + (lineHeight / 2);
+    } else if (ctx.textBaseline === 'bottom') {
+      startY = actualY - totalTextHeight + lineHeight;
+    }
+    
+    // 여러 줄 텍스트 렌더링
+    if (textLines.length > 1) {
+      textLines.forEach((line, index) => {
+        const lineY = startY + (index * lineHeight);
+        console.log(`[Text Render] ✏️ fillText("${line}", ${actualX}, ${lineY}) [줄 ${index + 1}/${textLines.length}]`);
+        ctx.fillText(line, actualX, lineY);
+      });
+    } else {
+      console.log(`[Text Render] ✏️ fillText("${text}", ${actualX}, ${actualY})`);
+      ctx.fillText(text, actualX, actualY);
+    }
 
-    // 7. 외곽선 (stroke) - 자동 색상 보정 적용
+    // 7. 외곽선 (stroke) - 자동 색상 보정 적용 (여러 줄 지원)
     if (styles.stroke) {
-      // stroke 색상도 자동 조정 (fill과 동일한 색상 사용)
       const strokeColor = textColor || styles.strokeColor || "#000000";
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = styles.strokeWidth || 1;
-      ctx.strokeText(text, actualX, actualY);
+      
+      if (textLines.length > 1) {
+        textLines.forEach((line, index) => {
+          const lineY = startY + (index * lineHeight);
+          ctx.strokeText(line, actualX, lineY);
+        });
+      } else {
+        ctx.strokeText(text, actualX, actualY);
+      }
     }
 
     ctx.restore();
@@ -722,6 +859,361 @@ const renderHelpers = {
     });
   },
 };
+
+/**
+ * [Smart Templates] 황금비율 계산 (1:1.618)
+ * @param {number} canvasWidth - 캔버스 너비
+ * @param {number} canvasHeight - 캔버스 높이
+ * @returns {Object} 황금비율 좌표 { x, y, width, height }
+ */
+function calculateGoldenRatio(canvasWidth, canvasHeight) {
+  const goldenRatio = 1.618;
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / goldenRatio; // 황금비율 지점
+  
+  return {
+    x: centerX,
+    y: centerY,
+    width: canvasWidth * 0.8,
+    height: canvasHeight * 0.3
+  };
+}
+
+/**
+ * [Smart Templates] 동적 템플릿 생성기
+ * @param {string} templateType - 템플릿 타입: "comparison", "question", "list"
+ * @param {string} title - 메인 타이틀
+ * @param {string} subtitle - 서브타이틀 (선택)
+ * @param {Object} background - 배경 설정
+ * @param {Object} options - 추가 옵션
+ * @returns {Object} TemplateDataSchema JSON 객체
+ */
+export function createSmartTemplate(templateType, title, subtitle = "", background = null, options = {}) {
+  const defaultBackground = background || {
+    type: "gradient",
+    value: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+  };
+  
+  const layers = [];
+  
+  // 배경 오버레이 (가독성 향상)
+  if (background?.type === "image") {
+    layers.push({
+      type: "shape",
+      shape: "rect",
+      x: 0.5,
+      y: 0.5,
+      widthRatio: 1,
+      heightRatio: 1,
+      styles: {
+        fill: "rgba(0,0,0,0.4)"
+      }
+    });
+  }
+  
+  switch (templateType) {
+    case "comparison": {
+      // 비교형 템플릿: VS, Before/After 등
+      const parts = title.split(/\s*(VS|vs|대|vs\.|VS\.)\s*/);
+      if (parts.length >= 3) {
+        const leftText = parts[0].trim();
+        const rightText = parts[2].trim();
+        const vsText = parts[1] || "VS";
+        
+        // 왼쪽 텍스트 (황금비율 좌측)
+        layers.push({
+          type: "text",
+          text: leftText,
+          x: 0.25,
+          y: 0.5,
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.06,
+            fontWeight: "bold",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+          }
+        });
+        
+        // VS 텍스트 (중앙)
+        layers.push({
+          type: "text",
+          text: vsText,
+          x: 0.5,
+          y: 0.5,
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFD700",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.08,
+            fontWeight: "900",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.9)", blur: 0.015, offsetX: 0, offsetY: 0.008 }
+          }
+        });
+        
+        // 오른쪽 텍스트 (황금비율 우측)
+        layers.push({
+          type: "text",
+          text: rightText,
+          x: 0.75,
+          y: 0.5,
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.06,
+            fontWeight: "bold",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+          }
+        });
+      } else {
+        // VS가 없는 경우 일반 타이틀
+        layers.push({
+          type: "text",
+          text: title,
+          x: 0.5,
+          y: 0.382, // 황금비율 지점 (1/1.618)
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.08,
+            fontWeight: "bold",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+          }
+        });
+      }
+      break;
+    }
+    
+    case "question": {
+      // 질문형 템플릿: 물음표 강조
+      layers.push({
+        type: "text",
+        text: title.replace(/\?+$/, ""), // 물음표 제거 (별도로 추가)
+        x: 0.5,
+        y: 0.382, // 황금비율 지점
+        autoColorAdjust: true,
+        styles: {
+          fill: "#FFFFFF",
+          fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+          fontRatio: 0.07,
+          fontWeight: "bold",
+          align: "center",
+          baseline: "middle",
+          shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+        }
+      });
+      
+      // 큰 물음표 아이콘
+      layers.push({
+        type: "text",
+        text: "?",
+        x: 0.85,
+        y: 0.25,
+        autoColorAdjust: false,
+        styles: {
+          fill: "#FFD700",
+          fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+          fontRatio: 0.15,
+          fontWeight: "900",
+          align: "center",
+          baseline: "middle",
+          shadow: { color: "rgba(0,0,0,0.9)", blur: 0.02, offsetX: 0, offsetY: 0.01 }
+        }
+      });
+      
+      if (subtitle) {
+        layers.push({
+          type: "text",
+          text: subtitle,
+          x: 0.5,
+          y: 0.618, // 황금비율 하단
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.04,
+            fontWeight: "normal",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
+          }
+        });
+      }
+      break;
+    }
+    
+    case "list": {
+      // 리스트형 템플릿: 번호 또는 체크리스트
+      const listItems = title.split(/\n|,|\./).filter(item => item.trim().length > 0).slice(0, 3);
+      const startY = 0.35;
+      const itemSpacing = 0.15;
+      
+      listItems.forEach((item, index) => {
+        const yPos = startY + (index * itemSpacing);
+        
+        // 번호 또는 아이콘
+        layers.push({
+          type: "text",
+          text: `${index + 1}.`,
+          x: 0.2,
+          y: yPos,
+          autoColorAdjust: false,
+          styles: {
+            fill: "#FFD700",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.06,
+            fontWeight: "900",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.9)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+          }
+        });
+        
+        // 리스트 아이템 텍스트
+        layers.push({
+          type: "text",
+          text: item.trim(),
+          x: 0.5,
+          y: yPos,
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.05,
+            fontWeight: "bold",
+            align: "left",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+          }
+        });
+      });
+      
+      if (subtitle) {
+        layers.push({
+          type: "text",
+          text: subtitle,
+          x: 0.5,
+          y: 0.8,
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.035,
+            fontWeight: "normal",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
+          }
+        });
+      }
+      break;
+    }
+    
+    default: {
+      // 기본 템플릿 (황금비율 배치)
+      layers.push({
+        type: "text",
+        text: title,
+        x: 0.5,
+        y: 0.382, // 황금비율 지점
+        autoColorAdjust: true,
+        styles: {
+          fill: "#FFFFFF",
+          fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+          fontRatio: 0.08,
+          fontWeight: "bold",
+          align: "center",
+          baseline: "middle",
+          shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
+        }
+      });
+      
+      if (subtitle) {
+        layers.push({
+          type: "text",
+          text: subtitle,
+          x: 0.5,
+          y: 0.618, // 황금비율 하단
+          autoColorAdjust: true,
+          styles: {
+            fill: "#FFFFFF",
+            fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
+            fontRatio: 0.05,
+            fontWeight: "normal",
+            align: "center",
+            baseline: "middle",
+            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
+          }
+        });
+      }
+    }
+  }
+  
+  return {
+    name: `Smart Template: ${templateType}`,
+    background: defaultBackground,
+    layers
+  };
+}
+
+/**
+ * [Dynamic Template Loader] JSON 파일에서 템플릿 로드
+ * @param {string|Object} templateSource - JSON 파일 경로 또는 템플릿 객체
+ * @param {Object} dynamicText - 플레이스홀더 치환 데이터
+ * @returns {Promise<Object>} TemplateDataSchema JSON 객체
+ */
+export async function loadTemplateFromJSON(templateSource, dynamicText = {}) {
+  if (typeof templateSource === 'object') {
+    // 이미 객체인 경우 플레이스홀더만 치환
+    return replacePlaceholders(JSON.parse(JSON.stringify(templateSource)), dynamicText);
+  }
+  
+  // JSON 파일 로드
+  try {
+    const response = await fetch(templateSource);
+    const templateData = await response.json();
+    return replacePlaceholders(templateData, dynamicText);
+  } catch (error) {
+    console.error(`[Template Loader] 템플릿 로드 실패:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 플레이스홀더 치환 헬퍼
+ */
+function replacePlaceholders(templateData, dynamicText) {
+  const replaced = JSON.parse(JSON.stringify(templateData));
+  
+  if (replaced.layers) {
+    replaced.layers.forEach(layer => {
+      if (layer.type === 'text' && layer.text) {
+        if (layer.text === '{{SLOGAN}}') {
+          layer.text = dynamicText.slogan || layer.text;
+        } else if (layer.text === '{{VISUALIZATION_CUE}}') {
+          layer.text = dynamicText.visualizationCue || layer.text;
+        } else if (layer.text === '{{TITLE}}') {
+          layer.text = dynamicText.title || layer.text;
+        } else if (layer.text === '{{SUBTITLE}}') {
+          layer.text = dynamicText.subtitle || layer.text;
+        }
+      }
+    });
+  }
+  
+  return replaced;
+}
 
 /**
  * [PRD v2.7 + v3.2] 범용 템플릿 렌더러 (비동기 지원)

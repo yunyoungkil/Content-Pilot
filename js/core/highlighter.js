@@ -1,7 +1,7 @@
 // js/core/highlighter.js (최종 수정본)
 
 import { enrichScrapWithHighlights } from './scrapbook.js';
-import { showToast } from '../utils.js';
+import { showToast, Logger } from '../utils.js';
 
 export function setupHighlighter() {
   if (window.__pilotHighlightInitialized) return;
@@ -148,10 +148,10 @@ export function setupHighlighter() {
       </div>
       
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
-        <button id="scrap-save-cancel-btn" style="padding: 10px 20px; border-radius: 6px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 14px;">
+        <button id="scrap-save-cancel-btn" style="padding: 10px 20px; border-radius: 6px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 14px; white-space: nowrap;">
           취소
         </button>
-        <button id="scrap-save-confirm-btn" style="padding: 10px 20px; border-radius: 6px; border: none; background: #2d8cf0; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+        <button id="scrap-save-confirm-btn" style="padding: 10px 20px; border-radius: 6px; border: none; background: #2d8cf0; color: white; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; min-width: 100px;">
           저장
         </button>
       </div>
@@ -186,7 +186,12 @@ export function setupHighlighter() {
 
     function updateSaveButtonText(btn, isChannelOnly, channelName) {
       if (isChannelOnly && channelName) {
-        btn.textContent = `전용 저장 (${channelName})`;
+        // 채널 이름이 길면 축약
+        const maxLength = 20;
+        const displayName = channelName.length > maxLength 
+          ? channelName.substring(0, maxLength) + '...' 
+          : channelName;
+        btn.textContent = `전용 저장`;
         btn.title = `이 스크랩을 '${channelName}' 채널에만 저장합니다`;
       } else {
         btn.textContent = "공용 저장";
@@ -300,17 +305,17 @@ export function setupHighlighter() {
           try {
             scrapData = enrichScrapWithHighlights(scrapData);
             if (scrapData.hasHighlights && scrapData.highlights && scrapData.highlights.length > 0) {
-              console.log(`%c📌 [Scrap] 핵심 문장 ${scrapData.highlights.length}개 식별됨`, 'color: #ff9800; font-weight: bold;');
-              console.log('[Scrap] 하이라이트 상세:', scrapData.highlights.map(h => ({
+              Logger.biz(`📌 [Scrap] 핵심 문장 ${scrapData.highlights.length}개 식별됨`);
+              Logger.info('[Scrap] 하이라이트 상세:', scrapData.highlights.map(h => ({
                 text: h.text.substring(0, 50) + '...',
                 score: h.score
               })));
             } else {
-              console.log('[Scrap] 하이라이트된 문장 없음 (텍스트 길이:', scrapData.text?.length || 0, ')');
+              Logger.warn('[Scrap] 하이라이트된 문장 없음 (텍스트 길이:', scrapData.text?.length || 0, ')');
             }
           } catch (error) {
-            console.error('[Highlighter] 하이라이트 추출 실패:', error);
-            console.error('[Highlighter] 에러 스택:', error.stack);
+            Logger.error('[Highlighter] 하이라이트 추출 실패:', error);
+            Logger.error('[Highlighter] 에러 스택:', error.stack);
             // 오류 시 원본 데이터 사용
           }
           
@@ -346,7 +351,7 @@ export function setupHighlighter() {
                 { action: "scrap_element", data: scrapData, channelId: null },
                 (response) => {
                   if (chrome.runtime.lastError) {
-                    console.error("[Highlighter] Chrome runtime error:", chrome.runtime.lastError);
+                    Logger.error("[Highlighter] Chrome runtime error:", chrome.runtime.lastError);
                     return;
                   }
                   if (response && response.success) {
@@ -358,7 +363,7 @@ export function setupHighlighter() {
                 }
               );
             } catch (error) {
-              console.error("[Highlighter] Failed to send message:", error);
+              Logger.error("[Highlighter] Failed to send message:", error);
             }
           }
 

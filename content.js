@@ -34,16 +34,16 @@ if (window.self !== window.top && typeof navigator !== 'undefined' && navigator.
 import { setupHighlighter } from "./js/core/highlighter.js";
 import { createAndShowPanel, isPanelVisible } from "./js/ui/panel.js";
 import { showRecentScrapPreview } from "./js/ui/preview.js";
-import { showToast } from "./js/utils.js";
+import { showToast, Logger } from "./js/utils.js";
 import { renderDashboard } from "./js/ui/dashboardMode.js";
 
 // 전역 TUI 에디터 리스너 강제 등록 (workspaceMode.js 모듈 로드)
 import "./js/ui/workspaceMode.js";
 
 // content.js 초기화 시점에 메시지 리스너 등록 확인
-console.log("🔧 [Content] content.js 모듈 로드 완료");
-console.log("🔧 [Content] window.location:", window.location?.href);
-console.log("🔧 [Content] window === window.top:", window === window.top);
+Logger.debug("🔧 [Content] content.js 모듈 로드 완료");
+Logger.debug("🔧 [Content] window.location:", window.location?.href);
+Logger.debug("🔧 [Content] window === window.top:", window === window.top);
 
 // [PRD v3.2] Extension context 무효화 감지 (자동 새로고침 제거 - 사용자 컨펌으로 변경)
 let extensionContextInvalidated = false;
@@ -55,12 +55,12 @@ let reloadPromptShown = false; // 중복 프롬프트 방지
 // 단순히 확장 프로그램이 비활성화된 경우는 다이얼로그를 표시하지 않음
 try {
   chrome.runtime.id; // 확장 프로그램이 유효한지 체크
-  console.log("[Content Pilot] 확장 프로그램 컨텍스트 정상:", chrome.runtime.id);
+  Logger.info("[Content Pilot] 확장 프로그램 컨텍스트 정상:", chrome.runtime.id);
 } catch (error) {
   // 초기 로드 시 확장 프로그램이 없거나 비활성화된 경우
   // 이는 정상적인 상황일 수 있으므로 다이얼로그를 표시하지 않음
   // (확장 프로그램이 설치되지 않았거나 비활성화된 경우)
-  console.warn(
+  Logger.warn(
     "[Content Pilot] Extension context invalidated (초기 로드 시). 확장 프로그램이 없거나 비활성화되었습니다.",
     error
   );
@@ -76,14 +76,14 @@ const checkExtensionContext = () => {
     return true;
   } catch (error) {
     if (!extensionContextInvalidated) {
-      console.warn(
+      Logger.warn(
         "[Content Pilot] Extension context invalidated during runtime. Please reload the page manually."
       );
       extensionContextInvalidated = true;
       // 사용자 동의를 받아 새로고침 (Fail-safe: 거부 시 새로고침하지 않음)
       if (window.self === window.top && !reloadPromptShown) {
         reloadPromptShown = true;
-        console.log("[Content Pilot] 확장 프로그램 컨텍스트 무효화 감지 (런타임)");
+        Logger.warn("[Content Pilot] 확장 프로그램 컨텍스트 무효화 감지 (런타임)");
         
         // document.body가 준비될 때까지 대기
         const showReloadPrompt = () => {
@@ -92,7 +92,7 @@ const checkExtensionContext = () => {
             if (document.body) {
               showToast("⚠️ 확장 프로그램이 업데이트되었습니다. 작성 중인 내용을 저장해주세요.");
             } else {
-              console.warn("[Content Pilot] document.body가 아직 준비되지 않았습니다.");
+              Logger.warn("[Content Pilot] document.body가 아직 준비되지 않았습니다.");
             }
           } catch (error) {
             console.error("[Content Pilot] showToast 오류:", error);

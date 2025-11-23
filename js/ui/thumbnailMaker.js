@@ -1,5 +1,5 @@
 // js/ui/thumbnailMaker.js
-import { renderTemplateFromData } from "./thumbnailGenerator.js";
+import { renderTemplateFromData, createSmartTemplate } from "./thumbnailGenerator.js";
 import { showToast } from "../utils.js";
 
 /**
@@ -51,11 +51,11 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       <button id="tm-close" style="background:none;border:none;color:#888;cursor:pointer;font-size:24px;line-height:1;flex-shrink:0;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;">&times;</button>
     </div>
 
-    <div style="display:grid;grid-template-columns: 2fr 1fr; gap:20px; margin-bottom:20px;flex-shrink:0;">
+    <div style="display:grid;grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap:20px; margin-bottom:20px;flex-shrink:0;align-items:start;">
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-          <label style="font-size:11px;color:#888;white-space:nowrap;">비율</label>
-          <select id="tm-ratio" style="flex:1;padding:6px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:nowrap;">
+          <label style="font-size:11px;color:#888;white-space:nowrap;flex-shrink:0;">비율</label>
+          <select id="tm-ratio" style="flex:1;min-width:0;padding:8px 6px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
             <option value="16:9" ${thumbInfo.ratio === "16:9" ? "selected" : ""}>🖥️ 유튜브 (16:9)</option>
             <option value="1:1" ${thumbInfo.ratio === "1:1" ? "selected" : ""}>🟦 인스타 (1:1)</option>
             <option value="9:16" ${thumbInfo.ratio === "9:16" ? "selected" : ""}>📱 쇼츠/릴스 (9:16)</option>
@@ -63,29 +63,39 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
           </select>
         </div>
         
-        <div>
-          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">메인 타이틀</label>
-          <input id="tm-title" type="text" value="${escapedThumbText}" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
+        <div style="flex-shrink:0;">
+          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">템플릿 스타일</label>
+          <select id="tm-template-type" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
+            <option value="default" ${thumbInfo.templateType === "default" || !thumbInfo.templateType ? "selected" : ""}>📝 기본 (중앙 정렬)</option>
+            <option value="comparison" ${thumbInfo.templateType === "comparison" ? "selected" : ""}>⚖️ 비교형 (VS, Before/After)</option>
+            <option value="question" ${thumbInfo.templateType === "question" ? "selected" : ""}>❓ 질문형 (물음표 강조)</option>
+            <option value="list" ${thumbInfo.templateType === "list" ? "selected" : ""}>📋 리스트형 (번호/체크리스트)</option>
+          </select>
         </div>
         
-        <div>
+        <div style="flex-shrink:0;">
+          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">메인 타이틀</label>
+          <input id="tm-title" type="text" value="${escapedThumbText}" placeholder="비교형: 'A VS B', 질문형: '어떻게 할까?', 리스트형: '1. 항목1, 2. 항목2'" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
+        </div>
+        
+        <div style="flex-shrink:0;">
           <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">서브 타이틀 (선택)</label>
           <input id="tm-subtitle" type="text" value="${(thumbInfo.subtitle || "").replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" placeholder="부제목을 입력하세요" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
         </div>
 
-        <div style="display:flex;gap:10px;">
-          <div style="flex:1;">
+        <div style="display:flex;gap:10px;flex-shrink:0;flex-wrap:wrap;">
+          <div style="flex:1;min-width:150px;">
             <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글꼴 (Font)</label>
-            <select id="tm-font-family" style="width:100%;padding:8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
+            <select id="tm-font-family" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
               <option value="'Pretendard', sans-serif" ${thumbInfo.fontFamily === "'Pretendard', sans-serif" || !thumbInfo.fontFamily ? "selected" : ""}>깔끔한 고딕 (기본)</option>
               <option value="'Noto Serif KR', serif" ${thumbInfo.fontFamily === "'Noto Serif KR', serif" ? "selected" : ""}>진지한 명조</option>
               <option value="'Black Han Sans', sans-serif" ${thumbInfo.fontFamily === "'Black Han Sans', sans-serif" ? "selected" : ""}>강력한 제목용</option>
               <option value="'Nanum Pen Script', cursive" ${thumbInfo.fontFamily === "'Nanum Pen Script', cursive" ? "selected" : ""}>친근한 손글씨</option>
             </select>
           </div>
-          <div style="flex:1;">
+          <div style="flex:1;min-width:150px;">
             <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글자 색상</label>
-            <select id="tm-text-color" style="width:100%;padding:8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
+            <select id="tm-text-color" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
               <option value="auto" ${thumbInfo.textColor === "auto" || !thumbInfo.textColor ? "selected" : ""}>✨ 자동 (가독성)</option>
               <option value="#FFFFFF" ${thumbInfo.textColor === "#FFFFFF" ? "selected" : ""}>⚪ 흰색</option>
               <option value="#000000" ${thumbInfo.textColor === "#000000" ? "selected" : ""}>⚫ 검은색</option>
@@ -95,8 +105,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
           </div>
         </div>
       </div>
-      <div style="min-width:0;background:#2d2d2d;padding:12px;border-radius:8px;display:flex;flex-direction:column;gap:10px;height:fit-content;">
-        <label style="font-size:12px;color:#aaa;">배경 스타일</label>
+      <div style="min-width:0;background:#2d2d2d;padding:12px;border-radius:8px;display:flex;flex-direction:column;gap:10px;height:fit-content;position:sticky;top:0;">
+        <label style="font-size:12px;color:#aaa;white-space:nowrap;">배경 스타일</label>
         
         <div style="display:flex;gap:4px;background:#1e1e1e;padding:2px;border-radius:6px;">
           <button id="tm-bg-mode-ai" class="tm-bg-tab active" style="flex:1;padding:6px;font-size:11px;cursor:pointer;background:#444;color:white;border:none;border-radius:4px;transition:0.2s;">🤖 AI 생성</button>
@@ -104,7 +114,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         </div>
 
         <div id="tm-bg-ai-panel">
-          <select id="tm-bg-style" style="width:100%;padding:8px;background:#1e1e1e;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;">
+          <select id="tm-bg-style" style="width:100%;padding:10px 8px;background:#1e1e1e;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;line-height:1.4;height:auto;">
             <option value="abstract">✨ 추상적/모던</option>
             <option value="gradient">🌈 그라디언트/질감</option>
             <option value="office">🏢 오피스/데스크</option>
@@ -242,6 +252,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
         thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
         // 스타일 정보 저장
+        templateType: document.getElementById("tm-template-type")?.value || "default",
         fontFamily: document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif",
         textColor: document.getElementById("tm-text-color")?.value || "auto",
         ratio: document.getElementById("tm-ratio")?.value || "16:9",
@@ -268,6 +279,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     if (isRestoring) return;
     
     const state = {
+      templateType: document.getElementById("tm-template-type")?.value || "default",
       title: document.getElementById("tm-title").value,
       subtitle: document.getElementById("tm-subtitle")?.value || "",
       fontFamily: document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif",
@@ -302,6 +314,9 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const restoreState = (state) => {
     isRestoring = true; // 복원 중임을 표시
     
+    if (document.getElementById("tm-template-type")) {
+      document.getElementById("tm-template-type").value = state.templateType || "default";
+    }
     document.getElementById("tm-title").value = state.title;
     if (document.getElementById("tm-subtitle")) {
       document.getElementById("tm-subtitle").value = state.subtitle || "";
@@ -351,71 +366,85 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const updatePreview = async () => {
     const title = document.getElementById("tm-title").value;
     const subtitle = document.getElementById("tm-subtitle")?.value || "";
+    const templateType = document.getElementById("tm-template-type")?.value || "default";
     
     // [신규] UI에서 값 가져오기
     const fontFamily = document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif";
     const textColorMode = document.getElementById("tm-text-color")?.value || "auto";
     
-    // 텍스트 색상 결정 (Auto가 아니면 지정색 사용)
-    let textFill = "#ffffff"; // 기본값
-    let autoAdjust = true;    // 자동 보정 여부
-
-    if (textColorMode !== 'auto') {
-      textFill = textColorMode;
-      autoAdjust = false; // 강제 지정 시 자동 보정 끄기
-    }
+    // 배경 설정
+    const background = currentBgImage 
+      ? { type: "image", value: currentBgImage }
+      : { type: "gradient", value: "linear-gradient(135deg, #1e272e 0%, #485460 100%)" };
     
-    // 템플릿 데이터 조립
-    const templateData = {
-      name: "Custom Thumbnail",
-      background: currentBgImage 
-        ? { type: "image", value: currentBgImage } // 이미지가 있으면 이미지 배경
-        : { type: "gradient", value: "linear-gradient(135deg, #1e272e 0%, #485460 100%)" }, // 없으면 기본 그라디언트
-      layers: [
-        // 배경 이미지가 있을 때는 텍스트 가독성을 위해 어두운 오버레이 추가 (자동 모드일 때만)
-        ...(currentBgImage && autoAdjust ? [{ type: "shape", shape: "rect", x: 0.5, y: 0.5, widthRatio: 1, heightRatio: 1, styles: { fill: "rgba(0,0,0,0.4)" } }] : []),
-        
-        // 메인 타이틀 (서브타이틀 있으면 위로 이동)
-        // [비율별 텍스트 크기 조정] 비율에 따라 fontRatio 동적 계산
-        { 
-          type: "text", 
-          text: title, 
-          x: 0.5, 
-          y: subtitle ? 0.45 : 0.5, // 서브타이틀 있으면 위로
-          // 자동 색상 보정 제어 플래그
-          autoColorAdjust: autoAdjust,
-          styles: { 
-            fill: textFill, 
-            fontFamily: fontFamily, // [반영] 선택한 폰트
-            // [비율별 크기 조정] 비율에 따라 fontRatio 동적 계산
-            fontRatio: calculateFontRatio(canvas.width, canvas.height, subtitle ? true : false),
-            fontWeight: "bold", 
-            align: "center", 
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 40, offsetX: 0, offsetY: 10 }
-          } 
-        },
-        
-        // 서브 타이틀 (조건부 렌더링)
-        ...(subtitle ? [{
-          type: "text",
-          text: subtitle,
-          x: 0.5,
-          y: 0.65,
-          autoColorAdjust: autoAdjust,
-          styles: {
-            fill: textFill, // 메인과 동일 색상
-            fontFamily: fontFamily,
-            // [비율별 크기 조정] 서브타이틀은 메인보다 작게
-            fontRatio: calculateFontRatio(canvas.width, canvas.height, true) * 0.5,
-            fontWeight: "normal",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 20, offsetX: 0, offsetY: 5 }
-          }
-        }] : [])
-      ]
-    };
+    // [Smart Templates] 템플릿 타입에 따라 스마트 템플릿 생성 또는 기본 템플릿 사용
+    let templateData;
+    
+    if (templateType !== "default") {
+      // 스마트 템플릿 사용 (비교형, 질문형, 리스트형)
+      templateData = createSmartTemplate(
+        templateType,
+        title,
+        subtitle,
+        background,
+        { fontFamily }
+      );
+    } else {
+      // 기본 템플릿 (기존 로직)
+      // 텍스트 색상 결정 (Auto가 아니면 지정색 사용)
+      let textFill = "#ffffff"; // 기본값
+      let autoAdjust = true;    // 자동 보정 여부
+
+      if (textColorMode !== 'auto') {
+        textFill = textColorMode;
+        autoAdjust = false; // 강제 지정 시 자동 보정 끄기
+      }
+      
+      templateData = {
+        name: "Custom Thumbnail",
+        background: background,
+        layers: [
+          // 배경 이미지가 있을 때는 텍스트 가독성을 위해 어두운 오버레이 추가 (자동 모드일 때만)
+          ...(currentBgImage && autoAdjust ? [{ type: "shape", shape: "rect", x: 0.5, y: 0.5, widthRatio: 1, heightRatio: 1, styles: { fill: "rgba(0,0,0,0.4)" } }] : []),
+          
+          // 메인 타이틀 (서브타이틀 있으면 위로 이동)
+          { 
+            type: "text", 
+            text: title, 
+            x: 0.5, 
+            y: subtitle ? 0.45 : 0.5,
+            autoColorAdjust: autoAdjust,
+            styles: { 
+              fill: textFill, 
+              fontFamily: fontFamily,
+              fontRatio: calculateFontRatio(canvas.width, canvas.height, subtitle ? true : false),
+              fontWeight: "bold", 
+              align: "center", 
+              baseline: "middle",
+              shadow: { color: "rgba(0,0,0,0.8)", blur: 40, offsetX: 0, offsetY: 10 }
+            } 
+          },
+          
+          // 서브 타이틀 (조건부 렌더링)
+          ...(subtitle ? [{
+            type: "text",
+            text: subtitle,
+            x: 0.5,
+            y: 0.65,
+            autoColorAdjust: autoAdjust,
+            styles: {
+              fill: textFill,
+              fontFamily: fontFamily,
+              fontRatio: calculateFontRatio(canvas.width, canvas.height, true) * 0.5,
+              fontWeight: "normal",
+              align: "center",
+              baseline: "middle",
+              shadow: { color: "rgba(0,0,0,0.8)", blur: 20, offsetX: 0, offsetY: 5 }
+            }
+          }] : [])
+        ]
+      };
+    }
 
     // thumbnailGenerator.js의 렌더러 호출
     await renderTemplateFromData(ctx, templateData);
@@ -625,6 +654,11 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   });
   
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
+  document.getElementById("tm-template-type")?.addEventListener("change", () => {
+    updatePreview();
+    saveState();
+  });
+
   document.getElementById("tm-title").addEventListener("input", () => {
     updatePreview();
     saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)

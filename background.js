@@ -1,6 +1,7 @@
 // background.js (Final Router Version)
 
 import { getDb, CONSTANTS, initializeFirebase, uploadImageToFirebaseStorage, cleanDataForFirebase } from './js/services/firebaseService.js';
+import { Logger } from './js/utils.js';
 
 import { 
   updateAllPerformanceMetrics, 
@@ -50,11 +51,11 @@ let kanbanRealtimeListenerAttached = false;
   try {
     await restoreAuthSession();
   } catch (error) {
-    console.error('[System] 세션 복원 실패:', error);
+    Logger.error('[System] 세션 복원 실패:', error);
   }
 })();
 
-console.log("🚀 [System] Service Worker Started (Lightweight Router)");
+Logger.info("🚀 [System] Service Worker Started (Lightweight Router)");
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
 chrome.action.onClicked.addListener((tab) => {
@@ -63,7 +64,7 @@ chrome.action.onClicked.addListener((tab) => {
       action: "open_content_pilot_panel",
     }, () => {
       if (chrome.runtime.lastError) {
-        console.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+        Logger.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
       }
     });
   }
@@ -72,10 +73,10 @@ chrome.action.onClicked.addListener((tab) => {
 // 1. 알람 리스너 (스케줄러)
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "fetch-channels") {
-    console.log("⏰ [Alarm] 채널 데이터 수집 시작");
+    Logger.biz("⏰ [Alarm] 채널 데이터 수집 시작");
     fetchAllChannelData();
   } else if (alarm.name === "update-performance-metrics") {
-    console.log("⏰ [Alarm] 성과 지표 업데이트 시작");
+    Logger.biz("⏰ [Alarm] 성과 지표 업데이트 시작");
     updateAllPerformanceMetrics();
   }
 });
@@ -83,7 +84,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // 2. 설치/업데이트 리스너
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install" || details.reason === "update") {
-    console.log(`[System] Extension ${details.reason}d. Registering alarms...`);
+    Logger.info(`[System] Extension ${details.reason}d. Registering alarms...`);
     chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
     chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
     
@@ -103,7 +104,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     promise
       .then(data => sendResponse(data || { success: true }))
       .catch(err => {
-        console.error(`[Router Error] ${msg.action}:`, err);
+        Logger.error(`[Router Error] ${msg.action}:`, err);
         sendResponse({ success: false, error: err.message });
       });
     return true; // 비동기 응답 표시
@@ -184,6 +185,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(remove(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${msg.data.status}/${msg.data.cardId}`)));
   }
 
+  if (msg.action === "move_kanban_card") {
+    return handleAsync((async () => {
+      const { cardId, originalStatus, newStatus } = msg.data;
+      if (!cardId || !originalStatus || !newStatus) {
+        return { success: false, error: "필수 정보가 부족합니다." };
+      }
+
+      const userId = CONSTANTS.USER_ID;
+      const originalRef = ref(getDb(), `kanban/${userId}/${originalStatus}/${cardId}`);
+      const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${cardId}`);
+
+      try {
+        // 원래 위치의 카드 데이터 읽기
+        const snapshot = await get(originalRef);
+        if (!snapshot.exists()) {
+          return { success: false, error: "이동할 카드를 찾을 수 없습니다." };
+        }
+
+        const cardData = snapshot.val();
+        
+        // 새 위치에 카드 데이터 저장
+        await set(newRef, cardData);
+        
+        // 원래 위치에서 카드 삭제
+        await remove(originalRef);
+
+        Logger.biz(`[Kanban] 카드 이동: ${cardId} (${originalStatus} → ${newStatus})`);
+        return { success: true };
+      } catch (error) {
+        Logger.error(`[Kanban] 카드 이동 실패:`, error);
+        return { success: false, error: error.message };
+      }
+    })());
+  }
+
   if (msg.action === "get_kanban_data" || msg.action === "get_all_kanban_data") {
     const dbRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}`);
     
@@ -242,7 +278,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       return { data: filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
     }).catch(error => {
-      console.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
+      Logger.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
       return { data: [] };
     }));
   }
@@ -390,7 +426,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           scrapData: scrapPayload
         };
       } catch (error) {
-        console.error('[scrap_element] 저장 실패:', error);
+        Logger.error('[scrap_element] 저장 실패:', error);
         return { success: false, error: error.message };
       }
     })());
@@ -504,7 +540,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   
   // 알 수 없는 액션
-  console.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
+  Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });
   return false;
 });

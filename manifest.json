@@ -26,7 +26,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dist/bundle.js"],
+      "js": ["dist/content.bundle.js"],
       "css": ["css/style.css"],
       "all_frames": true
     }

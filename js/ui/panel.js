@@ -1,14 +1,15 @@
 // js/ui/panel.js (워크스페이스 연동 로직 최종 적용)
 
-import { initDashboardMode, addDashboardEventListeners, renderDashboard } from "./dashboardMode.js";
+import { initDashboardMode, addDashboardEventListeners, renderDashboard, destroyDashboardMode } from "./dashboardMode.js";
 import { renderPanelHeader, renderHeaderAndTabs, addHeaderEventListeners } from "./header.js";
-import { renderScrapbook } from "./scrapbookMode.js";
+import { renderScrapbook, destroyScrapbookMode } from "./scrapbookMode.js";
 import { renderChannelMode } from "./channelMode.js";
-import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js"; 
+import { renderKanban, addKanbanEventListeners, destroyKanbanMode } from "./kanbanMode.js"; 
 import { renderWorkspace } from "./workspaceMode.js";
 import { renderPerformanceDashboard } from "./performanceDashboardMode.js";
 import { renderPerformanceReport } from "./performanceReportMode.js";
 import { renderAdminMode } from "./adminMode.js";
+import { Logger } from "../utils.js";
 
 // 전역 TUI 에디터 리스너 강제 등록 (workspaceMode.js가 로드되기 전에도 작동)
 import "./workspaceMode.js"; 
@@ -420,7 +421,25 @@ export function createAndShowPanel() {
         
         // [체크리스트 2-3] 탭 이름 추출
         const tabName = activeTabBtn.dataset.key;
-        console.log(`[Panel] 현재 활성 탭: ${tabName}`);
+        Logger.debug(`[Panel] 현재 활성 탭: ${tabName}`);
+        
+        // [UI 모듈 독립성 강화] 채널 변경 시에도 이전 모드 정리
+        if (tabName) {
+          Logger.debug(`[Panel] 채널 변경으로 인한 모드 리렌더링: ${tabName}, 이전 모드 정리 중...`);
+          
+          try {
+            // 이전 모드의 destroy 함수 호출
+            if (tabName === 'dashboard') {
+              destroyDashboardMode();
+            } else if (tabName === 'scrapbook') {
+              destroyScrapbookMode();
+            } else if (tabName === 'kanban') {
+              destroyKanbanMode();
+            }
+          } catch (error) {
+            Logger.error(`[Panel] 이전 모드(${tabName}) 정리 실패:`, error);
+          }
+        }
         
         // [체크리스트 4-1] 로딩 표시 추가
         mainArea.style.opacity = "0.6";
@@ -596,6 +615,26 @@ function addEventListenersToPanel(shadowRoot) {
         if (tab) {
             const activeKey = tab.dataset.key;
             if (window.__cp_active_mode === activeKey) return; 
+
+            // [UI 모듈 독립성 강화] 이전 모드 정리
+            const previousMode = window.__cp_active_mode;
+            if (previousMode) {
+                Logger.debug(`[Panel] 모드 전환: ${previousMode} → ${activeKey}, 이전 모드 정리 중...`);
+                
+                try {
+                    // 이전 모드의 destroy 함수 호출
+                    if (previousMode === 'dashboard') {
+                        destroyDashboardMode();
+                    } else if (previousMode === 'scrapbook') {
+                        destroyScrapbookMode();
+                    } else if (previousMode === 'kanban') {
+                        destroyKanbanMode();
+                    }
+                    // 다른 모드들은 아직 destroy 함수가 없을 수 있음
+                } catch (error) {
+                    Logger.error(`[Panel] 이전 모드(${previousMode}) 정리 실패:`, error);
+                }
+            }
 
             // [체크리스트 3-🅰️] 채널 없을 때 강제 이동 (채널 관리 탭 제외)
             if (activeKey !== 'admin') {

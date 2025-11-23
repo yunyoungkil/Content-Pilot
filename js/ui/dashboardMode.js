@@ -1862,4 +1862,22 @@ function handleUrlFetch(container) {
     });
 }
 
-export { initDashboardMode, renderDashboard, addDashboardEventListeners };
+/**
+ * Dashboard 모드 정리 함수
+ * 모드 전환 시 호출되어 메모리 누수 방지
+ */
+function destroyDashboardMode() {
+    // 전역 변수 초기화
+    cachedData = null;
+    viewState = {
+        myChannels: { sortOrder: 'pubDate', currentPage: 0 },
+        competitorChannels: { sortOrder: 'pubDate', currentPage: 0 }
+    };
+    activeTagFilter = null;
+    activeChannelFilter = null;
+    
+    // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+    // (container.innerHTML = ''로 인해)
+}
+
+export { initDashboardMode, renderDashboard, addDashboardEventListeners, destroyDashboardMode };

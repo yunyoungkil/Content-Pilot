@@ -1,5 +1,137 @@
 // 유틸리티 함수 모음
 
+/**
+ * [Global Logger] 전역 로깅 시스템
+ * 개발 모드에서만 로그를 출력하고, 로그 레벨에 따라 색상을 다르게 표시합니다.
+ */
+export const Logger = {
+  // DEBUG 모드 체크 (localStorage 또는 URL 파라미터)
+  isDebugMode: () => {
+    try {
+      // Service Worker 환경 체크
+      if (typeof self !== 'undefined' && self.constructor?.name === 'ServiceWorkerGlobalScope') {
+        // Service Worker에서는 항상 디버그 모드 (개발 중)
+        return true;
+      }
+      
+      // window가 없는 환경 (Service Worker 등)
+      if (typeof window === 'undefined') {
+        return true; // Service Worker는 기본적으로 디버그 모드
+      }
+      
+      // URL 파라미터로 DEBUG=true 체크
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('DEBUG') === 'true') return true;
+      } catch (e) {
+        // window.location 접근 불가 (cross-origin 등)
+      }
+      
+      // localStorage 체크
+      try {
+        const debugMode = localStorage.getItem('CP_DEBUG_MODE');
+        if (debugMode === 'true') return true;
+      } catch (e) {
+        // localStorage 접근 불가
+      }
+      
+      // 개발 환경 자동 감지 (localhost 또는 확장 프로그램)
+      try {
+        if (window.location.protocol === 'chrome-extension:' || 
+            window.location.hostname === 'localhost' || 
+            window.location.hostname === '127.0.0.1') {
+          return true;
+        }
+      } catch (e) {
+        // window.location 접근 불가
+      }
+      
+      return false;
+    } catch (e) {
+      // 모든 체크 실패 시 기본적으로 true (개발 편의성)
+      return true;
+    }
+  },
+
+  /**
+   * INFO 레벨 로그 (일반 정보, 회색)
+   */
+  info: (...args) => {
+    if (!Logger.isDebugMode()) return;
+    const style = 'color: #888; font-weight: normal;';
+    console.log(`%c[INFO]`, style, ...args);
+  },
+
+  /**
+   * WARN 레벨 로그 (경고, 노란색)
+   */
+  warn: (...args) => {
+    if (!Logger.isDebugMode()) return;
+    const style = 'color: #FFA500; font-weight: 600;';
+    console.warn(`%c[WARN]`, style, ...args);
+  },
+
+  /**
+   * ERROR 레벨 로그 (에러, 빨간색 배경)
+   */
+  error: (...args) => {
+    // 에러는 항상 출력 (프로덕션에서도)
+    const style = 'background: #FF4444; color: #FFFFFF; padding: 2px 6px; border-radius: 3px; font-weight: bold;';
+    console.error(`%c[ERROR]`, style, ...args);
+  },
+
+  /**
+   * BIZ 레벨 로그 (비즈니스 로직, 금색)
+   * 저장, 생성, 삭제 등 중요한 비즈니스 액션에 사용
+   */
+  biz: (...args) => {
+    if (!Logger.isDebugMode()) return;
+    const style = 'color: #FFD700; font-weight: 700; text-shadow: 0 0 3px rgba(255, 215, 0, 0.5);';
+    console.log(`%c💰 [BIZ]`, style, ...args);
+  },
+
+  /**
+   * DEBUG 레벨 로그 (상세 디버깅 정보, 파란색)
+   */
+  debug: (...args) => {
+    if (!Logger.isDebugMode()) return;
+    const style = 'color: #4A90E2; font-weight: normal; font-style: italic;';
+    console.log(`%c[DEBUG]`, style, ...args);
+  },
+
+  /**
+   * 성능 측정 시작
+   */
+  time: (label) => {
+    if (!Logger.isDebugMode()) return;
+    console.time(`[PERF] ${label}`);
+  },
+
+  /**
+   * 성능 측정 종료
+   */
+  timeEnd: (label) => {
+    if (!Logger.isDebugMode()) return;
+    console.timeEnd(`[PERF] ${label}`);
+  },
+
+  /**
+   * 그룹 시작
+   */
+  group: (label) => {
+    if (!Logger.isDebugMode()) return;
+    console.group(`%c[GROUP] ${label}`, 'color: #888; font-weight: bold;');
+  },
+
+  /**
+   * 그룹 종료
+   */
+  groupEnd: () => {
+    if (!Logger.isDebugMode()) return;
+    console.groupEnd();
+  }
+};
+
 // 전역 토스트(모달) 함수 (중복 방지, 어디서든 호출 가능)
 export function showToast(msg) {
   let toast = document.getElementById("cp-toast-modal");

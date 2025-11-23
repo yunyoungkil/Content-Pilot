@@ -1,6 +1,8 @@
 // js/services/authService.js
 // Google OAuth 인증 관련 서비스
 
+import { Logger } from '../utils.js';
+
 // 토큰 만료 시간 상수 (Google OAuth 토큰은 일반적으로 1시간 유효)
 const TOKEN_EXPIRY_BUFFER = 5 * 60 * 1000; // 5분 버퍼 (만료 5분 전에 갱신)
 const TOKEN_DEFAULT_EXPIRY = 60 * 60 * 1000; // 기본 1시간
@@ -146,7 +148,7 @@ export async function getValidToken(forceInteractive = false) {
       }
 
       if (refreshResult.success) {
-        console.log('🔑 [AUTH RESTORED] 토큰 갱신 완료');
+        Logger.biz('🔑 [AUTH RESTORED] 토큰 갱신 완료');
         return refreshResult.token;
       } else {
         console.error('🔑 [Auth] 토큰 갱신 실패');
@@ -270,7 +272,7 @@ export async function restoreAuthSession() {
     const validation = await validateStoredToken();
     
     if (validation.valid && !validation.needsRefresh) {
-      console.log('🔑 [AUTH RESTORED] 저장된 세션 복원 성공');
+      Logger.biz('🔑 [AUTH RESTORED] 저장된 세션 복원 성공');
       return true;
     }
     
@@ -278,7 +280,7 @@ export async function restoreAuthSession() {
     if (validation.needsRefresh) {
       const refreshResult = await refreshAuthToken(false);
       if (refreshResult.success) {
-        console.log('🔑 [AUTH RESTORED] 토큰 갱신으로 세션 복원 성공');
+        Logger.biz('🔑 [AUTH RESTORED] 토큰 갱신으로 세션 복원 성공');
         return true;
       }
     }
