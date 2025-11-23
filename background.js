@@ -45,6 +45,7 @@ initializeFirebase();
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
+let offscreenDocumentId = null; // Offscreen 문서 ID 추적
 
 // Service Worker 시작 시 세션 복원
 (async () => {
@@ -56,6 +57,168 @@ let kanbanRealtimeListenerAttached = false;
 })();
 
 Logger.info("🚀 [System] Service Worker Started (Lightweight Router)");
+
+/**
+ * Offscreen 문서 생성 및 관리
+ * 이미지 처리를 백그라운드로 이관하여 메인 스레드 부하 감소
+ */
+async function ensureOffscreenDocument() {
+  if (offscreenDocumentId) {
+    // 이미 생성되어 있는지 확인
+    try {
+      const clients = await chrome.offscreen.hasDocument();
+      if (clients) {
+        Logger.debug('[Offscreen] 문서가 이미 존재합니다.');
+        return offscreenDocumentId;
+      }
+    } catch (e) {
+      // 문서가 없거나 오류 발생
+      offscreenDocumentId = null;
+    }
+  }
+
+  try {
+    // Offscreen 문서 생성
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['DOM_SCRAPING', 'WORKERS'], // 이미지 처리용
+      justification: '이미지 리사이징 및 템플릿 렌더링을 백그라운드에서 처리'
+    });
+    
+    // 문서 ID 추적 (chrome.offscreen API는 직접 ID를 반환하지 않지만, 
+    // hasDocument()로 존재 여부 확인 가능)
+    offscreenDocumentId = 'offscreen-doc';
+    Logger.info('[Offscreen] 문서 생성 완료');
+    return offscreenDocumentId;
+  } catch (error) {
+    Logger.error('[Offscreen] 문서 생성 실패:', error);
+    return null;
+  }
+}
+
+/**
+ * Offscreen 문서로 이미지 리사이징 요청
+ * @param {string} imageDataUrl - 원본 이미지 DataURL
+ * @param {number} maxWidth - 최대 너비
+ * @param {number} maxHeight - 최대 높이
+ * @param {number} quality - JPEG 품질 (0-1)
+ * @returns {Promise<string>} 리사이즈된 이미지 DataURL
+ */
+async function resizeImageInOffscreen(imageDataUrl, maxWidth, maxHeight, quality = 0.9) {
+  const startTime = performance.now();
+  
+  try {
+    await ensureOffscreenDocument();
+    
+    // Offscreen 문서로 메시지 전송 (Promise 기반)
+    // chrome.runtime.sendMessage는 offscreen 문서의 chrome.runtime.onMessage 리스너로 전달됨
+    const response = await new Promise((resolve, reject) => {
+      // 응답을 받을 리스너 등록
+      const responseListener = (msg, sender, sendResponse) => {
+        if (msg.action === 'resize_image_in_offscreen_response') {
+          chrome.runtime.onMessage.removeListener(responseListener);
+          if (msg.success) {
+            resolve(msg);
+          } else {
+            reject(new Error(msg.error || '이미지 리사이징 실패'));
+          }
+          return true;
+        }
+        return false;
+      };
+      
+      chrome.runtime.onMessage.addListener(responseListener);
+      
+      // Offscreen 문서로 메시지 전송
+      // offscreen.js의 chrome.runtime.onMessage 리스너가 이를 받아 처리
+      chrome.runtime.sendMessage({
+        action: 'resize_image_in_offscreen',
+        imageDataUrl,
+        maxWidth,
+        maxHeight,
+        quality
+      }).catch(reject);
+      
+      // 타임아웃 설정 (30초)
+      setTimeout(() => {
+        chrome.runtime.onMessage.removeListener(responseListener);
+        reject(new Error('이미지 리사이징 타임아웃'));
+      }, 30000);
+    });
+    
+    if (response && response.success) {
+      const elapsed = Math.round(performance.now() - startTime);
+      Logger.info(`⚡ [Offscreen] 이미지 리사이징 완료 (${elapsed}ms)`);
+      return response.dataUrl;
+    } else {
+      throw new Error(response?.error || '이미지 리사이징 실패');
+    }
+  } catch (error) {
+    Logger.error('[Offscreen] 이미지 리사이징 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * Offscreen 문서로 템플릿 렌더링 요청
+ * @param {Object} templateData - 템플릿 데이터
+ * @param {number} canvasWidth - 캔버스 너비
+ * @param {number} canvasHeight - 캔버스 높이
+ * @param {Object} dynamicText - 동적 텍스트
+ * @returns {Promise<string>} 렌더링된 이미지 DataURL
+ */
+async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight, dynamicText = {}) {
+  const startTime = performance.now();
+  
+  try {
+    await ensureOffscreenDocument();
+    
+    // Offscreen 문서로 메시지 전송 (Promise 기반)
+    const response = await new Promise((resolve, reject) => {
+      // 응답을 받을 리스너 등록
+      const responseListener = (msg, sender, sendResponse) => {
+        if (msg.action === 'render_template_in_offscreen_response') {
+          chrome.runtime.onMessage.removeListener(responseListener);
+          if (msg.success) {
+            resolve(msg);
+          } else {
+            reject(new Error(msg.error || '템플릿 렌더링 실패'));
+          }
+          return true;
+        }
+        return false;
+      };
+      
+      chrome.runtime.onMessage.addListener(responseListener);
+      
+      // Offscreen 문서로 메시지 전송
+      chrome.runtime.sendMessage({
+        action: 'render_template_in_offscreen',
+        templateData,
+        canvasWidth,
+        canvasHeight,
+        dynamicText
+      }).catch(reject);
+      
+      // 타임아웃 설정 (60초 - 템플릿 렌더링은 더 오래 걸릴 수 있음)
+      setTimeout(() => {
+        chrome.runtime.onMessage.removeListener(responseListener);
+        reject(new Error('템플릿 렌더링 타임아웃'));
+      }, 60000);
+    });
+    
+    if (response && response.success) {
+      const elapsed = Math.round(performance.now() - startTime);
+      Logger.info(`⚡ [Offscreen] 템플릿 렌더링 완료 (${elapsed}ms)`);
+      return response.dataUrl;
+    } else {
+      throw new Error(response?.error || '템플릿 렌더링 실패');
+    }
+  } catch (error) {
+    Logger.error('[Offscreen] 템플릿 렌더링 오류:', error);
+    throw error;
+  }
+}
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
 chrome.action.onClicked.addListener((tab) => {
@@ -99,6 +262,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // 3. 메시지 라우터 (Message Router)
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Offscreen 응답 메시지는 라우터에서 제외 (내부 Promise 리스너가 처리)
+  if (msg.action === 'resize_image_in_offscreen_response' || 
+      msg.action === 'render_template_in_offscreen_response') {
+    return false; // 다른 리스너가 처리하도록 함
+  }
+  
   // 비동기 응답 처리를 위한 헬퍼
   const handleAsync = (promise) => {
     promise
@@ -146,6 +315,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "analyze_video_comments") return handleAsync(analyzeVideoComments(msg.videoId));
   if (msg.action === "upload_thumbnail_to_storage") {
     return handleAsync(uploadImageToFirebaseStorage(msg.data.dataUrl, `thumbnails/${CONSTANTS.USER_ID}/${msg.data.filename || Date.now()+'.png'}`, CONSTANTS.USER_ID).then(url => ({ success: true, url })));
+  }
+
+  // === [Offscreen Image Processing] 이미지 처리 가속 ===
+  if (msg.action === "resize_image_in_offscreen") {
+    return handleAsync(resizeImageInOffscreen(
+      msg.data.imageDataUrl,
+      msg.data.maxWidth || 1920,
+      msg.data.maxHeight || 1080,
+      msg.data.quality || 0.9
+    ).then(dataUrl => ({ success: true, dataUrl })));
+  }
+
+  if (msg.action === "render_template_in_offscreen") {
+    return handleAsync(renderTemplateInOffscreen(
+      msg.data.templateData,
+      msg.data.canvasWidth || 1280,
+      msg.data.canvasHeight || 720,
+      msg.data.dynamicText || {}
+    ).then(dataUrl => ({ success: true, dataUrl })));
   }
 
   // === [Auth Service] 인증 ===

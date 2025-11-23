@@ -155,6 +155,163 @@ imageCount = allImages.length;
     };
 }
 
+/**
+ * 이미지 리사이징 함수 (Offscreen에서 실행)
+ * @param {string} imageDataUrl - 원본 이미지 DataURL
+ * @param {number} maxWidth - 최대 너비
+ * @param {number} maxHeight - 최대 높이
+ * @param {number} quality - JPEG 품질 (0-1)
+ * @returns {Promise<string>} 리사이즈된 이미지 DataURL
+ */
+async function resizeImage(imageDataUrl, maxWidth, maxHeight, quality = 0.9) {
+    return new Promise((resolve, reject) => {
+        // DataURL 유효성 검사
+        if (!imageDataUrl || typeof imageDataUrl !== 'string') {
+            reject(new Error('유효하지 않은 이미지 데이터 URL'));
+            return;
+        }
+        
+        if (!imageDataUrl.startsWith('data:image/')) {
+            reject(new Error('DataURL 형식이 올바르지 않습니다. data:image/로 시작해야 합니다.'));
+            return;
+        }
+        
+        const img = new Image();
+        
+        img.onload = () => {
+            try {
+                const startTime = performance.now();
+                
+                // 원본 비율 유지하면서 리사이즈
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width = Math.round(width * ratio);
+                    height = Math.round(height * ratio);
+                }
+                
+                // 캔버스에 그리기
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                
+                if (!ctx) {
+                    reject(new Error('캔버스 컨텍스트를 가져올 수 없습니다.'));
+                    return;
+                }
+                
+                // 고품질 리사이징
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // DataURL로 변환
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                const elapsed = Math.round(performance.now() - startTime);
+                
+                console.log(`⚡ [Offscreen] 이미지 리사이징 완료: ${img.width}x${img.height} → ${width}x${height} (${elapsed}ms)`);
+                resolve(dataUrl);
+            } catch (error) {
+                console.error('[Offscreen] 이미지 처리 중 오류:', error);
+                reject(new Error(`이미지 처리 실패: ${error.message}`));
+            }
+        };
+        
+        img.onerror = (error) => {
+            console.error('[Offscreen] 이미지 로드 실패:', error);
+            console.error('[Offscreen] DataURL 길이:', imageDataUrl ? imageDataUrl.length : 0);
+            console.error('[Offscreen] DataURL 시작 부분:', imageDataUrl ? imageDataUrl.substring(0, 100) : 'null');
+            reject(new Error(`이미지 로드 실패: DataURL이 유효하지 않거나 손상되었을 수 있습니다.`));
+        };
+        
+        // CORS 문제 방지를 위해 crossOrigin 설정
+        img.crossOrigin = 'anonymous';
+        img.src = imageDataUrl;
+    });
+}
+
+/**
+ * 템플릿 렌더링 함수 (Offscreen에서 실행)
+ * @param {Object} templateData - 템플릿 데이터
+ * @param {number} canvasWidth - 캔버스 너비
+ * @param {number} canvasHeight - 캔버스 높이
+ * @param {Object} dynamicText - 동적 텍스트
+ * @returns {Promise<string>} 렌더링된 이미지 DataURL
+ */
+async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight, dynamicText = {}) {
+    const startTime = performance.now();
+    
+    try {
+        // 캔버스 생성
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        const ctx = canvas.getContext('2d');
+        
+        // 템플릿 렌더링 로직은 복잡하므로, 
+        // 일단 기본적인 배경과 텍스트만 처리
+        // (전체 렌더링 로직은 thumbnailGenerator.js에서 처리)
+        
+        // 배경 렌더링
+        if (templateData.background) {
+            const bg = templateData.background;
+            if (bg.type === 'color') {
+                ctx.fillStyle = bg.value || '#000000';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            } else if (bg.type === 'gradient') {
+                const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+                // 간단한 그라디언트 파싱 (실제로는 더 복잡할 수 있음)
+                ctx.fillStyle = bg.value || '#000000';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            } else if (bg.type === 'image' && bg.value) {
+                // 이미지 배경 로드
+                await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+                        resolve();
+                    };
+                    img.onerror = reject;
+                    img.src = bg.value;
+                });
+            }
+        }
+        
+        // 텍스트 레이어 렌더링 (간단한 버전)
+        if (templateData.layers) {
+            for (const layer of templateData.layers) {
+                if (layer.type === 'text' && layer.text) {
+                    const x = layer.x > 1 ? layer.x : layer.x * canvasWidth;
+                    const y = layer.y > 1 ? layer.y : layer.y * canvasHeight;
+                    const fontSize = (layer.styles?.fontRatio || 0.1) * canvasHeight;
+                    
+                    ctx.save();
+                    ctx.font = `${layer.styles?.fontWeight || 'normal'} ${fontSize}px ${layer.styles?.fontFamily || 'Arial'}`;
+                    ctx.fillStyle = layer.styles?.fill || '#FFFFFF';
+                    ctx.textAlign = layer.styles?.align || 'center';
+                    ctx.textBaseline = layer.styles?.baseline || 'middle';
+                    ctx.fillText(layer.text, x, y);
+                    ctx.restore();
+                }
+            }
+        }
+        
+        // DataURL로 변환
+        const dataUrl = canvas.toDataURL('image/png', 1.0);
+        const elapsed = Math.round(performance.now() - startTime);
+        
+        console.log(`⚡ [Offscreen] 템플릿 렌더링 완료: ${canvasWidth}x${canvasHeight} (${elapsed}ms)`);
+        return dataUrl;
+    } catch (error) {
+        console.error('[Offscreen] 템플릿 렌더링 실패:', error);
+        throw error;
+    }
+}
+
 // --- 메시지 리스너 (background.js로부터 요청 처리) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'parse_html_in_offscreen') {
@@ -180,6 +337,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             console.error('[Offscreen] 파싱 중 오류 발생:', error);
             sendResponse({ success: false, error: error.message });
         }
+        return true;
     }
-    return true;
+    
+    if (request.action === 'resize_image_in_offscreen') {
+        const { imageDataUrl, maxWidth, maxHeight, quality } = request;
+        resizeImage(imageDataUrl, maxWidth, maxHeight, quality)
+            .then(dataUrl => {
+                // background.js로 응답 전송
+                chrome.runtime.sendMessage({
+                    action: 'resize_image_in_offscreen_response',
+                    success: true,
+                    dataUrl
+                });
+            })
+            .catch(error => {
+                chrome.runtime.sendMessage({
+                    action: 'resize_image_in_offscreen_response',
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true; // 비동기 응답
+    }
+    
+    if (request.action === 'render_template_in_offscreen') {
+        const { templateData, canvasWidth, canvasHeight, dynamicText } = request;
+        renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight, dynamicText)
+            .then(dataUrl => {
+                // background.js로 응답 전송
+                chrome.runtime.sendMessage({
+                    action: 'render_template_in_offscreen_response',
+                    success: true,
+                    dataUrl
+                });
+            })
+            .catch(error => {
+                chrome.runtime.sendMessage({
+                    action: 'render_template_in_offscreen_response',
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true; // 비동기 응답
+    }
+    
+    return false;
 });

@@ -364,6 +364,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
   // 렌더링 함수 (thumbnailGenerator 엔진 활용)
   const updatePreview = async () => {
+    const startTime = performance.now();
+    
     const title = document.getElementById("tm-title").value;
     const subtitle = document.getElementById("tm-subtitle")?.value || "";
     const templateType = document.getElementById("tm-template-type")?.value || "default";
@@ -372,9 +374,42 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     const fontFamily = document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif";
     const textColorMode = document.getElementById("tm-text-color")?.value || "auto";
     
+    // [Offscreen 가속] 배경 이미지가 있으면 offscreen에서 리사이징
+    let processedBgImage = currentBgImage;
+    if (currentBgImage && currentBgImage.startsWith('data:image')) {
+      try {
+        // DataURL 유효성 검사
+        if (currentBgImage.length < 100) {
+          console.warn('[ThumbnailMaker] DataURL이 너무 짧습니다. 원본 사용.');
+        } else {
+          // Offscreen에서 이미지 리사이징 (캔버스 크기에 맞춤)
+          const response = await chrome.runtime.sendMessage({
+            action: "resize_image_in_offscreen",
+            data: {
+              imageDataUrl: currentBgImage,
+              maxWidth: canvas.width,
+              maxHeight: canvas.height,
+              quality: 0.95
+            }
+          });
+          
+          if (response && response.success && response.dataUrl) {
+            processedBgImage = response.dataUrl;
+            const elapsed = Math.round(performance.now() - startTime);
+            console.log(`⚡ [ThumbnailMaker] 배경 이미지 리사이징 완료 (${elapsed}ms)`);
+          } else {
+            console.warn('[ThumbnailMaker] Offscreen 리사이징 실패, 원본 사용:', response?.error);
+          }
+        }
+      } catch (error) {
+        console.warn('[ThumbnailMaker] Offscreen 리사이징 실패, 원본 사용:', error.message);
+        // 실패 시 원본 사용
+      }
+    }
+    
     // 배경 설정
-    const background = currentBgImage 
-      ? { type: "image", value: currentBgImage }
+    const background = processedBgImage 
+      ? { type: "image", value: processedBgImage }
       : { type: "gradient", value: "linear-gradient(135deg, #1e272e 0%, #485460 100%)" };
     
     // [Smart Templates] 템플릿 타입에 따라 스마트 템플릿 생성 또는 기본 템플릿 사용
@@ -754,7 +789,12 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     btn.textContent = "⏳ 업로드 중...";
     
     try {
+      // [Offscreen 가속] 최종 이미지 생성도 offscreen에서 처리 (선택적)
+      // 현재는 메인 스레드에서 처리하되, 향후 offscreen으로 이관 가능
+      const startTime = performance.now();
       const dataUrl = canvas.toDataURL("image/png");
+      const elapsed = Math.round(performance.now() - startTime);
+      console.log(`⚡ [ThumbnailMaker] 최종 이미지 생성 완료 (${elapsed}ms)`);
       
       // [SEO 핵심] 현재 입력된 제목을 Alt 텍스트로 사용
       const altText = document.getElementById("tm-title").value || thumbInfo.thumbnailText || "썸네일 이미지";
