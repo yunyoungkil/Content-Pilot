@@ -273,6 +273,30 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
   }
 }
 
+/**
+ * 객체 내의 모든 undefined 값을 재귀적으로 null로 변환하는 함수.
+ * Firebase에 저장하기 전 데이터를 정제하는 데 사용됩니다.
+ * @param {any} data - 정제할 데이터
+ * @returns {any} 정제된 데이터
+ */
+export function cleanDataForFirebase(data) {
+  if (data === undefined) return null;
+  if (data === null || typeof data !== "object") return data;
+  if (Array.isArray(data))
+    return data.map((item) => cleanDataForFirebase(item));
+
+  const cleanedObj = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      const value = data[key];
+      if (value !== undefined) {
+        cleanedObj[key] = cleanDataForFirebase(value);
+      }
+    }
+  }
+  return cleanedObj;
+}
+
 // firebaseConfig는 이미 7번째 줄에서 export const로 선언됨
 // firebase는 importScripts로 전역 변수로 로드되므로 export 불가
 // background.js에서 manifest.json의 importScripts로 로드됨
