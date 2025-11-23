@@ -1063,6 +1063,141 @@ export function renderWorkspace(container, ideaData) {
 
   const workspaceEl = container.querySelector(".workspace-container");
   console.log("[Workspace] workspaceEl 찾기:", workspaceEl);
+  
+  // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
+  try {
+    const shadowWindow = container.ownerDocument?.defaultView || window;
+    if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
+      console.log("🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 중...");
+      console.log("🔧 [Workspace] Shadow window:", shadowWindow);
+      console.log("🔧 [Workspace] Shadow window === window:", shadowWindow === window);
+      
+      const shadowTuiEditorListener = (event) => {
+        if (event.data?.action === "cp_open_tui_editor") {
+          console.log("🌐 [Workspace] ========================================");
+          console.log("🌐 [Workspace] 📨 Shadow DOM 리스너: cp_open_tui_editor 메시지 수신!");
+          console.log("🌐 [Workspace] ========================================");
+          
+          const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
+          if (!imageUrl) {
+            console.error("❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음");
+            return;
+          }
+          
+          // workspace 컨테이너 찾기
+          const workspaceContainer = container.querySelector(".workspace-container") || 
+                                   document.querySelector(".workspace-container") || 
+                                   document.querySelector(".cp-workspace-container");
+          
+          if (!workspaceContainer) {
+            console.error("❌ [Workspace] workspace 컨테이너를 찾을 수 없습니다!");
+            return;
+          }
+          
+          console.log("✅ [Workspace] workspace 컨테이너 확인 완료");
+          
+          // TUI 에디터 iframe 생성 또는 재사용
+          let tuiEditorIframe = document.querySelector("#tui-editor-iframe");
+          
+          if (!tuiEditorIframe) {
+            console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
+            tuiEditorIframe = document.createElement("iframe");
+            tuiEditorIframe.id = "tui-editor-iframe";
+            tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
+            tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
+            document.body.appendChild(tuiEditorIframe);
+            console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료");
+            
+            const sourceInfo = event.data.source || "editor";
+            console.log("🎯 [Workspace] 소스 정보:", sourceInfo);
+            const editorIframe = workspaceContainer.querySelector("#quill-editor-iframe");
+            
+            const tuiEditorMessageHandler = function(e) {
+              if (e.data?.action === "tui-editor-result" && e.data.dataUrl) {
+                console.log("[Workspace] TUI 에디터 편집 완료, 결과 처리 중...");
+                
+                if (sourceInfo === "thumbnail_maker" || !event.data.allDocumentImages || event.data.allDocumentImages.length === 0) {
+                  const altText = "편집된 썸네일";
+                  if (editorIframe && editorIframe.contentWindow) {
+                    editorIframe.contentWindow.postMessage({
+                      action: "insert-image",
+                      data: {
+                        url: e.data.dataUrl,
+                        alt: altText
+                      }
+                    }, "*");
+                  }
+                } else {
+                  if (editorIframe && editorIframe.contentWindow) {
+                    editorIframe.contentWindow.postMessage({
+                      action: "replace-edited-image",
+                      data: { dataUrl: e.data.dataUrl }
+                    }, "*");
+                  }
+                }
+                
+                if (tuiEditorIframe) {
+                  tuiEditorIframe.remove();
+                }
+                
+                shadowWindow.removeEventListener("message", tuiEditorMessageHandler);
+              }
+            };
+            shadowWindow.addEventListener("message", tuiEditorMessageHandler);
+            
+            tuiEditorIframe.onload = () => {
+              console.log("[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...");
+              setTimeout(() => {
+                if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
+                  tuiEditorIframe.contentWindow.postMessage({
+                    action: "open-tui-editor",
+                    imageUrl: imageUrl
+                  }, "*");
+                  
+                  if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
+                    tuiEditorIframe.contentWindow.postMessage({
+                      action: "set-document-images",
+                      images: event.data.allDocumentImages
+                    }, "*");
+                    console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+                  }
+                  
+                  console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+                }
+              }, 500);
+            };
+          } else {
+            console.log("[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...");
+            if (tuiEditorIframe.contentWindow) {
+              tuiEditorIframe.contentWindow.postMessage({
+                action: "open-tui-editor",
+                imageUrl: imageUrl
+              }, "*");
+              
+              if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
+                tuiEditorIframe.contentWindow.postMessage({
+                  action: "set-document-images",
+                  images: event.data.allDocumentImages
+                }, "*");
+                console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+              }
+              
+              console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+            }
+          }
+        }
+      };
+      
+      shadowWindow.addEventListener("message", shadowTuiEditorListener);
+      shadowWindow.__cp_tui_shadow_listener_attached = true;
+      console.log("✅ [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 완료");
+    } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
+      console.log("ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.");
+    }
+  } catch (err) {
+    console.warn("⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:", err.message);
+  }
+  
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
   
   // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
@@ -1310,40 +1445,70 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     
     // [수정] 리스너 중복 등록 방지
     if (!window.__cp_tui_listener_attached) {
+        console.log("🔧 [Workspace] addWorkspaceEventListeners 내부 TUI 리스너 등록 중...");
+        
         const tuiEditorMessageListener = (event) => {
+            // 🔍 디버깅: 모든 메시지 로깅
+            if (event.data && typeof event.data === 'object' && event.data.action) {
+                console.log("🔍 [Workspace] addWorkspace 리스너 - 메시지 수신:", {
+                    action: event.data.action,
+                    origin: event.origin,
+                    source: event.source,
+                    isCpOpenTuiEditor: event.data.action === "cp_open_tui_editor"
+                });
+            }
+            
             // cp_open_tui_editor 메시지 처리
             if (event.data?.action === "cp_open_tui_editor") {
-                console.log("[Workspace] ✅ cp_open_tui_editor 메시지 수신!", event.data);
+                console.log("🏢 [Workspace] ========================================");
+                console.log("🏢 [Workspace] 📨 cp_open_tui_editor 메시지 수신!");
+                console.log("🏢 [Workspace] ========================================");
+                console.log("📦 [Workspace] 메시지 데이터:", {
+                    action: event.data.action,
+                    imageUrl: event.data.imageUrl ? event.data.imageUrl.substring(0, 50) + "..." : "없음",
+                    allDocumentImagesCount: event.data.allDocumentImages?.length || 0,
+                    source: event.data.source || "editor"
+                });
                 
                 // currentImageUrl 또는 imageUrl 둘 다 처리 (호환성)
                 const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
                 if (!imageUrl) {
-                    console.error("[Workspace] TUI 에디터 열기 실패: 이미지 URL 없음");
+                    console.error("❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음");
                     return;
                 }
+                
+                console.log("✅ [Workspace] 이미지 URL 확인 완료:", imageUrl.substring(0, 50) + "...");
                 
                 // TUI 에디터 iframe 생성 또는 재사용
                 let tuiEditorIframe = document.querySelector("#tui-editor-iframe");
                 
                 if (!tuiEditorIframe) {
-                    console.log("[Workspace] TUI 에디터 iframe 생성 중...");
+                    console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
                     // TUI 에디터 iframe 생성
                     tuiEditorIframe = document.createElement("iframe");
                     tuiEditorIframe.id = "tui-editor-iframe";
                     tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
                     tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
                     document.body.appendChild(tuiEditorIframe);
-                    console.log("[Workspace] TUI 에디터 iframe 생성 완료, src:", tuiEditorIframe.src);
+                    console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료!");
+                    console.log("📍 [Workspace] iframe src:", tuiEditorIframe.src);
                     
                     // TUI 에디터에서 편집 완료 시 처리
                     const sourceInfo = event.data.source || "editor"; // 기본값은 editor
+                    console.log("🎯 [Workspace] 소스 정보:", sourceInfo);
+                    
                     const tuiEditorMessageHandler = function(e) {
                         if (e.data?.action === "tui-editor-result" && e.data.dataUrl) {
-                            console.log("[Workspace] TUI 에디터 편집 완료, 결과 처리 중...");
+                            console.log("🎉 [Workspace] ========================================");
+                            console.log("🎉 [Workspace] ✨ TUI 에디터 편집 완료!");
+                            console.log("🎉 [Workspace] ========================================");
+                            console.log("📊 [Workspace] 결과 데이터 URL 길이:", e.data.dataUrl.length, "bytes");
+                            
                             const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
                             
                             // 썸네일 메이커에서 온 경우: 에디터에 삽입
                             if (sourceInfo === "thumbnail_maker" || !event.data.allDocumentImages || event.data.allDocumentImages.length === 0) {
+                                console.log("📝 [Workspace] 썸네일 메이커 모드: 이미지 삽입");
                                 const altText = "편집된 썸네일";
                                 if (editorIframe && editorIframe.contentWindow) {
                                     editorIframe.contentWindow.postMessage({
@@ -1353,40 +1518,54 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                             alt: altText
                                         }
                                     }, "*");
+                                    console.log("✅ [Workspace] 에디터에 이미지 삽입 메시지 전송 완료");
                                     showToast("✅ 편집된 썸네일이 본문에 삽입되었습니다!");
+                                } else {
+                                    console.error("❌ [Workspace] 에디터 iframe을 찾을 수 없음");
                                 }
                             } else {
                                 // 에디터에서 온 경우: 기존 이미지 교체
+                                console.log("🔄 [Workspace] 에디터 모드: 기존 이미지 교체");
                                 if (editorIframe && editorIframe.contentWindow) {
                                     editorIframe.contentWindow.postMessage({
                                         action: "replace-edited-image",
                                         data: { dataUrl: e.data.dataUrl }
                                     }, "*");
+                                    console.log("✅ [Workspace] 에디터에 이미지 교체 메시지 전송 완료");
+                                } else {
+                                    console.error("❌ [Workspace] 에디터 iframe을 찾을 수 없음");
                                 }
                             }
                             
                             // TUI 에디터 iframe 제거
                             if (tuiEditorIframe) {
+                                console.log("🗑️ [Workspace] TUI 에디터 iframe 제거 중...");
                                 tuiEditorIframe.remove();
+                                console.log("✅ [Workspace] TUI 에디터 iframe 제거 완료");
                             }
                             
                             // 메시지 핸들러 제거
                             window.removeEventListener("message", tuiEditorMessageHandler);
+                            console.log("🎉 [Workspace] 전체 프로세스 완료!");
+                            console.log("🎉 [Workspace] ========================================");
                         }
                     };
                     window.addEventListener("message", tuiEditorMessageHandler);
+                    console.log("👂 [Workspace] TUI 에디터 결과 메시지 리스너 등록 완료");
                     
                     // TUI 에디터 iframe이 로드되면 이미지 전달
                     tuiEditorIframe.onload = () => {
-                        console.log("[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...");
+                        console.log("⏳ [Workspace] TUI 에디터 iframe 로드 완료!");
+                        console.log("📤 [Workspace] 이미지 전달 준비 중...");
                         setTimeout(() => {
                             if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
-                                console.log("[Workspace] TUI 에디터에 이미지 전달:", imageUrl.substring(0, 50) + "...");
+                                console.log("📸 [Workspace] TUI 에디터에 이미지 전달:", imageUrl.substring(0, 50) + "...");
                                 // 1. 이미지 열기
                                 tuiEditorIframe.contentWindow.postMessage({
                                     action: "open-tui-editor",
                                     imageUrl: imageUrl
                                 }, "*");
+                                console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료");
                                 
                                 // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                                 if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -1394,19 +1573,19 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                         action: "set-document-images",
                                         images: event.data.allDocumentImages
                                     }, "*");
-                                    console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+                                    console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료: ${event.data.allDocumentImages.length}개`);
                                 }
                                 
-                                console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+                                console.log("🎨 [Workspace] TUI 에디터에 모든 데이터 전달 완료!");
                             } else {
-                                console.error("[Workspace] TUI 에디터 iframe contentWindow 접근 실패");
+                                console.error("❌ [Workspace] TUI 에디터 iframe contentWindow 접근 실패");
                             }
                         }, 500); // iframe 로드 대기
                     };
                     
                     // onload가 이미 발생했을 수 있으므로 즉시 체크
                     if (tuiEditorIframe.contentWindow) {
-                        console.log("[Workspace] TUI 에디터 iframe이 이미 로드됨, 즉시 이미지 전달");
+                        console.log("⚡ [Workspace] TUI 에디터 iframe이 이미 로드됨, 즉시 이미지 전달");
                         setTimeout(() => {
                             if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
                                 // 1. 이미지 열기
@@ -1414,6 +1593,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                     action: "open-tui-editor",
                                     imageUrl: imageUrl
                                 }, "*");
+                                console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료 (즉시)");
                                 
                                 // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                                 if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -1421,22 +1601,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                         action: "set-document-images",
                                         images: event.data.allDocumentImages
                                     }, "*");
-                                    console.log("[Workspace] 문서 이미지 목록 전달 완료 (즉시):", event.data.allDocumentImages.length, "개");
+                                    console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료 (즉시): ${event.data.allDocumentImages.length}개`);
                                 }
                                 
-                                console.log("[Workspace] TUI 에디터에 이미지 전달 완료 (즉시)");
+                                console.log("🎨 [Workspace] TUI 에디터에 모든 데이터 전달 완료 (즉시)!");
                             }
                         }, 100);
                     }
                 } else {
                     // 이미 iframe이 존재하는 경우 이미지만 교체
-                    console.log("[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...");
+                    console.log("♻️ [Workspace] 기존 TUI 에디터 iframe 재사용");
+                    console.log("📤 [Workspace] 이미지 전달 중...");
                     if (tuiEditorIframe.contentWindow) {
                         // 1. 이미지 열기
                         tuiEditorIframe.contentWindow.postMessage({
                             action: "open-tui-editor",
                             imageUrl: imageUrl
                         }, "*");
+                        console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료 (재사용)");
                         
                         // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                         if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -1444,12 +1626,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                 action: "set-document-images",
                                 images: event.data.allDocumentImages
                             }, "*");
-                            console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+                            console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료 (재사용): ${event.data.allDocumentImages.length}개`);
                         }
                         
-                        console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+                        console.log("🎨 [Workspace] TUI 에디터에 이미지 전달 완료 (재사용)!");
                     } else {
-                        console.error("[Workspace] 기존 TUI 에디터 iframe의 contentWindow 접근 실패");
+                        console.error("❌ [Workspace] 기존 TUI 에디터 iframe의 contentWindow 접근 실패");
                     }
                 }
             }
@@ -1457,7 +1639,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         
         window.addEventListener("message", tuiEditorMessageListener);
         window.__cp_tui_listener_attached = true; // 플래그 설정
-        console.log("[Workspace] TUI 에디터 메시지 리스너 등록 완료");
+        console.log("✅ [Workspace] TUI 에디터 메시지 리스너 등록 완료 (addWorkspaceEventListeners)");
+        console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+        console.log("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
     } else {
         console.log("[Workspace] TUI 에디터 메시지 리스너가 이미 등록되어 있습니다.");
     }
@@ -2670,57 +2854,92 @@ export function updateWorkspaceScraps(container, ideaData) {
 
 // -----------------------------------------------------------------------------
 // 전역 TUI 에디터 메시지 리스너 등록 (renderWorkspace 호출 여부와 무관하게)
+// 모듈이 import될 때 즉시 실행됨
 // -----------------------------------------------------------------------------
 (function() {
+    console.log("🔧 [Workspace] ========================================");
+    console.log("🔧 [Workspace] 전역 TUI 에디터 리스너 등록 함수 실행 중...");
+    console.log("🔧 [Workspace] 모듈 로드 확인:", typeof window !== 'undefined');
+    console.log("🔧 [Workspace] window.location:", window.location?.href);
+    console.log("🔧 [Workspace] window === window.top:", window === window.top);
+    console.log("🔧 [Workspace] ========================================");
+    
+    // 즉시 실행 확인을 위한 추가 로그
+    if (typeof window === 'undefined') {
+        console.error("❌ [Workspace] window가 정의되지 않았습니다!");
+        return;
+    }
+    
     // 중복 등록 방지
     if (window.__cp_tui_global_listener_attached) {
-        console.log("[Workspace] 전역 TUI 에디터 메시지 리스너가 이미 등록되어 있습니다.");
+        console.log("ℹ️ [Workspace] 전역 TUI 에디터 메시지 리스너가 이미 등록되어 있습니다.");
         return;
     }
     
     const globalTuiEditorMessageListener = (event) => {
+        // 🔍 디버깅: 모든 메시지 로깅
+        if (event.data && typeof event.data === 'object' && event.data.action) {
+            console.log("🔍 [Workspace] 전역 리스너 - 메시지 수신:", {
+                action: event.data.action,
+                origin: event.origin,
+                source: event.source,
+                isCpOpenTuiEditor: event.data.action === "cp_open_tui_editor",
+                windowLocation: window.location.href,
+                isTopWindow: window === window.top
+            });
+        }
+        
         // cp_open_tui_editor 메시지 처리
         if (event.data?.action === "cp_open_tui_editor") {
-            console.log("[Workspace] ✅ 전역 리스너: cp_open_tui_editor 메시지 수신!", event.data);
+            console.log("🌐 [Workspace] ========================================");
+            console.log("🌐 [Workspace] 📨 전역 리스너: cp_open_tui_editor 메시지 수신!");
+            console.log("🌐 [Workspace] ========================================");
             
             // currentImageUrl 또는 imageUrl 둘 다 처리 (호환성)
             const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
             if (!imageUrl) {
-                console.error("[Workspace] TUI 에디터 열기 실패: 이미지 URL 없음");
+                console.error("❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음");
                 return;
             }
+            console.log("✅ [Workspace] 이미지 URL 확인 완료:", imageUrl.substring(0, 50) + "...");
             
             // workspace 컨테이너 찾기
             const workspaceContainer = document.querySelector(".workspace-container") || 
                                      document.querySelector(".cp-workspace-container");
             
             if (!workspaceContainer) {
-                console.warn("[Workspace] workspace 컨테이너를 찾을 수 없습니다. TUI 에디터를 열 수 없습니다.");
+                console.warn("⚠️ [Workspace] workspace 컨테이너를 찾을 수 없습니다. TUI 에디터를 열 수 없습니다.");
                 return;
             }
+            console.log("✅ [Workspace] workspace 컨테이너 확인 완료");
             
             // TUI 에디터 iframe 생성 또는 재사용
             let tuiEditorIframe = document.querySelector("#tui-editor-iframe");
             
             if (!tuiEditorIframe) {
-                console.log("[Workspace] TUI 에디터 iframe 생성 중...");
+                console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
                 tuiEditorIframe = document.createElement("iframe");
                 tuiEditorIframe.id = "tui-editor-iframe";
                 tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
                 tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
                 document.body.appendChild(tuiEditorIframe);
-                console.log("[Workspace] TUI 에디터 iframe 생성 완료");
+                console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료");
                 
                 // TUI 에디터에서 편집 완료 시 처리
                 const sourceInfo = event.data.source || "editor";
+                console.log("🎯 [Workspace] 소스 정보:", sourceInfo);
                 const editorIframe = workspaceContainer.querySelector("#quill-editor-iframe");
                 
                 const tuiEditorMessageHandler = function(e) {
                     if (e.data?.action === "tui-editor-result" && e.data.dataUrl) {
-                        console.log("[Workspace] TUI 에디터 편집 완료, 결과 처리 중...");
+                        console.log("🎉 [Workspace] ========================================");
+                        console.log("🎉 [Workspace] ✨ TUI 에디터 편집 완료! (전역 리스너)");
+                        console.log("🎉 [Workspace] ========================================");
+                        console.log("📊 [Workspace] 결과 데이터 URL 길이:", e.data.dataUrl.length, "bytes");
                         
                         // 썸네일 메이커에서 온 경우: 에디터에 삽입
                         if (sourceInfo === "thumbnail_maker" || !event.data.allDocumentImages || event.data.allDocumentImages.length === 0) {
+                            console.log("📝 [Workspace] 썸네일 메이커 모드: 이미지 삽입");
                             const altText = "편집된 썸네일";
                             if (editorIframe && editorIframe.contentWindow) {
                                 editorIframe.contentWindow.postMessage({
@@ -2730,32 +2949,45 @@ export function updateWorkspaceScraps(container, ideaData) {
                                         alt: altText
                                     }
                                 }, "*");
+                                console.log("✅ [Workspace] 에디터에 이미지 삽입 메시지 전송 완료");
                                 showToast("✅ 편집된 썸네일이 본문에 삽입되었습니다!");
+                            } else {
+                                console.error("❌ [Workspace] 에디터 iframe을 찾을 수 없음");
                             }
                         } else {
                             // 에디터에서 온 경우: 기존 이미지 교체
+                            console.log("🔄 [Workspace] 에디터 모드: 기존 이미지 교체");
                             if (editorIframe && editorIframe.contentWindow) {
                                 editorIframe.contentWindow.postMessage({
                                     action: "replace-edited-image",
                                     data: { dataUrl: e.data.dataUrl }
                                 }, "*");
+                                console.log("✅ [Workspace] 에디터에 이미지 교체 메시지 전송 완료");
+                            } else {
+                                console.error("❌ [Workspace] 에디터 iframe을 찾을 수 없음");
                             }
                         }
                         
                         // TUI 에디터 iframe 제거
                         if (tuiEditorIframe) {
+                            console.log("🗑️ [Workspace] TUI 에디터 iframe 제거 중...");
                             tuiEditorIframe.remove();
+                            console.log("✅ [Workspace] TUI 에디터 iframe 제거 완료");
                         }
                         
                         // 메시지 핸들러 제거
                         window.removeEventListener("message", tuiEditorMessageHandler);
+                        console.log("🎉 [Workspace] 전체 프로세스 완료! (전역 리스너)");
+                        console.log("🎉 [Workspace] ========================================");
                     }
                 };
                 window.addEventListener("message", tuiEditorMessageHandler);
+                console.log("👂 [Workspace] TUI 에디터 결과 메시지 리스너 등록 완료 (전역)");
                 
                 // TUI 에디터 iframe이 로드되면 이미지 전달
                 tuiEditorIframe.onload = () => {
-                    console.log("[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...");
+                    console.log("⏳ [Workspace] TUI 에디터 iframe 로드 완료! (전역)");
+                    console.log("📤 [Workspace] 이미지 전달 준비 중...");
                     setTimeout(() => {
                         if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
                             // 1. 이미지 열기
@@ -2763,6 +2995,7 @@ export function updateWorkspaceScraps(container, ideaData) {
                                 action: "open-tui-editor",
                                 imageUrl: imageUrl
                             }, "*");
+                            console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료 (전역)");
                             
                             // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                             if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -2770,16 +3003,17 @@ export function updateWorkspaceScraps(container, ideaData) {
                                     action: "set-document-images",
                                     images: event.data.allDocumentImages
                                 }, "*");
-                                console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+                                console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료 (전역): ${event.data.allDocumentImages.length}개`);
                             }
                             
-                            console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+                            console.log("🎨 [Workspace] TUI 에디터에 모든 데이터 전달 완료! (전역)");
                         }
                     }, 500);
                 };
                 
                 // onload가 이미 발생했을 수 있으므로 즉시 체크
                 if (tuiEditorIframe.contentWindow) {
+                    console.log("⚡ [Workspace] TUI 에디터 iframe이 이미 로드됨, 즉시 이미지 전달 (전역)");
                     setTimeout(() => {
                         if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
                             // 1. 이미지 열기
@@ -2787,6 +3021,7 @@ export function updateWorkspaceScraps(container, ideaData) {
                                 action: "open-tui-editor",
                                 imageUrl: imageUrl
                             }, "*");
+                            console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료 (즉시, 전역)");
                             
                             // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                             if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -2794,22 +3029,24 @@ export function updateWorkspaceScraps(container, ideaData) {
                                     action: "set-document-images",
                                     images: event.data.allDocumentImages
                                 }, "*");
-                                console.log("[Workspace] 문서 이미지 목록 전달 완료 (즉시):", event.data.allDocumentImages.length, "개");
+                                console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료 (즉시, 전역): ${event.data.allDocumentImages.length}개`);
                             }
                             
-                            console.log("[Workspace] TUI 에디터에 이미지 전달 완료 (즉시)");
+                            console.log("🎨 [Workspace] TUI 에디터에 모든 데이터 전달 완료 (즉시, 전역)!");
                         }
                     }, 100);
                 }
             } else {
                 // 이미 iframe이 존재하는 경우 이미지만 교체
-                console.log("[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...");
+                console.log("♻️ [Workspace] 기존 TUI 에디터 iframe 재사용 (전역)");
+                console.log("📤 [Workspace] 이미지 전달 중...");
                 if (tuiEditorIframe.contentWindow) {
                     // 1. 이미지 열기
                     tuiEditorIframe.contentWindow.postMessage({
                         action: "open-tui-editor",
                         imageUrl: imageUrl
                     }, "*");
+                    console.log("✅ [Workspace] 1️⃣ open-tui-editor 메시지 전송 완료 (재사용, 전역)");
                     
                     // 2. 문서 내 모든 이미지 목록 전달 (사이드바 표시용)
                     if (event.data.allDocumentImages && Array.isArray(event.data.allDocumentImages) && event.data.allDocumentImages.length > 0) {
@@ -2817,10 +3054,10 @@ export function updateWorkspaceScraps(container, ideaData) {
                             action: "set-document-images",
                             images: event.data.allDocumentImages
                         }, "*");
-                        console.log("[Workspace] 문서 이미지 목록 전달 완료:", event.data.allDocumentImages.length, "개");
+                        console.log(`✅ [Workspace] 2️⃣ 문서 이미지 목록 전달 완료 (재사용, 전역): ${event.data.allDocumentImages.length}개`);
                     }
                     
-                    console.log("[Workspace] TUI 에디터에 이미지 전달 완료");
+                    console.log("🎨 [Workspace] TUI 에디터에 이미지 전달 완료 (재사용, 전역)!");
                 }
             }
         }
@@ -2828,5 +3065,10 @@ export function updateWorkspaceScraps(container, ideaData) {
     
     window.addEventListener("message", globalTuiEditorMessageListener);
     window.__cp_tui_global_listener_attached = true;
-    console.log("[Workspace] 전역 TUI 에디터 메시지 리스너 등록 완료");
+    console.log("✅ [Workspace] 전역 TUI 에디터 메시지 리스너 등록 완료");
+    console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+    console.log("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
+    console.log("🔍 [Workspace] 디버깅: window.addEventListener 존재 여부 =", typeof window.addEventListener);
+    console.log("🔍 [Workspace] 디버깅: 리스너 함수 타입 =", typeof globalTuiEditorMessageListener);
+    console.log("🔍 [Workspace] 디버깅: 리스너 등록 확인 - window에 message 이벤트 리스너가 등록되었습니다");
 })();

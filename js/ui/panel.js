@@ -8,7 +8,10 @@ import { renderKanban, addKanbanEventListeners } from "./kanbanMode.js";
 import { renderWorkspace } from "./workspaceMode.js";
 import { renderPerformanceDashboard } from "./performanceDashboardMode.js";
 import { renderPerformanceReport } from "./performanceReportMode.js";
-import { renderAdminMode } from "./adminMode.js"; 
+import { renderAdminMode } from "./adminMode.js";
+
+// 전역 TUI 에디터 리스너 강제 등록 (workspaceMode.js가 로드되기 전에도 작동)
+import "./workspaceMode.js"; 
 
 
 export function isPanelVisible() {

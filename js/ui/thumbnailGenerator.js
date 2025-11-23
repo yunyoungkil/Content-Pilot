@@ -363,8 +363,15 @@ const renderHelpers = {
     } else if (background.type === "image") {
       // 이미지 배경 렌더링 (Base64 데이터 URL 지원)
       const imageValue = background.value || "";
+      // Base64 데이터인 경우 요약만 표시
+      let logValue = imageValue;
+      if (imageValue.startsWith('data:image') && imageValue.length > 100) {
+        logValue = `[Base64 Image: ${imageValue.length} chars]`;
+      } else if (imageValue.length > 80) {
+        logValue = imageValue.substring(0, 80) + '...';
+      }
       console.log(
-        `[Background Render] 이미지 배경 렌더링 시작: ${imageValue.substring(0, 50)}...`
+        `[Background Render] 이미지 배경 렌더링 시작: ${logValue}`
       );
       
       if (imageValue.startsWith("data:image/") || imageValue.startsWith("http://") || imageValue.startsWith("https://")) {
@@ -740,9 +747,23 @@ export async function renderTemplateFromData(
   console.log(
     `[Template Renderer] 렌더링 시작 - 캔버스 크기: ${canvasWidth}x${canvasHeight}`
   );
+  
+  // Base64 데이터를 숨기고 요약 정보만 표시
+  const sanitizedData = JSON.parse(JSON.stringify(templateData));
+  if (sanitizedData.background?.value) {
+    const bgValue = sanitizedData.background.value;
+    if (bgValue.startsWith('data:image') || bgValue.length > 100) {
+      // Base64 데이터인 경우 요약 정보만 표시
+      sanitizedData.background.value = `[Base64 Image: ${bgValue.length} chars]`;
+    } else if (bgValue.startsWith('https://firebasestorage.googleapis.com')) {
+      // Firebase Storage URL인 경우 그대로 표시
+      sanitizedData.background.value = bgValue.substring(0, 80) + '...';
+    }
+  }
+  
   console.log(
     `[Template Renderer] 📋 템플릿 전체 데이터:`,
-    JSON.stringify(templateData, null, 2)
+    JSON.stringify(sanitizedData, null, 2)
   );
   console.log(
     `[Template Renderer] 📊 레이어 개수: ${templateData.layers?.length || 0}`

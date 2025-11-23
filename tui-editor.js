@@ -10,22 +10,37 @@ let __cp_lastPos = { x: 0, y: 0 };
 
 window.addEventListener("message", async function (event) {
   if (!event.data || !event.data.action) return;
+  
   if (event.data.action === "open-tui-editor" && event.data.imageUrl) {
-    console.log("[TUI-Editor] open-tui-editor 메시지 수신:", event.data.imageUrl.substring(0, 50) + "...");
+    console.log("🎨 [TUI-Editor] ========================================");
+    console.log("🎨 [TUI-Editor] 📨 open-tui-editor 메시지 수신!");
+    console.log("🎨 [TUI-Editor] ========================================");
+    console.log("📸 [TUI-Editor] 이미지 URL:", event.data.imageUrl.substring(0, 50) + "...");
     currentImageUrl = event.data.imageUrl;
     openTuiEditor(currentImageUrl);
   }
+  
   if (event.data.action === "set-document-images" && Array.isArray(event.data.images)) {
+    console.log("📋 [TUI-Editor] 문서 이미지 목록 수신:", event.data.images.length, "개");
     documentImages = event.data.images;
     renderSidebar();
+    console.log("✅ [TUI-Editor] 사이드바 렌더링 완료");
   }
+  
   if (event.data.action === "get-edited-image") {
+    console.log("📤 [TUI-Editor] 편집된 이미지 요청 수신");
     if (window.tuiEditorInstance) {
       const dataUrl = window.tuiEditorInstance.toDataURL();
+      console.log("📊 [TUI-Editor] DataURL 생성 완료, 길이:", dataUrl.length, "bytes");
       window.parent.postMessage({ action: "tui-editor-result", dataUrl }, "*");
+      console.log("✅ [TUI-Editor] tui-editor-result 메시지 전송 완료");
+    } else {
+      console.error("❌ [TUI-Editor] TUI Editor 인스턴스가 없습니다!");
     }
   }
+  
   if (event.data.action === "add-undo-stack") {
+    console.log("↩️ [TUI-Editor] Undo 스택 추가 요청");
     if (window.tuiEditorInstance && window.tuiEditorInstance._graphics) {
       // TUI ImageEditor 내부 Graphics 객체의 undoStack에 현재 상태 push
       try {
@@ -36,9 +51,12 @@ window.addEventListener("message", async function (event) {
         if (typeof window.tuiEditorInstance._graphics.fire === "function") {
           window.tuiEditorInstance._graphics.fire("undoStackChanged");
         }
+        console.log("✅ [TUI-Editor] Undo 스택 추가 완료");
       } catch (e) {
-        console.warn("add-undo-stack 실패", e);
+        console.warn("⚠️ [TUI-Editor] add-undo-stack 실패", e);
       }
+    } else {
+      console.warn("⚠️ [TUI-Editor] TUI Editor 인스턴스 또는 Graphics가 없습니다");
     }
   }
 });
@@ -93,19 +111,24 @@ function renderSidebar() {
 }
 
 function openTuiEditor(imageUrl) {
-  console.log("[TUI-Editor] openTuiEditor 호출:", imageUrl.substring(0, 50) + "...");
+  console.log("🚀 [TUI-Editor] openTuiEditor 함수 호출");
+  console.log("📸 [TUI-Editor] 이미지 URL:", imageUrl.substring(0, 50) + "...");
+  
   const mount = document.getElementById("mount");
   if (!mount) {
-    console.error("[TUI-Editor] mount 요소를 찾을 수 없습니다!");
+    console.error("❌ [TUI-Editor] mount 요소를 찾을 수 없습니다!");
     return;
   }
+  console.log("✅ [TUI-Editor] mount 요소 확인 완료");
+  
   mount.style.position = "fixed";
   mount.style.left = "120px";
   mount.style.top = "0";
   mount.style.width = "calc(100vw - 120px)";
   mount.style.height = "100vh";
+  
   if (!tuiEditorInstance) {
-    console.log("[TUI-Editor] TUI Editor 인스턴스 생성 중...");
+    console.log("🆕 [TUI-Editor] 새로운 TUI Editor 인스턴스 생성 중...");
     mount.innerHTML = "";
     try {
       tuiEditorInstance = new window.tui.ImageEditor(mount, {
@@ -137,26 +160,32 @@ function openTuiEditor(imageUrl) {
       tuiEditorInstance.on("object:modified", () => { isDirty = true; });
       tuiEditorInstance.on("object:removed", () => { isDirty = true; });
       tuiEditorInstance.on("undoStackChanged", () => { isDirty = true; });
-      console.log("[TUI-IFRAME] mount:", mount);
-      console.log("[TUI-IFRAME] tuiEditorInstance:", tuiEditorInstance);
-      console.log("[TUI-Editor] TUI Editor 인스턴스 생성 완료");
+      console.log("✅ [TUI-Editor] TUI Editor 인스턴스 생성 완료!");
+      console.log("🎨 [TUI-Editor] ========================================");
 
       // 커스텀 Zoom/Hand 제어 바인딩 (한 번만)
       if (!__cp_controlsBound) {
+        console.log("🎮 [TUI-Editor] Zoom/Hand 제어 바인딩 중...");
         __cp_bindZoomAndHandControls();
         __cp_controlsBound = true;
+        console.log("✅ [TUI-Editor] Zoom/Hand 제어 바인딩 완료");
       }
     } catch (err) {
       alert("이미지 에디터 초기화 중 오류가 발생했습니다.\n\n" + (err?.message || err));
-      console.error("[TUI-Editor] TUI Editor 초기화 오류:", err);
+      console.error("❌ [TUI-Editor] TUI Editor 초기화 오류:", err);
     }
   } else {
-    console.log("[TUI-Editor] 기존 인스턴스 재사용, 이미지 교체 중...");
+    console.log("♻️ [TUI-Editor] 기존 인스턴스 재사용");
+    console.log("🔄 [TUI-Editor] 이미지 교체 중...");
     // 인스턴스가 이미 있으면 이미지 교체만 수행 (history 보존)
-    tuiEditorInstance.loadImageFromURL(imageUrl, "image").catch((err) => {
-      console.error("[TUI-Editor] 이미지 로드 실패:", err);
-      alert("이미지 서버의 보안 정책(CORS)으로 인해 이미지를 불러올 수 없습니다. 다른 이미지를 선택하거나, 직접 업로드해 주세요.\n\n오류: " + (err?.message || err));
-    });
+    tuiEditorInstance.loadImageFromURL(imageUrl, "image")
+      .then(() => {
+        console.log("✅ [TUI-Editor] 이미지 로드 완료");
+      })
+      .catch((err) => {
+        console.error("❌ [TUI-Editor] 이미지 로드 실패:", err);
+        alert("이미지 서버의 보안 정책(CORS)으로 인해 이미지를 불러올 수 없습니다. 다른 이미지를 선택하거나, 직접 업로드해 주세요.\n\n오류: " + (err?.message || err));
+      });
   }
 }
 

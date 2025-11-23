@@ -23,7 +23,14 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     bgImage: null // Base64 이미지 데이터
   };
 
-  console.log("[ThumbnailMaker] 초기화 데이터:", thumbInfo);
+  // 초기화 데이터 로깅 시 Base64 숨기기
+  const logThumbInfo = { ...thumbInfo };
+  if (logThumbInfo.bgImage && logThumbInfo.bgImage.startsWith('data:image')) {
+    logThumbInfo.bgImage = `[Base64 Image: ${logThumbInfo.bgImage.length} chars]`;
+  } else if (logThumbInfo.bgImage && logThumbInfo.bgImage.length > 80) {
+    logThumbInfo.bgImage = logThumbInfo.bgImage.substring(0, 80) + '...';
+  }
+  console.log("[ThumbnailMaker] 초기화 데이터:", logThumbInfo);
 
   // 2. 모달 컨테이너 생성 (어두운 테마 적용)
   const modal = document.createElement("div");
@@ -200,7 +207,35 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     if (!onSave) return; // onSave 콜백이 없으면 저장하지 않음
     
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
+    saveTimeout = setTimeout(async () => {
+      let bgImageToSave = currentBgImage;
+      
+      // Base64 데이터인 경우 Firebase Storage에 업로드 시도
+      if (bgImageToSave && bgImageToSave.startsWith('data:image')) {
+        try {
+          const timestamp = Date.now();
+          const filename = `thumbnail-bg-${timestamp}.png`;
+          
+          const response = await chrome.runtime.sendMessage({
+            action: "upload_thumbnail_to_storage",
+            data: {
+              dataUrl: bgImageToSave,
+              filename: filename
+            }
+          });
+          
+          if (response && response.success && response.url) {
+            bgImageToSave = response.url;
+            currentBgImage = response.url; // 현재 이미지도 업데이트
+            console.log("[ThumbnailMaker] ✅ 자동 저장: 배경 이미지 Firebase Storage 업로드 완료");
+          } else {
+            console.warn("[ThumbnailMaker] ⚠️ 자동 저장: Firebase Storage 업로드 실패, Base64 유지");
+          }
+        } catch (error) {
+          console.error("[ThumbnailMaker] 자동 저장: 배경 이미지 업로드 오류:", error);
+        }
+      }
+      
       const currentInfo = {
         thumbnailText: document.getElementById("tm-title").value,
         subtitle: document.getElementById("tm-subtitle")?.value || "",
@@ -210,12 +245,20 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         fontFamily: document.getElementById("tm-font-family")?.value || "'Pretendard', sans-serif",
         textColor: document.getElementById("tm-text-color")?.value || "auto",
         ratio: document.getElementById("tm-ratio")?.value || "16:9",
-        // 배경 이미지도 저장 (Base64)
-        bgImage: currentBgImage
+        // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback)
+        bgImage: bgImageToSave
       };
       
+      // 로깅 시 Base64 숨기기
+      const logInfo = { ...currentInfo };
+      if (logInfo.bgImage && logInfo.bgImage.startsWith('data:image')) {
+        logInfo.bgImage = `[Base64 Image: ${logInfo.bgImage.length} chars]`;
+      } else if (logInfo.bgImage && logInfo.bgImage.length > 80) {
+        logInfo.bgImage = logInfo.bgImage.substring(0, 80) + '...';
+      }
+      
       onSave(currentInfo);
-      console.log("[ThumbnailMaker] 자동 저장 완료:", currentInfo);
+      console.log("[ThumbnailMaker] 자동 저장 완료:", logInfo);
     }, 500); // 0.5초 뒤 저장
   };
   
@@ -439,14 +482,43 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   // [신규] 파일 업로드 처리
   document.getElementById("tm-upload-btn").onclick = () => document.getElementById("tm-file-input").click();
 
-  document.getElementById("tm-file-input").addEventListener("change", (e) => {
+  document.getElementById("tm-file-input").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-      currentBgImage = event.target.result; // Base64 데이터
-      updatePreview(); // 캔버스 다시 그리기
+    reader.onload = async (event) => {
+      const base64Data = event.target.result; // Base64 데이터
+      
+      // Firebase Storage에 업로드 시도
+      try {
+        const timestamp = Date.now();
+        const filename = `thumbnail-bg-${timestamp}.png`;
+        
+        const response = await chrome.runtime.sendMessage({
+          action: "upload_thumbnail_to_storage",
+          data: {
+            dataUrl: base64Data,
+            filename: filename
+          }
+        });
+        
+        if (response && response.success && response.url) {
+          // Firebase Storage URL 사용
+          currentBgImage = response.url;
+          console.log("[ThumbnailMaker] ✅ 배경 이미지 Firebase Storage 업로드 완료:", response.url);
+        } else {
+          // 업로드 실패 시 Base64 fallback
+          currentBgImage = base64Data;
+          console.warn("[ThumbnailMaker] ⚠️ Firebase Storage 업로드 실패, Base64 사용");
+        }
+      } catch (error) {
+        // 오류 발생 시 Base64 fallback
+        console.error("[ThumbnailMaker] 배경 이미지 업로드 오류:", error);
+        currentBgImage = base64Data;
+      }
+      
+      await updatePreview(); // 캔버스 다시 그리기
       saveState(); // 업로드 후 상태 저장 (내부에서 triggerAutoSave 호출)
       showToast("✅ 배경 이미지가 업로드되었습니다!");
     };
@@ -502,7 +574,9 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       });
 
       if (response && response.success && response.images.length > 0) {
-        currentBgImage = response.images[0]; // Base64 이미지 저장
+        // AI 생성 이미지는 이미 Firebase Storage URL로 반환됨
+        currentBgImage = response.images[0];
+        console.log("[ThumbnailMaker] ✅ AI 생성 배경 이미지:", currentBgImage.substring(0, 80) + "...");
         await updatePreview(); // 다시 렌더링
         saveState(); // 배경 생성 후 상태 저장
       } else {
