@@ -35,10 +35,13 @@ import {
   revokeGoogleAuth 
 } from './js/services/authService.js';
 
-import { ref, update, remove, set, get, push, serverTimestamp } from 'firebase/database';
+import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
 
 // Firebase 초기화
 initializeFirebase();
+
+// Service Worker 전역 변수 (window 대신 사용)
+let kanbanRealtimeListenerAttached = false;
 
 console.log("🚀 [System] Service Worker Started (Lightweight Router)");
 
@@ -172,10 +175,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === "get_kanban_data" || msg.action === "get_all_kanban_data") {
     const dbRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}`);
+    
+    // 실시간 리스너 등록 (한 번만)
+    if (!kanbanRealtimeListenerAttached) {
+      onValue(dbRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        // 모든 탭에 업데이트 메시지 전송
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: "kanban_data_updated",
+                data: data
+              }).catch(() => {});
+            }
+          });
+        });
+      });
+      kanbanRealtimeListenerAttached = true;
+    }
+    
     return handleAsync(get(dbRef).then(snap => {
-      // 실시간 리스너 등록 (기존 로직 유지)
-      // ... (생략: 필요 시 추가 구현)
-      return { success: true, data: snap.val() || {} };
+      const data = snap.val() || {};
+      // 즉시 UI에 업데이트 메시지 전송
+      if (sender.tab?.id) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "kanban_data_updated",
+          data: data
+        }).catch(() => {});
+      }
+      return { success: true, data: data };
     }));
   }
 
@@ -187,6 +216,55 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const filtered = arr.filter(s => s.channelId === undefined || s.channelId === null || s.channelId === msg.channelId);
       return { success: true, scraps: filtered.sort((a, b) => b.timestamp - a.timestamp) };
     }));
+  }
+
+  if (msg.action === "cp_get_firebase_scraps") {
+    const targetChannelId = msg.channelId || null;
+    return handleAsync(get(ref(getDb(), `scraps/${CONSTANTS.USER_ID}`)).then(snap => {
+      const val = snap.val() || {};
+      const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+      // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
+      const filtered = arr.filter(scrap => {
+        return scrap.channelId === undefined || 
+               scrap.channelId === null || 
+               scrap.channelId === targetChannelId;
+      });
+      return { data: filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
+    }).catch(error => {
+      console.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
+      return { data: [] };
+    }));
+  }
+
+  if (msg.action === "get_channel_content") {
+    return handleAsync((async () => {
+      const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
+        get(ref(getDb(), `channel_content/${CONSTANTS.USER_ID}`)),
+        get(ref(getDb(), `channel_meta/${CONSTANTS.USER_ID}`)),
+        get(ref(getDb(), `channels/${CONSTANTS.USER_ID}`))
+      ]);
+      
+      const content = contentSnap.val() || {};
+      const metas = metaSnap.val() || {};
+      const channels = channelsSnap.val() || {
+        myChannels: {},
+        competitorChannels: {}
+      };
+
+      // 필터링: null 값 제거
+      const blogs = Object.values(content.blogs || {}).filter(item => item !== null);
+      const youtubes = Object.values(content.youtubes || {}).filter(item => item !== null);
+      const allContent = [...blogs, ...youtubes];
+
+      return {
+        success: true,
+        data: {
+          content: allContent,
+          metas: metas,
+          channels: channels
+        }
+      };
+    })());
   }
 
   // === [Channel Management] 채널 관리 ===
