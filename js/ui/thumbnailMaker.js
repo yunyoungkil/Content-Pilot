@@ -699,31 +699,23 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   document.getElementById("tm-edit-tui").onclick = () => {
     try {
       const dataUrl = canvas.toDataURL("image/png");
-      console.log("[ThumbnailMaker] 정밀 편집 버튼 클릭, 이미지 데이터 준비:", dataUrl.substring(0, 50) + "...");
+      console.log("[ThumbnailMaker] 정밀 편집 버튼 클릭, 이미지 데이터 준비");
       
-      // 에디터 iframe 찾기 (여러 방법 시도)
-      let editorIframe = document.querySelector("#quill-editor-iframe");
-      if (!editorIframe) {
-        editorIframe = document.getElementById("quill-editor-iframe");
-      }
+      // [수정] 에디터 iframe을 거치지 않고, 바로 메인 윈도우(Parent)로 메시지 전송
+      // 이렇게 하면 에디터 로딩 여부와 상관없이 항상 TUI 에디터를 열 수 있습니다.
+      window.postMessage({
+        action: "cp_open_tui_editor",
+        currentImageUrl: dataUrl, // 호환성을 위해 유지
+        imageUrl: dataUrl, // tui-editor.js가 찾는 필드명
+        source: "thumbnail_maker",
+        // TUI 에디터 사이드바에 표시할 단일 이미지 목록 구성
+        allDocumentImages: [{ url: dataUrl, range: null }]
+      }, "*");
       
-      if (editorIframe && editorIframe.contentWindow) {
-        console.log("[ThumbnailMaker] 에디터 iframe 찾음, bridge-tui-edit 메시지 전송");
-        // 1. 에디터(iframe)로 이미지 데이터 전송 (브릿지 요청)
-        editorIframe.contentWindow.postMessage({
-          action: "bridge-tui-edit",
-          data: {
-            url: dataUrl
-          }
-        }, "*");
-        
-        // 2. 썸네일 모달 닫기 (TUI 에디터로 전환되므로)
-        modal.remove();
-        console.log("[ThumbnailMaker] 모달 닫기 완료");
-      } else {
-        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없음");
-        alert("❌ 에디터를 찾을 수 없어 정밀 편집을 실행할 수 없습니다.");
-      }
+      // 썸네일 모달 닫기
+      modal.remove();
+      console.log("[ThumbnailMaker] TUI 에디터 요청 전송 및 모달 닫기 완료");
+      
     } catch (error) {
       console.error("[ThumbnailMaker] 정밀 편집 오류:", error);
       alert("❌ 정밀 편집 중 오류가 발생했습니다: " + (error.message || "알 수 없는 오류"));

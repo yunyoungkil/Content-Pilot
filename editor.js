@@ -72,7 +72,9 @@ function initializeEditor() {
             });
             if (allDocumentImages.length === 0) {
               console.warn("[Editor] tui-edit: 문서에 이미지가 없음");
-              return; // 이미지 없으면 동작X
+              // [추가] 사용자 피드백 제공
+              alert("편집할 이미지가 없습니다. 먼저 이미지를 삽입해주세요.");
+              return;
             }
             
             // 선택된 이미지가 있으면 그것을 사용, 없으면 첫 번째 이미지 사용
@@ -99,45 +101,48 @@ function initializeEditor() {
             console.log("[Editor] window.parent:", window.parent);
             console.log("[Editor] window.parent === window.top:", window.parent === window.top);
             
-            // 메시지를 여러 window로 전송 (shadow DOM 호환)
+            // 메시지를 parent window로 전송
             const message = {
               action: "cp_open_tui_editor",
-              currentImageUrl: targetImage.url,
+              currentImageUrl: targetImage.url, // 호환성을 위해 유지
+              imageUrl: targetImage.url, // tui-editor.js가 찾는 필드명
               allDocumentImages
             };
             
-            try {
-                // 1. parent window로 전송
-                window.parent.postMessage(message, "*");
-                console.log("[Editor] window.parent로 메시지 전송 완료");
-            } catch (err) {
-                console.error("[Editor] window.parent로 메시지 전송 실패:", err);
-            }
-            
-            try {
-                // 2. top window로도 전송 (shadow DOM 내부에서도 작동)
-                if (window.top && window.top !== window.parent) {
-                    window.top.postMessage(message, "*");
-                    console.log("[Editor] window.top으로 메시지 전송 완료");
+            // 여러 window로 메시지 전송 (shadow DOM 호환)
+            const sendToWindow = (targetWindow, name) => {
+                try {
+                    targetWindow.postMessage(message, "*");
+                    console.log(`[Editor] ${name}로 메시지 전송 완료`);
+                    return true;
+                } catch (err) {
+                    console.error(`[Editor] ${name}로 메시지 전송 실패:`, err);
+                    return false;
                 }
-            } catch (err) {
-                console.error("[Editor] window.top으로 메시지 전송 실패:", err);
+            };
+            
+            // 1. parent window로 전송
+            sendToWindow(window.parent, "window.parent");
+            
+            // 2. top window로도 전송 (shadow DOM 내부에서도 작동)
+            if (window.top && window.top !== window.parent) {
+                sendToWindow(window.top, "window.top");
             }
             
+            // 3. frames를 통해서도 전송 시도
             try {
-                // 3. frames를 통해서도 전송 시도
                 if (window.parent.frames && window.parent.frames.length > 0) {
-                    Array.from(window.parent.frames).forEach((frame, idx) => {
+                    for (let i = 0; i < window.parent.frames.length; i++) {
                         try {
-                            frame.postMessage(message, "*");
-                            console.log(`[Editor] frame[${idx}]로 메시지 전송 완료`);
+                            window.parent.frames[i].postMessage(message, "*");
+                            console.log(`[Editor] window.parent.frames[${i}]로 메시지 전송 완료`);
                         } catch (e) {
-                            console.warn(`[Editor] frame[${idx}]로 메시지 전송 실패:`, e);
+                            console.warn(`[Editor] window.parent.frames[${i}]로 메시지 전송 실패:`, e.message);
                         }
-                    });
+                    }
                 }
             } catch (err) {
-                console.warn("[Editor] frames를 통한 메시지 전송 실패:", err);
+                console.warn("[Editor] frames를 통한 메시지 전송 실패:", err.message);
             }
           }
         },
@@ -592,7 +597,8 @@ function initializeEditor() {
           try {
             window.parent.postMessage({
               action: "cp_open_tui_editor",
-              currentImageUrl: data.url,
+              currentImageUrl: data.url, // 호환성을 위해 유지
+              imageUrl: data.url, // tui-editor.js가 찾는 필드명
               source: "thumbnail_maker",
               // TUI 에디터 사이드바에 표시할 단일 이미지 목록 구성
               allDocumentImages: [{ url: data.url, range: null }]
