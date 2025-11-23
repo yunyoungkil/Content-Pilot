@@ -84,6 +84,7 @@ function renderSidebar() {
   sidebar.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:10px;">문서 이미지</div>';
   documentImages.forEach((img, idx) => {
     const thumb = document.createElement("img");
+    thumb.crossOrigin = "anonymous"; // CORS 요청 허용
     thumb.src = img.url;
     thumb.style.width = "72px";
     thumb.style.height = "72px";
@@ -93,6 +94,15 @@ function renderSidebar() {
     thumb.style.cursor = "pointer";
     thumb.style.border = (img.url === currentImageUrl) ? "2px solid #2563eb" : "2px solid #e5e7eb";
     thumb.title = img.url;
+    // 이미지 로드 실패 시 대체 처리
+    thumb.onerror = function() {
+      console.warn("⚠️ [TUI-Editor] 썸네일 이미지 로드 실패:", img.url);
+      thumb.style.background = "#e5e7eb";
+      thumb.style.display = "flex";
+      thumb.style.alignItems = "center";
+      thumb.style.justifyContent = "center";
+      thumb.innerHTML = '<span style="font-size:10px;color:#6b7280;">이미지</span>';
+    };
     thumb.onclick = async function () {
       if (img.url === currentImageUrl) return;
       if (isDirty) {
@@ -110,7 +120,38 @@ function renderSidebar() {
   });
 }
 
-function openTuiEditor(imageUrl) {
+// COEP 정책 우회를 위한 이미지 프록시 함수
+async function fetchImageAsBlob(imageUrl) {
+  try {
+    console.log("🔄 [TUI-Editor] 이미지 프록시 로드 시작:", imageUrl.substring(0, 50) + "...");
+    
+    // data URL인 경우 그대로 반환
+    if (imageUrl.startsWith('data:')) {
+      return imageUrl;
+    }
+    
+    // fetch로 이미지 가져오기 (CORS 우회)
+    const response = await fetch(imageUrl, {
+      mode: 'cors',
+      credentials: 'omit'
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    console.log("✅ [TUI-Editor] 이미지 blob URL 생성 완료");
+    return blobUrl;
+  } catch (err) {
+    console.error("❌ [TUI-Editor] 이미지 프록시 로드 실패:", err);
+    // 실패 시 원본 URL 반환 (fallback)
+    return imageUrl;
+  }
+}
+
+async function openTuiEditor(imageUrl) {
   console.log("🚀 [TUI-Editor] openTuiEditor 함수 호출");
   console.log("📸 [TUI-Editor] 이미지 URL:", imageUrl.substring(0, 50) + "...");
   
@@ -127,13 +168,16 @@ function openTuiEditor(imageUrl) {
   mount.style.width = "calc(100vw - 120px)";
   mount.style.height = "100vh";
   
+  // COEP 정책 우회를 위해 이미지를 blob URL로 변환
+  const processedImageUrl = await fetchImageAsBlob(imageUrl);
+  
   if (!tuiEditorInstance) {
     console.log("🆕 [TUI-Editor] 새로운 TUI Editor 인스턴스 생성 중...");
     mount.innerHTML = "";
     try {
       tuiEditorInstance = new window.tui.ImageEditor(mount, {
         includeUI: {
-          loadImage: { path: imageUrl, name: "image" },
+          loadImage: { path: processedImageUrl, name: "image" },
           menu: [
             "crop",
             "flip",
@@ -177,15 +221,97 @@ function openTuiEditor(imageUrl) {
   } else {
     console.log("♻️ [TUI-Editor] 기존 인스턴스 재사용");
     console.log("🔄 [TUI-Editor] 이미지 교체 중...");
-    // 인스턴스가 이미 있으면 이미지 교체만 수행 (history 보존)
-    tuiEditorInstance.loadImageFromURL(imageUrl, "image")
-      .then(() => {
-        console.log("✅ [TUI-Editor] 이미지 로드 완료");
-      })
-      .catch((err) => {
-        console.error("❌ [TUI-Editor] 이미지 로드 실패:", err);
-        alert("이미지 서버의 보안 정책(CORS)으로 인해 이미지를 불러올 수 없습니다. 다른 이미지를 선택하거나, 직접 업로드해 주세요.\n\n오류: " + (err?.message || err));
-      });
+    
+    // 에디터 상태 잠금 해제를 위한 재시도 로직
+    const loadImageWithRetry = async (retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          // 에디터 상태 확인 및 초기화 시도
+          if (tuiEditorInstance._graphics) {
+            // 실행 중인 명령이 있으면 잠시 대기
+            await new Promise(resolve => setTimeout(resolve, 100 * (i + 1)));
+          }
+          
+          // 이미지 로드 시도
+          await tuiEditorInstance.loadImageFromURL(processedImageUrl, "image");
+          console.log("✅ [TUI-Editor] 이미지 로드 완료");
+          // 이전 blob URL 정리 (메모리 누수 방지)
+          if (processedImageUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(processedImageUrl);
+          }
+          return; // 성공 시 종료
+        } catch (err) {
+          console.warn(`⚠️ [TUI-Editor] 이미지 로드 시도 ${i + 1}/${retries} 실패:`, err.message);
+          
+          // "locked" 오류인 경우 에디터 재생성
+          if (err.message && err.message.includes("locked")) {
+            console.log("🔄 [TUI-Editor] 에디터 상태 잠금 감지, 에디터 재생성 중...");
+            try {
+              // 기존 인스턴스 정리
+              if (tuiEditorInstance.destroy) {
+                tuiEditorInstance.destroy();
+              }
+              tuiEditorInstance = null;
+              window.tuiEditorInstance = null;
+              
+              // 새 인스턴스 생성
+              mount.innerHTML = "";
+              tuiEditorInstance = new window.tui.ImageEditor(mount, {
+                includeUI: {
+                  loadImage: { path: processedImageUrl, name: "image" },
+                  menu: [
+                    "crop",
+                    "flip",
+                    "rotate",
+                    "draw",
+                    "shape",
+                    "icon",
+                    "text",
+                    "mask",
+                    "filter",
+                  ],
+                  uiSize: { width: "calc(100vw - 120px)", height: "100vh" },
+                  theme: {},
+                },
+                cssMaxWidth: 1200,
+                cssMaxHeight: 800,
+                selectionStyle: {
+                  cornerSize: 16,
+                  rotatingPointOffset: 48,
+                },
+              });
+              window.tuiEditorInstance = tuiEditorInstance;
+              tuiEditorInstance.on("object:added", () => { isDirty = true; });
+              tuiEditorInstance.on("object:modified", () => { isDirty = true; });
+              tuiEditorInstance.on("object:removed", () => { isDirty = true; });
+              tuiEditorInstance.on("undoStackChanged", () => { isDirty = true; });
+              
+              console.log("✅ [TUI-Editor] 에디터 재생성 완료");
+              // 이전 blob URL 정리
+              if (processedImageUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(processedImageUrl);
+              }
+              return; // 재생성 성공 시 종료
+            } catch (recreateErr) {
+              console.error("❌ [TUI-Editor] 에디터 재생성 실패:", recreateErr);
+              if (i === retries - 1) throw recreateErr; // 마지막 시도 실패 시 에러 전파
+            }
+          } else if (i === retries - 1) {
+            // 마지막 시도 실패
+            throw err;
+          }
+        }
+      }
+    };
+    
+    loadImageWithRetry().catch((err) => {
+      console.error("❌ [TUI-Editor] 이미지 로드 최종 실패:", err);
+      alert("이미지 로드 중 오류가 발생했습니다.\n\n오류: " + (err?.message || err) + "\n\n에디터를 새로고침하거나 페이지를 다시 로드해 주세요.");
+      // 실패 시 blob URL 정리
+      if (processedImageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(processedImageUrl);
+      }
+    });
   }
 }
 

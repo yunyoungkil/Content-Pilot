@@ -404,149 +404,100 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
   // 이벤트 연결
   thumbBtn.onclick = () => {
-    // Firebase에서 최신 썸네일 데이터 가져오기
+    // 즉시 모달 열기 (기존 데이터로)
+    const draftData = {
+      seoTitle: ideaData.seoTitle || ideaData.title,
+      thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null
+    };
+    
+    // 공통 콜백 함수들
+    const onInsert = (dataUrl, altText) => {
+      const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+      if (editorIframe && editorIframe.contentWindow) {
+        editorIframe.contentWindow.postMessage({
+          action: "insert-image",
+          data: { 
+            url: dataUrl,
+            alt: altText || draftData.seoTitle || "썸네일 이미지"
+          }
+        }, "*");
+        showToast("✅ 썸네일이 본문에 삽입되었습니다!");
+      } else {
+        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
+        showToast("❌ 에디터를 찾을 수 없습니다.");
+      }
+    };
+    
+    const onSave = (newThumbnailInfo) => {
+      // 메모리 업데이트
+      if (!ideaData.publishInfo) ideaData.publishInfo = {};
+      ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+
+      // Firebase 업데이트
+      const publishInfoUpdates = {
+        ...(ideaData.publishInfo || {}),
+        thumbnailInfo: newThumbnailInfo
+      };
+      
+      chrome.runtime.sendMessage({
+        action: "update_kanban_card",
+        data: {
+          cardId: ideaData.id,
+          status: ideaData.status || "ideas",
+          updates: {
+            publishInfo: publishInfoUpdates
+          }
+        }
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("[Thumbnail] 저장 오류:", chrome.runtime.lastError);
+        } else if (response && response.success) {
+          console.log("[Thumbnail] 작업 상태 자동 저장됨:", newThumbnailInfo);
+        } else {
+          console.error("[Thumbnail] 저장 실패:", response?.error);
+        }
+      });
+    };
+    
+    // 모달 즉시 열기
+    console.log("[ThumbnailButton] 썸네일 모달 열기 (기존 데이터 사용)");
+    openThumbnailMaker(draftData, onInsert, onSave, null);
+    
+    // 백그라운드에서 최신 데이터 가져오기 (선택적 업데이트)
     chrome.runtime.sendMessage({
       action: "get_kanban_card_status",
       data: { cardId: ideaData.id }
     }, (statusResponse) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[ThumbnailButton] 상태 조회 실패:", chrome.runtime.lastError);
+        return;
+      }
+      
       if (statusResponse && statusResponse.success) {
         const status = statusResponse.status || ideaData.status || "ideas";
-        // Firebase에서 최신 카드 데이터 가져오기
         chrome.runtime.sendMessage({
           action: "get_kanban_data"
         }, (kanbanResponse) => {
-          let latestThumbnailInfo = ideaData.publishInfo?.thumbnailInfo || null;
+          if (chrome.runtime.lastError) {
+            console.warn("[ThumbnailButton] 데이터 조회 실패:", chrome.runtime.lastError);
+            return;
+          }
           
           if (kanbanResponse && kanbanResponse.success && kanbanResponse.data) {
             const cardData = kanbanResponse.data[status]?.[ideaData.id];
             if (cardData && cardData.publishInfo?.thumbnailInfo) {
-              latestThumbnailInfo = cardData.publishInfo.thumbnailInfo;
-              // 메모리도 업데이트
-              if (!ideaData.publishInfo) ideaData.publishInfo = {};
-              ideaData.publishInfo.thumbnailInfo = latestThumbnailInfo;
-            }
-          }
-          
-          const draftData = {
-            seoTitle: ideaData.seoTitle || ideaData.title,
-            // Firebase에서 가져온 최신 썸네일 정보 사용
-            thumbnailInfo: latestThumbnailInfo
-          };
-          
-          console.log("[ThumbnailButton] Firebase에서 가져온 썸네일 정보:", latestThumbnailInfo);
-          
-          // [수정] 콜백에서 url과 altText 두 가지를 받음
-          openThumbnailMaker(
-            draftData, 
-            // 1. [onInsert] 본문 삽입 콜백
-            (dataUrl, altText) => {
-              const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
-              if (editorIframe && editorIframe.contentWindow) {
-                editorIframe.contentWindow.postMessage({
-                  action: "insert-image",
-                  data: { 
-                    url: dataUrl,
-                    alt: altText || draftData.seoTitle || "썸네일 이미지" // [핵심] 에디터로 Alt 텍스트 전달
-                  }
-                }, "*");
-                showToast("✅ 썸네일이 본문에 삽입되었습니다!");
-              } else {
-                console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
-                showToast("❌ 에디터를 찾을 수 없습니다.");
-              }
-            },
-            // 2. [onSave] 자동 저장 콜백 (신규 추가)
-            (newThumbnailInfo) => {
+              const latestThumbnailInfo = cardData.publishInfo.thumbnailInfo;
               // 메모리 업데이트
               if (!ideaData.publishInfo) ideaData.publishInfo = {};
-              ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
-
-              // Firebase 업데이트 (중첩 객체로 전달 - 점(.) 사용 안 함)
-              // 기존 publishInfo를 유지하면서 thumbnailInfo만 업데이트
-              const publishInfoUpdates = {
-                ...(ideaData.publishInfo || {}), // 기존 publishInfo 필드 유지
-                thumbnailInfo: newThumbnailInfo
-              };
+              ideaData.publishInfo.thumbnailInfo = latestThumbnailInfo;
               
-              chrome.runtime.sendMessage({
-                action: "update_kanban_card",
-                data: {
-                  cardId: ideaData.id,
-                  status: ideaData.status || "ideas",
-                  updates: {
-                    publishInfo: publishInfoUpdates
-                  }
-                }
-              }, (response) => {
-                if (chrome.runtime.lastError) {
-                  console.error("[Thumbnail] 저장 오류:", chrome.runtime.lastError);
-                } else if (response && response.success) {
-                  console.log("[Thumbnail] 작업 상태 자동 저장됨:", newThumbnailInfo);
-                } else {
-                  console.error("[Thumbnail] 저장 실패:", response?.error);
-                }
-              });
-            },
-            // 3. [onEditTui] 정밀 편집 콜백 (사용 안 함, tm-edit-tui 버튼에서 직접 처리)
-            null
-          );
-        });
-      } else {
-        // 상태 조회 실패 시 기존 데이터 사용
-        const draftData = {
-          seoTitle: ideaData.seoTitle || ideaData.title,
-          thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null
-        };
-        
-        openThumbnailMaker(
-          draftData, 
-          // 1. [onInsert] 본문 삽입 콜백
-          (dataUrl, altText) => {
-            const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
-            if (editorIframe && editorIframe.contentWindow) {
-              editorIframe.contentWindow.postMessage({
-                action: "insert-image",
-                data: { 
-                  url: dataUrl,
-                  alt: altText || draftData.seoTitle || "썸네일 이미지"
-                }
-              }, "*");
-              showToast("✅ 썸네일이 본문에 삽입되었습니다!");
-            } else {
-              console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.");
-              showToast("❌ 에디터를 찾을 수 없습니다.");
+              console.log("[ThumbnailButton] Firebase에서 최신 썸네일 정보 가져옴:", latestThumbnailInfo);
+              
+              // 모달이 열려있고 업데이트 가능하면 업데이트 (선택적)
+              // 모달은 이미 열렸으므로 추가 작업 불필요
             }
-          },
-          // 2. [onSave] 자동 저장 콜백
-          (newThumbnailInfo) => {
-            if (!ideaData.publishInfo) ideaData.publishInfo = {};
-            ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
-            
-            const publishInfoUpdates = {
-              ...(ideaData.publishInfo || {}),
-              thumbnailInfo: newThumbnailInfo
-            };
-            
-            chrome.runtime.sendMessage({
-              action: "update_kanban_card",
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || "ideas",
-                updates: {
-                  publishInfo: publishInfoUpdates
-                }
-              }
-            }, (response) => {
-              if (response && response.success) {
-                console.log("[ThumbnailButton] 썸네일 정보 저장 완료");
-              } else {
-                console.error("[ThumbnailButton] 썸네일 정보 저장 실패:", response);
-              }
-            });
-          },
-          // 3. [onEditTui] 정밀 편집 콜백 (사용 안 함)
-          null
-        );
+          }
+        });
       }
     });
   };
@@ -1101,11 +1052,51 @@ export function renderWorkspace(container, ideaData) {
           
           if (!tuiEditorIframe) {
             console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
+            
+            // 기존 모달이 있으면 제거
+            const existingOverlay = document.querySelector("#tui-editor-overlay");
+            if (existingOverlay) existingOverlay.remove();
+            
+            // 배경 오버레이 생성
+            const overlay = document.createElement("div");
+            overlay.id = "tui-editor-overlay";
+            overlay.style.cssText = "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;";
+            overlay.onclick = () => {
+              if (confirm("편집을 종료하시겠습니까?")) {
+                overlay.remove();
+                if (tuiEditorIframe) tuiEditorIframe.remove();
+              }
+            };
+            // body의 마지막에 추가하여 최상위에 위치
+            document.body.appendChild(overlay);
+            
+            // 모달 컨테이너 생성
+            const modalContainer = document.createElement("div");
+            modalContainer.id = "tui-editor-modal-container";
+            modalContainer.style.cssText = "position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;";
+            overlay.appendChild(modalContainer);
+            
+            // 닫기 버튼 추가
+            const closeBtn = document.createElement("button");
+            closeBtn.innerHTML = "×";
+            closeBtn.style.cssText = "position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;";
+            closeBtn.onmouseover = () => closeBtn.style.background = "rgba(255,255,255,0.2)";
+            closeBtn.onmouseout = () => closeBtn.style.background = "rgba(255,255,255,0.1)";
+            closeBtn.onclick = (e) => {
+              e.stopPropagation();
+              if (confirm("편집을 종료하시겠습니까?")) {
+                overlay.remove();
+                if (tuiEditorIframe) tuiEditorIframe.remove();
+              }
+            };
+            modalContainer.appendChild(closeBtn);
+            
+            // iframe 생성
             tuiEditorIframe = document.createElement("iframe");
             tuiEditorIframe.id = "tui-editor-iframe";
             tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
-            tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
-            document.body.appendChild(tuiEditorIframe);
+            tuiEditorIframe.style.cssText = "width:100%;height:100%;border:none;background:#282828;";
+            modalContainer.appendChild(tuiEditorIframe);
             console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료");
             
             const sourceInfo = event.data.source || "editor";
@@ -1484,12 +1475,51 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 
                 if (!tuiEditorIframe) {
                     console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
-                    // TUI 에디터 iframe 생성
+                    
+                    // 기존 모달이 있으면 제거
+                    const existingOverlay = document.querySelector("#tui-editor-overlay");
+                    if (existingOverlay) existingOverlay.remove();
+                    
+                    // 배경 오버레이 생성
+                    const overlay = document.createElement("div");
+                    overlay.id = "tui-editor-overlay";
+                    overlay.style.cssText = "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;";
+                    overlay.onclick = () => {
+                      if (confirm("편집을 종료하시겠습니까?")) {
+                        overlay.remove();
+                        if (tuiEditorIframe) tuiEditorIframe.remove();
+                      }
+                    };
+                    // body의 마지막에 추가하여 최상위에 위치
+                    document.body.appendChild(overlay);
+                    
+                    // 모달 컨테이너 생성
+                    const modalContainer = document.createElement("div");
+                    modalContainer.id = "tui-editor-modal-container";
+                    modalContainer.style.cssText = "position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;";
+                    overlay.appendChild(modalContainer);
+                    
+                    // 닫기 버튼 추가
+                    const closeBtn = document.createElement("button");
+                    closeBtn.innerHTML = "×";
+                    closeBtn.style.cssText = "position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;";
+                    closeBtn.onmouseover = () => closeBtn.style.background = "rgba(255,255,255,0.2)";
+                    closeBtn.onmouseout = () => closeBtn.style.background = "rgba(255,255,255,0.1)";
+                    closeBtn.onclick = (e) => {
+                      e.stopPropagation();
+                      if (confirm("편집을 종료하시겠습니까?")) {
+                        overlay.remove();
+                        if (tuiEditorIframe) tuiEditorIframe.remove();
+                      }
+                    };
+                    modalContainer.appendChild(closeBtn);
+                    
+                    // iframe 생성
                     tuiEditorIframe = document.createElement("iframe");
                     tuiEditorIframe.id = "tui-editor-iframe";
                     tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
-                    tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
-                    document.body.appendChild(tuiEditorIframe);
+                    tuiEditorIframe.style.cssText = "width:100%;height:100%;border:none;background:#282828;";
+                    modalContainer.appendChild(tuiEditorIframe);
                     console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료!");
                     console.log("📍 [Workspace] iframe src:", tuiEditorIframe.src);
                     
@@ -1640,14 +1670,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         window.addEventListener("message", tuiEditorMessageListener);
         window.__cp_tui_listener_attached = true; // 플래그 설정
         console.log("✅ [Workspace] TUI 에디터 메시지 리스너 등록 완료 (addWorkspaceEventListeners)");
-        console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+        try {
+            console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+        } catch (e) {
+            console.log("🔍 [Workspace] 디버깅: window.location.href = cross-origin (접근 불가)");
+        }
         console.log("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
     } else {
         console.log("[Workspace] TUI 에디터 메시지 리스너가 이미 등록되어 있습니다.");
     }
+    let windowLocation = "unknown";
+    try {
+        windowLocation = window.location?.href;
+    } catch (e) {
+        windowLocation = "cross-origin";
+    }
     console.log("[Workspace] 현재 window 정보:", {
         window: window,
-        windowLocation: window.location?.href,
+        windowLocation: windowLocation,
         windowTop: window.top,
         windowParent: window.parent,
         windowFrames: window.frames?.length
@@ -2860,7 +2900,11 @@ export function updateWorkspaceScraps(container, ideaData) {
     console.log("🔧 [Workspace] ========================================");
     console.log("🔧 [Workspace] 전역 TUI 에디터 리스너 등록 함수 실행 중...");
     console.log("🔧 [Workspace] 모듈 로드 확인:", typeof window !== 'undefined');
-    console.log("🔧 [Workspace] window.location:", window.location?.href);
+    try {
+        console.log("🔧 [Workspace] window.location:", window.location?.href);
+    } catch (e) {
+        console.log("🔧 [Workspace] window.location: cross-origin (접근 불가)");
+    }
     console.log("🔧 [Workspace] window === window.top:", window === window.top);
     console.log("🔧 [Workspace] ========================================");
     
@@ -2879,12 +2923,20 @@ export function updateWorkspaceScraps(container, ideaData) {
     const globalTuiEditorMessageListener = (event) => {
         // 🔍 디버깅: 모든 메시지 로깅
         if (event.data && typeof event.data === 'object' && event.data.action) {
+            // Cross-origin 프레임의 location 접근 시도 시 SecurityError 방지
+            let windowLocation = "unknown";
+            try {
+                windowLocation = window.location.href;
+            } catch (e) {
+                windowLocation = "cross-origin";
+            }
+            
             console.log("🔍 [Workspace] 전역 리스너 - 메시지 수신:", {
                 action: event.data.action,
                 origin: event.origin,
                 source: event.source,
                 isCpOpenTuiEditor: event.data.action === "cp_open_tui_editor",
-                windowLocation: window.location.href,
+                windowLocation: windowLocation,
                 isTopWindow: window === window.top
             });
         }
@@ -2918,11 +2970,51 @@ export function updateWorkspaceScraps(container, ideaData) {
             
             if (!tuiEditorIframe) {
                 console.log("🔨 [Workspace] TUI 에디터 iframe 생성 중...");
+                
+                // 기존 모달이 있으면 제거
+                const existingOverlay = document.querySelector("#tui-editor-overlay");
+                if (existingOverlay) existingOverlay.remove();
+                
+                // 배경 오버레이 생성
+                const overlay = document.createElement("div");
+                overlay.id = "tui-editor-overlay";
+                overlay.style.cssText = "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;";
+                overlay.onclick = () => {
+                  if (confirm("편집을 종료하시겠습니까?")) {
+                    overlay.remove();
+                    if (tuiEditorIframe) tuiEditorIframe.remove();
+                  }
+                };
+                // body의 마지막에 추가하여 최상위에 위치
+                document.body.appendChild(overlay);
+                
+                // 모달 컨테이너 생성
+                const modalContainer = document.createElement("div");
+                modalContainer.id = "tui-editor-modal-container";
+                modalContainer.style.cssText = "position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;";
+                overlay.appendChild(modalContainer);
+                
+                // 닫기 버튼 추가
+                const closeBtn = document.createElement("button");
+                closeBtn.innerHTML = "×";
+                closeBtn.style.cssText = "position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;";
+                closeBtn.onmouseover = () => closeBtn.style.background = "rgba(255,255,255,0.2)";
+                closeBtn.onmouseout = () => closeBtn.style.background = "rgba(255,255,255,0.1)";
+                closeBtn.onclick = (e) => {
+                  e.stopPropagation();
+                  if (confirm("편집을 종료하시겠습니까?")) {
+                    overlay.remove();
+                    if (tuiEditorIframe) tuiEditorIframe.remove();
+                  }
+                };
+                modalContainer.appendChild(closeBtn);
+                
+                // iframe 생성
                 tuiEditorIframe = document.createElement("iframe");
                 tuiEditorIframe.id = "tui-editor-iframe";
                 tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
-                tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
-                document.body.appendChild(tuiEditorIframe);
+                tuiEditorIframe.style.cssText = "width:100%;height:100%;border:none;background:#282828;";
+                modalContainer.appendChild(tuiEditorIframe);
                 console.log("✅ [Workspace] TUI 에디터 iframe 생성 완료");
                 
                 // TUI 에디터에서 편집 완료 시 처리
@@ -3066,7 +3158,11 @@ export function updateWorkspaceScraps(container, ideaData) {
     window.addEventListener("message", globalTuiEditorMessageListener);
     window.__cp_tui_global_listener_attached = true;
     console.log("✅ [Workspace] 전역 TUI 에디터 메시지 리스너 등록 완료");
-    console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+    try {
+        console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+    } catch (e) {
+        console.log("🔍 [Workspace] 디버깅: window.location.href = cross-origin (접근 불가)");
+    }
     console.log("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
     console.log("🔍 [Workspace] 디버깅: window.addEventListener 존재 여부 =", typeof window.addEventListener);
     console.log("🔍 [Workspace] 디버깅: 리스너 함수 타입 =", typeof globalTuiEditorMessageListener);

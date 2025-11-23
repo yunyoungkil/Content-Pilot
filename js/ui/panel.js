@@ -115,11 +115,51 @@ export function createAndShowPanel() {
                 
                 if (!tuiEditorIframe) {
                     console.log("[Panel] TUI 에디터 iframe 생성 중...");
+                    
+                    // 기존 모달이 있으면 제거
+                    const existingOverlay = document.querySelector("#tui-editor-overlay");
+                    if (existingOverlay) existingOverlay.remove();
+                    
+                    // 배경 오버레이 생성
+                    const overlay = document.createElement("div");
+                    overlay.id = "tui-editor-overlay";
+                    overlay.style.cssText = "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;";
+                    overlay.onclick = () => {
+                      if (confirm("편집을 종료하시겠습니까?")) {
+                        overlay.remove();
+                        if (tuiEditorIframe) tuiEditorIframe.remove();
+                      }
+                    };
+                    // body의 마지막에 추가하여 최상위에 위치
+                    document.body.appendChild(overlay);
+                    
+                    // 모달 컨테이너 생성
+                    const modalContainer = document.createElement("div");
+                    modalContainer.id = "tui-editor-modal-container";
+                    modalContainer.style.cssText = "position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;";
+                    overlay.appendChild(modalContainer);
+                    
+                    // 닫기 버튼 추가
+                    const closeBtn = document.createElement("button");
+                    closeBtn.innerHTML = "×";
+                    closeBtn.style.cssText = "position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;";
+                    closeBtn.onmouseover = () => closeBtn.style.background = "rgba(255,255,255,0.2)";
+                    closeBtn.onmouseout = () => closeBtn.style.background = "rgba(255,255,255,0.1)";
+                    closeBtn.onclick = (e) => {
+                      e.stopPropagation();
+                      if (confirm("편집을 종료하시겠습니까?")) {
+                        overlay.remove();
+                        if (tuiEditorIframe) tuiEditorIframe.remove();
+                      }
+                    };
+                    modalContainer.appendChild(closeBtn);
+                    
+                    // iframe 생성
                     tuiEditorIframe = document.createElement("iframe");
                     tuiEditorIframe.id = "tui-editor-iframe";
                     tuiEditorIframe.src = chrome.runtime.getURL("tui-editor.html");
-                    tuiEditorIframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;border:none;background:#282828;";
-                    document.body.appendChild(tuiEditorIframe);
+                    tuiEditorIframe.style.cssText = "width:100%;height:100%;border:none;background:#282828;";
+                    modalContainer.appendChild(tuiEditorIframe);
                     console.log("[Panel] TUI 에디터 iframe 생성 완료");
                     
                     // TUI 에디터에서 편집 완료 시 처리
