@@ -4,6 +4,7 @@
 // Firebase v9+ 모듈 API import
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, push, set, update, remove, onValue, get, serverTimestamp } from 'firebase/database';
+import { getValidToken } from './authService.js';
 
 // 상수 정의
 export const CONSTANTS = {
@@ -171,22 +172,16 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
     const blob = dataURLtoBlob(dataUrl);
     
     // Google OAuth 토큰 가져오기 (Firebase Storage 인증용)
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: false }, (authToken) => {
-        if (chrome.runtime.lastError) {
-          // interactive: false로 실패하면 interactive: true로 재시도
-          chrome.identity.getAuthToken({ interactive: true }, (authToken2) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else {
-              resolve(authToken2);
-            }
-          });
-        } else {
-          resolve(authToken);
-        }
-      });
-    });
+    // 토큰 검증 및 자동 갱신
+    let token = await getValidToken(false);
+    
+    // 토큰이 없으면 interactive 모드로 재시도
+    if (!token) {
+      token = await getValidToken(true);
+      if (!token) {
+        throw new Error('인증 토큰을 가져올 수 없습니다. 로그인이 필요합니다.');
+      }
+    }
     
     // Firebase Storage REST API를 사용하여 업로드
     const bucket = firebaseConfig.storageBucket;

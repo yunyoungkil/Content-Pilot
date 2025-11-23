@@ -2,6 +2,7 @@
 
 import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
 import { ref, get, update } from 'firebase/database';
+import { getValidToken } from './authService.js';
 
 // 1. 에러 전파 유틸리티
 export async function sendErrorToUI(errorType, message) {
@@ -85,7 +86,15 @@ export async function getAnalyticsData(token, propertyId, url, retryCount = 0, u
     return { pageviews: 0, gaEarnings: 0 };
   } catch (e) {
     if (e.message === "UNAUTHORIZED" && retryCount < 1) {
-        // 토큰 갱신 로직은 authService나 background에서 처리 권장하지만, 에러 전파
+        // 토큰 갱신 후 재시도
+        try {
+          const refreshedToken = await getValidToken(false);
+          if (refreshedToken) {
+            return getAnalyticsData(refreshedToken, propertyId, url, retryCount + 1, useEncodedPath);
+          }
+        } catch (refreshError) {
+          console.error('[getAnalyticsData] 토큰 갱신 실패:', refreshError);
+        }
         throw e; 
     }
     return { pageviews: 0, gaEarnings: 0, error: e.message };
@@ -138,6 +147,18 @@ export async function getAdsenseData(token, accountId, url, retryCount = 0) {
     }
     return { estimatedEarnings: 0, pageViews: 0 };
   } catch (e) {
+    if (e.message === "UNAUTHORIZED" && retryCount < 1) {
+        // 토큰 갱신 후 재시도
+        try {
+          const refreshedToken = await getValidToken(false);
+          if (refreshedToken) {
+            return getAdsenseData(refreshedToken, accountId, url, retryCount + 1);
+          }
+        } catch (refreshError) {
+          console.error('[getAdsenseData] 토큰 갱신 실패:', refreshError);
+        }
+        throw e;
+    }
     if (e.message === "UNAUTHORIZED") throw e;
     return { estimatedEarnings: 0, pageViews: 0, error: e.message };
   }
@@ -156,11 +177,16 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   try {
     await update(ref(db, `${path}/performance`), { collecting: true, collectingStartedAt: Date.now() });
 
-    const storage = await chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"]);
-    const token = storage.googleAuthToken;
+    // 토큰 검증 및 자동 갱신
+    const token = await getValidToken(false);
+    if (!token) {
+      throw new Error("인증 토큰을 가져올 수 없습니다. 로그인이 필요합니다.");
+    }
+
+    const storage = await chrome.storage.local.get(["adSenseAccountId"]);
     const adSenseId = storage.adSenseAccountId;
 
-    if (!token || !adSenseId) throw new Error("인증 정보 부족");
+    if (!adSenseId) throw new Error("AdSense 계정 ID가 없습니다.");
 
     // 채널 정보에서 GA ID 찾기
     const channelsSnap = await get(ref(db, `channels/${userId}`));

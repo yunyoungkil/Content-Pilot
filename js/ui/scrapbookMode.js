@@ -263,7 +263,107 @@ function renderDetailView(scrapId, container) {
         return cleaned.trim();
     };
 
-    const detailText = formatDetailText(scrap.text);
+    // 하이라이트 메타데이터가 있으면 적용
+    let detailText = formatDetailText(scrap.text);
+    let highlightedText = detailText;
+    
+    // 정규식 이스케이프 헬퍼 함수
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    
+    // 하이라이트 데이터 확인 및 디버깅
+    console.log('[ScrapbookMode] 스크랩 데이터 확인:', {
+      hasHighlights: !!scrap.highlights,
+      highlightsType: typeof scrap.highlights,
+      highlightsIsArray: Array.isArray(scrap.highlights),
+      highlightsLength: scrap.highlights?.length || 0,
+      textLength: detailText.length
+    });
+    
+    if (scrap.highlights && Array.isArray(scrap.highlights) && scrap.highlights.length > 0) {
+      console.log('[ScrapbookMode] 하이라이트 적용 시작:', scrap.highlights.length, '개');
+      console.log('[ScrapbookMode] 하이라이트 상세:', scrap.highlights);
+      
+      // 뒤에서부터 처리하여 인덱스 변경 방지
+      const sortedHighlights = [...scrap.highlights].sort((a, b) => (b.startIndex || 0) - (a.startIndex || 0));
+      
+      sortedHighlights.forEach((highlight, idx) => {
+        const highlightText = highlight.text ? highlight.text.trim() : '';
+        if (!highlightText || highlightText.length < 3) {
+          console.warn(`[ScrapbookMode] 하이라이트 ${idx + 1} 건너뜀: 텍스트 없음`);
+          return;
+        }
+        
+        // 텍스트에서 해당 문장 찾기
+        let found = false;
+        const searchText = highlightText;
+        
+        // 정확한 매칭 시도
+        if (detailText.includes(searchText)) {
+          const startIdx = highlightedText.indexOf(searchText);
+          if (startIdx !== -1) {
+            const endIdx = startIdx + searchText.length;
+            
+            // 이미 하이라이트가 적용되지 않은 경우만 처리
+            const before = highlightedText.substring(0, startIdx);
+            const target = highlightedText.substring(startIdx, endIdx);
+            const after = highlightedText.substring(endIdx);
+            
+            // 이미 마크 태그로 감싸져 있지 않은 경우만 처리
+            if (!target.includes('<mark') && !before.endsWith('<mark') && !after.startsWith('</mark>')) {
+              const highlighted = `<mark class="scrap-highlight" style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: 500; display: inline;" data-score="${highlight.score || 0}">${target}</mark>`;
+              highlightedText = before + highlighted + after;
+              found = true;
+              console.log(`[ScrapbookMode] ✅ 하이라이트 적용됨 (${idx + 1}/${sortedHighlights.length}):`, searchText.substring(0, 40) + '...');
+            }
+          }
+        }
+        
+        // 정확한 매칭 실패 시 부분 매칭 시도 (처음 15자만)
+        if (!found && searchText.length > 15) {
+          const partialText = searchText.substring(0, 15);
+          const partialIndex = highlightedText.indexOf(partialText);
+          
+          if (partialIndex !== -1) {
+            // 부분 매칭된 위치에서 문장 끝까지 찾기
+            let endIdx = partialIndex + partialText.length;
+            const maxLength = Math.min(searchText.length + 30, detailText.length - partialIndex);
+            
+            while (endIdx < partialIndex + maxLength && endIdx < highlightedText.length) {
+              const char = highlightedText[endIdx];
+              if (char === '.' || char === '!' || char === '?') {
+                if (endIdx + 1 < highlightedText.length && highlightedText[endIdx + 1] === ' ') {
+                  endIdx++;
+                  break;
+                }
+              }
+              endIdx++;
+            }
+            
+            const before = highlightedText.substring(0, partialIndex);
+            const target = highlightedText.substring(partialIndex, endIdx);
+            const after = highlightedText.substring(endIdx);
+            
+            if (!target.includes('<mark') && !before.endsWith('<mark') && !after.startsWith('</mark>') && target.trim().length > 10) {
+              const highlighted = `<mark class="scrap-highlight" style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: 500; display: inline;" data-score="${highlight.score || 0}">${target}</mark>`;
+              highlightedText = before + highlighted + after;
+              console.log(`[ScrapbookMode] ✅ 부분 하이라이트 적용됨 (${idx + 1}/${sortedHighlights.length}):`, target.substring(0, 40) + '...');
+            }
+          } else {
+            console.warn(`[ScrapbookMode] ❌ 하이라이트 ${idx + 1} 매칭 실패:`, searchText.substring(0, 30) + '...');
+          }
+        } else if (!found) {
+          console.warn(`[ScrapbookMode] ❌ 하이라이트 ${idx + 1} 매칭 실패 (텍스트 너무 짧음):`, searchText);
+        }
+      });
+      
+      console.log('[ScrapbookMode] 하이라이트 적용 완료. 최종 텍스트 길이:', highlightedText.length);
+      console.log('[ScrapbookMode] 하이라이트 태그 개수:', (highlightedText.match(/<mark/g) || []).length);
+    } else {
+      console.log('[ScrapbookMode] 하이라이트 데이터 없음. scrap 객체:', Object.keys(scrap));
+    }
+    
     const detailTitle = (scrap.text || '제목 없음').replace(/\s+/g, ' ').trim().substring(0, 50);
 
     // 이미지 수집 (image, allImages, images 모두 확인 - 하위 호환성)
@@ -386,7 +486,7 @@ function renderDetailView(scrapId, container) {
             <div class="scrapbook-detail-card" style="flex: 1; min-width: 300px; max-width: 420px;">
                 <div class="scrapbook-detail-title">${detailTitle}</div>
                 <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
-                <p class="scrapbook-detail-desc">${detailText}</p>
+                <p class="scrapbook-detail-desc" style="white-space: pre-wrap; word-wrap: break-word; line-height: 1.6;">${highlightedText}</p>
                 <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin-top: 16px; padding: 10px 16px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
                     💡 아이디어로 전환
                 </button>

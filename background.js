@@ -1,6 +1,6 @@
 // background.js (Final Router Version)
 
-import { getDb, CONSTANTS, initializeFirebase, uploadImageToFirebaseStorage } from './js/services/firebaseService.js';
+import { getDb, CONSTANTS, initializeFirebase, uploadImageToFirebaseStorage, cleanDataForFirebase } from './js/services/firebaseService.js';
 
 import { 
   updateAllPerformanceMetrics, 
@@ -32,7 +32,9 @@ import {
 
 import { 
   startGoogleAuth, 
-  revokeGoogleAuth 
+  revokeGoogleAuth,
+  getValidToken,
+  restoreAuthSession
 } from './js/services/authService.js';
 
 import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
@@ -42,6 +44,15 @@ initializeFirebase();
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
+
+// Service Worker 시작 시 세션 복원
+(async () => {
+  try {
+    await restoreAuthSession();
+  } catch (error) {
+    console.error('[System] 세션 복원 실패:', error);
+  }
+})();
 
 console.log("🚀 [System] Service Worker Started (Lightweight Router)");
 
@@ -348,6 +359,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Scrap Management] 스크랩 관리 ===
+  if (msg.action === "scrap_element" && msg.data) {
+    return handleAsync((async () => {
+      try {
+        const { data } = msg;
+        const channelId = msg.channelId !== undefined ? msg.channelId : null;
+        
+        // 스크랩 데이터 준비
+        const scrapPayload = {
+          text: data.text || '',
+          html: data.html || '',
+          tag: data.tag || 'UNKNOWN',
+          url: data.url || '',
+          image: data.image || null,
+          images: data.images || [],
+          highlights: data.highlights || [], // 하이라이트 메타데이터 포함
+          hasHighlights: data.hasHighlights || false,
+          timestamp: Date.now(),
+          channelId: channelId
+        };
+
+        // Firebase에 저장
+        const userId = CONSTANTS.USER_ID;
+        const scrapRef = push(ref(getDb(), `scraps/${userId}`));
+        await set(scrapRef, cleanDataForFirebase(scrapPayload));
+
+        return { 
+          success: true, 
+          scrapId: scrapRef.key,
+          scrapData: scrapPayload
+        };
+      } catch (error) {
+        console.error('[scrap_element] 저장 실패:', error);
+        return { success: false, error: error.message };
+      }
+    })());
+  }
+
   if (msg.action === "get_canvas_images") {
     return handleAsync((async () => {
       // TODO: 캔버스 이미지 가져오기 로직
@@ -368,6 +416,59 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }
       return { success: true };
+    })());
+  }
+
+  if (msg.action === "delete_scrap") {
+    return handleAsync((async () => {
+      const scrapId = msg.id;
+      if (!scrapId) {
+        return { success: false, error: "스크랩 ID가 필요합니다." };
+      }
+      const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
+      await remove(scrapRef);
+      return { success: true };
+    })());
+  }
+
+  if (msg.action === "toggle_scrap_sharing") {
+    return handleAsync((async () => {
+      const { scrapId, currentChannelId } = msg;
+      
+      if (!scrapId) {
+        return { success: false, error: "스크랩 ID가 필요합니다." };
+      }
+      
+      const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
+      const snap = await get(scrapRef);
+      
+      if (!snap.exists()) {
+        return { success: false, error: "스크랩을 찾을 수 없습니다." };
+      }
+      
+      const scrapData = snap.val();
+      const currentChannelIdValue = scrapData.channelId;
+      const isCurrentlyPublic = currentChannelIdValue === null || currentChannelIdValue === undefined;
+      
+      // 토글: null/undefined(공용) ↔ currentChannelId(전용)
+      const newChannelId = isCurrentlyPublic ? currentChannelId : null;
+      
+      // currentChannelId가 없으면 전용으로 변경할 수 없음
+      if (isCurrentlyPublic && !currentChannelId) {
+        return { 
+          success: false, 
+          error: "활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다." 
+        };
+      }
+      
+      // 업데이트
+      await update(scrapRef, { channelId: newChannelId });
+      
+      return { 
+        success: true, 
+        newChannelId,
+        message: newChannelId === null ? "공용 스크랩으로 변경되었습니다." : "전용 스크랩으로 변경되었습니다."
+      };
     })());
   }
 
