@@ -7,8 +7,9 @@ import { showToast } from "../utils.js";
  * @param {Object} draftData - 초안 생성 시 확보된 데이터 (thumbnailInfo 포함)
  * @param {Function} onInsert - '본문에 삽입' 클릭 시 실행할 콜백 (dataUrl, altText 전달)
  * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
+ * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave) {
+export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   // 1. 기존 데이터에서 썸네일 정보 추출 (없으면 기본값)
   const thumbInfo = draftData.thumbnailInfo || {
     thumbnailText: draftData.seoTitle || "제목을 입력하세요",
@@ -694,11 +695,39 @@ export function openThumbnailMaker(draftData, onInsert, onSave) {
     }
   };
 
-  // 정밀 편집 (TUI) 버튼 - 현재는 알림만 표시 (추후 연동)
+  // 정밀 편집 (TUI) 버튼 - 실제 기능 구현
   document.getElementById("tm-edit-tui").onclick = () => {
-    // const dataUrl = canvas.toDataURL("image/png");
-    alert("💡 준비 중입니다!\n\n현재 생성된 이미지를 TUI 편집기로 보내 스티커, 필터 등을 추가할 수 있는 기능이 곧 추가됩니다.");
-    // TODO: window.postMessage로 TUI iframe 열기 구현 필요
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      console.log("[ThumbnailMaker] 정밀 편집 버튼 클릭, 이미지 데이터 준비:", dataUrl.substring(0, 50) + "...");
+      
+      // 에디터 iframe 찾기 (여러 방법 시도)
+      let editorIframe = document.querySelector("#quill-editor-iframe");
+      if (!editorIframe) {
+        editorIframe = document.getElementById("quill-editor-iframe");
+      }
+      
+      if (editorIframe && editorIframe.contentWindow) {
+        console.log("[ThumbnailMaker] 에디터 iframe 찾음, bridge-tui-edit 메시지 전송");
+        // 1. 에디터(iframe)로 이미지 데이터 전송 (브릿지 요청)
+        editorIframe.contentWindow.postMessage({
+          action: "bridge-tui-edit",
+          data: {
+            url: dataUrl
+          }
+        }, "*");
+        
+        // 2. 썸네일 모달 닫기 (TUI 에디터로 전환되므로)
+        modal.remove();
+        console.log("[ThumbnailMaker] 모달 닫기 완료");
+      } else {
+        console.error("[ThumbnailMaker] 에디터 iframe을 찾을 수 없음");
+        alert("❌ 에디터를 찾을 수 없어 정밀 편집을 실행할 수 없습니다.");
+      }
+    } catch (error) {
+      console.error("[ThumbnailMaker] 정밀 편집 오류:", error);
+      alert("❌ 정밀 편집 중 오류가 발생했습니다: " + (error.message || "알 수 없는 오류"));
+    }
   };
 
   // 닫기 버튼

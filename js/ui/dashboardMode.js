@@ -79,7 +79,7 @@ async function initDashboardMode(container) {
                 renderAnalysisResult(myAnalysisContent, cache.myAnalysisResult, true);
             }
             if (cache.competitorAnalysisResult && competitorAnalysisContent) {
-                renderAnalysisResult(competitorAnalysisContent, cache.competitorAnalysisResult, false);
+                renderAnalysisResult(competitorAnalysisContent, cache.competitorAnalysisResult, false, cache.keywordGap || null);
                 if (competitorSection) {
                     competitorSection.style.display = 'block';
                     container.querySelector('#my-analysis-section')?.classList.add('docked');
@@ -205,7 +205,7 @@ async function initDashboardMode(container) {
         }, 300);
     });
 }
-async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = false) {
+async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis = false, keywordGap = null) {
     if (!analysisText || !analysisText.trim()) {
         container.innerHTML = `<p class="ai-ideas-placeholder">분석 결과에서 제안할 아이디어를 찾지 못했습니다.</p>`;
         return;
@@ -303,7 +303,32 @@ async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis
             `;
         }).join('');
 
-        container.innerHTML = `<div class="ai-ideas-list">${ideasHtml}</div>`;
+        // 키워드 갭 정보 표시
+        let keywordGapHtml = '';
+        if (keywordGap && keywordGap.gapKeywords && keywordGap.gapKeywords.length > 0) {
+            keywordGapHtml = `
+                <div class="keyword-gap-section" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #856404; display: flex; align-items: center; gap: 8px;">
+                        🔑 경쟁사 독점 키워드 (놓치고 있는 황금 키워드)
+                    </h3>
+                    <p style="margin: 0 0 12px 0; font-size: 13px; color: #856404;">
+                        경쟁사는 다음 키워드로 콘텐츠를 제작하고 있지만, 나는 아직 다루지 않은 키워드입니다. 이 키워드들을 활용하면 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회입니다.
+                    </p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${keywordGap.gapKeywords.map(kw => `
+                            <span style="background: #fff; color: #856404; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; border: 1px solid #ffc107;">
+                                ${kw}
+                            </span>
+                        `).join('')}
+                    </div>
+                    <p style="margin: 12px 0 0 0; font-size: 12px; color: #856404; opacity: 0.8;">
+                        총 ${keywordGap.gapCount}개의 갭 키워드 발견
+                    </p>
+                </div>
+            `;
+        }
+
+        container.innerHTML = `${keywordGapHtml}<div class="ai-ideas-list">${ideasHtml}</div>`;
 
     } catch (e) {
         console.error("AI 아이디어 파싱 오류:", e, "원본 텍스트:", analysisText);
@@ -1248,6 +1273,9 @@ function addDashboardEventListeners(container) {
                             let cache = result[CACHE_KEY] || {};
                             cache.myAnalysisResult = response.analysis;
                             cache.competitorAnalysisResult = response.ideas;
+                            if (response.keywordGap) {
+                                cache.keywordGap = response.keywordGap;
+                            }
                             if (response.analysis) {
                                 cache.myAnalysisSummary = response.analysis.split(/###|\n##|\n\d\./)[0].trim();
                             }
@@ -1259,8 +1287,8 @@ function addDashboardEventListeners(container) {
                         // 1. 성과 분석 결과 렌더링
                         renderAnalysisResult(myAnalysisContentEl, response.analysis, true);
                         
-                        // 2. 아이디어 제안 결과 렌더링
-                        renderAnalysisResult(competitorAnalysisContentEl, response.ideas, false);
+                        // 2. 아이디어 제안 결과 렌더링 (키워드 갭 정보 포함)
+                        renderAnalysisResult(competitorAnalysisContentEl, response.ideas, false, response.keywordGap);
                     } else {
                         const errorMsg = response?.error || "알 수 없는 오류";
                         myAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder error">분석 실패: ${errorMsg}</p>`;

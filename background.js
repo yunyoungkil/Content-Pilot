@@ -421,6 +421,135 @@ async function resolveYoutubeUrl(url, apiKey) {
  * @param {string} text - 분석할 텍스트
  * @returns {Promise<string[]|null>} - 추출된 키워드 배열 또는 null
  */
+/**
+ * 경쟁사 키워드 갭(Gap) 분석 함수
+ * 경쟁사가 사용하지만 내가 사용하지 않은 키워드를 찾아냅니다.
+ * @param {Array} myContent - 내 콘텐츠 배열 (각 항목은 {title, description, tags, ...})
+ * @param {Array} competitorContent - 경쟁사 콘텐츠 배열 (각 항목은 {title, description, tags, ...})
+ * @returns {Object} {gapKeywords: Array, myKeywords: Set, competitorKeywords: Set}
+ */
+/**
+ * [SEO 필터] 한국어 불용어(Stopwords) 목록
+ * 분석 가치가 없는 기능어, 조사, 인사말 등을 정의합니다.
+ */
+const KOREAN_STOPWORDS = new Set([
+  "에서", "으로", "입니다", "하고", "있는", "하는", "있습니다", "합니다", "것입니다", 
+  "안녕하세요", "오늘은", "이번", "저의", "제가", "너무", "정말", "진짜", "많이", 
+  "그리고", "하지만", "그런데", "따라서", "또한", "바로", "모두", "함께", "대해",
+  "대한", "위해", "통해", "관한", "가장", "어떤", "이런", "저런", "좋은", "같은",
+  "방법", "추천", "소개", "정리", "공유", "후기", "리뷰", "팁", "사용", "활용",
+  "카드", "복구", "sd", "메모리", "손상" // 사용자 피드백 기반 추가 필터링 (필요시 제거 가능)
+]);
+
+/**
+ * [Step 6-9] 경쟁사 키워드 갭(Gap) 분석 함수 (강화됨)
+ * 내 채널에는 없지만 경쟁사 채널에는 있는 '황금 키워드'를 추출합니다.
+ * 1차: Set 자료구조로 필터링, 2차: AI로 명사형 키워드만 정제
+ */
+async function analyzeKeywordGap(myContent, competitorContent) {
+  console.log("[Keyword Gap] 분석 시작 (불용어 필터링 적용)...");
+
+  // 1. 태그(키워드) 수집 및 1차 정제
+  const processTags = (contentList) => {
+    const tagsSet = new Set();
+    contentList.forEach(item => {
+      // 태그 수집
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          const cleanTag = tag.replace(/^#/, '').trim();
+          if (cleanTag.length > 1 && !KOREAN_STOPWORDS.has(cleanTag)) {
+            tagsSet.add(cleanTag);
+          }
+        });
+      }
+      // (보완) 제목에서 명사 유추 (간단히 띄어쓰기 기준)
+      if (item.title) {
+        item.title.split(/\s+/).forEach(word => {
+          const cleanWord = word.replace(/[.,?!\[\]\(\)]/g, '');
+          if (cleanWord.length > 1 && !KOREAN_STOPWORDS.has(cleanWord)) {
+            tagsSet.add(cleanWord);
+          }
+        });
+      }
+    });
+    return tagsSet;
+  };
+
+  const myTags = processTags(myContent);
+  const compTags = processTags(competitorContent);
+
+  // 2. 갭(Gap) 연산: (경쟁사 키워드) - (내 키워드)
+  // 내가 다루지 않은 경쟁사의 키워드만 남깁니다.
+  const rawGapKeywords = [...compTags].filter(tag => !myTags.has(tag));
+
+  // 후보가 너무 적으면 경쟁사 전체 키워드에서 분석
+  const candidates = rawGapKeywords.length < 5 ? [...compTags] : rawGapKeywords;
+
+  console.log(`[Keyword Gap] 1차 후보군 ${candidates.length}개 추출`);
+
+  // 3. AI에게 정제 요청 (불용어 제거 및 가치 판단)
+  const prompt = `
+    당신은 전문 SEO 데이터 분석가입니다. 아래 데이터를 바탕으로 '경쟁사 키워드 갭(Gap)' 분석을 수행해주세요.
+
+    [분석 목표]
+    경쟁사는 선점하고 있지만 내 채널(사용자)은 놓치고 있는 '고가치 황금 키워드' 5~7개를 선정하세요.
+
+    [데이터: 경쟁사 키워드 후보군]
+    ${candidates.slice(0, 300).join(", ")}
+
+    [필수 제약 사항 - 매우 중요]
+    1. **명사형 키워드만 추출하세요.** (예: "스마트싱스", "갤럭시 S24", "전세사기", "AI 프로필")
+    2. **조사, 어미, 불용어는 절대 포함하지 마세요.** - 나쁜 예: "에서", "으로", "입니다", "안녕하세요", "오늘은", "방법", "추천"
+       - 좋은 예: "단발머리", "아이폰15", "여행지", "청약통장"
+    3. **검색량이 있을 법한 구체적인 주제**를 선정하세요. 단순 형용사나 부사는 제외하세요.
+    4. 중복된 의미의 단어는 하나로 통합하세요.
+
+    [출력 형식]
+    반드시 JSON 배열 형식으로만 응답해주세요. (설명 금지)
+    예시: ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"]
+  `;
+
+  try {
+    // 기존 callGeminiAPI 함수 활용
+    const resultText = await callGeminiAPI(prompt);
+    
+    // JSON 파싱
+    const jsonMatch = resultText.match(/\[.*\]/s);
+    if (jsonMatch) {
+      const keywords = JSON.parse(jsonMatch[0]);
+      console.log("[Keyword Gap] 최종 황금 키워드:", keywords);
+      
+      // 한번 더 필터링 (혹시 모를 불용어 제거)
+      const filteredKeywords = keywords.filter(k => !KOREAN_STOPWORDS.has(k) && k.length > 1);
+      
+      return {
+        gapKeywords: filteredKeywords,
+        myKeywords: Array.from(myTags),
+        competitorKeywords: Array.from(compTags),
+        gapCount: filteredKeywords.length
+      };
+    } else {
+      console.warn("[Keyword Gap] JSON 파싱 실패, 원본:", resultText);
+      // 파싱 실패 시 1차 후보군 중 앞부분 반환
+      const fallbackKeywords = candidates.slice(0, 5).filter(k => !KOREAN_STOPWORDS.has(k) && k.length > 1);
+      return {
+        gapKeywords: fallbackKeywords,
+        myKeywords: Array.from(myTags),
+        competitorKeywords: Array.from(compTags),
+        gapCount: fallbackKeywords.length
+      };
+    }
+  } catch (e) {
+    console.error("[Keyword Gap] 분석 중 오류:", e);
+    return {
+      gapKeywords: [],
+      myKeywords: Array.from(myTags),
+      competitorKeywords: Array.from(compTags),
+      gapCount: 0
+    };
+  }
+}
+
 async function extractKeywords(text) {
   console.log("키워드 추출 시도:", text.substring(0, 100) + "...");
 
@@ -1161,7 +1290,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .set(msg.draft)
             .then(() => {
               db.ref(`kanban/${userId}/${foundStatus}/${msg.ideaId}/updatedAt`).set(
-                firebase.database.ServerValue.TIMESTAMP
+                serverTimestamp()
               );
               sendResponse({
                 success: true,
@@ -1272,7 +1401,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await cardRef.update(updates);
         
         // updatedAt 업데이트
-        await cardRef.child("updatedAt").set(firebase.database.ServerValue.TIMESTAMP);
+        await cardRef.child("updatedAt").set(serverTimestamp());
         
         sendResponse({ success: true });
       } catch (error) {
@@ -2902,20 +3031,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === "generate_content_ideas") {
     const { myContent, competitorContent, myAnalysisSummary } = msg.data;
 
-    const myDataSummary = myContent
-      .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (조회수: ${item.viewCount})`)
-      .join("\n");
+    const safeSendResponse = createSafeResponse();
+    
+    (async () => {
+      try {
+        // 1. 키워드 갭 분석 수행
+        const keywordGap = await analyzeKeywordGap(myContent, competitorContent);
+        
+        const myDataSummary = myContent
+          .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+          .slice(0, 10)
+          .map((item) => ` - ${item.title} (조회수: ${item.viewCount})`)
+          .join("\n");
 
-    const competitorDataSummary = competitorContent
-      .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
-      .slice(0, 10)
-      .map((item) => ` - ${item.title} (조회수: ${item.viewCount})`)
-      .join("\n");
+        const competitorDataSummary = competitorContent
+          .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+          .slice(0, 10)
+          .map((item) => ` - ${item.title} (조회수: ${item.viewCount})`)
+          .join("\n");
 
-    const youtubeIdeasPrompt = `
-            당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 세 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
+        // 2. 키워드 갭 정보를 프롬프트에 추가
+        const gapKeywordsSection = keywordGap.gapKeywords.length > 0
+          ? `
+            [정보 4: 🔑 경쟁사 독점 키워드 (놓치고 있는 황금 키워드)]
+            경쟁사는 다음 키워드로 콘텐츠를 제작하고 있지만, 나는 아직 다루지 않은 키워드입니다:
+            ${keywordGap.gapKeywords.map(kw => ` - ${kw}`).join('\n')}
+            
+            이 키워드들을 활용하면 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회입니다.
+          `
+          : `
+            [정보 4: 🔑 경쟁사 독점 키워드]
+            현재 경쟁사와 내가 사용하는 키워드가 유사하여 특별히 놓치고 있는 키워드는 없습니다.
+          `;
+
+        const youtubeIdeasPrompt = `
+            당신은 최고의 유튜브 콘텐츠 전략가입니다. 아래 네 가지 정보를 종합하여, 나의 강점을 활용해 경쟁자를 이길 수 있는 새로운 아이디어 5가지를 제안해주세요.
 
             [정보 1: 내 채널의 핵심 성공 요인]
             ${myAnalysisSummary}
@@ -2925,9 +3075,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             [정보 3: 경쟁 채널의 인기 영상 목록]
             ${competitorDataSummary}
+            ${gapKeywordsSection}
 
             [요청]
             나의 핵심 성공 요인(정보 1)을 바탕으로, 경쟁 채널의 인기 요소(정보 3)를 전략적으로 결합하거나, 혹은 경쟁자보다 더 나은 가치를 제공할 수 있는 새로운 아이디어 5가지를 제안해주세요.
+            
+            특히 [정보 8]의 경쟁사 독점 키워드를 활용한 아이디어를 최소 1-2개 포함해주세요. 이는 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회입니다.
+            
+            특히 [정보 4]의 경쟁사 독점 키워드를 활용한 아이디어를 최소 1-2개 포함해주세요. 이는 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회입니다.
 
             [출력 형식]
             반드시 다음 JSON 배열 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
@@ -2943,9 +3098,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ]
         `;
 
-    (async () => {
-      const ideasResult = await callGeminiAPI(youtubeIdeasPrompt);
-      sendResponse({ success: true, ideas: ideasResult });
+        const ideasResult = await callGeminiAPI(youtubeIdeasPrompt);
+        
+        // 3. 키워드 갭 정보를 응답에 포함
+        safeSendResponse({ 
+          success: true, 
+          ideas: ideasResult,
+          keywordGap: {
+            gapKeywords: keywordGap.gapKeywords,
+            gapCount: keywordGap.gapCount
+          }
+        });
+      } catch (error) {
+        console.error('[generate_content_ideas] 오류:', error);
+        safeSendResponse({ success: false, error: error.message });
+      }
     })();
 
     return true;
@@ -3013,6 +3180,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
           });
         });
+
+        // 2-3. 키워드 갭 분석 수행 (강화된 버전)
+        let keywordGapInfo = "";
+        let keywordGapList = [];
+        
+        // 경쟁사 콘텐츠가 있거나, 경쟁 채널 URL이 설정된 경우 실행
+        if (competitorContent.length > 0 || competitorUrls.length > 0) {
+            // 분석 실행
+            const keywordGap = await analyzeKeywordGap(myContent, competitorContent);
+            keywordGapList = keywordGap.gapKeywords || [];
+            
+            if (keywordGapList.length > 0) {
+                keywordGapInfo = `
+[정보 8: 경쟁사 독점 키워드 (Keyword Gap)]
+경쟁사는 활발히 다루고 있지만 내 채널에는 부족한 '황금 키워드'입니다. 이 키워드들을 주제 선정에 최우선으로 반영하세요:
+${keywordGapList.join(", ")}
+                `;
+            }
+        }
+        
+        const gapKeywordsSection = keywordGapList.length > 0
+          ? `
+            [정보 8: 🔑 경쟁사 독점 키워드 (놓치고 있는 황금 키워드)]
+            경쟁사는 다음 키워드로 콘텐츠를 제작하고 있지만, 나는 아직 다루지 않은 키워드입니다:
+            ${keywordGapList.map(kw => ` - ${kw}`).join('\n')}
+            
+            이 키워드들을 활용하면 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회입니다.
+          `
+          : `
+            [정보 8: 🔑 경쟁사 독점 키워드]
+            현재 경쟁사와 내가 사용하는 키워드가 유사하여 특별히 놓치고 있는 키워드는 없습니다.
+          `;
 
         // 3. 데이터 요약 생성 (기존 로직 활용)
         const myDataSummary = myContent
@@ -3086,6 +3285,7 @@ ${decayContent.map((item, idx) =>
             [정보 7: 콘텐츠 재활용 기회]
             ${repurposingInfo}
             ` : ''}
+            ${gapKeywordsSection}
 
             [핵심 원칙: 실용성 및 사용자 의도]
             - 단순 키워드 조합이 아닌, 실제 사용자가 검색하고 공감할 만한 실용적 주제여야 합니다.
@@ -3100,9 +3300,10 @@ ${decayContent.map((item, idx) =>
             - 과거 발행 콘텐츠 중 수익성과 트래픽이 높은 콘텐츠의 공통 패턴을 분석하여 성공 공식을 도출하세요.
             - 예: "특정 태그 조합", "특정 주제 유형", "특정 접근 방식" 등
             
-            2단계: [정보 2, 3${emergingTopics ? ', 6' : ''}]에서 '새로운 기회(키워드)' 탐색
+            2단계: [정보 2, 3${emergingTopics ? ', 6' : ''}, 8]에서 '새로운 기회(키워드)' 탐색
             - 내 채널의 인기 게시물(정보 2)과 경쟁 채널의 인기 게시물(정보 3)을 분석하여 아직 다루지 않았거나 더 깊이 다룰 수 있는 새로운 기회를 찾으세요.
             ${emergingTopics ? '- [정보 6: 최신 트렌드]를 활용하여 시장 선점 기회를 잡으세요. 트렌드가 확산되기 전에 콘텐츠를 발행하면 더 높은 성과를 기대할 수 있습니다.' : ''}
+            - [정보 8: 경쟁사 독점 키워드]를 활용하여 경쟁사보다 먼저 해당 주제를 선점할 수 있는 기회를 잡으세요.
             
             3단계: '성공 공식'을 '새로운 기회'에 적용
             - 1단계에서 도출한 성공 공식을 2단계에서 찾은 새로운 기회에 적용하여 구체적인 아이디어를 생성하세요.
@@ -3146,7 +3347,11 @@ ${decayContent.map((item, idx) =>
         sendResponse({ 
           success: true, 
           analysis: performanceAnalysis || "성과 데이터가 부족하여 분석을 건너뛰었습니다.", // UI '성과 분석 결과' 영역용
-          ideas: ideasResult // UI 'AI 아이디어 제안' 영역용
+          ideas: ideasResult, // UI 'AI 아이디어 제안' 영역용
+          keywordGap: {
+            gapKeywords: keywordGapList,
+            gapCount: keywordGapList.length
+          }
         });
 
       } catch (error) {
@@ -4429,7 +4634,7 @@ ${decayContent.map((item, idx) =>
       // workspace 객체 전체를 업데이트 (점(.)을 포함한 키 사용 불가)
       const updates = {
         linkedScraps: linkedScraps,
-        updatedAt: firebase.database.ServerValue.TIMESTAMP
+        updatedAt: serverTimestamp()
       };
       
       // workspace 객체가 없으면 생성
@@ -4502,7 +4707,7 @@ ${decayContent.map((item, idx) =>
       // workspace 객체 전체를 업데이트 (점(.)을 포함한 키 사용 불가)
       const updates = {
         linkedScraps: linkedScraps,
-        updatedAt: firebase.database.ServerValue.TIMESTAMP
+        updatedAt: serverTimestamp()
       };
       
       // workspace 객체가 없으면 생성
@@ -4709,6 +4914,47 @@ ${decayContent.map((item, idx) =>
         originalContentText = `[원본 본문 (리뉴얼 참고용)]\n${ideaData.origin.fullContent.substring(0, 5000)}\n\n`;
       }
 
+      // [스마트 내부 링크] 내 과거 포스팅 목록 조회
+      let myPastPostsText = "";
+      try {
+        const userId = CONSTANTS.USER_ID;
+        const db = getFirebaseDatabase();
+        const contentSnap = await get(ref(db, `channel_content/${userId}/blogs`));
+        const allBlogs = contentSnap.val() || {};
+        
+        // 현재 채널의 글만 필터링 (channelId가 일치하는 경우)
+        const myPosts = Object.values(allBlogs)
+          .filter(item => item !== null && item.title && item.fullLink)
+          .filter(item => {
+            // channelId가 있으면 일치하는 것만, 없으면 모두 포함
+            if (ideaData.channelId) {
+              return item.sourceId === ideaData.channelId;
+            }
+            return true; // channelId가 없으면 모든 글 포함
+          })
+          .sort((a, b) => {
+            // 최신순 정렬 (publishedAt 또는 createdAt 기준)
+            const dateA = a.publishedAt || a.createdAt || 0;
+            const dateB = b.publishedAt || b.createdAt || 0;
+            return dateB - dateA;
+          })
+          .slice(0, 20); // 최근 20개만 사용
+        
+        if (myPosts.length > 0) {
+          myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
+          myPastPostsText += myPosts.map((post, idx) => {
+            const title = post.title || "제목 없음";
+            const url = post.fullLink || post.link || "";
+            const description = post.description || post.cleanText?.substring(0, 100) || "";
+            return `${idx + 1}. 제목: ${title}\n   URL: ${url}\n   설명: ${description}\n`;
+          }).join("\n");
+          myPastPostsText += "\n";
+        }
+      } catch (error) {
+        console.warn('[generate_draft_from_idea] 내 과거 포스팅 조회 실패:', error);
+        // 오류가 발생해도 계속 진행
+      }
+
       // 3. 추천 검색어와 롱테일 키워드 수집
       const recommendedSearches = ideaData.recommendedSearches || [];
       const longTailKeywords = ideaData.longTailKeywords || [];
@@ -4786,6 +5032,25 @@ ${decayContent.map((item, idx) =>
 
             ### 8. 관련 참고 자료
             ${originalContentText}${linkedScrapsText || "참고 자료 없음"}
+            
+            ${myPastPostsText ? `### 9. 내 과거 포스팅 목록 (스마트 내부 링크 추천)
+            ${myPastPostsText}
+            
+            [스마트 내부 링크 삽입 규칙 - 매우 중요]
+            - 현재 작성 중인 글의 주제와 **문맥상 자연스럽게 연관된** 내 과거 포스팅이 있다면, 해당 위치에 내부 링크를 삽입해주세요.
+            - 링크는 문맥에 완전히 녹아들어야 하며, 독자가 자연스럽게 클릭하고 싶게 만들어주세요.
+            - 링크 형식: 마크다운 링크 형식 [관련 글: 제목](URL) 또는 [제목](URL) 형식으로 작성해주세요.
+            - 좋은 예시들:
+              * "이러한 증상이 나타난다면 [갤럭시 S23 후기](URL)에서 더 자세한 사용 경험을 확인할 수 있습니다."
+              * "스마트홈 설정 방법은 [스마트싱스 초기 설정 가이드](URL)에서 상세히 다루었습니다."
+              * "관련 주제로는 [아이폰 15 프로 리뷰](URL)도 참고하시기 바랍니다."
+            - 나쁜 예시들 (절대 사용 금지):
+              * "관련 글: [제목](URL)" (문맥 없이 나열)
+              * "참고: [제목](URL)" (딱딱한 표현)
+              * "이전 글: [제목](URL)" (과거 글임을 강조하는 표현)
+            - **중요**: 관련성이 없는 과거 글에 무리하게 링크를 걸지 마세요. 문맥상 자연스럽게 연결될 때만 링크를 삽입하세요.
+            - 내부 링크는 본문 중간에 2~3개 정도가 적당합니다. 너무 많으면 독자 경험이 나빠질 수 있습니다.
+            ` : ""}
             
             [참고 자료 활용 규칙]
             - 원본 본문이 제공된 경우(리뉴얼 아이디어), 그 내용을 바탕으로 팩트 기반으로 작성하되, 단순 복사가 아닌 새로운 관점이나 더 풍부한 정보로 발전시켜주세요.

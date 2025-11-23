@@ -54,6 +54,7 @@ function initializeEditor() {
           undo: () => quillEditor.history.undo(),
           redo: () => quillEditor.history.redo(),
           "tui-edit": function () {
+            console.log("[Editor] tui-edit 버튼 클릭");
             // Quill 문서 내 모든 이미지와 Range 추출
             let allDocumentImages = [];
             const contents = quillEditor.getContents();
@@ -69,17 +70,75 @@ function initializeEditor() {
                 idx += op.insert.length;
               }
             });
-            if (allDocumentImages.length === 0) return; // 이미지 없으면 동작X
-            // 첫 번째 이미지를 자동 선택
-            const firstImage = allDocumentImages[0];
-            window.__cp_editingImageRange = firstImage.range;
-            window.__cp_selectedImageRange = firstImage.range;
-            window.__cp_selectedImageUrl = firstImage.url;
-            window.parent.postMessage({
+            if (allDocumentImages.length === 0) {
+              console.warn("[Editor] tui-edit: 문서에 이미지가 없음");
+              return; // 이미지 없으면 동작X
+            }
+            
+            // 선택된 이미지가 있으면 그것을 사용, 없으면 첫 번째 이미지 사용
+            let targetImage = null;
+            if (window.__cp_selectedImageUrl && window.__cp_selectedImageRange) {
+              // 선택된 이미지가 allDocumentImages에 있는지 확인
+              targetImage = allDocumentImages.find(img => img.url === window.__cp_selectedImageUrl);
+              if (targetImage) {
+                console.log("[Editor] tui-edit: 선택된 이미지 사용:", window.__cp_selectedImageUrl.substring(0, 50) + "...");
+              }
+            }
+            
+            // 선택된 이미지가 없거나 찾을 수 없으면 첫 번째 이미지 사용
+            if (!targetImage) {
+              targetImage = allDocumentImages[0];
+              console.log("[Editor] tui-edit: 첫 번째 이미지 사용:", targetImage.url.substring(0, 50) + "...");
+            }
+            
+            window.__cp_editingImageRange = targetImage.range;
+            window.__cp_selectedImageRange = targetImage.range;
+            window.__cp_selectedImageUrl = targetImage.url;
+            
+            console.log("[Editor] tui-edit: cp_open_tui_editor 메시지 전송");
+            console.log("[Editor] window.parent:", window.parent);
+            console.log("[Editor] window.parent === window.top:", window.parent === window.top);
+            
+            // 메시지를 여러 window로 전송 (shadow DOM 호환)
+            const message = {
               action: "cp_open_tui_editor",
-              currentImageUrl: firstImage.url,
+              currentImageUrl: targetImage.url,
               allDocumentImages
-            }, "*");
+            };
+            
+            try {
+                // 1. parent window로 전송
+                window.parent.postMessage(message, "*");
+                console.log("[Editor] window.parent로 메시지 전송 완료");
+            } catch (err) {
+                console.error("[Editor] window.parent로 메시지 전송 실패:", err);
+            }
+            
+            try {
+                // 2. top window로도 전송 (shadow DOM 내부에서도 작동)
+                if (window.top && window.top !== window.parent) {
+                    window.top.postMessage(message, "*");
+                    console.log("[Editor] window.top으로 메시지 전송 완료");
+                }
+            } catch (err) {
+                console.error("[Editor] window.top으로 메시지 전송 실패:", err);
+            }
+            
+            try {
+                // 3. frames를 통해서도 전송 시도
+                if (window.parent.frames && window.parent.frames.length > 0) {
+                    Array.from(window.parent.frames).forEach((frame, idx) => {
+                        try {
+                            frame.postMessage(message, "*");
+                            console.log(`[Editor] frame[${idx}]로 메시지 전송 완료`);
+                        } catch (e) {
+                            console.warn(`[Editor] frame[${idx}]로 메시지 전송 실패:`, e);
+                        }
+                    });
+                }
+            } catch (err) {
+                console.warn("[Editor] frames를 통한 메시지 전송 실패:", err);
+            }
           }
         },
       },
@@ -521,6 +580,29 @@ function initializeEditor() {
           } else {
             console.log("Text not found in editor:", data.text);
           }
+        }
+        break;
+
+      // [신규] 썸네일 생성기 -> TUI 에디터 연결 브릿지
+      case "bridge-tui-edit":
+        console.log("[Editor] bridge-tui-edit 메시지 수신:", data);
+        if (data && data.url) {
+          console.log("[Editor] 부모 창에 cp_open_tui_editor 메시지 전송, URL:", data.url.substring(0, 50) + "...");
+          // 부모 창(Main)에게 TUI 에디터 열기 요청 전송
+          try {
+            window.parent.postMessage({
+              action: "cp_open_tui_editor",
+              currentImageUrl: data.url,
+              source: "thumbnail_maker",
+              // TUI 에디터 사이드바에 표시할 단일 이미지 목록 구성
+              allDocumentImages: [{ url: data.url, range: null }]
+            }, "*");
+            console.log("[Editor] cp_open_tui_editor 메시지 전송 완료");
+          } catch (err) {
+            console.error("[Editor] 메시지 전송 실패:", err);
+          }
+        } else {
+          console.error("[Editor] bridge-tui-edit: data.url이 없음", data);
         }
         break;
       case "get-content":
