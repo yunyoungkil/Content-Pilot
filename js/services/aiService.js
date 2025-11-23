@@ -70,6 +70,10 @@ export async function generateDraftFromIdea(ideaData) {
   const feedback = await getUserFeedbackPatterns(); // 피드백 패턴 가져오기
   
   // 프롬프트 구성
+  const performanceInfo = performanceData.decayContent && performanceData.decayContent.length > 0
+    ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
+    : '';
+  
   const prompt = `
     ${persona.systemPrompt}
     [작성 요청]
@@ -79,8 +83,7 @@ export async function generateDraftFromIdea(ideaData) {
     목차: ${(ideaData.outline || []).join(', ')}
     
     [참고 데이터]
-    ${performanceData.analysis ? `성과 분석: ${performanceData.analysis}` : ''}
-    ${feedback ? `독자 선호: ${feedback}` : ''}
+    ${performanceInfo ? `${performanceInfo}\n` : ''}${feedback ? `독자 선호 패턴: ${feedback}` : ''}
     
     위 정보를 바탕으로 SEO 최적화된 블로그 포스트 초안을 마크다운 형식으로 작성해주세요.
     - h1 태그로 제목 시작
@@ -116,6 +119,10 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 // 7. 이미지 생성
 export async function generateAiImage(prompt, count = 1) {
   const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
+  if (!geminiApiKey) {
+    throw new Error("Gemini API 키가 없습니다.");
+  }
+  
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiApiKey}`;
   
   const images = [];
@@ -128,6 +135,12 @@ export async function generateAiImage(prompt, count = 1) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API 오류: ${res.status}`);
+      }
+      
       const data = await res.json();
       const base64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       
@@ -138,8 +151,12 @@ export async function generateAiImage(prompt, count = 1) {
            userId
         );
         images.push(url);
+      } else {
+        console.warn(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패: base64 데이터 없음`);
       }
-    } catch(e) { console.error("이미지 생성 실패:", e); }
+    } catch(e) { 
+      console.error(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패:`, e);
+    }
   }
   return images;
 }

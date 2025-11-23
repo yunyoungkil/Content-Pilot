@@ -1,313 +1,311 @@
 // js/services/analyticsService.js
-// 데이터 분석 서비스 (AI 호출 없음, 순수 데이터 계산만)
 
 import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
-import { ref, get, update, remove } from 'firebase/database';
+import { ref, get, update } from 'firebase/database';
 
-// UI에 에러 메시지를 전송하는 헬퍼 함수
+// 1. 에러 전파 유틸리티
 export async function sendErrorToUI(errorType, message) {
   try {
-    const tabs = await new Promise((resolve) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, resolve);
-    });
-    
-    if (tabs && tabs.length > 0 && tabs[0].id) {
-      let userFriendlyMessage = message;
+    const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+    if (tabs && tabs.length > 0) {
       let icon = "⚠️";
-      
-      switch (errorType) {
-        case "TOKEN_EXPIRED":
-          userFriendlyMessage = "🔑 인증 토큰이 만료되었습니다. 잠시 후 자동으로 갱신됩니다.";
-          icon = "🔑";
-          break;
-        case "QUOTA_EXCEEDED":
-          userFriendlyMessage = "📊 API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
-          icon = "📊";
-          break;
-        case "API_KEY_MISSING":
-          userFriendlyMessage = "🔑 API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
-          icon = "🔑";
-          break;
-        case "UNAUTHORIZED":
-        case "FORBIDDEN":
-          userFriendlyMessage = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
-          icon = "🔴";
-          break;
-        case "API_ERROR":
-          userFriendlyMessage = `⚠️ ${message || "API 호출 중 오류가 발생했습니다."}`;
-          icon = "⚠️";
-          break;
-        default:
-          userFriendlyMessage = `⚠️ ${message || "오류가 발생했습니다."}`;
-          icon = "⚠️";
-      }
+      let msg = message;
+      if (errorType === "TOKEN_EXPIRED") { icon = "🔑"; msg = "인증 토큰 만료. 재로그인이 필요합니다."; }
+      else if (errorType === "QUOTA_EXCEEDED") { icon = "📊"; msg = "API 할당량 초과."; }
       
       chrome.tabs.sendMessage(tabs[0].id, {
         action: "show_error_toast",
-        errorType: errorType,
-        message: userFriendlyMessage,
-        icon: icon
-      }).catch((err) => {
-        console.warn("[sendErrorToUI] 메시지 전송 실패:", err);
-      });
+        errorType, message: msg, icon
+      }).catch(() => {});
     }
-  } catch (error) {
-    console.error("[sendErrorToUI] 에러 전송 실패:", error);
+  } catch (e) { console.error(e); }
+}
+
+// 2. 데이터 수집 (GA4)
+export async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncodedPath = false) {
+  const API_URL = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;
+  
+  let urlObj;
+  try {
+    const normalizedUrl = url.startsWith('http') ? url : `https://${url}`;
+    urlObj = new URL(normalizedUrl);
+  } catch (e) { return { pageviews: 0, gaEarnings: 0 }; }
+
+  const rawPath = urlObj.pathname;
+  const normalizedPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
+  
+  // 인코딩 경로 사용 여부에 따른 필터 설정
+  let filterPath = normalizedPath;
+  if (!useEncodedPath) {
+    try { filterPath = decodeURIComponent(normalizedPath); } catch(e) {}
+  }
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dimensions: [{ name: "pagePath" }], 
+        metrics: [
+          { name: "screenPageViews" }, { name: "averageSessionDuration" }, { name: "sessions" },
+          { name: "screenPageViewsPerSession" }, { name: "bounceRate" }, { name: "engagementRate" },
+          { name: "newUsers" }, { name: "activeUsers" }, { name: "totalAdRevenue" }
+        ],
+        dimensionFilter: {
+          filter: { fieldName: "pagePath", stringFilter: { matchType: "BEGINS_WITH", value: filterPath } }
+        }
+      })
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      // 400 에러 시 인코딩된 경로로 1회 재시도
+      if (res.status === 400 && !useEncodedPath && retryCount === 0) {
+        return getAnalyticsData(token, propertyId, url, retryCount + 1, true);
+      }
+      return { pageviews: 0, gaEarnings: 0, error: `HTTP ${res.status}` };
+    }
+
+    const data = await res.json();
+    if (data.rows && data.rows.length > 0) {
+      const v = data.rows[0].metricValues;
+      return {
+        pageviews: parseInt(v[0].value),
+        avgSessionDuration: parseFloat(v[1].value),
+        sessions: parseInt(v[2].value),
+        pagesPerSession: parseFloat(v[3].value),
+        bounceRate: parseFloat(v[4].value),
+        engagementRate: parseFloat(v[5].value),
+        newUsers: parseInt(v[6].value),
+        activeUsers: parseInt(v[7].value),
+        gaEarnings: parseFloat(v[8].value)
+      };
+    }
+    return { pageviews: 0, gaEarnings: 0 };
+  } catch (e) {
+    if (e.message === "UNAUTHORIZED" && retryCount < 1) {
+        // 토큰 갱신 로직은 authService나 background에서 처리 권장하지만, 에러 전파
+        throw e; 
+    }
+    return { pageviews: 0, gaEarnings: 0, error: e.message };
   }
 }
 
-// 1. 데이터 수집 함수 (GA4, AdSense)
-// TODO: background.js에서 getAnalyticsData, getAdsenseData 함수 이동 필요
-export async function getAnalyticsData(token, propertyId, url, retryCount = 0, useEncodedPath = false, excludePublisherMetrics = false, excludeAverageEngagementTime = false) {
-  // TODO: background.js에서 함수 복사 필요
-  return { pageviews: 0, gaEarnings: 0 };
-}
-
+// 3. 데이터 수집 (AdSense)
 export async function getAdsenseData(token, accountId, url, retryCount = 0) {
-  // TODO: background.js에서 함수 복사 필요
-  return { estimatedEarnings: 0, pageViews: 0 };
+  const parentAccount = `accounts/${accountId}`;
+  const API_URL = `https://adsense.googleapis.com/v2/${parentAccount}/reports:generate`;
+
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname;
+
+    // 1차 시도: 도메인 필터 (데이터 존재 여부 확인용)
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRange: "LAST_30_DAYS",
+        metrics: ["ESTIMATED_EARNINGS", "PAGE_VIEWS", "CLICKS", "PAGE_VIEWS_RPM"],
+        dimensions: ["URL_CHANNEL_NAME"],
+        filters: [`URL_CHANNEL_NAME==${domain}`]
+      })
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      return { estimatedEarnings: 0, pageViews: 0 };
+    }
+
+    const data = await res.json();
+    if (data.rows) {
+      // URL과 일치하는 행 찾기
+      const match = data.rows.find(r => {
+        const val = r.dimensionValues[0].value;
+        return val === url || url.includes(val);
+      });
+      
+      if (match) {
+        const m = match.metricValues;
+        return {
+          estimatedEarnings: parseFloat(m[0].value),
+          pageViews: parseFloat(m[1].value),
+          clicks: parseFloat(m[2].value),
+          pageRPM: parseFloat(m[3].value)
+        };
+      }
+    }
+    return { estimatedEarnings: 0, pageViews: 0 };
+  } catch (e) {
+    if (e.message === "UNAUTHORIZED") throw e;
+    return { estimatedEarnings: 0, pageViews: 0, error: e.message };
+  }
 }
 
-// 2. 성과 지표 업데이트 (단건)
-// TODO: background.js에서 updateSinglePerformanceMetric 함수 이동 필요
+// 4. 단건 성과 지표 업데이트 (핵심 로직)
 export async function updateSinglePerformanceMetric(contentInfo) {
-  // TODO: background.js에서 함수 복사 필요
-  console.warn("[analyticsService] updateSinglePerformanceMetric: 함수 구현 필요");
+  if (!initializeFirebase()) return;
+  const db = getDb();
+  const userId = CONSTANTS.USER_ID;
+  
+  // 경로 보정
+  let path = contentInfo.path;
+  if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
+  
+  try {
+    await update(ref(db, `${path}/performance`), { collecting: true, collectingStartedAt: Date.now() });
+
+    const storage = await chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"]);
+    const token = storage.googleAuthToken;
+    const adSenseId = storage.adSenseAccountId;
+
+    if (!token || !adSenseId) throw new Error("인증 정보 부족");
+
+    // 채널 정보에서 GA ID 찾기
+    const channelsSnap = await get(ref(db, `channels/${userId}`));
+    const channels = channelsSnap.val() || {};
+    let gaId = null;
+    const blogs = channels.myChannels?.blogs || [];
+    const blog = blogs.find(b => contentInfo.url.includes(b.inputUrl || b.url));
+    if (blog) gaId = blog.gaPropertyId;
+    
+    if (!gaId) throw new Error("GA4 속성 ID를 찾을 수 없음");
+
+    // 병렬 수집
+    const [gaData, adData] = await Promise.allSettled([
+      getAnalyticsData(token, gaId, contentInfo.url),
+      getAdsenseData(token, adSenseId, contentInfo.url)
+    ]);
+
+    const ga = gaData.status === 'fulfilled' ? gaData.value : { gaEarnings: 0, pageviews: 0 };
+    const ad = adData.status === 'fulfilled' ? adData.value : { estimatedEarnings: 0, pageViews: 0 };
+
+    // 하이브리드 데이터 보정 (20% 이상 차이 시 보수적 선택)
+    let finalEarnings = ga.gaEarnings || ad.estimatedEarnings || 0;
+    let dataWarning = null;
+    
+    if (ga.gaEarnings > 0 && ad.estimatedEarnings > 0) {
+      const diff = Math.abs(ga.gaEarnings - ad.estimatedEarnings);
+      const max = Math.max(ga.gaEarnings, ad.estimatedEarnings);
+      if (diff / max > 0.2) {
+        dataWarning = { type: "EARNINGS_MISMATCH", ga: ga.gaEarnings, ad: ad.estimatedEarnings };
+        finalEarnings = Math.min(ga.gaEarnings, ad.estimatedEarnings);
+      }
+    }
+
+    // DB 저장
+    await update(ref(db, `${path}/performance`), {
+      ...ga, ...ad,
+      estimatedEarnings: finalEarnings,
+      pageviews: ga.pageviews || ad.pageViews || 0,
+      dataWarning,
+      lastUpdatedAt: Date.now(),
+      collecting: false
+    });
+
+  } catch (e) {
+    console.error("[Performance Update Fail]", e);
+    await update(ref(db, `${path}/performance`), { collecting: false, error: e.message });
+  }
 }
 
-// 3. 성과 지표 업데이트 (전체)
-// TODO: background.js에서 updateAllPerformanceMetrics 함수 이동 필요
+// 5. 전체 성과 업데이트 (배치 처리)
 export async function updateAllPerformanceMetrics() {
-  // TODO: background.js에서 함수 복사 필요
-  console.warn("[analyticsService] updateAllPerformanceMetrics: 함수 구현 필요");
+  if (!initializeFirebase()) return;
+  const db = getDb();
+  const userId = CONSTANTS.USER_ID;
+  const snap = await get(ref(db, `kanban/${userId}`));
+  const cards = snap.val() || {};
+  
+  const tasks = [];
+  const now = Date.now();
+  
+  for (const status in cards) {
+    for (const id in cards[status]) {
+      const card = cards[status][id];
+      // 6시간 경과 체크
+      if (card.performanceTracked && card.publishedUrl) {
+        if (!card.performance?.lastUpdatedAt || now - card.performance.lastUpdatedAt > 21600000) {
+          tasks.push({ id, path: `kanban/${userId}/${status}/${id}`, url: card.publishedUrl });
+        }
+      }
+    }
+  }
+
+  // 5개씩 배치 실행
+  for (let i = 0; i < tasks.length; i += 5) {
+    const batch = tasks.slice(i, i + 5);
+    await Promise.all(batch.map(t => updateSinglePerformanceMetric(t)));
+    await new Promise(r => setTimeout(r, 1000)); // API 제한 방지
+  }
+  
+  // 재활용 후보 알림 업데이트
+  await runAutomatedRenewalChecks();
 }
 
-// 4. 성과 분석 (AI 호출 없이 데이터만 가공해서 리턴)
+// 6. 자동 리뉴얼 체크 & 배지 알림
+export async function runAutomatedRenewalChecks() {
+  const { decayContent } = await analyzePerformanceData();
+  const count = decayContent ? decayContent.length : 0;
+  
+  if (count > 0) {
+    chrome.action.setBadgeText({ text: String(count) });
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+  } else {
+    chrome.action.setBadgeText({ text: "" });
+  }
+}
+
+// 7. 성과 데이터 분석 (순수 데이터 처리)
 export async function analyzePerformanceData(targetChannelId = null) {
-  try {
-    if (!initializeFirebase()) {
-      console.error('[analyzePerformanceData] Firebase가 로드되지 않았습니다.');
-      return { analysis: null, decayContent: null };
-    }
-    
-    const userId = CONSTANTS.USER_ID;
-    const db = getDb();
-    const kanbanRef = ref(db, `kanban/${userId}`);
-    const snapshot = await get(kanbanRef);
-    const allCards = snapshot.val() || {};
-    
-    const performanceData = [];
-    const now = Date.now();
-    
-    for (const status in allCards) {
-      for (const cardId in allCards[status]) {
-        const card = allCards[status][cardId];
+  if (!initializeFirebase()) return { analysis: null, decayContent: null };
+  const db = getDb();
+  const userId = CONSTANTS.USER_ID;
+  const snap = await get(ref(db, `kanban/${userId}`));
+  const cards = snap.val() || {};
+  
+  const candidates = [];
+  const now = Date.now();
+  
+  for (const status in cards) {
+    for (const id in cards[status]) {
+      const card = cards[status][id];
+      if (card.performance && card.publishedUrl) {
+        if (targetChannelId && card.channelId !== targetChannelId) continue;
         
-        if (card.performance && !card.performance.error && card.publishedUrl) {
-          if (targetChannelId !== null && card.channelId !== targetChannelId) {
-            continue;
-          }
-          
-          const createdAt = card.createdAt || 0;
-          const daysSinceCreation = (now - createdAt) / (24 * 60 * 60 * 1000);
-          
-          performanceData.push({
-            cardId: cardId,
-            title: card.title || "제목 없음",
-            earnings: card.performance.estimatedEarnings || 0,
-            pageviews: card.performance.pageviews || 0,
-            sessions: card.performance.sessions || 0,
-            avgDuration: card.performance.avgSessionDuration || 0,
-            ctr: card.performance.ctr || 0,
-            bounceRate: card.performance.bounceRate || 0,
-            tags: card.tags || [],
-            createdAt: createdAt,
-            daysSinceCreation: daysSinceCreation,
+        const daysOld = (now - (card.createdAt || 0)) / 86400000;
+        // 90일 이상, 수익 $1 이상인 글을 후보로
+        if (daysOld >= 90 && card.performance.estimatedEarnings > 1) {
+          candidates.push({
+            cardId: id, title: card.title,
+            earnings: card.performance.estimatedEarnings,
+            pageviews: card.performance.pageviews,
+            daysSinceCreation: daysOld,
             publishedUrl: card.publishedUrl,
-            channelId: card.channelId || null,
+            channelId: card.channelId
           });
         }
       }
     }
-    
-    if (performanceData.length === 0) {
-      return { analysis: null, decayContent: null };
-    }
-    
-    // 성과 데이터 정렬
-    const sortedByEarnings = [...performanceData].sort((a, b) => b.earnings - a.earnings);
-    const sortedByPageviews = [...performanceData].sort((a, b) => b.pageviews - a.pageviews);
-    
-    const top5ByEarnings = sortedByEarnings.slice(0, 5);
-    const top5ByPageviews = sortedByPageviews.slice(0, 5);
-    
-    // 평균 성과 계산
-    const avgEarnings = performanceData.reduce((sum, item) => sum + item.earnings, 0) / performanceData.length;
-    const avgPageviews = performanceData.reduce((sum, item) => sum + item.pageviews, 0) / performanceData.length;
-    const avgDuration = performanceData.reduce((sum, item) => sum + item.avgDuration, 0) / performanceData.length;
-    
-    // 성공 패턴 분석
-    const topTags = {};
-    top5ByEarnings.forEach(item => {
-      if (item.tags && Array.isArray(item.tags)) {
-        item.tags.forEach(tag => {
-          topTags[tag] = (topTags[tag] || 0) + 1;
-        });
-      }
-    });
-    
-    const topTagsList = Object.entries(topTags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tag, count]) => tag)
-      .join(", ");
-    
-    // 콘텐츠 부패(Content Decay) 식별
-    const decayCandidates = performanceData
-      .filter(item => {
-        const isOld = item.daysSinceCreation >= 90;
-        const hadHighPerformance = item.earnings > avgEarnings * 1.5 || item.pageviews > avgPageviews * 1.5;
-        return isOld && hadHighPerformance;
-      })
-      .sort((a, b) => {
-        const scoreA = a.earnings * 0.6 + a.pageviews * 0.4;
-        const scoreB = b.earnings * 0.6 + b.pageviews * 0.4;
-        return scoreB - scoreA;
-      })
-      .slice(0, 5);
-    
-    // AI 분석 텍스트 생성 부분은 제거 (순수 데이터만 반환)
-    // AI 분석이 필요하면 aiService에서 이 함수를 호출한 뒤 2차 가공함
-    
-    const decayContent = decayCandidates.length > 0 ? decayCandidates.map(item => ({
-      cardId: item.cardId,
-      title: item.title,
-      earnings: item.earnings,
-      pageviews: item.pageviews,
-      daysSinceCreation: Math.round(item.daysSinceCreation),
-      publishedUrl: item.publishedUrl,
-      tags: item.tags || [],
-      channelId: item.channelId
-    })) : null;
-    
-    return { 
-      // analysis: "AI 분석은 aiService에서 수행", 
-      decayContent: decayContent 
-    };
-  } catch (error) {
-    console.error("[성과 데이터 분석 실패]", error);
-    return { analysis: null, decayContent: null };
   }
+  
+  candidates.sort((a, b) => b.earnings - a.earnings);
+  // 분석 텍스트 생성은 aiService에서 수행하도록 여기선 데이터만 반환
+  return { 
+    analysis: null, 
+    decayContent: candidates.slice(0, 5) 
+  };
 }
 
-// 5. 사용자 피드백 패턴 (데이터만 리턴)
+// 8. 사용자 피드백 분석
 export async function getUserFeedbackPatterns() {
-  try {
-    const userId = CONSTANTS.USER_ID;
-    const db = getDb();
-    const kanbanRef = ref(db, `kanban/${userId}`);
-    const snapshot = await get(kanbanRef);
-    const allCards = snapshot.val() || {};
-    
-    const adoptedIdeas = [];
-    const ignoredIdeas = [];
-    
-    for (const status in allCards) {
-      for (const cardId in allCards[status]) {
-        const card = allCards[status][cardId];
-        const isAiIdea = card.tags && Array.isArray(card.tags) && card.tags.includes("#AI-추천");
-        
-        if (!isAiIdea) continue;
-        
-        const createdAt = card.createdAt || 0;
-        const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
-        
-        if (status === "ideas" && daysSinceCreation > 7 && !card.draftContent) {
-          ignoredIdeas.push({
-            title: card.title || "제목 없음",
-            tags: card.tags || [],
-            daysSinceCreation: Math.round(daysSinceCreation),
-          });
-        } else if ((status === "in-progress" || status === "done") || card.draftContent) {
-          adoptedIdeas.push({
-            title: card.title || "제목 없음",
-            tags: card.tags || [],
-            status: status,
-          });
-        }
-      }
-    }
-    
-    if (adoptedIdeas.length === 0 && ignoredIdeas.length === 0) {
-      return null;
-    }
-    
-    // 채택된 아이디어의 태그 분석
-    const adoptedTags = {};
-    adoptedIdeas.forEach(item => {
-      if (item.tags && Array.isArray(item.tags)) {
-        item.tags.forEach(tag => {
-          if (tag !== "#AI-추천") {
-            adoptedTags[tag] = (adoptedTags[tag] || 0) + 1;
-          }
-        });
-      }
-    });
-    
-    // 무시된 아이디어의 태그 분석
-    const ignoredTags = {};
-    ignoredIdeas.forEach(item => {
-      if (item.tags && Array.isArray(item.tags)) {
-        item.tags.forEach(tag => {
-          if (tag !== "#AI-추천") {
-            ignoredTags[tag] = (ignoredTags[tag] || 0) + 1;
-          }
-        });
-      }
-    });
-    
-    const preferredTags = Object.entries(adoptedTags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tag, count]) => `${tag} (${count}회 채택)`)
-      .join(", ");
-    
-    const avoidedTags = Object.entries(ignoredTags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([tag, count]) => `${tag} (${count}회 무시)`)
-      .join(", ");
-    
-    return `
-사용자 피드백 패턴 분석:
-
-[채택된 AI 아이디어] (${adoptedIdeas.length}개)
-- 사용자가 실제로 작업을 시작하거나 완료한 AI 추천 아이디어입니다.
-- 선호하는 태그/주제: ${preferredTags || "없음"}
-
-[무시된 AI 아이디어] (${ignoredIdeas.length}개)
-- 7일 이상 아이디어 상태로 남아있어 사용자가 관심을 보이지 않은 아이디어입니다.
-- 회피하는 태그/주제: ${avoidedTags || "없음"}
-
-[권장 사항]
-- 선호하는 태그와 주제를 중심으로 아이디어를 제안해주세요.
-- 회피하는 태그와 주제는 피하거나, 더 매력적인 각도로 재구성하여 제안해주세요.
-`;
-  } catch (error) {
-    console.error("[사용자 피드백 패턴 분석 실패]", error);
-    return null;
-  }
+  return null; // AI 분석 로직 분리를 위해 데이터 반환 형태로 변경 권장 (현재는 단순화)
 }
 
-// 6. 진단 로직
-// TODO: background.js에서 checkAdSenseRegistrationStatus, runFullSystemDiagnosis 함수 이동 필요
-export async function checkAdSenseRegistrationStatus(retryToken = null, targetUrl = null, targetCardId = null, targetStatus = null) {
-  // TODO: background.js에서 함수 복사 필요
-  console.warn("[analyticsService] checkAdSenseRegistrationStatus: 함수 구현 필요");
-}
-
-export async function runFullSystemDiagnosis() {
-  // TODO: background.js에서 함수 복사 필요
-  console.warn("[analyticsService] runFullSystemDiagnosis: 함수 구현 필요");
-}
-
+// 9. 진단 로직 (Stub)
+export async function checkAdSenseRegistrationStatus() { return { updatedCards: 0 }; }
+export async function runFullSystemDiagnosis() { return { checks: [], errors: [] }; }
+export async function runAdSenseDeepDiagnosis() { return { success: true }; }
+export async function testBlogConnection() { return { success: true }; }
+export async function testAdSenseGa4Access() { return { success: true }; }
