@@ -13,7 +13,9 @@ import {
   fetchAndSaveSinglePost, 
   deleteChannelData,
   checkDuplicateUrl,
-  summarizeText
+  summarizeText,
+  refreshChannelData,
+  fetchImageAsBase64
 } from './js/services/collectorService.js';
 
 import { 
@@ -21,14 +23,17 @@ import {
   generateIdeaBriefing, 
   generateAiImage, 
   analyzeImageForTemplate,
-  callGeminiAPI
+  callGeminiAPI,
+  analyzeMyChannel,
+  generateContentIdeas,
+  generateAndSendKeywords,
+  analyzeVideoComments
 } from './js/services/aiService.js';
 
-// TODO: startGoogleAuth, revokeGoogleAuth는 아직 구현되지 않음
-// import { 
-//   startGoogleAuth, 
-//   revokeGoogleAuth 
-// } from './js/services/authService.js';
+import { 
+  startGoogleAuth, 
+  revokeGoogleAuth 
+} from './js/services/authService.js';
 
 import { ref, update, remove, set, get, push, serverTimestamp } from 'firebase/database';
 
@@ -92,11 +97,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [Collector Service] 데이터 수집 ===
   if (msg.action === "fetch_all_channel_data") return handleAsync(fetchAllChannelData());
-  // TODO: refreshChannelData, fetchImageAsBase64는 아직 구현되지 않음
-  if (msg.action === "refresh_channel_data") return handleAsync(Promise.reject(new Error("refreshChannelData: 아직 구현되지 않음")));
+  if (msg.action === "refresh_channel_data") return handleAsync(refreshChannelData(msg.sourceId, msg.platform));
   if (msg.action === "fetch_and_save_single_post") return handleAsync(fetchAndSaveSinglePost(msg.url, msg.channelId, msg.sourceId));
   if (msg.action === "delete_channel") return handleAsync(deleteChannelData(msg.url));
-  if (msg.action === "fetch_image_as_base64") return handleAsync(Promise.reject(new Error("fetchImageAsBase64: 아직 구현되지 않음")));
+  if (msg.action === "fetch_image_as_base64") return handleAsync(fetchImageAsBase64(msg.url));
   
   // === [Analytics Service] 성과 분석 & 진단 ===
   if (msg.action === "trigger_performance_refresh") return handleAsync(updateAllPerformanceMetrics());
@@ -121,19 +125,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === "analyze_image_for_template") return handleAsync(analyzeImageForTemplate(msg.data));
   if (msg.action === "call_gemini") return handleAsync(callGeminiAPI(msg.prompt).then(text => ({ success: true, text })));
-  // TODO: 아래 함수들은 아직 구현되지 않음 (임시로 에러 반환)
-  if (msg.action === "analyze_my_channel") return handleAsync(Promise.reject(new Error("analyzeMyChannel: 아직 구현되지 않음")));
-  if (msg.action === "generate_content_ideas") return handleAsync(Promise.reject(new Error("generateContentIdeas: 아직 구현되지 않음")));
-  if (msg.action === "request_search_keywords") return handleAsync(Promise.reject(new Error("generateAndSendKeywords: 아직 구현되지 않음")));
-  if (msg.action === "analyze_video_comments") return handleAsync(Promise.reject(new Error("analyzeVideoComments: 아직 구현되지 않음")));
+  if (msg.action === "analyze_my_channel") return handleAsync(analyzeMyChannel(msg.data));
+  if (msg.action === "generate_content_ideas") return handleAsync(generateContentIdeas(msg.data));
+  if (msg.action === "request_search_keywords") return handleAsync(generateAndSendKeywords(msg.data, sender));
+  if (msg.action === "analyze_video_comments") return handleAsync(analyzeVideoComments(msg.videoId));
   if (msg.action === "upload_thumbnail_to_storage") {
     return handleAsync(uploadImageToFirebaseStorage(msg.data.dataUrl, `thumbnails/${CONSTANTS.USER_ID}/${msg.data.filename || Date.now()+'.png'}`, CONSTANTS.USER_ID).then(url => ({ success: true, url })));
   }
 
   // === [Auth Service] 인증 ===
-  // TODO: startGoogleAuth, revokeGoogleAuth는 아직 구현되지 않음
-  if (msg.action === "start_google_auth") return handleAsync(Promise.reject(new Error("startGoogleAuth: 아직 구현되지 않음")));
-  if (msg.action === "revoke_google_auth") return handleAsync(Promise.reject(new Error("revokeGoogleAuth: 아직 구현되지 않음")));
+  if (msg.action === "start_google_auth") return handleAsync(startGoogleAuth());
+  if (msg.action === "revoke_google_auth") return handleAsync(revokeGoogleAuth());
 
   // === [DB Operations] 단순 데이터 조작 (직접 처리) ===
   if (msg.action === "add_idea_to_kanban") {

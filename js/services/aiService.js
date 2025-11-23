@@ -166,3 +166,38 @@ export async function analyzeImageForTemplate(data) {
   // ... (Vision API 호출 로직)
   return { success: true };
 }
+
+// 9. 채널 분석
+export async function analyzeMyChannel(data) {
+  // TODO: 채널 분석 로직 구현
+  return { success: true, analysis: "" };
+}
+
+// 10. 콘텐츠 아이디어 생성
+export async function generateContentIdeas(data) {
+  // TODO: 콘텐츠 아이디어 생성 로직 구현
+  return { success: true, ideas: [] };
+}
+
+// 11. 검색 키워드 생성 및 전송
+export async function generateAndSendKeywords(data, sender) {
+  // TODO: 검색 키워드 생성 로직 구현
+  const keywords = [];
+  if (sender.tab?.id) {
+    chrome.tabs.sendMessage(sender.tab.id, {
+      action: "search_queries_recommended",
+      success: true,
+      data: keywords,
+      cardId: data.cardId,
+      status: data.status,
+      cardTitle: data.title,
+    }).catch(() => {});
+  }
+  return { success: true, keywords };
+}
+
+// 12. 비디오 댓글 분석
+export async function analyzeVideoComments(videoId) {
+  // TODO: 비디오 댓글 분석 로직 구현
+  return { success: true, comments: [] };
+}

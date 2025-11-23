@@ -46,5 +46,50 @@ export async function fetchAdSenseAccountId(token) {
   return null;
 }
 
+/**
+ * Google OAuth 인증 시작
+ * @returns {Promise<Object>} 인증 결과
+ */
+export async function startGoogleAuth() {
+  try {
+    const token = await chrome.identity.getAuthToken({ interactive: true });
+    await chrome.storage.local.set({ googleAuthToken: token });
+    
+    // GA4 속성 및 AdSense 계정 ID 가져오기
+    const [properties, adSenseId] = await Promise.all([
+      fetchGaProperties(token).catch(() => []),
+      fetchAdSenseAccountId(token).catch(() => null)
+    ]);
+    
+    await chrome.storage.local.set({ 
+      adSenseAccountId: adSenseId,
+      gaProperties: properties 
+    });
+    
+    return { success: true, token, properties, adSenseId };
+  } catch (error) {
+    console.error('[startGoogleAuth] 오류:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Google OAuth 인증 해제
+ * @returns {Promise<Object>} 해제 결과
+ */
+export async function revokeGoogleAuth() {
+  try {
+    const { googleAuthToken } = await chrome.storage.local.get('googleAuthToken');
+    if (googleAuthToken) {
+      await chrome.identity.removeCachedAuthToken({ token: googleAuthToken });
+    }
+    await chrome.storage.local.remove(['googleAuthToken', 'adSenseAccountId', 'gaProperties']);
+    return { success: true };
+  } catch (error) {
+    console.error('[revokeGoogleAuth] 오류:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 console.log('[System] authService 모듈 로드 완료');
 
