@@ -424,7 +424,6 @@ export async function startGoogleAuth() {
     // 보안: 토큰 길이만 로깅 (값은 마스킹)
     Logger.debug('[startGoogleAuth] 토큰 발급 성공, 길이:', tokenString.length);
     
-<<<<<<< HEAD
     // 토큰 만료 시간 저장
     await saveTokenExpiry(tokenString);
     

@@ -396,7 +396,6 @@ export function renderChannelMode(container) {
         `;
         
         if (response && response.success) {
-<<<<<<< HEAD
           // GA4 속성 목록 저장 (응답 구조에 따라 처리)
           // response.data가 있으면 data 내부에서, 없으면 직접 접근
           const gaProperties = response.data?.gaProperties || response.gaProperties || response.properties;
