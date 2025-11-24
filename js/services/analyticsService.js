@@ -1,7 +1,8 @@
 // js/services/analyticsService.js
 
 import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
-import { ref, get, update } from 'firebase/database';
+// [중요] firebase/database import 제거 - REST API 사용으로 대체됨
+import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
 
 // 1. 에러 전파 유틸리티

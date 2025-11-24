@@ -1,7 +1,8 @@
 // js/services/aiService.js
 
 import { getDb, CONSTANTS, uploadImageToFirebaseStorage, cleanDataForFirebase } from './firebaseService.js';
-import { ref, update, get } from 'firebase/database';
+// [중요] firebase/database import 제거 - REST API 사용으로 대체됨
+import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
 import { Logger } from '../utils.js';

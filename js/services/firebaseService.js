@@ -1,8 +1,8 @@
 // js/services/firebaseService.js (Final REST API Version)
-// Firebase 초기화 및 헬퍼 함수 제공 (REST API 기반)
+// Firebase Web SDK의 불안정성을 해결하기 위해 REST API로 완전히 대체된 버전입니다.
 
 import { initializeApp } from 'firebase/app';
-// [중요] firebase/database import를 제거합니다. 충돌 방지.
+// [중요] firebase/database import를 제거하여 SDK 충돌을 원천 차단합니다.
 import { getAuth, GoogleAuthProvider, signInWithCredential, onAuthStateChanged } from 'firebase/auth';
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
@@ -97,7 +97,6 @@ export function initializeFirebase() {
 // 1. DB URL 생성기
 const getDbUrl = (path) => {
   const baseUrl = firebaseConfig.databaseURL;
-  // 경로가 URL 형식이면 그대로 사용, 아니면 조합
   if (path.startsWith('https://')) return path;
   
   const cleanPath = path.startsWith('/') ? path.substring(1) : path;
@@ -119,7 +118,20 @@ async function dbRequest(method, path, data = null) {
       headers: { 'Content-Type': 'application/json' }
     };
     if (data !== null) {
-      options.body = JSON.stringify(cleanDataForFirebase(data));
+      const cleanedData = cleanDataForFirebase(data);
+      // 빈 객체 체크: Firebase REST API는 빈 객체를 거부함
+      if (cleanedData !== null && typeof cleanedData === 'object' && !Array.isArray(cleanedData)) {
+        const keys = Object.keys(cleanedData);
+        if (keys.length === 0) {
+          Logger.warn(`[Firebase REST] 빈 객체 감지 (${path}), 최소 데이터 보장`);
+          // 빈 객체 대신 null 또는 최소 데이터 사용
+          options.body = JSON.stringify(null);
+        } else {
+          options.body = JSON.stringify(cleanedData);
+        }
+      } else {
+        options.body = JSON.stringify(cleanedData);
+      }
     }
 
     const response = await fetch(url, options);
@@ -146,113 +158,11 @@ async function dbRequest(method, path, data = null) {
   }
 }
 
-// --- [대체] SDK 호환 함수 구현 (REST 기반) ---
-
-/**
- * ref: 단순히 경로 문자열을 반환하거나, URL을 그대로 통과시킵니다.
- */
-export function ref(db, path) {
-  // db 인자는 무시하고 path만 사용 (REST 방식)
-  return path || '';
-}
-
-/**
- * get: 데이터 읽기 (GET)
- */
-export async function get(path) {
-  const data = await dbRequest('GET', path);
-  // Snapshot 호환 객체 반환
-  return {
-    val: () => data,
-    exists: () => data !== null && data !== undefined
-  };
-}
-
-/**
- * set: 데이터 덮어쓰기 (PUT)
- */
-export async function set(path, data) {
-  await dbRequest('PUT', path, data);
-  return true;
-}
-
-/**
- * update: 데이터 일부 수정 (PATCH)
- */
-export async function update(path, data) {
-  await dbRequest('PATCH', path, data);
-  return true;
-}
-
-/**
- * remove: 데이터 삭제 (DELETE)
- */
-export async function remove(path) {
-  await dbRequest('DELETE', path);
-  return true;
-}
-
-/**
- * push: 새 데이터 추가 및 ID 생성 (POST)
- * @returns {object} { key: string, set: function } (SDK 호환성 유지)
- */
-export async function push(path, data = null) {
-  // 1. 데이터가 있으면 바로 POST (생성 및 저장)
-  if (data !== null) {
-    const response = await dbRequest('POST', path, data);
-    // REST API POST 응답은 { "name": "-Key..." } 형태
-    const newKey = response.name;
-    Logger.debug(`[Firebase REST] push 성공: ${path}/${newKey}`);
-    return {
-      key: newKey,
-      set: (val) => set(`${path}/${newKey}`, val) // 체이닝 지원
-    };
-  } 
-  // 2. 데이터 없이 키만 미리 생성해야 하는 경우 (SDK의 push() 동작)
-  else {
-    // REST에서는 빈 push가 불가능하므로, 빈 객체를 보내서 키를 받아옴
-    const response = await dbRequest('POST', path, {}); 
-    const newKey = response.name;
-    Logger.debug(`[Firebase REST] push 키 생성: ${path}/${newKey}`);
-    return {
-      key: newKey,
-      set: (val) => set(`${path}/${newKey}`, val)
-    };
-  }
-}
-
-/**
- * onValue: 실시간 리스너 (REST에서는 1회성 get으로 대체)
- */
-export function onValue(path, callback) {
-  Logger.warn('[Firebase REST] onValue는 REST 모드에서 실시간 지원이 안됩니다. 1회만 실행됩니다.');
-  get(path).then(snapshot => callback(snapshot));
-  return () => {}; // 구독 해제 함수
-}
-
-/**
- * getDb: 가짜 DB 인스턴스 반환 (ref 함수에서 첫 번째 인자로 사용됨)
- */
-export function getDb() {
-  return {}; // 빈 객체 (REST 모드에서는 사용 안 함)
-}
-
-/**
- * serverTimestamp: 서버 시간 (REST에서는 클라이언트 시간으로 대체)
- */
-export function serverTimestamp() {
-  return Date.now();
-}
-
-// 사용자별 레퍼런스 헬퍼
-export function getUserRef(path) {
-  return `${path}/${CONSTANTS.USER_ID}`;
-}
+// --- [복구됨] Auth Service 호환성 어댑터 ---
 
 /**
  * REST 모드용 인증 어댑터
  * authService.js가 호출할 때 "성공" 응답을 주어 에러를 방지합니다.
- * 실제 인증은 Google Access Token으로 대체되었으므로, 여기서는 정보만 확인합니다.
  */
 export async function signInToFirebaseWithGoogleToken(token) {
   try {
@@ -264,12 +174,11 @@ export async function signInToFirebaseWithGoogleToken(token) {
     });
     
     if (!response.ok) {
-      throw new Error('Google 토큰 검증 실패');
+        throw new Error('Google 토큰 검증 실패');
     }
 
     const user = await response.json();
     
-    // authService.js가 기대하는 데이터 구조 반환
     return {
       success: true,
       user: {
@@ -284,6 +193,175 @@ export async function signInToFirebaseWithGoogleToken(token) {
   }
 }
 
+// --- [대체] SDK 호환 함수 구현 (REST 기반) ---
+
+/**
+ * ref: 단순히 경로 문자열을 반환합니다. 
+ * SDK의 Reference 객체를 반환하지 않으므로 _checkNotDeleted 오류가 발생하지 않습니다.
+ */
+export function ref(db, path) {
+  return path || '';
+}
+
+export async function get(path) {
+  const data = await dbRequest('GET', path);
+  return {
+    val: () => data,
+    exists: () => data !== null && data !== undefined
+  };
+}
+
+export async function set(path, data) {
+  await dbRequest('PUT', path, data);
+  return true;
+}
+
+export async function update(path, data) {
+  await dbRequest('PATCH', path, data);
+  return true;
+}
+
+export async function remove(path) {
+  await dbRequest('DELETE', path);
+  return true;
+}
+
+export async function push(path, data = null) {
+  // REST API의 POST 메서드를 사용하여 새 자식 노드(Key)를 생성합니다.
+  if (data !== null) {
+    const response = await dbRequest('POST', path, data);
+    const newKey = response.name; // Firebase REST는 생성된 키를 'name' 속성으로 반환
+    Logger.debug(`[Firebase REST] push 성공: ${path}/${newKey}`);
+    return {
+      key: newKey,
+      set: (val) => set(`${path}/${newKey}`, val)
+    };
+  } else {
+    // 빈 push 호출 대응
+    const response = await dbRequest('POST', path, {}); 
+    const newKey = response.name;
+    Logger.debug(`[Firebase REST] push 키 생성: ${path}/${newKey}`);
+    return {
+      key: newKey,
+      set: (val) => set(`${path}/${newKey}`, val)
+    };
+  }
+}
+
+export function onValue(path, callback) {
+  // REST 모드에서는 실시간 리스너가 제한되므로 1회성 get으로 대체
+  Logger.warn('[Firebase REST] onValue는 REST 모드에서 실시간 지원이 안됩니다. 1회만 실행됩니다.');
+  get(path).then(snapshot => callback(snapshot));
+  return () => {}; 
+}
+
+export function getDb() { 
+  return {}; 
+}
+
+export function serverTimestamp() { 
+  return Date.now(); 
+}
+
+export function getUserRef(path) { 
+  return `${path}/${CONSTANTS.USER_ID}`; 
+}
+
+export function cleanDataForFirebase(data) {
+  if (data === undefined) return null;
+  if (data === null || typeof data !== "object") return data;
+  if (Array.isArray(data)) return data.map(cleanDataForFirebase);
+  const cleanedObj = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      const value = data[key];
+      if (value !== undefined) cleanedObj[key] = cleanDataForFirebase(value);
+    }
+  }
+  return cleanedObj;
+}
+
+// Storage 업로드 함수 (REST API 기반)
+export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
+  try {
+    const blob = dataURLtoBlob(dataUrl);
+    let token = await getValidToken(false);
+    if (!token) {
+      token = await getValidToken(true);
+      if (!token) {
+        throw new Error('인증 토큰을 가져올 수 없습니다. 로그인이 필요합니다.');
+      }
+    }
+    
+    const bucket = firebaseConfig.storageBucket;
+    const encodedPath = encodeURIComponent(path);
+    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
+    
+    Logger.debug('[Firebase Storage] 업로드 시작:', path);
+    
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': blob.type || 'image/png'
+      },
+      body: blob
+    });
+    
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      const errorMessage = errorData.error?.message || uploadResponse.statusText;
+      
+      if (uploadResponse.status === 403) {
+        Logger.error('[Firebase Storage] 403 Permission denied 오류');
+        Logger.error('[Firebase Storage] ⚠️ Firebase Storage 보안 규칙을 확인하세요.');
+      }
+      
+      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorMessage}`);
+    }
+    
+    const uploadResult = await uploadResponse.json();
+    
+    // 다운로드 URL 생성
+    const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
+    
+    // Firebase Realtime Database에 메타데이터 저장
+    const storagePath = `gs://${bucket}/${path}`;
+    try {
+      const timestamp = Date.now();
+      const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
+      
+      await set(imageDataPath, {
+        path: path,
+        storagePath: storagePath,
+        downloadURL: downloadURL,
+        timestamp: timestamp,
+        size: blob.size
+      });
+    } catch (error) {
+      Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
+    }
+    
+    Logger.debug('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
+    
+    return downloadURL;
+  } catch (error) {
+    Logger.error('[Firebase Storage] 업로드 실패:', error);
+    throw error;
+  }
+}
+
+function dataURLtoBlob(dataUrl) {
+  const arr = dataUrl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while(n--) u8arr[n] = bstr.charCodeAt(n);
+  return new Blob([u8arr], {type: mime});
+}
+
+// Firebase Auth 관련 함수들 (호환성 유지)
 /**
  * Firebase Auth 상태 리스너 초기화
  */
@@ -313,7 +391,7 @@ function initializeAuthStateListener() {
       email: authState.user?.email
     });
     
-    // 인증 상태를 chrome.storage.local에 저장 (Service Worker 재시작 시 복원)
+    // 인증 상태를 chrome.storage.local에 저장
     try {
       await chrome.storage.local.set({
         firebaseAuthState: authState,
@@ -393,126 +471,11 @@ export function onFirebaseAuthStateChanged(callback) {
   });
 }
 
-// --- 기타 유틸리티 함수들 ---
-
-/**
- * Base64 데이터 URL을 Blob으로 변환하는 헬퍼 함수
- */
-export function dataURLtoBlob(dataUrl) {
-  const arr = dataUrl.split(',');
-  const mime = arr[0].match(/:(.*?);/)[1];
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new Blob([u8arr], { type: mime });
-}
-
-/**
- * Firebase Storage에 이미지를 업로드하고 다운로드 URL을 반환하는 함수
- * Firebase Storage REST API를 사용 (Service Worker 환경 호환)
- */
-export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
-  try {
-    // Base64 데이터 URL을 Blob으로 변환
-    const blob = dataURLtoBlob(dataUrl);
-    
-    // Google OAuth 토큰 가져오기
-    let token = await getValidToken(false);
-    
-    if (!token) {
-      token = await getValidToken(true);
-      if (!token) {
-        throw new Error('인증 토큰을 가져올 수 없습니다. 로그인이 필요합니다.');
-      }
-    }
-    
-    // Firebase Storage REST API를 사용하여 업로드
-    const bucket = firebaseConfig.storageBucket;
-    const encodedPath = encodeURIComponent(path);
-    
-    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
-    
-    Logger.debug('[Firebase Storage] 업로드 시작:', path);
-    
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': blob.type || 'image/png'
-      },
-      body: blob
-    });
-    
-    if (!uploadResponse.ok) {
-      const errorData = await uploadResponse.json().catch(() => ({}));
-      const errorMessage = errorData.error?.message || uploadResponse.statusText;
-      
-      if (uploadResponse.status === 403) {
-        Logger.error('[Firebase Storage] 403 Permission denied 오류');
-        Logger.error('[Firebase Storage] ⚠️ Firebase Storage 보안 규칙을 확인하세요.');
-      }
-      
-      throw new Error(`Firebase Storage 업로드 실패 (${uploadResponse.status}): ${errorMessage}`);
-    }
-    
-    const uploadResult = await uploadResponse.json();
-    
-    // 다운로드 URL 생성
-    const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
-    
-    // Firebase Realtime Database에 메타데이터 저장
-    const storagePath = `gs://${bucket}/${path}`;
-    try {
-      const timestamp = Date.now();
-      const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
-      
-      await set(imageDataPath, {
-        path: path,
-        storagePath: storagePath,
-        downloadURL: downloadURL,
-        timestamp: timestamp,
-        size: blob.size
-      });
-    } catch (error) {
-      Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
-    }
-    
-    Logger.debug('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
-    
-    return downloadURL;
-  } catch (error) {
-    Logger.error('[Firebase Storage] 업로드 실패:', error);
-    throw error;
-  }
-}
-
-/**
- * 객체 내의 모든 undefined 값을 재귀적으로 null로 변환하는 함수
- */
-export function cleanDataForFirebase(data) {
-  if (data === undefined) return null;
-  if (data === null || typeof data !== "object") return data;
-  if (Array.isArray(data)) return data.map(cleanDataForFirebase);
-  
-  const cleanedObj = {};
-  for (const key in data) {
-    if (Object.prototype.hasOwnProperty.call(data, key)) {
-      const value = data[key];
-      if (value !== undefined) {
-        cleanedObj[key] = cleanDataForFirebase(value);
-      }
-    }
-  }
-  return cleanedObj;
-}
-
-// Firebase Auth 관련 export (호환성)
+// export
 export { initializeApp, getAuth, signInWithCredential, GoogleAuthProvider };
 
 // 즉시 초기화
 initializeFirebase();
 
 Logger.info('[System] firebaseService 모듈 로드 완료 (REST API 모드)');
+

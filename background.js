@@ -38,7 +38,9 @@ import {
   restoreAuthSession
 } from './js/services/authService.js';
 
-import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
+// [중요] firebase/database import 제거 - REST API 사용으로 대체됨
+// import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
+import { ref, update, remove, set, get, push, serverTimestamp, onValue } from './js/services/firebaseService.js';
 
 // Firebase 초기화
 initializeFirebase();
@@ -137,7 +139,14 @@ async function resizeImageInOffscreen(imageDataUrl, maxWidth, maxHeight, quality
         maxWidth,
         maxHeight,
         quality
-      }).catch(reject);
+      }).catch((err) => {
+        // "message port closed"는 정상적인 상황일 수 있음
+        if (err?.message && !err.message.includes('message port closed')) {
+          reject(err);
+        } else {
+          reject(new Error('Offscreen 문서 연결 실패'));
+        }
+      });
       
       // 타임아웃 설정 (30초)
       setTimeout(() => {
@@ -198,7 +207,14 @@ async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight
         canvasWidth,
         canvasHeight,
         dynamicText
-      }).catch(reject);
+      }).catch((err) => {
+        // "message port closed"는 정상적인 상황일 수 있음
+        if (err?.message && !err.message.includes('message port closed')) {
+          reject(err);
+        } else {
+          reject(new Error('Offscreen 문서 연결 실패'));
+        }
+      });
       
       // 타임아웃 설정 (60초 - 템플릿 렌더링은 더 오래 걸릴 수 있음)
       setTimeout(() => {
@@ -227,7 +243,16 @@ chrome.action.onClicked.addListener((tab) => {
       action: "open_content_pilot_panel",
     }, () => {
       if (chrome.runtime.lastError) {
-        Logger.warn("[sendMessage] 메시지 전송 실패:", chrome.runtime.lastError.message);
+        // "message port closed"는 정상적인 상황 (탭이 닫히거나 content script가 없을 때)
+        // 다른 에러만 경고로 표시
+        const errorMsg = chrome.runtime.lastError.message || '';
+        if (!errorMsg.includes('message port closed') && 
+            !errorMsg.includes('Could not establish connection')) {
+          Logger.warn("[sendMessage] 메시지 전송 실패:", errorMsg);
+        } else {
+          // 정상적인 상황이므로 디버그 레벨로만 로깅
+          Logger.debug("[sendMessage] 메시지 포트 닫힘 (정상):", errorMsg);
+        }
       }
     });
   }
@@ -300,7 +325,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "generate_idea_briefing") {
     const { cardId, title, description, ...opts } = msg.data;
     opts.onProgress = (p) => {
-      if (sender.tab?.id) chrome.tabs.sendMessage(sender.tab.id, { action: "briefing_progress", cardId, progress: p }).catch(()=>{});
+      if (sender.tab?.id) {
+        chrome.tabs.sendMessage(sender.tab.id, { action: "briefing_progress", cardId, progress: p }).catch((err) => {
+          // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+          if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+            Logger.debug('[sendMessage] briefing_progress 전송 실패:', err.message);
+          }
+        });
+      }
     };
     return handleAsync(generateIdeaBriefing(cardId, title, description, opts));
   }
@@ -432,7 +464,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               chrome.tabs.sendMessage(tab.id, {
                 action: "kanban_data_updated",
                 data: data
-              }).catch(() => {});
+              }).catch((err) => {
+                // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+                // 조용히 무시
+              });
             }
           });
         });
@@ -447,7 +482,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.tabs.sendMessage(sender.tab.id, {
           action: "kanban_data_updated",
           data: data
-        }).catch(() => {});
+        }).catch((err) => {
+          // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+          // 조용히 무시
+        });
       }
       return { success: true, data: data };
     })());
@@ -551,8 +589,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const { youtubeApiKey, geminiApiKey, channels } = msg.data;
       await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
       const userId = await getCurrentUserId();
+      
+      // channels가 없거나 빈 객체인 경우 기본 구조 생성
+      let channelsToSave = channels;
+      if (!channelsToSave || (typeof channelsToSave === 'object' && Object.keys(channelsToSave).length === 0)) {
+        Logger.warn('[save_channels_and_key] channels가 비어있음, 기본 구조 생성');
+        channelsToSave = {
+          myChannels: {
+            blogs: [],
+            youtubes: []
+          }
+        };
+      }
+      
       // undefined 값을 null로 변환하여 Firebase 저장 오류 방지
-      const cleanedChannels = cleanDataForFirebase(channels);
+      const cleanedChannels = cleanDataForFirebase(channelsToSave);
+      
+      // 빈 객체 체크
+      if (cleanedChannels && typeof cleanedChannels === 'object' && Object.keys(cleanedChannels).length === 0) {
+        Logger.error('[save_channels_and_key] cleanedChannels가 빈 객체입니다.');
+        throw new Error('저장할 채널 데이터가 없습니다.');
+      }
+      
       await set(ref(getDb(), `channels/${userId}`), cleanedChannels);
       // 데이터 수집 트리거
       await fetchAllChannelData();

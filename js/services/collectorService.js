@@ -1,7 +1,8 @@
 // js/services/collectorService.js
 
 import { getDb, CONSTANTS, cleanDataForFirebase } from './firebaseService.js';
-import { ref, get, set, update, remove } from 'firebase/database';
+// [중요] firebase/database import 제거 - REST API 사용으로 대체됨
+import { ref, get, set, update, remove } from './firebaseService.js';
 import { sendErrorToUI } from './analyticsService.js';
 
 let creating;
