@@ -7,6 +7,10 @@ import { Logger } from '../utils.js';
 const TOKEN_EXPIRY_BUFFER = 5 * 60 * 1000; // 5분 버퍼 (만료 5분 전에 갱신)
 const TOKEN_DEFAULT_EXPIRY = 60 * 60 * 1000; // 기본 1시간
 
+// 토큰 갱신 중복 호출 방지 (Promise Singleton 패턴)
+let refreshTokenPromise = null;
+let isRefreshing = false;
+
 /**
  * 토큰 만료 시간을 스토리지에 저장
  * @param {string} token - Google OAuth 토큰
@@ -75,48 +79,121 @@ export async function validateStoredToken() {
 }
 
 /**
- * 토큰 갱신 (Silent Refresh)
+ * 토큰 갱신 (Silent Refresh) - 경합 조건 방지
  * @param {boolean} interactive - 사용자 상호작용 필요 여부
  * @returns {Promise<{success: boolean, token: string|null, error?: string}>}
  */
 export async function refreshAuthToken(interactive = false) {
-  try {
-    console.log('🔑 [Auth] 토큰 갱신 시도 (interactive:', interactive, ')');
-    
-    // 기존 토큰 제거 (캐시 무효화)
-    const storage = await chrome.storage.local.get('googleAuthToken');
-    if (storage.googleAuthToken) {
-      try {
-        await chrome.identity.removeCachedAuthToken({ token: storage.googleAuthToken });
-      } catch (e) {
-        console.warn('[refreshAuthToken] 기존 토큰 제거 실패:', e);
-      }
-    }
-
-    // 새 토큰 발급
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive }, (authToken) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(authToken);
-        }
-      });
-    });
-
-    if (!token) {
-      throw new Error('토큰 발급 실패');
-    }
-
-    // 토큰 만료 시간 저장
-    await saveTokenExpiry(token);
-    
-    console.log('🔑 [Auth] 토큰 갱신 성공');
-    return { success: true, token };
-  } catch (error) {
-    console.error('[refreshAuthToken] 오류:', error);
-    return { success: false, token: null, error: error.message };
+  // 이미 갱신 중이면 기존 Promise 반환 (Singleton 패턴)
+  if (isRefreshing && refreshTokenPromise) {
+    Logger.debug('🔑 [Auth] 토큰 갱신 중... 기존 요청 대기');
+    return refreshTokenPromise;
   }
+
+  // 새 갱신 프로세스 시작
+  isRefreshing = true;
+  refreshTokenPromise = (async () => {
+    try {
+      console.log('🔑 [Auth] 토큰 갱신 시도 (interactive:', interactive, ')');
+      
+      // 기존 토큰 제거 (캐시 무효화)
+      const storage = await chrome.storage.local.get('googleAuthToken');
+      if (storage.googleAuthToken) {
+        try {
+          // 토큰이 문자열인지 확인
+          const tokenToRemove = typeof storage.googleAuthToken === 'string' 
+            ? storage.googleAuthToken 
+            : (storage.googleAuthToken?.token || String(storage.googleAuthToken));
+          
+          if (tokenToRemove && typeof tokenToRemove === 'string') {
+            await chrome.identity.removeCachedAuthToken({ token: tokenToRemove });
+          } else {
+            Logger.warn('[refreshAuthToken] 유효하지 않은 토큰 형식, 제거 건너뜀');
+          }
+        } catch (e) {
+          Logger.warn('[refreshAuthToken] 기존 토큰 제거 실패:', e);
+        }
+      }
+
+      // 새 토큰 발급
+      const authToken = await new Promise((resolve, reject) => {
+        chrome.identity.getAuthToken({ interactive }, (token) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(token);
+          }
+        });
+      });
+
+      Logger.debug('[refreshAuthToken] 토큰 타입:', typeof authToken);
+      // 보안: 토큰은 최대 5자만 표시하고 나머지는 마스킹
+      if (authToken && typeof authToken === 'string') {
+        const masked = authToken.length > 5 
+          ? authToken.substring(0, 5) + '***' + authToken.substring(authToken.length - 3)
+          : '***';
+        Logger.debug('[refreshAuthToken] 토큰 (마스킹됨):', masked);
+      } else {
+        Logger.debug('[refreshAuthToken] 토큰 값:', authToken ? '***' : 'null');
+      }
+
+      if (!authToken) {
+        throw new Error('토큰 발급 실패');
+      }
+      
+      // 토큰이 문자열인지 확인하고 변환
+      const token = typeof authToken === 'string' ? authToken : String(authToken);
+      
+      if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+        Logger.error('[refreshAuthToken] 유효하지 않은 토큰:', { 
+          originalType: typeof authToken, 
+          originalValue: authToken,
+          convertedValue: token
+        });
+        throw new Error('유효하지 않은 토큰 형식입니다.');
+      }
+
+      // 토큰 만료 시간 저장
+      await saveTokenExpiry(token);
+      
+      // 사용자 정보도 함께 업데이트 (토큰이 새로 발급되었으므로)
+      try {
+        const userInfo = await fetchUserInfo(token);
+        await chrome.storage.local.set({
+          googleUserEmail: userInfo.email,
+          googleUserId: userInfo.id,
+          googleUserName: userInfo.name
+        });
+      } catch (e) {
+        Logger.warn('[refreshAuthToken] 사용자 정보 업데이트 실패:', e);
+      }
+      
+      // Firebase Auth에도 로그인 시도
+      try {
+        const { signInToFirebaseWithGoogleToken } = await import('./firebaseService.js');
+        const firebaseAuthResult = await signInToFirebaseWithGoogleToken(token);
+        if (firebaseAuthResult.success) {
+          Logger.info('[refreshAuthToken] Firebase Auth 갱신 성공');
+        } else {
+          Logger.warn('[refreshAuthToken] Firebase Auth 갱신 실패:', firebaseAuthResult.error);
+        }
+      } catch (e) {
+        Logger.warn('[refreshAuthToken] Firebase Auth 갱신 시도 중 오류:', e);
+      }
+      
+      console.log('🔑 [Auth] 토큰 갱신 성공');
+      return { success: true, token };
+    } catch (error) {
+      console.error('[refreshAuthToken] 오류:', error);
+      return { success: false, token: null, error: error.message };
+    } finally {
+      // 갱신 완료 후 플래그 초기화
+      isRefreshing = false;
+      refreshTokenPromise = null;
+    }
+  })();
+
+  return refreshTokenPromise;
 }
 
 /**
@@ -209,31 +286,210 @@ export async function fetchAdSenseAccountId(token) {
 }
 
 /**
+ * Google 사용자 정보 가져오기
+ * @param {string} token - Google OAuth 토큰
+ * @returns {Promise<{email: string, id: string, name: string}>} 사용자 정보
+ */
+async function fetchUserInfo(token) {
+  if (!token || typeof token !== 'string') {
+    Logger.error('[fetchUserInfo] 유효하지 않은 토큰:', typeof token);
+    throw new Error('유효하지 않은 토큰입니다.');
+  }
+
+  try {
+    Logger.info('[fetchUserInfo] 사용자 정보 요청 시작');
+    // 보안: 토큰 길이만 로깅 (값은 마스킹)
+    Logger.debug('[fetchUserInfo] 토큰 길이:', token.length);
+    Logger.debug('[fetchUserInfo] 토큰 (마스킹됨):', token.length > 5 
+      ? token.substring(0, 5) + '***' + token.substring(token.length - 3)
+      : '***');
+    
+    // Google OAuth2 UserInfo API 호출
+    const apiUrl = "https://www.googleapis.com/oauth2/v3/userinfo";
+    const response = await fetch(apiUrl, {
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    Logger.debug(`[fetchUserInfo] API 응답 상태: ${response.status} ${response.statusText}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      let errorData = {};
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        // JSON 파싱 실패 시 텍스트 그대로 사용
+      }
+      
+      Logger.error(`[fetchUserInfo] API 오류 (${response.status}):`, errorData || errorText);
+      
+      // 401 Unauthorized인 경우 토큰 문제
+      if (response.status === 401) {
+        throw new Error('인증 토큰이 유효하지 않거나 만료되었습니다. 다시 로그인해주세요.');
+      }
+      
+      throw new Error(`사용자 정보 가져오기 실패 (${response.status}): ${errorData.error?.message || errorText.substring(0, 100)}`);
+    }
+    
+    const userInfo = await response.json();
+    Logger.debug('[fetchUserInfo] API 응답 데이터:', {
+      email: userInfo.email,
+      sub: userInfo.sub,
+      name: userInfo.name,
+      id: userInfo.id,
+      verified_email: userInfo.verified_email
+    });
+    
+    // 필수 필드 확인
+    if (!userInfo.email && !userInfo.sub) {
+      Logger.error('[fetchUserInfo] 이메일 또는 sub이 없음. 전체 응답:', userInfo);
+      throw new Error('사용자 정보에 이메일 또는 ID가 없습니다. OAuth 스코프를 확인해주세요.');
+    }
+    
+    const result = {
+      email: userInfo.email || null,
+      id: userInfo.sub || userInfo.id || null,
+      name: userInfo.name || userInfo.email || 'Unknown User'
+    };
+    
+    if (!result.email) {
+      // sub을 이메일로 사용할 수 없으므로 에러
+      Logger.error('[fetchUserInfo] 이메일이 없음. sub만 있음:', userInfo.sub);
+      throw new Error('사용자 이메일을 가져올 수 없습니다. OAuth 스코프에 userinfo.email이 포함되어 있는지 확인해주세요.');
+    }
+    
+    Logger.info(`[fetchUserInfo] ✅ 사용자 정보 가져오기 성공: ${result.email} (${result.name})`);
+    return result;
+  } catch (error) {
+    Logger.error('[fetchUserInfo] ❌ 오류 발생:', error);
+    // 보안: 토큰 값은 마스킹하여 로깅
+    if (token && typeof token === 'string') {
+      const masked = token.length > 5 
+        ? token.substring(0, 5) + '***' + token.substring(token.length - 3)
+        : '***';
+      Logger.error('[fetchUserInfo] 토큰 (마스킹됨):', masked, '길이:', token.length);
+    } else {
+      Logger.error('[fetchUserInfo] 토큰:', token ? '***' : 'null');
+    }
+    
+    // 에러를 다시 throw하여 상위에서 처리하도록 함
+    throw error;
+  }
+}
+
+/**
  * Google OAuth 인증 시작
  * @returns {Promise<Object>} 인증 결과
  */
 export async function startGoogleAuth() {
   try {
-    const token = await chrome.identity.getAuthToken({ interactive: true });
+    Logger.info('[startGoogleAuth] Google 로그인 시작');
+    
+    // Promise 기반으로 토큰 가져오기
+    const token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken({ interactive: true }, (authToken) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(authToken);
+        }
+      });
+    });
+    
+    Logger.debug('[startGoogleAuth] 토큰 타입:', typeof token);
+    // 보안: 토큰은 최대 5자만 표시하고 나머지는 마스킹
+    if (token && typeof token === 'string') {
+      const masked = token.length > 5 
+        ? token.substring(0, 5) + '***' + token.substring(token.length - 3)
+        : '***';
+      Logger.debug('[startGoogleAuth] 토큰 (마스킹됨):', masked);
+    } else {
+      Logger.debug('[startGoogleAuth] 토큰 값:', token ? '***' : 'null');
+    }
+    
+    if (!token) {
+      throw new Error('토큰을 가져올 수 없습니다.');
+    }
+    
+    // 토큰이 문자열이 아니면 문자열로 변환 시도
+    const tokenString = typeof token === 'string' ? token : String(token);
+    
+    if (!tokenString || tokenString === 'undefined' || tokenString === 'null') {
+      throw new Error('유효하지 않은 토큰입니다.');
+    }
+    
+    // 보안: 토큰 길이만 로깅 (값은 마스킹)
+    Logger.debug('[startGoogleAuth] 토큰 발급 성공, 길이:', tokenString.length);
     
     // 토큰 만료 시간 저장
-    await saveTokenExpiry(token);
+    await saveTokenExpiry(tokenString);
+    
+    // 사용자 정보 가져오기 (이메일 기반 USER_ID 설정)
+    let userInfo;
+    try {
+      userInfo = await fetchUserInfo(tokenString);
+      Logger.info(`[startGoogleAuth] 사용자 정보 가져오기 성공: ${userInfo.email}`);
+    } catch (error) {
+      Logger.error('[startGoogleAuth] 사용자 정보 가져오기 실패:', error);
+      // 사용자 정보 가져오기 실패 시에도 로그인은 성공으로 처리하되, 경고 표시
+      throw new Error(`로그인은 성공했지만 사용자 정보를 가져올 수 없습니다: ${error.message}`);
+    }
     
     // GA4 속성 및 AdSense 계정 ID 가져오기
     const [properties, adSenseId] = await Promise.all([
-      fetchGaProperties(token).catch(() => []),
-      fetchAdSenseAccountId(token).catch(() => null)
+      fetchGaProperties(token).catch((e) => {
+        Logger.warn('[startGoogleAuth] GA4 속성 가져오기 실패:', e);
+        return [];
+      }),
+      fetchAdSenseAccountId(token).catch((e) => {
+        Logger.warn('[startGoogleAuth] AdSense 계정 ID 가져오기 실패:', e);
+        return null;
+      })
     ]);
     
+    // 사용자 정보와 함께 저장
     await chrome.storage.local.set({ 
+      googleUserEmail: userInfo.email,
+      googleUserId: userInfo.id,
+      googleUserName: userInfo.name,
       adSenseAccountId: adSenseId,
       gaProperties: properties 
     });
     
+    // Firebase Auth에 로그인 (Google Access Token 사용)
+    try {
+      const { signInToFirebaseWithGoogleToken } = await import('./firebaseService.js');
+      const firebaseAuthResult = await signInToFirebaseWithGoogleToken(tokenString);
+      
+      if (firebaseAuthResult.success) {
+        Logger.biz(`[Firebase Auth] ✅ Firebase 인증 성공: ${firebaseAuthResult.user.email} (UID: ${firebaseAuthResult.user.uid})`);
+      } else {
+        Logger.warn(`[Firebase Auth] ⚠️ Firebase 인증 실패: ${firebaseAuthResult.error}`);
+        Logger.warn(`[Firebase Auth] 코드: ${firebaseAuthResult.code || 'unknown'}`);
+        
+        // Access Token만으로 실패한 경우 경고
+        if (firebaseAuthResult.error?.includes('ID token') || firebaseAuthResult.code === 'auth/invalid-credential') {
+          Logger.warn('[Firebase Auth] 💡 Access Token만으로는 인증할 수 없을 수 있습니다. ID Token이 필요할 수 있습니다.');
+        }
+      }
+    } catch (e) {
+      Logger.warn('[Firebase Auth] Firebase 인증 시도 중 오류:', e);
+    }
+    
+    Logger.biz(`🔑 [Auth] 로그인 성공: ${userInfo.email} (ID: ${userInfo.id})`);
     console.log('🔑 [Auth] 로그인 성공, 토큰 만료 시간 저장 완료');
-    return { success: true, token, properties, adSenseId };
+    return { 
+      success: true, 
+      token: tokenString, 
+      properties, 
+      adSenseId,
+      userInfo 
+    };
   } catch (error) {
-    console.error('[startGoogleAuth] 오류:', error);
+    Logger.error('[startGoogleAuth] 오류:', error);
     return { success: false, error: error.message };
   }
 }
@@ -244,20 +500,43 @@ export async function startGoogleAuth() {
  */
 export async function revokeGoogleAuth() {
   try {
-    const { googleAuthToken } = await chrome.storage.local.get('googleAuthToken');
+    const storage = await chrome.storage.local.get('googleAuthToken');
+    const googleAuthToken = storage.googleAuthToken;
+    
     if (googleAuthToken) {
-      await chrome.identity.removeCachedAuthToken({ token: googleAuthToken });
+      try {
+        // 토큰이 문자열인지 확인
+        const tokenToRemove = typeof googleAuthToken === 'string' 
+          ? googleAuthToken 
+          : (googleAuthToken?.token || String(googleAuthToken));
+        
+        if (tokenToRemove && typeof tokenToRemove === 'string') {
+          await chrome.identity.removeCachedAuthToken({ token: tokenToRemove });
+        } else {
+          Logger.warn('[revokeGoogleAuth] 유효하지 않은 토큰 형식, 제거 건너뜀');
+        }
+      } catch (e) {
+        Logger.warn('[revokeGoogleAuth] 토큰 제거 실패:', e);
+      }
     }
+    
+    // 모든 인증 관련 데이터 삭제
     await chrome.storage.local.remove([
       'googleAuthToken',
       'googleAuthTokenExpiry',
       'googleAuthTokenIssued',
       'adSenseAccountId',
-      'gaProperties'
+      'gaProperties',
+      // 사용자 정보도 함께 삭제
+      'googleUserEmail',
+      'googleUserId',
+      'googleUserName'
     ]);
+    
+    Logger.biz('🔑 [Auth] 로그아웃 완료 - 모든 사용자 정보 삭제됨');
     return { success: true };
   } catch (error) {
-    console.error('[revokeGoogleAuth] 오류:', error);
+    Logger.error('[revokeGoogleAuth] 오류:', error);
     return { success: false, error: error.message };
   }
 }
@@ -272,6 +551,19 @@ export async function restoreAuthSession() {
     const validation = await validateStoredToken();
     
     if (validation.valid && !validation.needsRefresh) {
+      // Firebase Auth에도 로그인 시도
+      try {
+        const { signInToFirebaseWithGoogleToken } = await import('./firebaseService.js');
+        const firebaseAuthResult = await signInToFirebaseWithGoogleToken(validation.token);
+        if (firebaseAuthResult.success) {
+          Logger.biz('🔑 [AUTH RESTORED] 저장된 세션 및 Firebase Auth 복원 성공');
+        } else {
+          Logger.warn('🔑 [AUTH RESTORED] 저장된 세션 복원 성공 (Firebase Auth 실패)');
+        }
+      } catch (e) {
+        Logger.warn('[restoreAuthSession] Firebase Auth 복원 실패:', e);
+      }
+      
       Logger.biz('🔑 [AUTH RESTORED] 저장된 세션 복원 성공');
       return true;
     }
@@ -280,6 +572,19 @@ export async function restoreAuthSession() {
     if (validation.needsRefresh) {
       const refreshResult = await refreshAuthToken(false);
       if (refreshResult.success) {
+        // Firebase Auth에도 로그인 시도
+        try {
+          const { signInToFirebaseWithGoogleToken } = await import('./firebaseService.js');
+          const firebaseAuthResult = await signInToFirebaseWithGoogleToken(refreshResult.token);
+          if (firebaseAuthResult.success) {
+            Logger.biz('🔑 [AUTH RESTORED] 토큰 갱신 및 Firebase Auth 복원 성공');
+          } else {
+            Logger.warn('🔑 [AUTH RESTORED] 토큰 갱신 성공 (Firebase Auth 실패)');
+          }
+        } catch (e) {
+          Logger.warn('[restoreAuthSession] Firebase Auth 복원 실패:', e);
+        }
+        
         Logger.biz('🔑 [AUTH RESTORED] 토큰 갱신으로 세션 복원 성공');
         return true;
       }

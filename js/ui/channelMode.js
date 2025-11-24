@@ -396,17 +396,21 @@ export function renderChannelMode(container) {
         `;
         
         if (response && response.success) {
-          // GA4 속성 목록 저장
-          if (response.data.gaProperties) {
-            gaPropertiesList = response.data.gaProperties;
+          // GA4 속성 목록 저장 (응답 구조에 따라 처리)
+          // response.data가 있으면 data 내부에서, 없으면 직접 접근
+          const gaProperties = response.data?.gaProperties || response.gaProperties || response.properties;
+          const adSenseAccountId = response.data?.adSenseAccountId || response.adSenseAccountId || response.adSenseId;
+          
+          if (gaProperties && Array.isArray(gaProperties)) {
+            gaPropertiesList = gaProperties;
             updateGa4Dropdown();
           }
           
           // AdSense 계정 ID 자동 입력
-          if (response.data.adSenseAccountId) {
+          if (adSenseAccountId) {
             const adsenseIdEl = container.querySelector("#modal-adsense-id");
             if (adsenseIdEl && !adsenseIdEl.value) {
-              adsenseIdEl.value = response.data.adSenseAccountId;
+              adsenseIdEl.value = adSenseAccountId;
             }
           }
           

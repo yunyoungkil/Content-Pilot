@@ -1,6 +1,6 @@
 // background.js (Final Router Version)
 
-import { getDb, CONSTANTS, initializeFirebase, uploadImageToFirebaseStorage, cleanDataForFirebase } from './js/services/firebaseService.js';
+import { getDb, CONSTANTS, initializeFirebase, uploadImageToFirebaseStorage, cleanDataForFirebase, getCurrentUserId } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 
 import { 
@@ -314,7 +314,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "request_search_keywords") return handleAsync(generateAndSendKeywords(msg.data, sender));
   if (msg.action === "analyze_video_comments") return handleAsync(analyzeVideoComments(msg.videoId));
   if (msg.action === "upload_thumbnail_to_storage") {
-    return handleAsync(uploadImageToFirebaseStorage(msg.data.dataUrl, `thumbnails/${CONSTANTS.USER_ID}/${msg.data.filename || Date.now()+'.png'}`, CONSTANTS.USER_ID).then(url => ({ success: true, url })));
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      return uploadImageToFirebaseStorage(msg.data.dataUrl, `thumbnails/${userId}/${msg.data.filename || Date.now()+'.png'}`, userId).then(url => ({ success: true, url }));
+    })());
   }
 
   // === [Offscreen Image Processing] 이미지 처리 가속 ===
@@ -357,7 +360,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       // 저장
-      const newRef = push(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${msg.status || 'ideas'}`));
+      const userId = await getCurrentUserId();
+      const newRef = push(ref(getDb(), `kanban/${userId}/${msg.status || 'ideas'}`));
       await set(newRef, { ...ideaData, createdAt: Date.now(), channelId: msg.channelId });
 
       return { success: true, firebaseKey: newRef.key };
@@ -366,11 +370,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === "update_kanban_card") {
     const { cardId, status, updates } = msg.data;
-    return handleAsync(update(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${cardId}`), updates));
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      return update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), updates);
+    })());
   }
   
   if (msg.action === "delete_kanban_card") {
-    return handleAsync(remove(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${msg.data.status}/${msg.data.cardId}`)));
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      return remove(ref(getDb(), `kanban/${userId}/${msg.data.status}/${msg.data.cardId}`));
+    })());
   }
 
   if (msg.action === "move_kanban_card") {
@@ -380,7 +390,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return { success: false, error: "필수 정보가 부족합니다." };
       }
 
-      const userId = CONSTANTS.USER_ID;
+      const userId = await getCurrentUserId();
       const originalRef = ref(getDb(), `kanban/${userId}/${originalStatus}/${cardId}`);
       const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${cardId}`);
 
@@ -409,7 +419,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "get_kanban_data" || msg.action === "get_all_kanban_data") {
-    const dbRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}`);
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      const dbRef = ref(getDb(), `kanban/${userId}`);
     
     // 실시간 리스너 등록 (한 번만)
     if (!kanbanRealtimeListenerAttached) {
@@ -430,7 +442,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       kanbanRealtimeListenerAttached = true;
     }
     
-    return handleAsync(get(dbRef).then(snap => {
+      const snap = await get(dbRef);
       const data = snap.val() || {};
       // 즉시 UI에 업데이트 메시지 전송
       if (sender.tab?.id) {
@@ -440,43 +452,50 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }).catch(() => {});
       }
       return { success: true, data: data };
-    }));
+    })());
   }
 
   if (msg.action === "get_all_scraps") {
-    return handleAsync(get(ref(getDb(), `scraps/${CONSTANTS.USER_ID}`)).then(snap => {
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      const snap = await get(ref(getDb(), `scraps/${userId}`));
       const val = snap.val() || {};
       const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
       // 필터링
       const filtered = arr.filter(s => s.channelId === undefined || s.channelId === null || s.channelId === msg.channelId);
       return { success: true, scraps: filtered.sort((a, b) => b.timestamp - a.timestamp) };
-    }));
+    })());
   }
 
   if (msg.action === "cp_get_firebase_scraps") {
-    const targetChannelId = msg.channelId || null;
-    return handleAsync(get(ref(getDb(), `scraps/${CONSTANTS.USER_ID}`)).then(snap => {
-      const val = snap.val() || {};
-      const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-      // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
-      const filtered = arr.filter(scrap => {
-        return scrap.channelId === undefined || 
-               scrap.channelId === null || 
-               scrap.channelId === targetChannelId;
-      });
-      return { data: filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
-    }).catch(error => {
-      Logger.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
-      return { data: [] };
-    }));
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      const targetChannelId = msg.channelId || null;
+      try {
+        const snap = await get(ref(getDb(), `scraps/${userId}`));
+        const val = snap.val() || {};
+        const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+        // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
+        const filtered = arr.filter(scrap => {
+          return scrap.channelId === undefined || 
+                 scrap.channelId === null || 
+                 scrap.channelId === targetChannelId;
+        });
+        return { data: filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
+      } catch (error) {
+        Logger.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
+        return { data: [] };
+      }
+    })());
   }
 
   if (msg.action === "get_channel_content") {
     return handleAsync((async () => {
+      const userId = await getCurrentUserId();
       const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
-        get(ref(getDb(), `channel_content/${CONSTANTS.USER_ID}`)),
-        get(ref(getDb(), `channel_meta/${CONSTANTS.USER_ID}`)),
-        get(ref(getDb(), `channels/${CONSTANTS.USER_ID}`))
+        get(ref(getDb(), `channel_content/${userId}`)),
+        get(ref(getDb(), `channel_meta/${userId}`)),
+        get(ref(getDb(), `channels/${userId}`))
       ]);
       
       const content = contentSnap.val() || {};
@@ -505,9 +524,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // === [Channel Management] 채널 관리 ===
   if (msg.action === "get_channels_and_key") {
     return handleAsync((async () => {
+      const userId = await getCurrentUserId();
       const [storage, channelsSnap] = await Promise.all([
         chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
-        get(ref(getDb(), `channels/${CONSTANTS.USER_ID}`))
+        get(ref(getDb(), `channels/${userId}`))
       ]);
       return {
         success: true,
@@ -521,17 +541,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "get_my_channels") {
-    return handleAsync(get(ref(getDb(), `channels/${CONSTANTS.USER_ID}`)).then(snap => {
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      const snap = await get(ref(getDb(), `channels/${userId}`));
       const channels = snap.val() || {};
       return { success: true, channels: channels.myChannels || { blogs: [], youtubes: [] } };
-    }));
+    })());
   }
 
   if (msg.action === "save_channels_and_key") {
     return handleAsync((async () => {
       const { youtubeApiKey, geminiApiKey, channels } = msg.data;
       await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
-      await set(ref(getDb(), `channels/${CONSTANTS.USER_ID}`), channels);
+      const userId = await getCurrentUserId();
+      // undefined 값을 null로 변환하여 Firebase 저장 오류 방지
+      const cleanedChannels = cleanDataForFirebase(channels);
+      await set(ref(getDb(), `channels/${userId}`), cleanedChannels);
       // 데이터 수집 트리거
       await fetchAllChannelData();
       return { success: true, message: "채널 정보가 저장되었습니다." };
@@ -604,7 +629,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         };
 
         // Firebase에 저장
-        const userId = CONSTANTS.USER_ID;
+        const userId = await getCurrentUserId();
         const scrapRef = push(ref(getDb(), `scraps/${userId}`));
         await set(scrapRef, cleanDataForFirebase(scrapPayload));
 
