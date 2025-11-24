@@ -915,7 +915,16 @@ function submitCard(container, status, title, inputWrapper) {
         showToast('✅ 카드가 추가되었습니다.');
         // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
       } else {
-        showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+        // 중복 검사 실패 시 친절한 메시지 표시
+        if (response?.code === 'DUPLICATE_FOUND') {
+          const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
+            : response.cardInfo?.status === 'in-progress' ? '작성 중'
+            : response.cardInfo?.status === 'done' ? '발행 완료'
+            : response.cardInfo?.status || '알 수 없음';
+          showToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`);
+        } else {
+          showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || response?.message || '알 수 없는 오류'));
+        }
       }
     });
   });

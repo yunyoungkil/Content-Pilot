@@ -325,9 +325,16 @@ export function createAndShowPanel() {
           console.log("[Panel] 채널 개수:", myBlogs.length);
           
           // activeChannelId가 실제 채널 목록에 있는지 확인
+          const generateChannelId = (channel) => {
+            if (channel.id) return channel.id;
+            if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+            if (channel.url) return btoa(channel.url).replace(/=/g, "");
+            return null;
+          };
+          
           const isValidChannel = myBlogs.some(blog => {
-            const channelId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
-            return channelId === res.activeChannelId;
+            const channelId = generateChannelId(blog);
+            return channelId && channelId === res.activeChannelId;
           });
           
           if (isValidChannel && myBlogs.length > 0) {
@@ -367,7 +374,17 @@ export function createAndShowPanel() {
         if (myBlogs.length > 0) {
           // 2-A. 채널은 있는데 선택이 안 된 경우 -> 첫 번째 채널 자동 선택 후 대시보드 이동
           console.log("[Panel] 채널이 있음, 대시보드 표시");
-          const firstId = myBlogs[0].id || (myBlogs[0].apiUrl ? btoa(myBlogs[0].apiUrl).replace(/=/g, "") : "");
+          const generateChannelId = (channel) => {
+            if (channel.id) return channel.id;
+            if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+            if (channel.url) return btoa(channel.url).replace(/=/g, "");
+            return null;
+          };
+          const firstId = generateChannelId(myBlogs[0]);
+          if (!firstId) {
+            console.error("[Panel] 첫 번째 채널의 ID를 생성할 수 없습니다:", myBlogs[0]);
+            return;
+          }
           chrome.storage.local.set({ activeChannelId: firstId }, () => {
             renderDashboard(mainArea); 
             addDashboardEventListeners(mainArea);

@@ -286,9 +286,36 @@ export function renderChannelMode(container) {
     const compListEl = container.querySelector("#modal-competitor-list");
     if (compListEl) {
       compListEl.innerHTML = "";
-      data.competitors.forEach(url => addCompetitorInput(url));
-      // 빈 입력칸 하나 추가 (UX)
-      if (data.competitors.length === 0) addCompetitorInput("");
+      console.log("[ChannelMode] 경쟁사 리스트 렌더링 시작, 개수:", data.competitors?.length || 0);
+      if (data.competitors && Array.isArray(data.competitors) && data.competitors.length > 0) {
+        data.competitors.forEach((url, index) => {
+          console.log(`[ChannelMode] 경쟁사 ${index + 1} 추가:`, url);
+          addCompetitorInput(url);
+        });
+      } else {
+        // 빈 입력칸 하나 추가 (UX)
+        console.log("[ChannelMode] 경쟁사가 없으므로 빈 입력칸 추가");
+        addCompetitorInput("");
+      }
+      
+      // 모달이 열릴 때 경쟁사 추가 버튼이 있는지 확인하고 이벤트 리스너 재등록
+      const addCompetitorBtn = container.querySelector("#modal-add-competitor-btn");
+      if (addCompetitorBtn) {
+        // 기존 리스너 제거 후 재등록 (중복 방지)
+        const newBtn = addCompetitorBtn.cloneNode(true);
+        addCompetitorBtn.parentNode.replaceChild(newBtn, addCompetitorBtn);
+        newBtn.addEventListener("click", (e) => {
+          console.log("[ChannelMode] 경쟁사 추가 버튼 클릭됨 (모달 열림 후 재등록)");
+          e.preventDefault();
+          e.stopPropagation();
+          addCompetitorInput("");
+        });
+        console.log("[ChannelMode] 경쟁사 추가 버튼 이벤트 리스너 재등록 완료");
+      } else {
+        console.error("[ChannelMode] 모달이 열렸지만 경쟁사 추가 버튼을 찾을 수 없습니다!");
+      }
+    } else {
+      console.error("[ChannelMode] 경쟁사 리스트 요소를 찾을 수 없습니다!");
     }
     
     console.log("[ChannelMode] 모달 표시 전:", targetModal.style.display);
@@ -330,15 +357,25 @@ export function renderChannelMode(container) {
   // 경쟁사 입력칸 추가
   function addCompetitorInput(value = "") {
     const listEl = container.querySelector("#modal-competitor-list");
-    if (!listEl) return;
+    if (!listEl) {
+      console.error("[ChannelMode] 경쟁사 리스트 요소를 찾을 수 없습니다!");
+      return;
+    }
     const div = document.createElement("div");
     div.className = "competitor-item";
     div.innerHTML = `
       <input type="text" class="competitor-input" value="${value}" placeholder="경쟁사 블로그 URL">
       <button class="competitor-delete-btn" title="삭제">×</button>
     `;
-    div.querySelector(".competitor-delete-btn").addEventListener("click", () => div.remove());
+    const deleteBtn = div.querySelector(".competitor-delete-btn");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", () => {
+        console.log("[ChannelMode] 경쟁사 입력칸 삭제");
+        div.remove();
+      });
+    }
     listEl.appendChild(div);
+    console.log("[ChannelMode] 경쟁사 입력칸 추가됨:", value || "(빈 값)");
   }
 
   // 이벤트 리스너
@@ -355,9 +392,37 @@ export function renderChannelMode(container) {
     console.error("[ChannelMode] 채널 추가 버튼을 찾을 수 없습니다!");
   }
   
+  // 경쟁사 추가 버튼 이벤트 리스너 (이벤트 위임 사용)
+  // 모달이 동적으로 생성되거나 업데이트될 수 있으므로 이벤트 위임 사용
+  container.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "modal-add-competitor-btn") {
+      console.log("[ChannelMode] 경쟁사 추가 버튼 클릭됨");
+      e.preventDefault();
+      e.stopPropagation();
+      addCompetitorInput("");
+    }
+    
+    // 경쟁사 삭제 버튼도 이벤트 위임으로 처리
+    if (e.target && e.target.classList.contains("competitor-delete-btn")) {
+      console.log("[ChannelMode] 경쟁사 삭제 버튼 클릭됨");
+      const competitorItem = e.target.closest(".competitor-item");
+      if (competitorItem) {
+        competitorItem.remove();
+      }
+    }
+  });
+  
+  // 기존 방식도 유지 (하위 호환성)
   const addCompetitorBtn = container.querySelector("#modal-add-competitor-btn");
   if (addCompetitorBtn) {
-    addCompetitorBtn.addEventListener("click", () => addCompetitorInput(""));
+    addCompetitorBtn.addEventListener("click", (e) => {
+      console.log("[ChannelMode] 경쟁사 추가 버튼 클릭됨 (기존 리스너)");
+      e.preventDefault();
+      e.stopPropagation();
+      addCompetitorInput("");
+    });
+  } else {
+    console.warn("[ChannelMode] 경쟁사 추가 버튼을 찾을 수 없습니다 (초기 로드 시). 모달이 열릴 때 다시 시도됩니다.");
   }
   
   const modalCloseBtn = container.querySelector(".cp-modal-close");

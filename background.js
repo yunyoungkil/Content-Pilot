@@ -16,7 +16,8 @@ import {
   checkDuplicateUrl,
   summarizeText,
   refreshChannelData,
-  fetchImageAsBase64
+  fetchImageAsBase64,
+  updateUrlIndex
 } from './js/services/collectorService.js';
 
 import { 
@@ -380,10 +381,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const ideaData = JSON.parse(msg.data);
 
+      // 제목 검증
+      if (!ideaData.title || !ideaData.title.trim()) {
+        return { success: false, error: "제목은 필수입니다." };
+      }
+      if (ideaData.title.length > 200) {
+        ideaData.title = ideaData.title.substring(0, 200);
+      }
+
       // 중복 검사 (Collector Service 활용)
       if (ideaData.origin?.postUrl) {
         const dupCheck = await checkDuplicateUrl(ideaData.origin.postUrl);
-        if (dupCheck.exists) return { success: false, code: "DUPLICATE_FOUND", cardInfo: dupCheck };
+        if (dupCheck.exists) {
+          const statusMap = {
+            "ideas": "기획",
+            "in-progress": "작성 중",
+            "done": "발행 완료"
+          };
+          const statusText = statusMap[dupCheck.status] || dupCheck.status;
+          return { 
+            success: false, 
+            code: "DUPLICATE_FOUND", 
+            error: `이미 '${statusText}' 단계에 등록된 아이디어입니다.`,
+            message: `이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${dupCheck.title}`,
+            cardInfo: dupCheck 
+          };
+        }
       }
 
       // 요약 (AI Service 활용)
@@ -393,10 +416,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // 저장
       const userId = await getCurrentUserId();
-      const path = `kanban/${userId}/${msg.status || 'ideas'}`;
-      const newKey = await push(path, { ...ideaData, createdAt: Date.now(), channelId: msg.channelId });
+      const status = msg.status || 'ideas';
+      const path = `kanban/${userId}/${status}`;
+      const finalData = { ...ideaData, createdAt: Date.now(), channelId: msg.channelId };
+      const pushResult = await push(path, finalData);
+      const cardId = pushResult.key; // push()는 { key: string, set: function } 객체를 반환
 
-      return { success: true, firebaseKey: newKey };
+      // URL 인덱스 업데이트 (중복 검사를 위해 필수)
+      if (ideaData.origin?.postUrl) {
+        try {
+          await updateUrlIndex(cardId, status, ideaData.origin.postUrl, null);
+        } catch (error) {
+          Logger.warn('[add_idea_to_kanban] URL 인덱스 업데이트 실패:', error);
+          // 인덱스 업데이트 실패해도 카드 추가는 성공으로 처리
+        }
+      }
+
+      // AI 브리핑 자동 생성
+      // 'manual_entry'를 제외한 모든 아이디어는 생성 즉시 AI 브리핑을 실행
+      // (ai_generated, my_post, competitor_post, my_post_renewal 등 모든 경우)
+      const originType = ideaData.origin?.type;
+      if (originType !== 'manual_entry' && ideaData.title && status === 'ideas') {
+        // 비동기로 실행 (응답을 기다리지 않음)
+        Logger.info(`[add_idea_to_kanban] AI 브리핑 자동 생성 시작 - cardId: ${cardId}, originType: ${originType}`);
+        generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
+          generateOutline: true,
+          generateKeywords: true,
+          generateLongTail: true,
+          generateMainKeywords: true
+        }).then(() => {
+          Logger.biz(`✅ [add_idea_to_kanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
+        }).catch((error) => {
+          Logger.warn('[add_idea_to_kanban] AI 브리핑 생성 실패:', error);
+          // 브리핑 생성 실패해도 카드 추가는 성공으로 처리
+        });
+      } else {
+        Logger.debug(`[add_idea_to_kanban] AI 브리핑 자동 생성 건너뜀 - originType: ${originType}, status: ${status}`);
+      }
+
+      return { success: true, firebaseKey: cardId };
     })());
   }
 
@@ -428,7 +486,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       try {
         // 원래 위치의 카드 데이터 읽기
-        const cardData = await get(originalRef);
+        const cardSnap = await get(originalRef);
+        const cardData = cardSnap?.val();
         if (!cardData) {
           return { success: false, error: "이동할 카드를 찾을 수 없습니다." };
         }
@@ -451,12 +510,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_kanban_data" || msg.action === "get_all_kanban_data") {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
+      Logger.info(`[get_kanban_data] 요청 수신 - userId: ${userId}`);
       const dbRef = ref(getDb(), `kanban/${userId}`);
     
     // 실시간 리스너 등록 (한 번만)
     if (!kanbanRealtimeListenerAttached) {
       onValue(dbRef, (snapshot) => {
-        const data = snapshot || {};
+        const data = snapshot?.val() || {};
+        const cardsCount = Object.keys(data).length;
+        Logger.debug(`[get_kanban_data] 실시간 업데이트 - 카드 개수: ${cardsCount}`);
         // 모든 탭에 업데이트 메시지 전송
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach((tab) => {
@@ -476,7 +538,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     
       const snap = await get(dbRef);
-      const data = snap || {};
+      const data = snap?.val() || {};
+      const cardsCount = Object.keys(data).length;
+      Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
       // 즉시 UI에 업데이트 메시지 전송
       if (sender.tab?.id) {
         chrome.tabs.sendMessage(sender.tab.id, {
@@ -494,11 +558,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_all_scraps") {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
+      Logger.info(`[get_all_scraps] 요청 수신 - userId: ${userId}, channelId: ${msg.channelId || 'null'}`);
       const snap = await get(ref(getDb(), `scraps/${userId}`));
-      const val = snap || {};
+      const val = snap?.val() || {};
       const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+      Logger.debug(`[get_all_scraps] 전체 스크랩 개수: ${arr.length}`);
       // 필터링
       const filtered = arr.filter(s => s.channelId === undefined || s.channelId === null || s.channelId === msg.channelId);
+      Logger.info(`[get_all_scraps] 필터링 후 스크랩 개수: ${filtered.length}`);
       return { success: true, scraps: filtered.sort((a, b) => b.timestamp - a.timestamp) };
     })());
   }
@@ -508,7 +575,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const userId = await getCurrentUserId();
       const targetChannelId = msg.channelId || null;
       try {
-        const val = await get(ref(getDb(), `scraps/${userId}`)) || {};
+        const snap = await get(ref(getDb(), `scraps/${userId}`));
+        const val = snap?.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
         // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
         const filtered = arr.filter(scrap => {
@@ -527,15 +595,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_channel_content") {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
+      Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
       const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
         get(ref(getDb(), `channel_content/${userId}`)),
         get(ref(getDb(), `channel_meta/${userId}`)),
         get(ref(getDb(), `channels/${userId}`))
       ]);
       
-      const content = contentSnap || {};
-      const metas = metaSnap || {};
-      const channels = channelsSnap || {
+      // snapshot 객체에서 .val()로 데이터 추출
+      const content = contentSnap?.val() || {};
+      const metas = metaSnap?.val() || {};
+      const channels = channelsSnap?.val() || {
         myChannels: {},
         competitorChannels: {}
       };
@@ -544,6 +614,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const blogs = Object.values(content.blogs || {}).filter(item => item !== null);
       const youtubes = Object.values(content.youtubes || {}).filter(item => item !== null);
       const allContent = [...blogs, ...youtubes];
+      
+      Logger.info(`[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length}, youtubes: ${youtubes.length}, total: ${allContent.length}`);
 
       return {
         success: true,
@@ -560,16 +632,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_channels_and_key") {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
+      Logger.info(`[get_channels_and_key] 요청 수신 - userId: ${userId}`);
       const [storage, channelsSnap] = await Promise.all([
         chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
         get(ref(getDb(), `channels/${userId}`))
       ]);
+      
+      // channelsSnap은 { val: () => data, exists: () => boolean } 형태
+      const channelsData = channelsSnap?.val() || {};
+      const blogsCount = channelsData.myChannels?.blogs?.length || 0;
+      const youtubesCount = channelsData.myChannels?.youtubes?.length || 0;
+      Logger.info(`[get_channels_and_key] 채널 데이터 로드 완료 - blogs: ${blogsCount}, youtubes: ${youtubesCount}`);
+      
       return {
         success: true,
         data: {
           youtubeApiKey: storage.youtubeApiKey || "",
           geminiApiKey: storage.geminiApiKey || "",
-          ...(channelsSnap || {})
+          ...channelsData
         }
       };
     })());
@@ -579,28 +659,126 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
       const snap = await get(ref(getDb(), `channels/${userId}`));
-      const channels = snap || {};
+      const channels = snap?.val() || {};
       return { success: true, channels: channels.myChannels || { blogs: [], youtubes: [] } };
     })());
   }
 
   if (msg.action === "save_channels_and_key") {
     return handleAsync((async () => {
-      const { youtubeApiKey, geminiApiKey, channels } = msg.data;
+      const { youtubeApiKey, geminiApiKey, channels, myChannels } = msg.data;
+      // myChannels가 있으면 channels로 변환 (하위 호환성)
+      const channelsData = channels || (myChannels ? { myChannels } : null);
       await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
       const userId = await getCurrentUserId();
       
-      // channels가 없거나 빈 객체인 경우 기본 구조 생성
-      let channelsToSave = channels;
-      if (!channelsToSave || (typeof channelsToSave === 'object' && Object.keys(channelsToSave).length === 0)) {
-        Logger.warn('[save_channels_and_key] channels가 비어있음, 기본 구조 생성');
-        channelsToSave = {
-          myChannels: {
-            blogs: [],
-            youtubes: []
-          }
-        };
+      // 기존 채널 데이터 불러오기 (병합을 위해)
+      let existingChannels = {};
+      try {
+        const existingSnap = await get(ref(getDb(), `channels/${userId}`));
+        existingChannels = existingSnap?.val() || {};
+      } catch (error) {
+        Logger.debug('[save_channels_and_key] 기존 채널 데이터 불러오기 실패 (신규 사용자일 수 있음):', error.message);
       }
+      
+      // 채널 ID 생성 헬퍼 함수
+      const generateChannelId = (channel) => {
+        if (channel.id) return channel.id;
+        if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+        if (channel.url) return btoa(channel.url).replace(/=/g, "");
+        return null;
+      };
+      
+      // 채널에 ID가 없으면 생성
+      const ensureChannelIds = (channels) => {
+        if (!channels || typeof channels !== 'object') return channels;
+        if (channels.myChannels?.blogs) {
+          channels.myChannels.blogs = channels.myChannels.blogs.map(c => {
+            if (!c.id) {
+              c.id = generateChannelId(c);
+            }
+            return c;
+          });
+        }
+        if (channels.myChannels?.youtubes) {
+          channels.myChannels.youtubes = channels.myChannels.youtubes.map(c => {
+            if (!c.id) {
+              c.id = generateChannelId(c);
+            }
+            return c;
+          });
+        }
+        return channels;
+      };
+      
+      // channels가 없거나 빈 객체인 경우 기존 데이터 사용 또는 기본 구조 생성
+      let channelsToSave = channelsData;
+      if (!channelsToSave || (typeof channelsToSave === 'object' && Object.keys(channelsToSave).length === 0)) {
+        // 기존 데이터가 있으면 기존 데이터 사용
+        if (existingChannels && Object.keys(existingChannels).length > 0) {
+          Logger.debug('[save_channels_and_key] channels가 비어있지만 기존 데이터가 있음, 기존 데이터 유지');
+          channelsToSave = existingChannels;
+        } else {
+          // 기존 데이터도 없으면 기본 구조 생성
+          Logger.warn('[save_channels_and_key] channels가 비어있고 기존 데이터도 없음, 기본 구조 생성');
+          channelsToSave = {
+            myChannels: {
+              blogs: [],
+              youtubes: []
+            }
+          };
+        }
+      } else {
+        // 새 channels 데이터가 있으면 기존 데이터와 병합 (myChannels 우선)
+        if (existingChannels?.myChannels && channelsToSave.myChannels) {
+          // 기존 채널 목록과 새 채널 목록 병합 (중복 제거)
+          const existingBlogs = existingChannels.myChannels.blogs || [];
+          const newBlogs = channelsToSave.myChannels.blogs || [];
+          const existingYoutubes = existingChannels.myChannels.youtubes || [];
+          const newYoutubes = channelsToSave.myChannels.youtubes || [];
+          
+          // 중복 제거 및 업데이트를 위한 헬퍼 함수
+          const mergeChannels = (existing, newChannels) => {
+            const merged = [...existing];
+            newChannels.forEach(newChannel => {
+              const newId = generateChannelId(newChannel);
+              if (!newId) {
+                Logger.warn('[save_channels_and_key] 새 채널의 ID를 생성할 수 없습니다:', newChannel);
+                return;
+              }
+              // 기존 채널 중 같은 ID를 가진 채널 찾기
+              const existingIndex = merged.findIndex(existingChannel => {
+                const existingId = generateChannelId(existingChannel);
+                return existingId && existingId === newId;
+              });
+              
+              if (existingIndex >= 0) {
+                // 기존 채널이 있으면 업데이트 (competitors 포함 모든 필드 병합)
+                Logger.debug(`[save_channels_and_key] 기존 채널 업데이트 (ID: ${newId})`, {
+                  existing: merged[existingIndex],
+                  new: newChannel
+                });
+                merged[existingIndex] = {
+                  ...merged[existingIndex],
+                  ...newChannel,
+                  // competitors는 새 값으로 덮어쓰기 (명시적으로 설정된 경우)
+                  competitors: newChannel.competitors !== undefined ? newChannel.competitors : merged[existingIndex].competitors
+                };
+              } else {
+                // 기존 채널이 없으면 추가
+                merged.push(newChannel);
+              }
+            });
+            return merged;
+          };
+          
+          channelsToSave.myChannels.blogs = mergeChannels(existingBlogs, newBlogs);
+          channelsToSave.myChannels.youtubes = mergeChannels(existingYoutubes, newYoutubes);
+        }
+      }
+      
+      // 모든 채널에 ID가 있는지 확인하고 없으면 생성
+      channelsToSave = ensureChannelIds(channelsToSave);
       
       // undefined 값을 null로 변환하여 Firebase 저장 오류 방지
       const cleanedChannels = cleanDataForFirebase(channelsToSave);
@@ -623,7 +801,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { ideaId } = msg;
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap || {};
+      const allCards = snap?.val() || {};
       for (const status in allCards) {
         if (allCards[status][ideaId]) {
           return { success: true, data: allCards[status][ideaId], status };
@@ -637,7 +815,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { cardId } = msg;
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap || {};
+      const allCards = snap?.val() || {};
       for (const status in allCards) {
         if (allCards[status][cardId]) {
           return { success: true, status, data: allCards[status][cardId] };
@@ -651,7 +829,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const { ideaId, draft } = msg;
     return handleAsync((async () => {
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap || {};
+      const allCards = snap?.val() || {};
       for (const status in allCards) {
         if (allCards[status][ideaId]) {
           await update(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`), { draftContent: draft });
@@ -686,11 +864,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // Firebase에 저장
         const userId = await getCurrentUserId();
         const path = `scraps/${userId}`;
-        const newKey = await push(path, cleanDataForFirebase(scrapPayload));
+        const pushResult = await push(path, cleanDataForFirebase(scrapPayload));
+        const scrapId = pushResult.key; // push()는 { key: string, set: function } 객체를 반환
 
         return { 
           success: true, 
-          scrapId: newKey,
+          scrapId: scrapId,
           scrapData: scrapPayload
         };
       } catch (error) {
@@ -711,7 +890,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { scrapId, imageUrl } = msg.data;
       const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-      const scrap = await get(scrapRef);
+      const scrapSnap = await get(scrapRef);
+      const scrap = scrapSnap?.val();
       if (scrap) {
         if (scrap.images && Array.isArray(scrap.images)) {
           scrap.images = scrap.images.filter(img => img !== imageUrl);
@@ -743,7 +923,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       
       const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-      const scrapData = await get(scrapRef);
+      const scrapSnap = await get(scrapRef);
+      const scrapData = scrapSnap?.val();
       
       if (!scrapData) {
         return { success: false, error: "스크랩을 찾을 수 없습니다." };
@@ -777,7 +958,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { ideaId, scrapId, status } = msg.data;
       const ideaRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`);
-      const idea = await get(ideaRef);
+      const ideaSnap = await get(ideaRef);
+      const idea = ideaSnap?.val();
       if (idea) {
         const linkedScraps = idea.workspace?.linkedScraps || [];
         if (!linkedScraps.includes(scrapId)) {

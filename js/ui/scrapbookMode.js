@@ -744,8 +744,11 @@ function renderDetailView(scrapId, container) {
           title: ideaTitle,
           description: ideaDescription,
           keywords: ideaTags.filter(tag => tag !== '#스크랩-전환'), // 스크랩 태그는 keywords로
-          sourceUrl: scrap.url || '', // 출처 URL 저장
-          sourceScrapId: scrapId // 원본 스크랩 ID 저장 (나중에 연결 가능)
+          origin: {
+            postUrl: scrap.url || '', // 중복 검사를 위해 origin.postUrl로 저장
+            sourceScrapId: scrapId // 원본 스크랩 ID 저장 (나중에 연결 가능)
+          },
+          sourceScrapId: scrapId // 하위 호환성을 위해 유지
         };
         
         // background.js에 아이디어 추가 요청
@@ -776,7 +779,16 @@ function renderDetailView(scrapId, container) {
                 }
               }
             } else {
-              showConfirmationToast('❌ 아이디어 전환에 실패했습니다: ' + (response?.error || '알 수 없는 오류'), null);
+              // 중복 검사 실패 시 친절한 메시지 표시
+              if (response?.code === 'DUPLICATE_FOUND') {
+                const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
+                  : response.cardInfo?.status === 'in-progress' ? '작성 중'
+                  : response.cardInfo?.status === 'done' ? '발행 완료'
+                  : response.cardInfo?.status || '알 수 없음';
+                showConfirmationToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`, null);
+              } else {
+                showConfirmationToast('❌ 아이디어 전환에 실패했습니다: ' + (response?.error || response?.message || '알 수 없는 오류'), null);
+              }
             }
           });
         });

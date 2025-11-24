@@ -4,6 +4,7 @@ import { getDb, CONSTANTS, cleanDataForFirebase } from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, set, update, remove } from './firebaseService.js';
 import { sendErrorToUI } from './analyticsService.js';
+import { Logger } from '../utils.js';
 
 let creating;
 
@@ -43,11 +44,40 @@ export function encodeUrlForFirebaseKey(url) {
 }
 
 export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
-  const db = getDb();
-  const updates = {};
-  if (originUrl) updates[`url_index/${CONSTANTS.USER_ID}/${encodeUrlForFirebaseKey(normalizeUrlForComparison(originUrl))}/origin/${cardId}`] = { status, cardId };
-  if (publishedUrl) updates[`url_index/${CONSTANTS.USER_ID}/${encodeUrlForFirebaseKey(normalizeUrlForComparison(publishedUrl))}/published/${cardId}`] = { status, cardId };
-  if (Object.keys(updates).length) await update(ref(db), updates);
+  // Firebase REST API는 다중 경로 업데이트를 지원하지 않으므로 각 경로를 개별적으로 업데이트
+  const updatePromises = [];
+  
+  if (originUrl) {
+    const normalizedUrl = normalizeUrlForComparison(originUrl);
+    if (normalizedUrl) {
+      const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
+      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/origin/${cardId}`;
+      updatePromises.push(
+        update(path, { status, cardId }).catch(error => {
+          Logger.warn(`[updateUrlIndex] origin URL 인덱스 업데이트 실패 (${path}):`, error);
+          return null; // 하나 실패해도 다른 업데이트는 계속
+        })
+      );
+    }
+  }
+  
+  if (publishedUrl) {
+    const normalizedUrl = normalizeUrlForComparison(publishedUrl);
+    if (normalizedUrl) {
+      const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
+      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/published/${cardId}`;
+      updatePromises.push(
+        update(path, { status, cardId }).catch(error => {
+          Logger.warn(`[updateUrlIndex] published URL 인덱스 업데이트 실패 (${path}):`, error);
+          return null; // 하나 실패해도 다른 업데이트는 계속
+        })
+      );
+    }
+  }
+  
+  if (updatePromises.length > 0) {
+    await Promise.all(updatePromises);
+  }
 }
 
 export async function checkDuplicateUrl(url) {
@@ -75,17 +105,51 @@ async function processRssItem(itemText, sourceId, channelType) {
   const pubDateMatch = itemText.match(/<(pubDate|published|updated)>(.*?)<\/\1>/);
   const timestamp = pubDateMatch ? new Date(pubDateMatch[2]).getTime() : Date.now();
 
+  // RSS 피드에서 태그 추출
+  const tags = [];
+  // <category> 태그 추출
+  const categoryMatches = itemText.matchAll(/<category[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/category>/gi);
+  for (const match of categoryMatches) {
+    if (match[1]) {
+      const tag = match[1].trim();
+      if (tag && !tags.includes(tag)) tags.push(tag);
+    }
+  }
+  // <dc:subject> 태그 추출 (Dublin Core)
+  const subjectMatches = itemText.matchAll(/<dc:subject[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/dc:subject>/gi);
+  for (const match of subjectMatches) {
+    if (match[1]) {
+      const tag = match[1].trim();
+      if (tag && !tags.includes(tag)) tags.push(tag);
+    }
+  }
+  // <tag> 태그 추출
+  const tagMatches = itemText.matchAll(/<tag[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/tag>/gi);
+  for (const match of tagMatches) {
+    if (match[1]) {
+      const tag = match[1].trim();
+      if (tag && !tags.includes(tag)) tags.push(tag);
+    }
+  }
+
   const contentId = btoa(fullLink.split('?')[0]).replace(/=/g, '');
   const db = getDb();
   const path = `channel_content/${CONSTANTS.USER_ID}/blogs/${contentId}`;
 
   // 이미 존재하는지 확인 (가벼운 체크)
   const existSnap = await get(ref(db, path));
-  if (existSnap.exists()) return;
+  if (existSnap?.exists()) return;
 
   // 새 글이면 본문 파싱
   const parsed = await parseBlogPage(fullLink);
   if (!parsed.success) return;
+
+  // RSS 피드에서 태그를 찾지 못했으면 본문에서 추출 시도
+  let finalTags = tags.length > 0 ? tags : null;
+  if (!finalTags && parsed.cleanText) {
+    const extractedTags = await extractKeywords(parsed.cleanText);
+    finalTags = extractedTags && extractedTags.length > 0 ? extractedTags : null;
+  }
 
   const data = {
     title, fullLink, pubDate: timestamp,
@@ -94,6 +158,7 @@ async function processRssItem(itemText, sourceId, channelType) {
     cleanText: parsed.cleanText,
     sourceId, channelType,
     fetchedAt: Date.now(),
+    tags: finalTags,
     ...parsed.metrics
   };
 
@@ -101,13 +166,19 @@ async function processRssItem(itemText, sourceId, channelType) {
 }
 
 export async function fetchRssFeed(url, channelType) {
+  // URL 유효성 검사
+  if (!url || typeof url !== 'string' || url.trim() === '') {
+    Logger.warn(`[RSS] 유효하지 않은 URL: ${url}`);
+    return;
+  }
+  
   try {
     const db = getDb();
     const sourceId = btoa(url).replace(/=/g, '');
     const metaRef = ref(db, `channel_meta/${CONSTANTS.USER_ID}/${sourceId}`);
     
     const metaSnap = await get(metaRef);
-    const meta = metaSnap.val() || {};
+    const meta = metaSnap?.val() || {};
     const headers = {};
     if (meta.lastEtag) headers['If-None-Match'] = meta.lastEtag;
     
@@ -125,7 +196,9 @@ export async function fetchRssFeed(url, channelType) {
     const text = await res.text();
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
     await limitConcurrency(items.slice(0, 10), item => processRssItem(item, sourceId, channelType));
-  } catch (e) { console.error(`[RSS] ${url} Fail:`, e); }
+  } catch (e) { 
+    Logger.error(`[RSS] ${url || 'undefined'} Fail:`, e); 
+  }
 }
 
 // 3. 유튜브 수집
@@ -164,18 +237,157 @@ export async function fetchYoutubeChannel(channelId, channelType) {
   }
 }
 
+/**
+ * 블로그 URL을 RSS URL로 변환
+ */
+function resolveBlogUrlToRss(url) {
+  if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+    return null;
+  }
+  
+  try {
+    const urlObj = new URL(url);
+    const host = urlObj.hostname.toLowerCase();
+    const origin = urlObj.origin;
+    
+    // 플랫폼별 RSS 경로
+    if (host.includes('tistory.com')) {
+      return `${origin}/rss`;
+    } else if (host.includes('blog.naver.com')) {
+      const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+      if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+        return `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+      }
+      const blogId = new URLSearchParams(urlObj.search).get('blogId');
+      if (blogId) {
+        return `https://rss.blog.naver.com/${blogId}.xml`;
+      }
+      return `${origin}/rss`;
+    } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
+      return url.endsWith('/') ? `${url}feed` : `${url}/feed`;
+    } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
+      return `${origin}/feeds/posts/default?alt=rss`;
+    }
+    
+    // 기본값: /feed 또는 /rss 시도
+    return url.endsWith('/') ? `${url}feed` : `${url}/feed`;
+  } catch (e) {
+    Logger.warn('[resolveBlogUrlToRss] URL 파싱 실패:', url, e);
+    return null;
+  }
+}
+
 // 4. 전체 수집
 export async function fetchAllChannelData() {
+  Logger.info('[fetchAllChannelData] 채널 데이터 수집 시작');
+  
   const db = getDb();
   const snap = await get(ref(db, `channels/${CONSTANTS.USER_ID}`));
-  const channels = snap.val();
-  if (!channels) return;
+  const channels = snap?.val();
+  if (!channels) {
+    Logger.warn('[fetchAllChannelData] 채널 데이터가 없습니다.');
+    return;
+  }
+
+  Logger.info(`[fetchAllChannelData] 채널 데이터 발견: blogs=${channels.myChannels?.blogs?.length || 0}, youtubes=${channels.myChannels?.youtubes?.length || 0}`);
 
   const promises = [];
-  channels.myChannels?.blogs?.forEach(c => promises.push(fetchRssFeed(c.apiUrl, "myChannels")));
-  channels.myChannels?.youtubes?.forEach(c => promises.push(fetchYoutubeChannel(c.apiUrl, "myChannels")));
   
-  await Promise.all(promises);
+  // blogs 채널 처리
+  if (channels.myChannels?.blogs) {
+    channels.myChannels.blogs.forEach((c, index) => {
+      let rssUrl = null;
+      
+      // apiUrl이 있으면 사용
+      if (c.apiUrl && typeof c.apiUrl === 'string' && c.apiUrl.trim() !== '') {
+        rssUrl = c.apiUrl;
+        Logger.info(`[fetchAllChannelData] 블로그 ${index + 1}: apiUrl 사용 - ${rssUrl}`);
+      } 
+      // url이 있으면 RSS URL로 변환 시도
+      else if (c.url && typeof c.url === 'string' && c.url.trim() !== '') {
+        rssUrl = resolveBlogUrlToRss(c.url);
+        if (rssUrl) {
+          Logger.info(`[fetchAllChannelData] 블로그 ${index + 1}: URL 변환 성공 - ${c.url} -> ${rssUrl}`);
+        } else {
+          Logger.warn(`[fetchAllChannelData] 블로그 ${index + 1}: URL 변환 실패 - ${c.url}`);
+        }
+      } else {
+        Logger.warn(`[fetchAllChannelData] 블로그 ${index + 1}: apiUrl과 url이 모두 없음`, c);
+      }
+      
+      if (rssUrl) {
+        promises.push(fetchRssFeed(rssUrl, "myChannels").catch(err => {
+          Logger.error(`[fetchAllChannelData] RSS 피드 수집 실패 (${rssUrl}):`, err);
+          return null; // 하나 실패해도 다른 채널은 계속 수집
+        }));
+      }
+    });
+  }
+  
+  // YouTube 채널 처리 (apiUrl이 있는 경우만)
+  if (channels.myChannels?.youtubes) {
+    channels.myChannels.youtubes.forEach((c, index) => {
+      if (c.apiUrl && typeof c.apiUrl === 'string' && c.apiUrl.trim() !== '') {
+        Logger.info(`[fetchAllChannelData] YouTube ${index + 1}: ${c.apiUrl}`);
+        promises.push(fetchYoutubeChannel(c.apiUrl, "myChannels").catch(err => {
+          Logger.error(`[fetchAllChannelData] YouTube 채널 수집 실패 (${c.apiUrl}):`, err);
+          return null;
+        }));
+      } else {
+        Logger.warn(`[fetchAllChannelData] YouTube ${index + 1}: apiUrl이 없음`, c);
+      }
+    });
+  }
+  
+  // 경쟁 채널 처리 (competitors)
+  if (channels.myChannels?.blogs) {
+    channels.myChannels.blogs.forEach((c, index) => {
+      // 디버깅: 경쟁 채널 데이터 구조 확인
+      Logger.debug(`[fetchAllChannelData] 블로그 ${index + 1} 경쟁 채널 확인:`, {
+        hasCompetitors: !!c.competitors,
+        competitorsType: typeof c.competitors,
+        isArray: Array.isArray(c.competitors),
+        competitorsLength: c.competitors?.length,
+        competitors: c.competitors
+      });
+      
+      if (c.competitors && Array.isArray(c.competitors) && c.competitors.length > 0) {
+        Logger.info(`[fetchAllChannelData] 블로그 ${index + 1}의 경쟁 채널 ${c.competitors.length}개 수집 시작`);
+        c.competitors.forEach((compUrl, compIndex) => {
+          if (!compUrl || typeof compUrl !== 'string' || compUrl.trim() === '') {
+            Logger.warn(`[fetchAllChannelData] 경쟁 채널 ${compIndex + 1}: 유효하지 않은 URL - ${compUrl}`);
+            return;
+          }
+          
+          // 경쟁 채널 URL을 RSS URL로 변환
+          const rssUrl = resolveBlogUrlToRss(compUrl);
+          if (rssUrl) {
+            Logger.info(`[fetchAllChannelData] 경쟁 채널 ${compIndex + 1}: URL 변환 성공 - ${compUrl} -> ${rssUrl}`);
+            promises.push(fetchRssFeed(rssUrl, "competitorChannels").catch(err => {
+              Logger.error(`[fetchAllChannelData] 경쟁 채널 RSS 피드 수집 실패 (${rssUrl}):`, err);
+              return null; // 하나 실패해도 다른 채널은 계속 수집
+            }));
+          } else {
+            Logger.warn(`[fetchAllChannelData] 경쟁 채널 ${compIndex + 1}: URL 변환 실패 - ${compUrl}`);
+          }
+        });
+      } else {
+        Logger.debug(`[fetchAllChannelData] 블로그 ${index + 1}: 경쟁 채널이 없거나 유효하지 않음`);
+      }
+    });
+  }
+  
+  if (promises.length > 0) {
+    Logger.info(`[fetchAllChannelData] ${promises.length}개 채널 수집 시작`);
+    try {
+      await Promise.all(promises);
+      Logger.biz(`✅ [fetchAllChannelData] 모든 채널 데이터 수집 완료 (${promises.length}개)`);
+    } catch (error) {
+      Logger.error('[fetchAllChannelData] 수집 중 오류 발생:', error);
+    }
+  } else {
+    Logger.warn('[fetchAllChannelData] 수집할 채널이 없습니다.');
+  }
 }
 
 // 5. HTML 파싱 (오프스크린)
@@ -383,8 +595,56 @@ export async function refreshChannelData(sourceId, platform) {
 export async function extractKeywords(text) { 
   // 간단한 키워드 추출 (필요시 AI Service의 callGeminiAPI 사용)
   if (!text || text.length < 10) return [];
-  // 기본적으로 빈 배열 반환 (나중에 AI 기반 추출로 확장 가능)
-  return []; 
+  
+  try {
+    // 기본 키워드 추출: 제목과 본문에서 자주 나오는 명사 추출
+    // 1. 제목에서 키워드 추출 (첫 100자)
+    const titleText = text.substring(0, 100);
+    const titleKeywords = extractKeywordsFromText(titleText, 3);
+    
+    // 2. 본문에서 키워드 추출 (전체 텍스트)
+    const bodyKeywords = extractKeywordsFromText(text, 5);
+    
+    // 3. 중복 제거 및 병합
+    const allKeywords = [...new Set([...titleKeywords, ...bodyKeywords])];
+    
+    // 최대 10개까지만 반환
+    return allKeywords.slice(0, 10);
+  } catch (error) {
+    Logger.warn('[extractKeywords] 키워드 추출 실패:', error);
+    return [];
+  }
+}
+
+/**
+ * 텍스트에서 키워드 추출 (간단한 빈도 기반)
+ */
+function extractKeywordsFromText(text, maxCount = 5) {
+  if (!text || text.length < 10) return [];
+  
+  // 한글 단어 추출 (2글자 이상)
+  const koreanWords = text.match(/[가-힣]{2,}/g) || [];
+  
+  // 불용어 제거
+  const stopWords = ['것', '수', '등', '및', '또한', '그리고', '하지만', '그러나', '이것', '저것', 
+                     '때문', '위해', '통해', '대해', '관련', '이후', '이전', '이번', '다음', '이런',
+                     '그런', '저런', '이렇게', '그렇게', '저렇게', '이렇게', '그렇게', '저렇게'];
+  
+  // 단어 빈도 계산
+  const wordFreq = {};
+  koreanWords.forEach(word => {
+    if (word.length >= 2 && !stopWords.includes(word)) {
+      wordFreq[word] = (wordFreq[word] || 0) + 1;
+    }
+  });
+  
+  // 빈도순 정렬
+  const sortedWords = Object.entries(wordFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxCount)
+    .map(([word]) => word);
+  
+  return sortedWords;
 }
 export async function summarizeText(text) { 
   // 간단한 요약 로직 (필요시 AI Service의 callGeminiAPI 사용)

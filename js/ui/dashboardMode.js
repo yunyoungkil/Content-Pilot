@@ -809,31 +809,96 @@ async function updateDashboardUI(container) {
 
         // 활성 채널 찾기 (API URL 매칭 또는 ID 매칭)
         // cachedData.channels.myChannels.blogs 배열에서 찾음
+        const generateChannelId = (channel) => {
+            if (channel.id) return channel.id;
+            if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+            if (channel.url) return btoa(channel.url).replace(/=/g, "");
+            return null;
+        };
+        
         const myBlogs = cachedData.channels.myChannels?.blogs || [];
         const currentChannel = myBlogs.find(blog => {
-            const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
-            return id === activeChannelId;
+            const id = generateChannelId(blog);
+            return id && id === activeChannelId;
         });
 
         if (currentChannel) {
             // 헤더에 현재 채널명 표시
             const headerEl = myCol.querySelector('.dashboard-col-header h2');
             if (headerEl) {
-                headerEl.textContent = `🚀 ${currentChannel.inputUrl || '내 채널'}`;
+                headerEl.textContent = `🚀 ${currentChannel.inputUrl || currentChannel.url || '내 채널'}`;
             }
             
-            // 내 채널 이름 가져오기 (channel_meta에서 title 우선)
-            const sourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
+            // sourceId 생성: 실제 저장된 콘텐츠의 sourceId를 찾기
+            let sourceId = null;
+            
+            // 1. apiUrl이 있으면 직접 사용
+            if (currentChannel.apiUrl) {
+                sourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
+            } 
+            // 2. url만 있으면 RSS URL로 변환 후 시도
+            else if (currentChannel.url) {
+                // RSS URL 변환 (collectorService의 resolveBlogUrlToRss와 동일한 로직)
+                const urlObj = new URL(currentChannel.url);
+                const host = urlObj.hostname.toLowerCase();
+                let rssUrl = null;
+                
+                if (host.includes('tistory.com')) {
+                    rssUrl = `${urlObj.origin}/rss`;
+                } else if (host.includes('blog.naver.com')) {
+                    const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+                    if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+                        rssUrl = `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+                    } else {
+                        rssUrl = `${urlObj.origin}/rss`;
+                    }
+                } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
+                    rssUrl = currentChannel.url.endsWith('/') ? `${currentChannel.url}feed` : `${currentChannel.url}/feed`;
+                } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
+                    rssUrl = `${urlObj.origin}/feeds/posts/default?alt=rss`;
+                } else {
+                    // 기본값: /feed 추가
+                    rssUrl = currentChannel.url.endsWith('/') ? `${currentChannel.url}feed` : `${currentChannel.url}/feed`;
+                }
+                
+                // RSS URL을 base64 인코딩
+                sourceId = btoa(rssUrl).replace(/=/g, "");
+            }
+            
+            // 3. 실제 콘텐츠에서 sourceId 확인 (fallback)
+            if (sourceId && cachedData.content.length > 0) {
+                const foundItem = cachedData.content.find(item => item.sourceId === sourceId);
+                if (!foundItem && cachedData.content.length > 0) {
+                    // sourceId가 매칭되지 않으면, 실제 콘텐츠의 sourceId를 사용
+                    const actualSourceId = cachedData.content[0].sourceId;
+                    if (actualSourceId) {
+                        console.log(`[Dashboard] sourceId 매칭 실패, 실제 sourceId 사용: ${actualSourceId} (예상: ${sourceId})`);
+                        sourceId = actualSourceId;
+                    }
+                }
+            }
+            
+            if (!sourceId) {
+                console.error('[Dashboard] sourceId를 생성할 수 없습니다:', currentChannel);
+                contentListElement.innerHTML = `<p class="loading-placeholder">채널의 sourceId를 찾을 수 없습니다.<br>채널 설정을 확인해주세요.</p>`;
+                return;
+            }
+            
+            console.log(`[Dashboard] sourceId: ${sourceId}, 콘텐츠 개수: ${cachedData.content.length}`);
+            
             let channelName = null;
             if (cachedData.metas && cachedData.metas[sourceId] && cachedData.metas[sourceId].title) {
                 channelName = cachedData.metas[sourceId].title;
             } else {
-                channelName = currentChannel.inputUrl || currentChannel.apiUrl || '내 채널';
+                channelName = currentChannel.inputUrl || currentChannel.url || currentChannel.apiUrl || '내 채널';
             }
             
             // 데이터 렌더링 (trackedUrls 전달)
+            const filteredContent = cachedData.content.filter(item => item.sourceId === sourceId);
+            console.log(`[Dashboard] 필터링된 콘텐츠 개수: ${filteredContent.length}`);
             renderPaginatedContent(contentListElement, controlsContainer, sourceId, cachedData.content, 'myChannels', 'blog', channelName, trackedUrls);
         } else {
+            console.warn('[Dashboard] currentChannel을 찾을 수 없습니다. activeChannelId:', activeChannelId);
             contentListElement.innerHTML = `<p class="loading-placeholder">선택된 채널 데이터를 찾을 수 없습니다.<br>글로벌 채널 선택기를 확인해주세요.</p>`;
         }
     }
@@ -847,40 +912,80 @@ async function updateDashboardUI(container) {
         const contentListElement = compCol.querySelector('#competitorChannels-content-list');
         const controlsContainer = compCol.querySelector('#competitorChannels-controls-container');
         
+        const generateChannelId = (channel) => {
+            if (channel.id) return channel.id;
+            if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+            if (channel.url) return btoa(channel.url).replace(/=/g, "");
+            return null;
+        };
+        
         const myBlogs = cachedData.channels.myChannels?.blogs || [];
         const currentChannel = myBlogs.find(blog => {
-            const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
-            return id === activeChannelId;
+            const id = generateChannelId(blog);
+            return id && id === activeChannelId;
         });
 
         if (currentChannel && currentChannel.competitors && currentChannel.competitors.length > 0) {
             // 경쟁사들의 sourceId 목록 추출
-            const compSourceIds = currentChannel.competitors.map(c => btoa(c.apiUrl).replace(/=/g, ""));
-            
-            // [신규] 경쟁사 sourceId -> 이름 매핑 생성 (블로그 title 우선 사용)
+            // competitors는 URL 문자열 배열이므로, 각 URL을 RSS URL로 변환 후 base64 인코딩
+            const compSourceIds = [];
             const competitorMap = {};
-            currentChannel.competitors.forEach(comp => {
-                const sourceId = btoa(comp.apiUrl).replace(/=/g, "");
-                // 경쟁사 이름: channel_meta의 title 우선, 없으면 도메인 사용
-                let compName = null;
-                if (cachedData.metas && cachedData.metas[sourceId] && cachedData.metas[sourceId].title) {
-                    compName = cachedData.metas[sourceId].title;
-                } else {
-                    // title이 없으면 도메인 추출
-                    let urlStr = comp.inputUrl || comp.url || comp.apiUrl || '';
-                    try {
-                        if (urlStr && !urlStr.startsWith('http')) {
-                            urlStr = `https://${urlStr}`;
+            
+            currentChannel.competitors.forEach(compUrl => {
+                // compUrl은 문자열 (URL)
+                if (!compUrl || typeof compUrl !== 'string') return;
+                
+                // URL을 RSS URL로 변환 (collectorService의 resolveBlogUrlToRss와 동일한 로직)
+                let rssUrl = null;
+                try {
+                    const urlObj = new URL(compUrl.startsWith('http') ? compUrl : `https://${compUrl}`);
+                    const host = urlObj.hostname.toLowerCase();
+                    
+                    if (host.includes('tistory.com')) {
+                        rssUrl = `${urlObj.origin}/rss`;
+                    } else if (host.includes('blog.naver.com')) {
+                        const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+                        if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+                            rssUrl = `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+                        } else {
+                            rssUrl = `${urlObj.origin}/rss`;
                         }
-                        const urlObj = new URL(urlStr);
-                        compName = urlObj.hostname.replace('www.', '');
-                    } catch (e) {
-                        // URL 파싱 실패 시 원본 사용
-                        compName = urlStr;
+                    } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
+                        rssUrl = compUrl.endsWith('/') ? `${compUrl}feed` : `${compUrl}/feed`;
+                    } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
+                        rssUrl = `${urlObj.origin}/feeds/posts/default?alt=rss`;
+                    } else {
+                        // 기본값: /feed 추가
+                        rssUrl = compUrl.endsWith('/') ? `${compUrl}feed` : `${compUrl}/feed`;
                     }
+                } catch (e) {
+                    console.warn('[Dashboard] 경쟁 채널 URL 파싱 실패:', compUrl, e);
+                    // URL 파싱 실패 시 원본 URL 사용
+                    rssUrl = compUrl;
                 }
-                competitorMap[sourceId] = compName || '알 수 없는 경쟁사';
+                
+                if (rssUrl) {
+                    const sourceId = btoa(rssUrl).replace(/=/g, "");
+                    compSourceIds.push(sourceId);
+                    
+                    // 경쟁사 이름: channel_meta의 title 우선, 없으면 도메인 사용
+                    let compName = null;
+                    if (cachedData.metas && cachedData.metas[sourceId] && cachedData.metas[sourceId].title) {
+                        compName = cachedData.metas[sourceId].title;
+                    } else {
+                        // title이 없으면 도메인 추출
+                        try {
+                            const urlObj = new URL(compUrl.startsWith('http') ? compUrl : `https://${compUrl}`);
+                            compName = urlObj.hostname.replace('www.', '');
+                        } catch (e) {
+                            compName = compUrl;
+                        }
+                    }
+                    competitorMap[sourceId] = compName || '알 수 없는 경쟁사';
+                }
             });
+            
+            console.log(`[Dashboard] 경쟁 채널 sourceIds: ${compSourceIds.length}개`, compSourceIds);
             
             // [신규] 현재 활성화된 플랫폼 탭 확인
             const platformTabs = compCol.querySelectorAll('.platform-tab');
@@ -1469,7 +1574,16 @@ function addDashboardEventListeners(container) {
                         });
                     });
                 } else {
-                    alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
+                    // 중복 검사 실패 시 친절한 메시지 표시
+                    if (response?.code === 'DUPLICATE_FOUND') {
+                        const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
+                            : response.cardInfo?.status === 'in-progress' ? '작성 중'
+                            : response.cardInfo?.status === 'done' ? '발행 완료'
+                            : response.cardInfo?.status || '알 수 없음';
+                        showToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`, 'warning');
+                    } else {
+                        showToast('❌ 기획 보드 추가 실패: ' + (response?.error || response?.message || '알 수 없는 오류'), 'error');
+                    }
                 }
                 });
             })();
@@ -1719,10 +1833,17 @@ function handleUrlFetch(container) {
         }
         
         if (activeChannelId && cachedData && cachedData.channels) {
+            const generateChannelId = (channel) => {
+                if (channel.id) return channel.id;
+                if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+                if (channel.url) return btoa(channel.url).replace(/=/g, "");
+                return null;
+            };
+            
             const myBlogs = cachedData.channels.myChannels?.blogs || [];
             const currentChannel = myBlogs.find(blog => {
-                const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
-                return id === activeChannelId;
+                const id = generateChannelId(blog);
+                return id && id === activeChannelId;
             });
             
             if (currentChannel && currentChannel.apiUrl) {

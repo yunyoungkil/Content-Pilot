@@ -138,12 +138,23 @@ async function initGlobalChannelSelector(shadowRoot) {
       } else {
         // 채널 목록 추가
         let foundActive = false;
+        const generateChannelId = (channel) => {
+          if (channel.id) return channel.id;
+          if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
+          if (channel.url) return btoa(channel.url).replace(/=/g, "");
+          return null;
+        };
+        
         myBlogs.forEach(blog => {
           const option = document.createElement("option");
-          // ID가 없으면 API URL을 ID로 사용 (마이그레이션 호환)
-          const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : "");
+          // ID 생성 (id > apiUrl > url 순서)
+          const id = generateChannelId(blog);
+          if (!id) {
+            console.warn("[Header] 채널 ID를 생성할 수 없습니다:", blog);
+            return;
+          }
           option.value = id;
-          option.textContent = `📺 ${blog.inputUrl || blog.url}`;
+          option.textContent = `📺 ${blog.inputUrl || blog.url || blog.apiUrl || '알 수 없음'}`;
           selector.appendChild(option);
 
           if (id === activeChannelId) foundActive = true;
