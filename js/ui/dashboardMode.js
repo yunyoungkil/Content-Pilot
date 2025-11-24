@@ -336,7 +336,7 @@ async function renderAnalysisResult(container, analysisText, isMyChannelAnalysis
     }
 }
 
-function createContentCard(item, type, sourceName = null, trackedUrls = new Set()) {
+function createContentCard(item, type, sourceName = null, trackedUrls = new Map()) {
     if (!item || !item.title) return '';
     const isVideo = !!item.videoId;
     const link = isVideo ? `https://www.youtube.com/watch?v=${item.videoId}` : item.fullLink || item.link || '#';
@@ -352,23 +352,64 @@ function createContentCard(item, type, sourceName = null, trackedUrls = new Set(
     // [체크리스트 3] 버튼 조건부 렌더링: 이미 등록된 포스팅인지 확인
     const itemUrl = item.fullLink || item.link || '';
     const normalizedItemUrl = normalizeUrlForTracking(itemUrl);
-    const isTracked = normalizedItemUrl && trackedUrls.has(normalizedItemUrl);
+    const trackingInfo = normalizedItemUrl ? trackedUrls.get(normalizedItemUrl) : null;
+    const isTracked = !!trackingInfo;
     
-    // 추적 중 배지 HTML (card-channel-name 영역에 표시)
-    const statusBadgeHtml = isTracked ? `<div class="status-badge" style="
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        padding: 1px 4px;
-        background: #e8f5e9;
-        color: #2e7d32;
-        border-radius: 3px;
-        font-size: 10px;
-        font-weight: 500;
-        line-height: 1.2;
-        margin-left: auto;
-        height: 18px;
-    " title="이미 기획 보드에 있거나 성과 추적 중입니다">✅ 추적 중</div>` : '';
+    // 상태에 따라 다른 배지 표시
+    let statusBadgeHtml = '';
+    if (trackingInfo) {
+        const { status, hasPerformance, publishedUrl } = trackingInfo;
+        let badgeText = '';
+        let badgeColor = '';
+        let badgeBg = '';
+        let badgeTitle = '';
+        
+        if (status === 'ideas') {
+            badgeText = '📝 기획 중';
+            badgeColor = '#1976d2';
+            badgeBg = '#e3f2fd';
+            badgeTitle = '기획 보드에 등록되어 있습니다';
+        } else if (status === 'in-progress') {
+            badgeText = '✍️ 작성 중';
+            badgeColor = '#f57c00';
+            badgeBg = '#fff3e0';
+            badgeTitle = '작성 중인 아이디어입니다';
+        } else if (status === 'done') {
+            if (hasPerformance && publishedUrl) {
+                badgeText = '✅ 추적 중';
+                badgeColor = '#2e7d32';
+                badgeBg = '#e8f5e9';
+                badgeTitle = '발행 완료 및 성과 추적 중입니다';
+            } else if (publishedUrl) {
+                badgeText = '📤 발행 완료';
+                badgeColor = '#7b1fa2';
+                badgeBg = '#f3e5f5';
+                badgeTitle = '발행 완료되었습니다 (성과 추적 미설정)';
+            } else {
+                badgeText = '📤 발행 완료';
+                badgeColor = '#7b1fa2';
+                badgeBg = '#f3e5f5';
+                badgeTitle = '발행 완료되었습니다';
+            }
+        }
+        
+        if (badgeText) {
+            statusBadgeHtml = `<div class="status-badge" style="
+                display: inline-flex;
+                align-items: center;
+                gap: 2px;
+                padding: 1px 4px;
+                background: ${badgeBg};
+                color: ${badgeColor};
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: 500;
+                line-height: 1.2;
+                margin-left: auto;
+                height: 18px;
+            " title="${badgeTitle}">${badgeText}</div>`;
+        }
+    }
     
     // [신규] 채널 이름 표시 (제목 위에 표시) - 경쟁 채널은 클릭 가능, 추적 중 배지 포함
     const channelNameHtml = sourceName || isTracked ? `
@@ -504,7 +545,7 @@ function createContentCard(item, type, sourceName = null, trackedUrls = new Set(
 /**
  * 경쟁사 콘텐츠 통합 렌더링 (여러 경쟁사의 데이터를 합쳐서 필터링, 정렬, 페이징)
  */
-function renderCompetitorPaginatedContent(listContainer, controlsContainer, sourceIds, allContent, platform, competitorMap = null, trackedUrls = new Set()) {
+function renderCompetitorPaginatedContent(listContainer, controlsContainer, sourceIds, allContent, platform, competitorMap = null, trackedUrls = new Map()) {
     const type = 'competitorChannels';
     const state = viewState[type];
     const isVideo = platform === 'youtube';
@@ -658,7 +699,7 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
     }
 }
 
-function renderPaginatedContent(listContainer, controlsContainer, sourceId, allContent, type, platform, channelName = null, trackedUrls = new Set()) {
+function renderPaginatedContent(listContainer, controlsContainer, sourceId, allContent, type, platform, channelName = null, trackedUrls = new Map()) {
     const state = viewState[type];
     const isVideo = platform === 'youtube';
     let filteredContent = allContent.filter(item => item.sourceId === sourceId && (isVideo ? !!item.videoId : !item.videoId));
@@ -761,8 +802,9 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
 async function updateDashboardUI(container) {
     if (!cachedData) return;
 
-    // [체크리스트 1] 추적 중인 URL 목록 확보
-    const trackedUrls = new Set();
+    // [체크리스트 1] 추적 중인 URL 목록 확보 (상태 정보 포함)
+    // Map<normalizedUrl, { status, hasPerformance, publishedUrl }>
+    const trackedUrls = new Map();
     try {
         const kanbanResponse = await new Promise((resolve) => {
             chrome.runtime.sendMessage({ action: 'get_all_kanban_data' }, (response) => {
@@ -780,12 +822,30 @@ async function updateDashboardUI(container) {
                     // origin.postUrl: 리뉴얼 원본 URL
                     if (cardData.origin?.postUrl) {
                         const normalizedUrl = normalizeUrlForTracking(cardData.origin.postUrl);
-                        if (normalizedUrl) trackedUrls.add(normalizedUrl);
+                        if (normalizedUrl) {
+                            const hasPerformance = !!(cardData.publishedUrl && cardData.performance);
+                            trackedUrls.set(normalizedUrl, {
+                                status: status,
+                                hasPerformance: hasPerformance,
+                                publishedUrl: cardData.publishedUrl || null
+                            });
+                        }
                     }
-                    // publishedUrl: 발행 완료된 URL
+                    // publishedUrl: 발행 완료된 URL (origin.postUrl과 다를 수 있음)
                     if (cardData.publishedUrl) {
                         const normalizedUrl = normalizeUrlForTracking(cardData.publishedUrl);
-                        if (normalizedUrl) trackedUrls.add(normalizedUrl);
+                        if (normalizedUrl) {
+                            const hasPerformance = !!cardData.performance;
+                            // publishedUrl이 이미 있으면 업데이트, 없으면 추가
+                            const existing = trackedUrls.get(normalizedUrl);
+                            if (!existing || status === 'done') {
+                                trackedUrls.set(normalizedUrl, {
+                                    status: status,
+                                    hasPerformance: hasPerformance,
+                                    publishedUrl: cardData.publishedUrl
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -1165,13 +1225,8 @@ function addDashboardEventListeners(container) {
         }
     });
 
-    // [Phase 2] URL 추가 버튼 클릭 이벤트
-    const addUrlBtn = container.querySelector('#add-url-btn');
-    if (addUrlBtn) {
-        addUrlBtn.addEventListener('click', () => {
-            showUrlAddModal(container);
-        });
-    }
+    // [Phase 2] URL 추가 버튼 클릭 이벤트 (이벤트 위임 사용)
+    // 버튼이 동적으로 생성될 수 있으므로 이벤트 위임 사용
 
     // [신규] RSS/채널 데이터 새로고침 버튼 이벤트
     const refreshMyChannelsBtn = container.querySelector('#refresh-my-channels-btn');
@@ -1241,6 +1296,14 @@ function addDashboardEventListeners(container) {
 
     container.addEventListener('click', e => {
         const target = e.target;
+        
+        // URL 추가 버튼 클릭
+        if (target.id === 'add-url-btn' || target.closest('#add-url-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            showUrlAddModal(container);
+            return;
+        }
         
         // URL 추가 모달 닫기
         if (target.classList.contains('url-modal-close') || target.classList.contains('url-modal-backdrop')) {
@@ -1465,7 +1528,7 @@ function addDashboardEventListeners(container) {
                                 }
                             }
                             
-                            // 상태 배지 추가
+                            // 상태 배지 추가 (아이디어 추가 직후이므로 "기획 중"으로 표시)
                             if (channelNameDiv) {
                                 const statusBadge = document.createElement('div');
                                 statusBadge.className = 'status-badge';
@@ -1474,8 +1537,8 @@ function addDashboardEventListeners(container) {
                                     align-items: center;
                                     gap: 2px;
                                     padding: 1px 4px;
-                                    background: #e8f5e9;
-                                    color: #2e7d32;
+                                    background: #e3f2fd;
+                                    color: #1976d2;
                                     border-radius: 3px;
                                     font-size: 10px;
                                     font-weight: 500;
@@ -1483,8 +1546,8 @@ function addDashboardEventListeners(container) {
                                     margin-left: auto;
                                     height: 18px;
                                 `;
-                                statusBadge.textContent = '✅ 추적 중';
-                                statusBadge.title = '이미 기획 보드에 있거나 성과 추적 중입니다';
+                                statusBadge.textContent = '📝 기획 중';
+                                statusBadge.title = '기획 보드에 등록되어 있습니다';
                                 channelNameDiv.appendChild(statusBadge);
                             }
                         }
@@ -1495,7 +1558,16 @@ function addDashboardEventListeners(container) {
                             updateDashboardUI(container);
                         }, 300);
                     } else {
-                        alert('기획 보드 추가 실패: ' + (response?.error || '알 수 없는 오류'));
+                        // 중복 검사 실패 시 친절한 메시지 표시
+                        if (response?.code === 'DUPLICATE_FOUND') {
+                            const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
+                                : response.cardInfo?.status === 'in-progress' ? '작성 중'
+                                : response.cardInfo?.status === 'done' ? '발행 완료'
+                                : response.cardInfo?.status || '알 수 없음';
+                            showToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`, 'warning');
+                        } else {
+                            showToast(`❌ 기획 보드 추가 실패: ${response?.error || response?.message || '알 수 없는 오류'}`, 'error');
+                        }
                     }
                 });
             });
@@ -1777,12 +1849,20 @@ function showUrlAddModal(container) {
  */
 function handleUrlFetch(container) {
     const modal = container.querySelector('#url-add-modal');
-    if (!modal) return; // 모달이 없으면 종료
+    if (!modal) {
+        console.error('[Dashboard] URL 추가 모달을 찾을 수 없습니다.');
+        return; // 모달이 없으면 종료
+    }
     
-    const urlInput = container.querySelector('#url-input');
-    const fetchBtn = container.querySelector('#url-fetch-btn');
-    const previewArea = container.querySelector('#url-preview-area');
-    const errorArea = container.querySelector('#url-error-area');
+    const urlInput = modal.querySelector('#url-input');
+    const fetchBtn = modal.querySelector('#url-fetch-btn');
+    const previewArea = modal.querySelector('#url-preview-area');
+    const errorArea = modal.querySelector('#url-error-area');
+    
+    if (!urlInput || !fetchBtn || !previewArea || !errorArea) {
+        console.error('[Dashboard] URL 추가 모달의 필수 요소를 찾을 수 없습니다.', { urlInput, fetchBtn, previewArea, errorArea });
+        return;
+    }
     
     // [피해야 할 동작 방지 1] 중복 요청 방지: 이미 진행 중인 요청이 있으면 차단
     if (fetchBtn.disabled || modal.dataset.fetching === 'true') {

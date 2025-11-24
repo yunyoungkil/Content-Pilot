@@ -212,11 +212,14 @@ export function showConfirmationToast(message, onConfirm) {
     transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   `;
 
+  // onConfirm이 있으면 확인 버튼 표시, 없으면 단순 알림으로 취소 버튼만 표시
+  const hasConfirmAction = onConfirm && typeof onConfirm === 'function';
+  
   toast.innerHTML = `
     <span>${message}</span>
     <div class="cp-confirm-actions" style="display: flex; gap: 8px;">
-      <button id="cp-confirm-yes" style="background: #4285F4; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 600;">삭제</button>
-      <button id="cp-confirm-no" style="background: #5f6368; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">취소</button>
+      ${hasConfirmAction ? '<button id="cp-confirm-yes" style="background: #4285F4; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 600;">확인</button>' : ''}
+      <button id="cp-confirm-no" style="background: #5f6368; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">${hasConfirmAction ? '취소' : '닫기'}</button>
     </div>
   `;
 
@@ -234,10 +237,20 @@ export function showConfirmationToast(message, onConfirm) {
     setTimeout(() => toast.remove(), 400);
   };
 
-  toast.querySelector('#cp-confirm-yes').onclick = () => {
-    onConfirm(); // "삭제" 버튼 클릭 시 전달받은 함수 실행
-    closeToast();
-  };
+  // 확인 버튼이 있는 경우에만 이벤트 리스너 추가
+  if (hasConfirmAction) {
+    const confirmBtn = toast.querySelector('#cp-confirm-yes');
+    if (confirmBtn) {
+      confirmBtn.onclick = () => {
+        onConfirm(); // 확인 버튼 클릭 시 전달받은 함수 실행
+        closeToast();
+      };
+    }
+  }
 
-  toast.querySelector('#cp-confirm-no').onclick = closeToast;
+  // 취소/닫기 버튼
+  const cancelBtn = toast.querySelector('#cp-confirm-no');
+  if (cancelBtn) {
+    cancelBtn.onclick = closeToast;
+  }
 }

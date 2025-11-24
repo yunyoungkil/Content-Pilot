@@ -10,22 +10,31 @@ import { Logger } from '../utils.js';
 // 1. Gemini API 호출 (Core)
 export async function callGeminiAPI(prompt) {
   const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
-  if (!geminiApiKey) throw new Error("Gemini API 키가 없습니다.");
+  if (!geminiApiKey) {
+    Logger.error("[callGeminiAPI] Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.");
+    throw new Error("Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.");
+  }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
   
   try {
+    Logger.debug(`[callGeminiAPI] API 호출 시작 - prompt 길이: ${prompt.length}`);
     const response = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || "API Error");
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!response.ok) {
+      Logger.error(`[callGeminiAPI] API 오류 (${response.status}):`, data);
+      throw new Error(data.error?.message || `API Error (${response.status})`);
+    }
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    Logger.debug(`[callGeminiAPI] API 호출 성공 - 응답 길이: ${result.length}`);
+    return result;
   } catch (e) {
-    console.error("Gemini API 호출 실패:", e);
-    return `오류: ${e.message}`;
+    Logger.error("[callGeminiAPI] Gemini API 호출 실패:", e);
+    throw e; // 에러를 다시 throw하여 상위에서 처리할 수 있도록
   }
 }
 
@@ -256,20 +265,273 @@ ${performanceInfo ? `${performanceInfo}\n` : ''}${feedback ? `독자 선호 패�
 
 // 6. 아이디어 브리핑
 export async function generateIdeaBriefing(cardId, title, description, options = {}) {
-  const { onProgress } = options;
+  const { onProgress, status = 'ideas' } = options; // status 옵션 추가
   const userId = CONSTANTS.USER_ID;
   const updates = {};
 
-  if (options.generateOutline) {
-    const res = await callGeminiAPI(`"${title}" 주제의 블로그 목차 5개를 JSON 배열로 줘.`);
-    try { updates.outline = JSON.parse(res.match(/\[.*\]/s)[0]); } catch(e) {}
-    if (onProgress) onProgress(30);
-  }
-  
-  // ... (키워드 생성 등 추가 로직)
+  try {
+    Logger.info(`[generateIdeaBriefing] 시작 - cardId: ${cardId}, title: ${title}, status: ${status}`);
 
-  if (Object.keys(updates).length > 0) {
-    await update(ref(getDb(), `kanban/${userId}/ideas/${cardId}`), updates);
+    if (options.generateOutline) {
+      Logger.debug(`[generateIdeaBriefing] 목차 생성 시작`);
+      const prompt = `"${title}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
+      let res;
+      try {
+        res = await callGeminiAPI(prompt);
+        Logger.debug(`[generateIdeaBriefing] Gemini API 응답: ${res.substring(0, 200)}...`);
+      } catch (apiError) {
+        Logger.error(`[generateIdeaBriefing] Gemini API 호출 실패:`, apiError);
+        // API 호출 실패 시 목차 생성을 건너뛰고 계속 진행
+        if (apiError.message.includes("Gemini API 키가 없습니다")) {
+          Logger.warn(`[generateIdeaBriefing] Gemini API 키가 설정되지 않아 목차 생성을 건너뜁니다.`);
+        }
+        res = null;
+      }
+      
+      if (res && !res.startsWith("오류:")) {
+        try {
+          // JSON 배열 추출 시도 (여러 방법)
+          let outlineArray = null;
+          
+          // 방법 1: 직접 JSON 파싱 시도
+          try {
+            outlineArray = JSON.parse(res.trim());
+          } catch (e1) {
+            // 방법 2: 배열 부분만 추출
+            const arrayMatch = res.match(/\[[\s\S]*?\]/);
+            if (arrayMatch) {
+              outlineArray = JSON.parse(arrayMatch[0]);
+            } else {
+              // 방법 3: 마크다운 코드 블록에서 추출
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+              if (codeBlockMatch) {
+                outlineArray = JSON.parse(codeBlockMatch[1]);
+              }
+            }
+          }
+          
+          // 배열인지 확인하고 문자열 배열로 변환
+          if (Array.isArray(outlineArray)) {
+            updates.outline = outlineArray.map(item => {
+              // 객체인 경우 문자열로 변환
+              if (typeof item === 'object' && item !== null) {
+                return item.title || item.text || item.name || String(item);
+              }
+              return String(item);
+            }).filter(item => item && item.trim().length > 0);
+            Logger.info(`[generateIdeaBriefing] 목차 생성 성공: ${updates.outline.length}개 항목`, updates.outline);
+          } else {
+            Logger.warn(`[generateIdeaBriefing] 목차 파싱 실패: 배열이 아님 - ${typeof outlineArray}`, outlineArray);
+          }
+        } catch (parseError) {
+          Logger.error(`[generateIdeaBriefing] 목차 파싱 오류:`, parseError);
+          Logger.debug(`[generateIdeaBriefing] 원본 응답: ${res}`);
+        }
+      } else {
+        Logger.warn(`[generateIdeaBriefing] 목차 생성 실패 - 응답: ${res || 'null'}`);
+      }
+      
+      if (onProgress) onProgress(30);
+    }
+    
+    // 주요 키워드 생성
+    if (options.generateMainKeywords) {
+      Logger.debug(`[generateIdeaBriefing] 주요 키워드 생성 시작`);
+      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
+      let res;
+      try {
+        res = await callGeminiAPI(prompt);
+        Logger.debug(`[generateIdeaBriefing] 주요 키워드 API 응답: ${res.substring(0, 200)}...`);
+      } catch (apiError) {
+        Logger.error(`[generateIdeaBriefing] 주요 키워드 API 호출 실패:`, apiError);
+        res = null;
+      }
+      
+      if (res && !res.startsWith("오류:")) {
+        try {
+          let keywordsArray = null;
+          try {
+            keywordsArray = JSON.parse(res.trim());
+          } catch (e1) {
+            const arrayMatch = res.match(/\[[\s\S]*?\]/);
+            if (arrayMatch) {
+              keywordsArray = JSON.parse(arrayMatch[0]);
+            } else {
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+              if (codeBlockMatch) {
+                keywordsArray = JSON.parse(codeBlockMatch[1]);
+              }
+            }
+          }
+          
+          if (Array.isArray(keywordsArray)) {
+            updates.mainKeywords = keywordsArray.map(item => {
+              if (typeof item === 'object' && item !== null) {
+                return item.keyword || item.text || item.name || String(item);
+              }
+              return String(item);
+            }).filter(item => item && item.trim().length > 0).slice(0, 5);
+            Logger.info(`[generateIdeaBriefing] 주요 키워드 생성 성공: ${updates.mainKeywords.length}개`, updates.mainKeywords);
+          } else {
+            Logger.warn(`[generateIdeaBriefing] 주요 키워드 파싱 실패: 배열이 아님`);
+          }
+        } catch (parseError) {
+          Logger.error(`[generateIdeaBriefing] 주요 키워드 파싱 오류:`, parseError);
+        }
+      }
+      
+      if (onProgress) onProgress(50);
+    }
+    
+    // 롱테일 키워드 생성
+    if (options.generateLongTail) {
+      Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작`);
+      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
+      let res;
+      try {
+        res = await callGeminiAPI(prompt);
+        Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 API 응답: ${res.substring(0, 200)}...`);
+      } catch (apiError) {
+        Logger.error(`[generateIdeaBriefing] 롱테일 키워드 API 호출 실패:`, apiError);
+        res = null;
+      }
+      
+      if (res && !res.startsWith("오류:")) {
+        try {
+          let longTailArray = null;
+          try {
+            longTailArray = JSON.parse(res.trim());
+          } catch (e1) {
+            const arrayMatch = res.match(/\[[\s\S]*?\]/);
+            if (arrayMatch) {
+              longTailArray = JSON.parse(arrayMatch[0]);
+            } else {
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+              if (codeBlockMatch) {
+                longTailArray = JSON.parse(codeBlockMatch[1]);
+              }
+            }
+          }
+          
+          if (Array.isArray(longTailArray)) {
+            updates.longTailKeywords = longTailArray.map(item => {
+              if (typeof item === 'object' && item !== null) {
+                return item.keyword || item.text || item.name || String(item);
+              }
+              return String(item);
+            }).filter(item => item && item.trim().length > 0).slice(0, 5);
+            Logger.info(`[generateIdeaBriefing] 롱테일 키워드 생성 성공: ${updates.longTailKeywords.length}개`, updates.longTailKeywords);
+          } else {
+            Logger.warn(`[generateIdeaBriefing] 롱테일 키워드 파싱 실패: 배열이 아님`);
+          }
+        } catch (parseError) {
+          Logger.error(`[generateIdeaBriefing] 롱테일 키워드 파싱 오류:`, parseError);
+        }
+      }
+      
+      if (onProgress) onProgress(70);
+    }
+    
+    // 일반 키워드/추천 검색어 생성
+    if (options.generateKeywords) {
+      Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작`);
+      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
+      let res;
+      try {
+        res = await callGeminiAPI(prompt);
+        Logger.debug(`[generateIdeaBriefing] 추천 검색어 API 응답: ${res.substring(0, 200)}...`);
+      } catch (apiError) {
+        Logger.error(`[generateIdeaBriefing] 추천 검색어 API 호출 실패:`, apiError);
+        res = null;
+      }
+      
+      if (res && !res.startsWith("오류:")) {
+        try {
+          let keywordsArray = null;
+          try {
+            keywordsArray = JSON.parse(res.trim());
+          } catch (e1) {
+            const arrayMatch = res.match(/\[[\s\S]*?\]/);
+            if (arrayMatch) {
+              keywordsArray = JSON.parse(arrayMatch[0]);
+            } else {
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+              if (codeBlockMatch) {
+                keywordsArray = JSON.parse(codeBlockMatch[1]);
+              }
+            }
+          }
+          
+          if (Array.isArray(keywordsArray)) {
+            // # 제거하고 태그 배열로 변환
+            updates.tags = keywordsArray.map(item => {
+              let keyword = typeof item === 'object' && item !== null
+                ? (item.keyword || item.text || item.name || String(item))
+                : String(item);
+              // # 제거
+              keyword = keyword.replace(/^#+/, '').trim();
+              return keyword;
+            }).filter(item => item && item.trim().length > 0).slice(0, 10);
+            Logger.info(`[generateIdeaBriefing] 추천 검색어 생성 성공: ${updates.tags.length}개`, updates.tags);
+          } else {
+            Logger.warn(`[generateIdeaBriefing] 추천 검색어 파싱 실패: 배열이 아님`);
+          }
+        } catch (parseError) {
+          Logger.error(`[generateIdeaBriefing] 추천 검색어 파싱 오류:`, parseError);
+        }
+      }
+      
+      if (onProgress) onProgress(90);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      const updatePath = `kanban/${userId}/${status}/${cardId}`;
+      Logger.debug(`[generateIdeaBriefing] Firebase 업데이트 시작 - path: ${updatePath}, updates:`, updates);
+      await update(ref(getDb(), updatePath), cleanDataForFirebase(updates));
+      Logger.biz(`✅ [generateIdeaBriefing] 브리핑 생성 완료 - cardId: ${cardId}, status: ${status}, 업데이트 항목: ${Object.keys(updates).join(', ')}`);
+      
+      // REST API 모드에서는 실시간 리스너가 작동하지 않으므로, UI 갱신을 위해 최신 데이터를 가져와서 메시지 전송
+      try {
+        const kanbanRef = ref(getDb(), `kanban/${userId}`);
+        const kanbanSnap = await get(kanbanRef);
+        const kanbanData = kanbanSnap?.val() || {};
+        
+        // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송 (chrome.runtime.sendMessage)
+        chrome.runtime.sendMessage({
+          action: "kanban_data_updated",
+          data: kanbanData
+        }).catch((err) => {
+          // 확장 프로그램 UI가 닫혔을 수 있음 (정상적인 상황)
+          if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+            Logger.debug(`[generateIdeaBriefing] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
+          }
+        });
+        
+        // 2. 웹페이지 탭의 content script에도 메시지 전송 (chrome.tabs.sendMessage)
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: "kanban_data_updated",
+                data: kanbanData
+              }).catch((err) => {
+                // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+                // 조용히 무시
+              });
+            }
+          });
+        });
+        Logger.debug(`[generateIdeaBriefing] UI 갱신 메시지 전송 완료`);
+      } catch (updateError) {
+        Logger.warn(`[generateIdeaBriefing] UI 갱신 메시지 전송 실패:`, updateError);
+        // UI 갱신 실패해도 브리핑 생성은 성공으로 처리
+      }
+    } else {
+      Logger.warn(`[generateIdeaBriefing] 업데이트할 데이터 없음 - 모든 생성 옵션이 실패했거나 비활성화됨`);
+    }
+  } catch (error) {
+    Logger.error(`[generateIdeaBriefing] 전체 오류:`, error);
+    throw error;
   }
 }
 

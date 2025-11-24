@@ -134,6 +134,8 @@ function addRealtimeUpdateListener() {
                 linkedScraps: {} 
               } 
             };
+            // 전역 ideaData 업데이트 (실시간 업데이트를 위해)
+            window.__cp_workspace_idea_data = ideaDataForWorkspace;
             // ▲▲▲ [수정 완료] ▲▲▲
             renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
           }
@@ -283,6 +285,14 @@ function createKanbanCard(id, data, status) {
   if (hasOutline) {
     topTagsHtml += `<span class="kanban-card-tag outline-tag">📄 목차</span>`;
   }
+  // 주요 키워드 표시
+  if (data.mainKeywords && Array.isArray(data.mainKeywords) && data.mainKeywords.length > 0) {
+    topTagsHtml += data.mainKeywords
+      .map((keyword) => {
+        return `<span class="kanban-card-tag main-keyword-tag">🔑 ${keyword}</span>`;
+      })
+      .join("");
+  }
   if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
     topTagsHtml += data.tags
       .map((tag) => {
@@ -379,8 +389,20 @@ function createKanbanCard(id, data, status) {
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }
-  // K-1: draftContent가 있으면 초안 완료 표시
-  if (data.draftContent) {
+  // K-1: draftContent 또는 workspace.draft가 있으면 초안 완료 표시
+  // null, 빈 문자열, 빈 객체는 제외
+  const hasDraftContent = data.draftContent && 
+    data.draftContent !== null && 
+    data.draftContent !== "" && 
+    data.draftContent !== "<p><br></p>" && 
+    data.draftContent !== "<p></p>";
+  const hasWorkspaceDraft = data.workspace?.draft && 
+    data.workspace.draft !== null && 
+    data.workspace.draft !== "" && 
+    data.workspace.draft !== "<p><br></p>" && 
+    data.workspace.draft !== "<p></p>";
+  
+  if (hasDraftContent || hasWorkspaceDraft) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
   }
 
@@ -535,8 +557,10 @@ function createKanbanCard(id, data, status) {
   let actionButtons = ``;
   // 컨텍스트 메뉴 버튼 추가 (모든 상태에서)
   actionButtons += `<button class="card-context-menu-btn" title="더보기" data-card-id="${id}">⋯</button>`;
-  // 모든 상태에서 삭제 버튼 추가
-  actionButtons += `<button class="delete-card-btn" title="카드 삭제" data-card-id="${id}">🗑️</button>`;
+  // 삭제 버튼은 "ideas" 단계에서만 표시
+  if (status === "ideas") {
+    actionButtons += `<button class="delete-card-btn" title="카드 삭제" data-card-id="${id}">🗑️</button>`;
+  }
   
   if (status === "done") {
     if (!data.publishedUrl) {
@@ -652,6 +676,14 @@ function addKanbanEventListeners(container) {
           if (response && response.success) {
             showToast("✅ 카드가 삭제되었습니다.");
             
+            // 로컬 데이터에서 카드 제거
+            if (allKanbanData[status] && allKanbanData[status][cardId]) {
+              delete allKanbanData[status][cardId];
+            }
+            
+            // UI 즉시 업데이트
+            updateKanbanUI(allKanbanData);
+            
             // ▼▼▼ [수정] 대시보드의 addedIdeas에서도 제거 ▼▼▼
             // 모든 캐시 키를 확인하여 해당 firebaseKey를 가진 아이디어 제거
             chrome.storage.local.get(null, (allStorage) => {
@@ -715,6 +747,8 @@ function addKanbanEventListeners(container) {
             linkedScraps: {} 
           } 
         };
+        // 전역 ideaData 업데이트 (실시간 업데이트를 위해)
+        window.__cp_workspace_idea_data = ideaDataForWorkspace;
         // ▲▲▲ [수정 완료] ▲▲▲
 
         renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달

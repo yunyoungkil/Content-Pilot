@@ -540,13 +540,21 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     }
   };
 
-  document.getElementById("tm-bg-mode-ai").onclick = () => toggleTabs('ai');
-  document.getElementById("tm-bg-mode-upload").onclick = () => toggleTabs('upload');
+  const bgModeAi = document.getElementById("tm-bg-mode-ai");
+  if (bgModeAi) bgModeAi.onclick = () => toggleTabs('ai');
+  
+  const bgModeUpload = document.getElementById("tm-bg-mode-upload");
+  if (bgModeUpload) bgModeUpload.onclick = () => toggleTabs('upload');
 
   // [신규] 파일 업로드 처리
-  document.getElementById("tm-upload-btn").onclick = () => document.getElementById("tm-file-input").click();
+  const uploadBtn = document.getElementById("tm-upload-btn");
+  if (uploadBtn) uploadBtn.onclick = () => {
+    const fileInput = document.getElementById("tm-file-input");
+    if (fileInput) fileInput.click();
+  };
 
-  document.getElementById("tm-file-input").addEventListener("change", async (e) => {
+  const fileInput = document.getElementById("tm-file-input");
+  if (fileInput) fileInput.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -593,9 +601,11 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   });
 
   // [핵심] 배경 생성 버튼 클릭 (스타일 반영)
-  document.getElementById("tm-gen-bg").onclick = async () => {
+  const genBgBtn = document.getElementById("tm-gen-bg");
+  if (genBgBtn) genBgBtn.onclick = async () => {
     const btn = document.getElementById("tm-gen-bg");
     const loading = document.getElementById("tm-loading");
+    if (!btn || !loading) return;
     
     // UI 로딩 상태 전환
     btn.disabled = true;
@@ -661,14 +671,16 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   };
 
   // [신규] Undo/Redo 이벤트 리스너
-  document.getElementById("tm-undo").addEventListener("click", () => {
+  const undoBtn = document.getElementById("tm-undo");
+  if (undoBtn) undoBtn.addEventListener("click", () => {
     if (history.currentIndex > 0) {
       history.currentIndex--;
       restoreState(history.states[history.currentIndex]);
     }
   });
   
-  document.getElementById("tm-redo").addEventListener("click", () => {
+  const redoBtn = document.getElementById("tm-redo");
+  if (redoBtn) redoBtn.addEventListener("click", () => {
     if (history.currentIndex < history.states.length - 1) {
       history.currentIndex++;
       restoreState(history.states[history.currentIndex]);
@@ -680,10 +692,12 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     if (e.ctrlKey || e.metaKey) {
       if (e.key === "z" && !e.shiftKey) {
         e.preventDefault();
-        document.getElementById("tm-undo").click();
+        const undoBtn = document.getElementById("tm-undo");
+        if (undoBtn) undoBtn.click();
       } else if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
         e.preventDefault();
-        document.getElementById("tm-redo").click();
+        const redoBtn = document.getElementById("tm-redo");
+        if (redoBtn) redoBtn.click();
       }
     }
   });
@@ -694,29 +708,34 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     saveState();
   });
 
-  document.getElementById("tm-title").addEventListener("input", () => {
+  const titleInput = document.getElementById("tm-title");
+  if (titleInput) titleInput.addEventListener("input", () => {
     updatePreview();
     saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)
   });
   
-  document.getElementById("tm-subtitle")?.addEventListener("input", () => {
+  const subtitleInput = document.getElementById("tm-subtitle");
+  if (subtitleInput) subtitleInput.addEventListener("input", () => {
     updatePreview();
     saveState();
   });
   
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
-  document.getElementById("tm-font-family").addEventListener("change", () => {
+  const fontFamilySelect = document.getElementById("tm-font-family");
+  if (fontFamilySelect) fontFamilySelect.addEventListener("change", () => {
     updatePreview();
     saveState();
   });
   
-  document.getElementById("tm-text-color").addEventListener("change", () => {
+  const textColorInput = document.getElementById("tm-text-color");
+  if (textColorInput) textColorInput.addEventListener("change", () => {
     updatePreview();
     saveState();
   });
   
   // [신규] 비율 변경 이벤트 - 상태 저장 포함
-  document.getElementById("tm-ratio").addEventListener("change", (e) => {
+  const ratioSelect = document.getElementById("tm-ratio");
+  if (ratioSelect) ratioSelect.addEventListener("change", (e) => {
     const [w, h] = e.target.value.split(":").map(Number);
     // 기준 높이 720px에 맞춰 너비 계산 (또는 고정 해상도 사용)
     if (w === 16 && h === 9) { 
@@ -741,7 +760,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const wrapper = document.getElementById("tm-canvas-wrapper");
   const overlay = document.getElementById("tm-drag-overlay");
   
-  wrapper.addEventListener("dragover", (e) => {
+  if (!wrapper || !overlay) {
+    console.warn("[ThumbnailMaker] 드래그 앤 드롭 요소를 찾을 수 없습니다.");
+  } else {
+    wrapper.addEventListener("dragover", (e) => {
     e.preventDefault();
     e.stopPropagation();
     wrapper.style.borderColor = "#6c5ce7"; // 보라색 강조
@@ -778,10 +800,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       showToast("❌ 이미지 파일만 드롭할 수 있습니다.");
     }
   });
+  }
 
   // 본문 삽입 버튼
-  document.getElementById("tm-insert").onclick = async () => {
+  const insertBtn = document.getElementById("tm-insert");
+  if (insertBtn) insertBtn.onclick = async () => {
     const btn = document.getElementById("tm-insert");
+    if (!btn) return;
     const originalText = btn.textContent;
     
     // 로딩 상태
@@ -844,7 +869,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   };
 
   // 정밀 편집 (TUI) 버튼 - 실제 기능 구현
-  document.getElementById("tm-edit-tui").onclick = () => {
+  const editTuiBtn = document.getElementById("tm-edit-tui");
+  if (editTuiBtn) editTuiBtn.onclick = () => {
     try {
       const dataUrl = canvas.toDataURL("image/png");
       console.log("[ThumbnailMaker] 정밀 편집 버튼 클릭, 이미지 데이터 준비");
@@ -871,7 +897,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   };
 
   // 닫기 버튼
-  document.getElementById("tm-close").onclick = () => modal.remove();
+  const closeBtn = document.getElementById("tm-close");
+  if (closeBtn) closeBtn.onclick = () => modal.remove();
 
   // 초기 1회 렌더링 (기본 배경 + 텍스트)
   updatePreview();

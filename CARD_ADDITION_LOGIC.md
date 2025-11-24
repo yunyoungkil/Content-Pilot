@@ -52,16 +52,35 @@
 **데이터 구조**:
 ```javascript
 {
-  title: string,                    // 콘텐츠 제목
-  description: string,               // 콘텐츠 설명
+  title: string,                    // 콘텐츠 제목 (접두사: [리뉴얼] 또는 [벤치마킹])
+  description: string,               // 콘텐츠 설명 (우선순위: cleanText > description > "")
   tags: Array,                       // 태그 배열
   origin: {
-    postUrl: string,                 // 원본 URL
-    sourceId: string,                 // 소스 ID
-    channelType: string              // 'myChannels' 또는 'competitorChannels'
+    type: string,                    // "my_post" 또는 "competitor_post"
+    channelName: string,             // 채널 이름
+    postUrl: string                  // 원본 URL (fullLink 또는 link)
   },
   channelId: string|null            // 활성 채널 ID
 }
+```
+
+**Description 필드 우선순위**:
+콘텐츠의 내용은 아이디어 카드의 `description` 필드로 변환되며, 다음과 같은 우선순위로 데이터를 가져옵니다:
+
+1. **1순위: `post.cleanText`**
+   - 수집된 원본 본문 텍스트 (HTML 태그가 제거된 순수 텍스트)
+   - 블로그 포스팅 등의 전체 내용을 담고 있을 가능성이 높음
+
+2. **2순위: `post.description`**
+   - RSS 피드나 메타데이터에서 제공하는 요약 설명
+   - `cleanText`가 없을 경우 사용
+
+3. **3순위: 빈 문자열 (`""`)**
+   - 위의 두 정보가 모두 없을 경우 빈 내용으로 저장
+
+**구현 코드** (`js/ui/dashboardMode.js:1417`):
+```javascript
+description: post.cleanText || post.description || "",
 ```
 
 ### 1.3 AI 아이디어 추가
@@ -81,7 +100,7 @@
 **위치**: `js/ui/scrapbookMode.js`
 
 **흐름**:
-1. 사용자가 스크랩 상세 보기에서 "아이디어로 변환" 버튼 클릭
+1. 사용자가 스크랩 상세 보기(Detail View)에서 "아이디어로 변환" 버튼 클릭
 2. 스크랩 데이터를 아이디어 형식으로 변환
 3. `chrome.runtime.sendMessage({ action: 'add_idea_to_kanban', ... })` 전송
 4. `background.js`의 `add_idea_to_kanban` 핸들러 처리
@@ -94,13 +113,61 @@
 **데이터 구조**:
 ```javascript
 {
-  title: string,                    // 스크랩 텍스트에서 추출한 제목
-  description: string,               // 스크랩 텍스트
+  title: string,                    // 스크랩 텍스트에서 추출한 제목 (최대 100자)
+  description: string,               // 스크랩 텍스트 전체
   keywords: Array,                   // 스크랩 태그 (스크랩-전환 제외)
-  sourceUrl: string,                 // 원본 스크랩 URL
-  sourceScrapId: string,             // 원본 스크랩 ID
-  tags: Array                        // ['#스크랩-전환'] 포함
+  origin: {
+    postUrl: string,                // 원본 스크랩 URL (중복 검사용)
+    sourceScrapId: string           // 원본 스크랩 ID
+  },
+  sourceScrapId: string             // 하위 호환성을 위해 유지
 }
+```
+
+**콘텐츠 변환 로직** (`js/ui/scrapbookMode.js:738-752`):
+
+1. **제목 (title)**:
+   - 스크랩 텍스트에서 공백을 정규화하고 앞부분 100자를 추출
+   - 제목이 없으면 "제목 없음" 사용
+   ```javascript
+   title: scrap.text ? scrap.text.replace(/\s+/g, ' ').trim().substring(0, 100) : '제목 없음'
+   ```
+
+2. **설명 (description)**:
+   - 스크랩의 전체 텍스트 본문이 아이디어의 상세 설명으로 들어감
+   - 사용자가 하이라이트한 핵심 내용이 그대로 기획의 바탕이 됨
+   ```javascript
+   description: scrap.text || ''
+   ```
+
+3. **태그 (tags/keywords)**:
+   - `#스크랩-전환` 태그가 자동으로 추가되어 해당 아이디어가 스크랩에서 유래했음을 명시
+   - 기존 스크랩 태그는 `keywords` 필드에 저장 (`#스크랩-전환` 제외)
+   ```javascript
+   keywords: ideaTags.filter(tag => tag !== '#스크랩-전환')
+   ```
+
+4. **출처 정보 (origin)**:
+   - `origin.postUrl`: 스크랩했던 원본 웹페이지 URL이 메타데이터로 보존 (중복 검사용)
+   - `origin.sourceScrapId`: 원본 스크랩의 ID가 연결되어 나중에 역으로 추적 가능
+   - `sourceScrapId`: 하위 호환성을 위해 루트 레벨에도 저장
+
+**구현 코드 예시**:
+```javascript
+const ideaTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim().substring(0, 100) : '제목 없음';
+const ideaDescription = scrap.text || '';
+const ideaTags = scrap.tags && Array.isArray(scrap.tags) ? [...scrap.tags, '#스크랩-전환'] : ['#스크랩-전환'];
+
+const ideaData = {
+  title: ideaTitle,
+  description: ideaDescription,
+  keywords: ideaTags.filter(tag => tag !== '#스크랩-전환'),
+  origin: {
+    postUrl: scrap.url || '',
+    sourceScrapId: scrapId
+  },
+  sourceScrapId: scrapId
+};
 ```
 
 ## 2. 백엔드 처리 (`background.js`)
@@ -261,4 +328,110 @@ if (msg.action === "scrap_element" && msg.data) {
 2. 모든 카드 추가 경로에 에러 처리 추가
 3. 제목 기반 중복 검사 추가
 4. 로딩 상태 표시 개선
+
+## 6. 칸반 카드 이동 로직
+
+### 6.1 프론트엔드 처리 (드래그 앤 드롭)
+**위치**: `js/ui/kanbanMode.js`
+
+**흐름**:
+1. 사용자가 카드를 드래그하여 다른 컬럼에 놓을 때 `drop` 이벤트 발생
+2. 이동 가능 여부를 검증 (Validation)
+3. 검증 통과 시 `chrome.runtime.sendMessage({ action: 'move_kanban_card', ... })` 전송
+4. `background.js`의 `move_kanban_card` 핸들러 처리
+
+**코드 위치**:
+- 드래그 시작: `js/ui/kanbanMode.js:650` (`dragstart` 이벤트)
+- 드롭 처리: `js/ui/kanbanMode.js:772` (`drop` 이벤트)
+- 백엔드 처리: `background.js:602` (`move_kanban_card`)
+
+**이동 제한 규칙 (Validation)**:
+1. **아이디어 → 진행 중** (`ideas` → `in-progress`/`done`):
+   - 조건: 초안(`draftContent`)이 없거나 연결된 자료가 없으면 이동 불가
+   - 메시지: "⚠️ 기획을 시작하려면 카드를 클릭하여 워크스페이스에서 초안을 생성하거나, 자료를 연결해야 합니다."
+   - 코드: `js/ui/kanbanMode.js:780-786`
+
+2. **진행 중 → 아이디어** (`in-progress` → `ideas`):
+   - 조건: 이미 초안(`draftContent`)이 작성된 카드는 '아이디어' 단계로 되돌릴 수 없음
+   - 메시지: "⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다. (초안 삭제 후 복귀 가능)"
+   - 코드: `js/ui/kanbanMode.js:787-793`
+
+**데이터 구조**:
+```javascript
+{
+  cardId: string,           // 이동할 카드 ID
+  originalStatus: string,   // 출발지 상태 ('ideas', 'in-progress', 'done')
+  newStatus: string         // 도착지 상태 ('ideas', 'in-progress', 'done')
+}
+```
+
+### 6.2 백엔드 처리 (`move_kanban_card` 핸들러)
+**위치**: `background.js:602`
+
+**처리 단계**:
+1. 메시지 데이터에서 `cardId`, `originalStatus`, `newStatus` 추출
+2. 원래 위치의 카드 데이터 읽기 (`get(originalRef)`)
+3. 새 위치에 카드 데이터 저장 (`set(newRef, cardData)`)
+4. 원래 위치에서 카드 삭제 (`remove(originalRef)`)
+5. UI 갱신 메시지 전송 (`kanban_data_updated`)
+
+**중요 사항**:
+- Firebase Realtime Database는 "이동" 명령어가 없으므로 "복사(Copy) → 삭제(Delete)" 패턴 사용
+- 카드 데이터는 그대로 복사되므로 `publishInfo`, `draftContent` 등 모든 필드가 보존됨
+- `status` 필드는 경로에 포함되므로 별도로 업데이트할 필요 없음
+
+**코드**:
+```javascript
+if (msg.action === "move_kanban_card") {
+  return handleAsync((async () => {
+    const { cardId, originalStatus, newStatus } = msg.data;
+    const userId = await getCurrentUserId();
+    const originalRef = ref(getDb(), `kanban/${userId}/${originalStatus}/${cardId}`);
+    const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${cardId}`);
+
+    // 원래 위치의 카드 데이터 읽기
+    const cardSnap = await get(originalRef);
+    const cardData = cardSnap?.val();
+    if (!cardData) {
+      return { success: false, error: "이동할 카드를 찾을 수 없습니다." };
+    }
+    
+    // 새 위치에 카드 데이터 저장
+    await set(newRef, cardData);
+    
+    // 원래 위치에서 카드 삭제
+    await remove(originalRef);
+    
+    // UI 갱신 메시지 전송
+    // ...
+    
+    return { success: true };
+  })());
+}
+```
+
+### 6.3 실시간 UI 동기화
+**위치**: `js/ui/kanbanMode.js`
+
+**동작**:
+1. `background.js`에서 `move_kanban_card` 핸들러가 완료되면 `kanban_data_updated` 메시지 전송
+2. `kanbanMode.js`의 `addRealtimeUpdateListener()`가 이 메시지를 감지
+3. `updateKanbanUI()` 함수를 호출하여 보드 전체를 최신 상태로 다시 렌더링
+
+**코드 위치**:
+- 실시간 리스너: `js/ui/kanbanMode.js:93` (`addRealtimeUpdateListener`)
+- UI 업데이트: `js/ui/kanbanMode.js:151` (`updateKanbanUI`)
+
+**데이터 흐름도**:
+```
+User Action: 드래그 앤 드롭 (kanbanMode.js)
+    ↓
+Validation: 초안 유무 등에 따른 이동 규칙 검사
+    ↓
+Request: move_kanban_card 메시지 전송
+    ↓
+Backend: get (Old Path) → set (New Path) → remove (Old Path) (background.js)
+    ↓
+Sync: Firebase 변경 감지 → kanban_data_updated 메시지 → UI 자동 업데이트
+```
 

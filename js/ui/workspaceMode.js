@@ -730,21 +730,28 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   seoTitle = seoTitle || '';
   
   // Firebase 업데이트 (값이 있을 때만)
+  // 모든 값이 빈 문자열이면 Firebase 업데이트를 건너뛰어야 함 (초안 삭제 후 재생성 방지)
   if (ideaData && ideaData.id) {
     const updates = {};
     const publishInfoUpdates = {};
+    let hasNonEmptyValue = false;
     
-    if (permalink !== undefined) {
+    if (permalink !== undefined && permalink.trim() !== '') {
       publishInfoUpdates.permalink = permalink;
+      hasNonEmptyValue = true;
     }
-    if (tags !== undefined) {
+    if (tags !== undefined && tags.trim() !== '') {
       publishInfoUpdates.tags = tags;
+      hasNonEmptyValue = true;
     }
-    if (seoTitle !== undefined) {
+    if (seoTitle !== undefined && seoTitle.trim() !== '') {
       updates.seoTitle = seoTitle;
       publishInfoUpdates.seoTitle = seoTitle;
+      hasNonEmptyValue = true;
     }
-    if (Object.keys(publishInfoUpdates).length > 0) {
+    
+    // 실제 값이 있을 때만 Firebase 업데이트 (빈 문자열로 publishInfo 재생성 방지)
+    if (hasNonEmptyValue && Object.keys(publishInfoUpdates).length > 0) {
       publishInfoUpdates.updatedAt = Date.now();
       updates.publishInfo = publishInfoUpdates;
     }
@@ -884,23 +891,59 @@ export function renderWorkspace(container, ideaData) {
   if (!ideaData.tags && ideaData.workspace.keywords) ideaData.tags = ideaData.workspace.keywords;
   if (!ideaData.outline && ideaData.workspace.outline) ideaData.outline = ideaData.workspace.outline;
   
-  if (ideaData.title && (!ideaData.tags || ideaData.tags.length <= 1)) {
+  // 브리핑이 이미 생성되었는지 확인 (outline, mainKeywords, longTailKeywords, tags 중 하나라도 있으면 생성된 것으로 간주)
+  const hasBriefing = ideaData.outline?.length > 0 
+    || ideaData.mainKeywords?.length > 0 
+    || ideaData.longTailKeywords?.length > 0 
+    || (ideaData.tags && ideaData.tags.length > 1);
+  
+  // 브리핑이 없고, tags도 없거나 1개 이하일 때만 브리핑 요청 (중복 호출 방지)
+  if (ideaData.title && !hasBriefing && (!ideaData.tags || ideaData.tags.length <= 1)) {
+     Logger.debug(`[Workspace] 브리핑 요청 - cardId: ${ideaData.id}, title: ${ideaData.title}`);
      chrome.runtime.sendMessage({
         action: "generate_idea_briefing",
         data: {
           cardId: ideaData.id,
           title: ideaData.title,
           description: ideaData.description || "",
-          generateMainKeywords: true
+          generateMainKeywords: true,
+          generateOutline: true,
+          generateKeywords: true,
+          generateLongTail: true
         }
+     }).catch((err) => {
+       Logger.warn(`[Workspace] 브리핑 요청 실패:`, err);
      });
+  } else {
+    Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - hasBriefing: ${hasBriefing}, tags: ${ideaData.tags?.length || 0}`);
   }
 
   // 에디터 저장 리스너
   window.__cp_workspace_idea_id = ideaData.id;
+  // 전역 ideaData 저장 (실시간 업데이트를 위해)
+  window.__cp_workspace_idea_data = ideaData;
+  // 초안 삭제 후 자동 저장 차단 플래그
+  if (!window.__cp_draft_deletion_block_time) {
+    window.__cp_draft_deletion_block_time = 0;
+  }
   if (!window.__cp_workspace_save_listener) {
     window.addEventListener("message", (event) => {
       if (event.data?.action === "cp_save_draft" && event.data.content) {
+        // 초안 삭제 후 5초 이내에는 자동 저장 차단
+        const now = Date.now();
+        if (window.__cp_draft_deletion_block_time && (now - window.__cp_draft_deletion_block_time) < 5000) {
+          Logger.debug(`[Workspace] 초안 삭제 후 자동 저장 차단 (${5000 - (now - window.__cp_draft_deletion_block_time)}ms 남음)`);
+          return;
+        }
+        
+        // 빈 내용 필터링 (초안 삭제 후 재생성 방지)
+        const content = event.data.content || "";
+        const trimmedContent = content.trim();
+        if (!trimmedContent || trimmedContent === "<p><br></p>" || trimmedContent === "<p></p>" || trimmedContent === "<br>") {
+          Logger.debug(`[Workspace] 빈 내용 자동 저장 차단`);
+          return;
+        }
+        
         chrome.runtime.sendMessage({ action: "save_idea_draft", ideaId: window.__cp_workspace_idea_id, draft: event.data.content });
       }
     });
@@ -911,16 +954,24 @@ export function renderWorkspace(container, ideaData) {
       ? ideaData.outline.map((item, i) => `<li class="outline-item" data-index="${i}"><span class="outline-text">${item}</span><button class="outline-delete-btn">×</button></li>`).join("") 
       : "<li class='outline-empty'>추천 목차가 없습니다.</li>";
 
-  const tagsHtml = (ideaData.tags?.length > 0)
-      ? ideaData.tags.filter(t => t !== "#AI-추천").map(k => `<span class="tag interactive-tag">${k}</span>`).join("")
-      : "<span>주요 키워드 없음</span>";
+  // 주요 키워드 표시 (mainKeywords 우선, 없으면 tags 사용)
+  const mainKeywordsHtml = (ideaData.mainKeywords?.length > 0)
+      ? ideaData.mainKeywords.map(k => `<span class="tag main-keyword-tag interactive-tag">🔑 ${k}</span>`).join("")
+      : (ideaData.tags?.length > 0)
+          ? ideaData.tags.filter(t => t !== "#AI-추천").map(k => `<span class="tag interactive-tag">${k}</span>`).join("")
+          : "<span>주요 키워드 없음</span>";
 
   const longTailHtml = (ideaData.longTailKeywords?.length > 0)
       ? ideaData.longTailKeywords.map(k => `<span class="tag long-tail-keyword interactive-tag">${k}</span>`).join("")
       : "<span>롱테일 키워드 없음</span>";
 
-  const searchHtml = (ideaData.recommendedKeywords?.length > 0)
-      ? ideaData.recommendedKeywords.map(item => `
+  // 추천 검색어 표시 (tags 우선, 없으면 recommendedKeywords 사용)
+  const recommendedKeywords = ideaData.tags?.length > 0 
+      ? ideaData.tags.filter(t => t !== "#AI-추천").map(t => t.replace(/^#+/, ''))
+      : (ideaData.recommendedKeywords || []);
+  
+  const searchHtml = (recommendedKeywords.length > 0)
+      ? recommendedKeywords.map(item => `
           <li style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <span class="recommended-keyword-item" data-keyword="${item.replace(/"/g, '&quot;')}" style="cursor: pointer; flex: 1; padding: 4px 0; transition: color 0.2s;" title="클릭하여 에디터에 추가">${item}</span>
             <a href="https://www.google.com/search?q=${encodeURIComponent(item)}" target="_blank" class="keyword-search-link" title="구글 검색" style="text-decoration: none; margin-left: 8px; font-size: 14px; color: #4285f4; cursor: pointer; flex-shrink: 0; padding: 4px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">🔗</a>
@@ -963,7 +1014,10 @@ export function renderWorkspace(container, ideaData) {
         
         <div class="resource-content-area publish-info-area" id="publish-info-area" style="display:block;"><div id="publish-info-content"></div></div>
         <div class="resource-content-area ai-briefing-area" id="ai-briefing-area" style="display:none;">
-            <div class="editor-keyword-section"><div class="keyword-list">${tagsHtml} ${longTailHtml}</div></div>
+            <div class="editor-keyword-section">
+                <div class="keyword-list">${mainKeywordsHtml}</div>
+                <div class="keyword-list" style="margin-top: 12px;">${longTailHtml}</div>
+            </div>
         </div>
         <div class="resource-content-area outline-area" id="outline-area" style="display:none;">
             <ul class="outline-list">${outlineHtml}</ul>
@@ -2108,6 +2162,10 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 }, (response) => {
                     console.log('[Workspace] Firebase 삭제 응답:', response);
                     if (response && response.success) {
+                        // 초안 삭제 후 자동 저장 차단 플래그 설정 (5초간)
+                        window.__cp_draft_deletion_block_time = Date.now();
+                        Logger.debug(`[Workspace] 초안 삭제 후 자동 저장 차단 시작 (5초)`);
+                        
                         // ideaData에서도 제거 (모든 관련 필드)
                         ideaData.draftContent = "";
                         if (ideaData.workspace) {
@@ -2118,10 +2176,41 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                         }
                         ideaData.seoTitle = "";
                         
-                        // 발행 정보 UI 즉시 업데이트
+                        // 전역 ideaData도 동기화
+                        if (window.__cp_workspace_idea_data) {
+                            window.__cp_workspace_idea_data.draftContent = "";
+                            if (window.__cp_workspace_idea_data.workspace) {
+                                window.__cp_workspace_idea_data.workspace.draft = "";
+                            }
+                            if (window.__cp_workspace_idea_data.publishInfo) {
+                                window.__cp_workspace_idea_data.publishInfo = {};
+                            }
+                            window.__cp_workspace_idea_data.seoTitle = "";
+                        }
+                        
+                        // 발행 정보 UI 즉시 업데이트 (Firebase 업데이트 없이 UI만 갱신)
                         const publishInfoArea = workspaceEl.querySelector("#publish-info-area");
                         if (publishInfoArea) {
-                            showPublishInfo(workspaceEl, "", "", "", ideaData);
+                            // showPublishInfo를 호출하면 빈 값으로도 publishInfo가 재생성될 수 있으므로
+                            // UI만 직접 업데이트 (Firebase 업데이트는 하지 않음)
+                            const existingInfo = workspaceEl.querySelector('.publish-info-panel');
+                            if (existingInfo) {
+                                existingInfo.remove();
+                            }
+                            // 빈 발행 정보 패널 표시 (Firebase 업데이트 없이)
+                            const emptyInfoHtml = `
+                                <div class="publish-info-panel" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px;">
+                                    <p style="color: #999; font-size: 13px;">발행 정보가 없습니다.</p>
+                                </div>
+                            `;
+                            publishInfoArea.insertAdjacentHTML('beforeend', emptyInfoHtml);
+                        }
+                        
+                        // 썸네일 버튼도 제거 (초안이 없으면 썸네일 정보도 없어야 함)
+                        const thumbBtn = workspaceEl.querySelector("#btn-create-thumbnail");
+                        if (thumbBtn && thumbBtn.parentNode) {
+                            thumbBtn.remove();
+                            console.log('[Workspace] 썸네일 버튼이 UI에서 제거되었습니다.');
                         }
                         
                         // 초안 삭제 버튼 제거
@@ -2473,6 +2562,13 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 if (ideaData.workspace) {
                     ideaData.workspace.outline = newOutline;
                 }
+                // 전역 ideaData도 업데이트 (실시간 업데이트를 위해)
+                if (window.__cp_workspace_idea_data) {
+                    window.__cp_workspace_idea_data.outline = newOutline;
+                    if (window.__cp_workspace_idea_data.workspace) {
+                        window.__cp_workspace_idea_data.workspace.outline = newOutline;
+                    }
+                }
                 if (callback) callback();
             } else {
                 console.error('[Workspace] 목차 업데이트 실패:', response);
@@ -2485,11 +2581,16 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         const outlineList = workspaceEl.querySelector('.outline-list');
         if (!outlineList) return;
         
-        const outline = ideaData.outline || ideaData.workspace?.outline || [];
-        if (outline.length === 0) {
+        // 최신 데이터 가져오기 (전역 데이터 우선)
+        const currentOutline = window.__cp_workspace_idea_data?.outline 
+            || ideaData.outline 
+            || ideaData.workspace?.outline 
+            || [];
+        
+        if (currentOutline.length === 0) {
             outlineList.innerHTML = "<li class='outline-empty'>추천 목차가 없습니다.</li>";
         } else {
-            outlineList.innerHTML = outline.map((item, i) => 
+            outlineList.innerHTML = currentOutline.map((item, i) => 
                 `<li class="outline-item" data-index="${i}"><span class="outline-text">${item}</span><button class="outline-delete-btn">×</button></li>`
             ).join("");
         }
@@ -2560,7 +2661,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
             const index = parseInt(listItem.dataset.index);
             
             if (confirm('이 목차 항목을 삭제하시겠습니까?')) {
-                const outline = [...(ideaData.outline || ideaData.workspace?.outline || [])];
+                // 최신 데이터 가져오기
+                const currentOutline = window.__cp_workspace_idea_data?.outline 
+                    || ideaData.outline 
+                    || ideaData.workspace?.outline 
+                    || [];
+                const outline = [...currentOutline];
                 outline.splice(index, 1);
                 updateOutlineInFirebase(outline, () => {
                     refreshOutlineList();
@@ -2576,7 +2682,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         addOutlineBtn.addEventListener('click', () => {
             const newItem = prompt('새 목차 항목을 입력하세요:');
             if (newItem && newItem.trim()) {
-                const outline = [...(ideaData.outline || ideaData.workspace?.outline || [])];
+                // 최신 데이터 가져오기
+                const currentOutline = window.__cp_workspace_idea_data?.outline 
+                    || ideaData.outline 
+                    || ideaData.workspace?.outline 
+                    || [];
+                const outline = [...currentOutline];
                 outline.push(newItem.trim());
                 updateOutlineInFirebase(outline, () => {
                     refreshOutlineList();

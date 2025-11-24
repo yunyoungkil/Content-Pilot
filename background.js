@@ -17,7 +17,9 @@ import {
   summarizeText,
   refreshChannelData,
   fetchImageAsBase64,
-  updateUrlIndex
+  updateUrlIndex,
+  normalizeUrlForComparison,
+  encodeUrlForFirebaseKey
 } from './js/services/collectorService.js';
 
 import { 
@@ -434,12 +436,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // AI 브리핑 자동 생성
       // 'manual_entry'를 제외한 모든 아이디어는 생성 즉시 AI 브리핑을 실행
-      // (ai_generated, my_post, competitor_post, my_post_renewal 등 모든 경우)
+      // (ai_generated, my_post, competitor_post, my_post_renewal, origin이 없는 경우 등 모든 경우)
       const originType = ideaData.origin?.type;
-      if (originType !== 'manual_entry' && ideaData.title && status === 'ideas') {
+      const shouldGenerateBriefing = originType !== 'manual_entry' && ideaData.title && status === 'ideas';
+      
+      if (shouldGenerateBriefing) {
         // 비동기로 실행 (응답을 기다리지 않음)
-        Logger.info(`[add_idea_to_kanban] AI 브리핑 자동 생성 시작 - cardId: ${cardId}, originType: ${originType}`);
+        Logger.info(`[add_idea_to_kanban] AI 브리핑 자동 생성 시작 - cardId: ${cardId}, originType: ${originType || 'undefined'}, status: ${status}`);
         generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
+          status: status, // status 전달
           generateOutline: true,
           generateKeywords: true,
           generateLongTail: true,
@@ -447,11 +452,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }).then(() => {
           Logger.biz(`✅ [add_idea_to_kanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
         }).catch((error) => {
-          Logger.warn('[add_idea_to_kanban] AI 브리핑 생성 실패:', error);
+          Logger.error('[add_idea_to_kanban] AI 브리핑 생성 실패:', error);
           // 브리핑 생성 실패해도 카드 추가는 성공으로 처리
         });
       } else {
-        Logger.debug(`[add_idea_to_kanban] AI 브리핑 자동 생성 건너뜀 - originType: ${originType}, status: ${status}`);
+        Logger.debug(`[add_idea_to_kanban] AI 브리핑 자동 생성 건너뜀 - originType: ${originType || 'undefined'}, status: ${status}, title: ${ideaData.title ? '있음' : '없음'}`);
       }
 
       return { success: true, firebaseKey: cardId };
@@ -459,17 +464,138 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "update_kanban_card") {
-    const { cardId, status, updates } = msg.data;
+    // msg.data가 객체인 경우와 직접 속성이 있는 경우 모두 처리
+    const cardId = msg.data?.cardId || msg.cardId;
+    const status = msg.data?.status || msg.status;
+    const updates = msg.data?.updates || msg.updates;
+    
     return handleAsync((async () => {
+      if (!cardId || !status || !updates) {
+        Logger.error('[update_kanban_card] 필수 정보 부족:', { cardId, status, hasUpdates: !!updates });
+        return { success: false, error: "필수 정보가 부족합니다." };
+      }
+      
       const userId = await getCurrentUserId();
-      return update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), updates);
+      const updatePath = `kanban/${userId}/${status}/${cardId}`;
+      
+      Logger.debug(`[update_kanban_card] 업데이트 시작 - path: ${updatePath}, updates:`, updates);
+      
+      // 데이터 정제 (undefined → null)
+      const cleanedUpdates = cleanDataForFirebase(updates);
+      
+      await update(ref(getDb(), updatePath), cleanedUpdates);
+      
+      Logger.biz(`✅ [update_kanban_card] 카드 업데이트 완료 - cardId: ${cardId}, status: ${status}`);
+      
+      // REST API 모드에서는 실시간 리스너가 작동하지 않으므로, UI 갱신을 위해 최신 데이터를 가져와서 메시지 전송
+      try {
+        const kanbanRef = ref(getDb(), `kanban/${userId}`);
+        const kanbanSnap = await get(kanbanRef);
+        const kanbanData = kanbanSnap?.val() || {};
+        
+        // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송
+        chrome.runtime.sendMessage({
+          action: "kanban_data_updated",
+          data: kanbanData
+        }).catch((err) => {
+          if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+            Logger.debug(`[update_kanban_card] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
+          }
+        });
+        
+        // 2. 웹페이지 탭의 content script에도 메시지 전송
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: "kanban_data_updated",
+                data: kanbanData
+              }).catch((err) => {
+                // 조용히 무시
+              });
+            }
+          });
+        });
+        Logger.debug(`[update_kanban_card] UI 갱신 메시지 전송 완료`);
+      } catch (updateError) {
+        Logger.warn(`[update_kanban_card] UI 갱신 메시지 전송 실패:`, updateError);
+      }
+      
+      return { success: true };
     })());
   }
   
   if (msg.action === "delete_kanban_card") {
     return handleAsync((async () => {
-      const userId = await getCurrentUserId();
-      return remove(ref(getDb(), `kanban/${userId}/${msg.data.status}/${msg.data.cardId}`));
+      try {
+        const { cardId, status } = msg.data;
+        if (!cardId || !status) {
+          return { success: false, error: "카드 ID와 상태가 필요합니다." };
+        }
+
+        const userId = await getCurrentUserId();
+        const cardPath = `kanban/${userId}/${status}/${cardId}`;
+        
+        // 카드 데이터를 먼저 읽어서 URL 인덱스 삭제에 사용
+        const cardSnap = await get(ref(getDb(), cardPath));
+        const cardData = cardSnap?.val();
+        
+        if (!cardData) {
+          return { success: false, error: "삭제할 카드를 찾을 수 없습니다." };
+        }
+
+        // 카드 삭제
+        Logger.info(`[delete_kanban_card] 카드 삭제 시작 - cardId: ${cardId}, status: ${status}`);
+        await remove(ref(getDb(), cardPath));
+
+        // URL 인덱스에서도 제거 (origin.postUrl 또는 publishedUrl이 있는 경우)
+        if (cardData.origin?.postUrl || cardData.publishedUrl) {
+          try {
+            const updatePromises = [];
+            
+            if (cardData.origin?.postUrl) {
+              const normalizedUrl = normalizeUrlForComparison(cardData.origin.postUrl);
+              if (normalizedUrl) {
+                const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
+                const originIndexPath = `url_index/${userId}/${encodedKey}/origin/${cardId}`;
+                updatePromises.push(
+                  remove(ref(getDb(), originIndexPath)).catch(error => {
+                    Logger.warn(`[delete_kanban_card] origin URL 인덱스 삭제 실패 (${originIndexPath}):`, error);
+                    return null;
+                  })
+                );
+              }
+            }
+            
+            if (cardData.publishedUrl) {
+              const normalizedUrl = normalizeUrlForComparison(cardData.publishedUrl);
+              if (normalizedUrl) {
+                const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
+                const publishedIndexPath = `url_index/${userId}/${encodedKey}/published/${cardId}`;
+                updatePromises.push(
+                  remove(ref(getDb(), publishedIndexPath)).catch(error => {
+                    Logger.warn(`[delete_kanban_card] published URL 인덱스 삭제 실패 (${publishedIndexPath}):`, error);
+                    return null;
+                  })
+                );
+              }
+            }
+            
+            if (updatePromises.length > 0) {
+              await Promise.all(updatePromises);
+            }
+          } catch (indexError) {
+            Logger.warn('[delete_kanban_card] URL 인덱스 삭제 중 오류:', indexError);
+            // 인덱스 삭제 실패해도 카드 삭제는 성공으로 처리
+          }
+        }
+
+        Logger.biz(`✅ [delete_kanban_card] 카드 삭제 완료 - cardId: ${cardId}`);
+        return { success: true };
+      } catch (error) {
+        Logger.error('[delete_kanban_card] 카드 삭제 실패:', error);
+        return { success: false, error: error.message };
+      }
     })());
   }
 
@@ -499,9 +625,203 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await remove(originalRef);
 
         Logger.biz(`[Kanban] 카드 이동: ${cardId} (${originalStatus} → ${newStatus})`);
+        
+        // UI 갱신 메시지 전송
+        try {
+          const kanbanRef = ref(getDb(), `kanban/${userId}`);
+          const kanbanSnap = await get(kanbanRef);
+          const kanbanData = kanbanSnap?.val() || {};
+          
+          chrome.runtime.sendMessage({
+            action: "kanban_data_updated",
+            data: kanbanData
+          }).catch((err) => {
+            if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+              Logger.debug(`[move_kanban_card] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
+            }
+          });
+          
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                chrome.tabs.sendMessage(tab.id, {
+                  action: "kanban_data_updated",
+                  data: kanbanData
+                }).catch((err) => {
+                  // 조용히 무시
+                });
+              }
+            });
+          });
+        } catch (updateError) {
+          Logger.warn(`[move_kanban_card] UI 갱신 메시지 전송 실패:`, updateError);
+        }
+        
         return { success: true };
       } catch (error) {
         Logger.error(`[Kanban] 카드 이동 실패:`, error);
+        return { success: false, error: error.message };
+      }
+    })());
+  }
+
+  if (msg.action === "delete_draft_and_publish_info") {
+    return handleAsync((async () => {
+      const { ideaId, status } = msg.data || msg;
+      if (!ideaId || !status) {
+        return { success: false, error: "필수 정보가 부족합니다." };
+      }
+
+      const userId = await getCurrentUserId();
+      const cardPath = `kanban/${userId}/${status}/${ideaId}`;
+      
+      try {
+        // 현재 카드 데이터 읽기
+        const cardSnap = await get(ref(getDb(), cardPath));
+        const cardData = cardSnap?.val();
+        
+        if (!cardData) {
+          return { success: false, error: "카드를 찾을 수 없습니다." };
+        }
+        
+        // draftContent, publishInfo, seoTitle 제거
+        // Firebase REST API에서 필드를 완전히 제거하려면 필드를 제외한 전체 데이터를 set()으로 저장해야 함
+        // update()로 null을 설정해도 필드가 남아있을 수 있으므로, 처음부터 set() 사용
+        
+        Logger.debug(`[delete_draft_and_publish_info] 필드 제거 시작 - draftContent: ${cardData.draftContent !== undefined ? '있음' : '없음'}, publishInfo: ${cardData.publishInfo !== undefined ? '있음' : '없음'}, seoTitle: ${cardData.seoTitle !== undefined ? '있음' : '없음'}, workspace.draft: ${cardData.workspace?.draft !== undefined ? '있음' : '없음'}`);
+        
+        // 필드를 제외한 새 데이터 구성
+        const { draftContent, publishInfo, seoTitle, workspace, ...restCardData } = cardData;
+        
+        // workspace에서 draft만 제거한 새 객체 생성
+        let cleanedWorkspace = workspace;
+        if (workspace) {
+          const { draft, ...restWorkspace } = workspace;
+          // workspace에 다른 필드가 있으면 draft만 제거한 객체 사용, 없으면 undefined
+          cleanedWorkspace = Object.keys(restWorkspace).length > 0 ? restWorkspace : undefined;
+        }
+        
+        // 필드를 제외한 새 데이터 구성
+        const cleanedCardData = {
+          ...restCardData,
+          ...(cleanedWorkspace ? { workspace: cleanedWorkspace } : {})
+        };
+        
+        Logger.debug(`[delete_draft_and_publish_info] 필드 제외한 데이터로 교체 시작`);
+        
+        // 초안 삭제 후 자동으로 아이디어 칸(ideas)으로 이동해야 하는지 확인
+        const shouldMoveToIdeas = status !== 'ideas';
+        
+        if (shouldMoveToIdeas) {
+          // 이동이 필요한 경우: 필드 제거된 데이터를 바로 아이디어 칸에 저장하고 원래 위치에서 삭제
+          Logger.debug(`[delete_draft_and_publish_info] 초안 삭제 후 아이디어 칸으로 이동 - 현재 status: ${status}`);
+          
+          const ideasPath = `kanban/${userId}/ideas/${ideaId}`;
+          
+          // 필드 제거된 데이터를 아이디어 칸에 저장
+          await set(ref(getDb(), ideasPath), cleanDataForFirebase(cleanedCardData));
+          
+          // 원래 위치에서 카드 삭제
+          await remove(ref(getDb(), cardPath));
+          
+          Logger.biz(`✅ [delete_draft_and_publish_info] 초안 삭제 및 카드 이동 완료: ${ideaId} (${status} → ideas)`);
+        } else {
+          // 이동이 필요 없는 경우: 현재 위치에서 필드만 제거
+          await set(ref(getDb(), cardPath), cleanDataForFirebase(cleanedCardData));
+          
+          Logger.biz(`✅ [delete_draft_and_publish_info] 초안 및 발행 정보 삭제 완료 - cardId: ${ideaId}`);
+          
+          // 업데이트가 완전히 반영되도록 잠시 대기
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // 삭제된 필드가 실제로 제거되었는지 확인
+          const verifySnap = await get(ref(getDb(), cardPath));
+          const verifyData = verifySnap?.val();
+          
+          if (verifyData) {
+            // 필드가 존재하는지 확인 (undefined가 아니면 필드가 존재함)
+            const hasDraftField = verifyData.draftContent !== undefined;
+            const hasPublishInfoField = verifyData.publishInfo !== undefined;
+            const hasSeoTitleField = verifyData.seoTitle !== undefined;
+            const hasWorkspaceDraftField = verifyData.workspace?.draft !== undefined;
+            
+            Logger.debug(`[delete_draft_and_publish_info] 필드 존재 확인 - draftContent: ${hasDraftField}, publishInfo: ${hasPublishInfoField}, seoTitle: ${hasSeoTitleField}, workspace.draft: ${hasWorkspaceDraftField}`);
+            
+            if (hasDraftField || hasPublishInfoField || hasSeoTitleField || hasWorkspaceDraftField) {
+              Logger.error(`[delete_draft_and_publish_info] ⚠️ 필드가 여전히 존재함 - 재시도...`);
+              
+              // 재시도: 다시 한 번 필드 제거
+              const { draftContent: vDraft, publishInfo: vPublish, seoTitle: vSeo, workspace: vWorkspace, ...vRest } = verifyData;
+              let vCleanedWorkspace = vWorkspace;
+              if (vWorkspace) {
+                const { draft: vDraftField, ...vRestWorkspace } = vWorkspace;
+                vCleanedWorkspace = Object.keys(vRestWorkspace).length > 0 ? vRestWorkspace : undefined;
+              }
+              
+              const vCleanedCardData = {
+                ...vRest,
+                ...(vCleanedWorkspace ? { workspace: vCleanedWorkspace } : {})
+              };
+              
+              await set(ref(getDb(), cardPath), cleanDataForFirebase(vCleanedCardData));
+              
+              // 최종 확인
+              await new Promise(resolve => setTimeout(resolve, 300));
+              const finalVerifySnap = await get(ref(getDb(), cardPath));
+              const finalVerifyData = finalVerifySnap?.val();
+              
+              const finalHasDraft = finalVerifyData?.draftContent !== undefined;
+              const finalHasPublishInfo = finalVerifyData?.publishInfo !== undefined;
+              const finalHasSeoTitle = finalVerifyData?.seoTitle !== undefined;
+              const finalHasWorkspaceDraft = finalVerifyData?.workspace?.draft !== undefined;
+              
+              if (finalHasDraft || finalHasPublishInfo || finalHasSeoTitle || finalHasWorkspaceDraft) {
+                Logger.error(`[delete_draft_and_publish_info] ⚠️ 재시도 후에도 필드가 남아있음 (draftContent: ${finalHasDraft}, publishInfo: ${finalHasPublishInfo}, seoTitle: ${finalHasSeoTitle}, workspace.draft: ${finalHasWorkspaceDraft})`);
+              } else {
+                Logger.biz(`✅ [delete_draft_and_publish_info] 재시도 완료 - 필드 완전 삭제 확인됨`);
+              }
+            } else {
+              Logger.biz(`✅ [delete_draft_and_publish_info] 필드 제거 확인 완료 - 모든 필드가 제거됨`);
+            }
+          }
+        }
+        
+        // UI 갱신 메시지 전송 (최신 데이터로)
+        try {
+          const kanbanRef = ref(getDb(), `kanban/${userId}`);
+          const kanbanSnap = await get(kanbanRef);
+          const kanbanData = kanbanSnap?.val() || {};
+          
+          Logger.debug(`[delete_draft_and_publish_info] UI 갱신 메시지 전송 - 카드 개수: ${Object.keys(kanbanData).reduce((sum, status) => sum + Object.keys(kanbanData[status] || {}).length, 0)}`);
+          
+          chrome.runtime.sendMessage({
+            action: "kanban_data_updated",
+            data: kanbanData
+          }).catch((err) => {
+            if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+              Logger.debug(`[delete_draft_and_publish_info] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
+            }
+          });
+          
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                chrome.tabs.sendMessage(tab.id, {
+                  action: "kanban_data_updated",
+                  data: kanbanData
+                }).catch((err) => {
+                  // 조용히 무시
+                });
+              }
+            });
+          });
+        } catch (updateError) {
+          Logger.warn(`[delete_draft_and_publish_info] UI 갱신 메시지 전송 실패:`, updateError);
+        }
+        
+        return { success: true, moved: shouldMoveToIdeas };
+      } catch (error) {
+        Logger.error('[delete_draft_and_publish_info] 삭제 실패:', error);
         return { success: false, error: error.message };
       }
     })());
@@ -828,15 +1148,102 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "save_idea_draft") {
     const { ideaId, draft } = msg;
     return handleAsync((async () => {
-      const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
+      // 빈 내용 필터링 (초안 삭제 후 재생성 방지)
+      const content = draft || "";
+      const trimmedContent = content.trim();
+      if (!trimmedContent || trimmedContent === "<p><br></p>" || trimmedContent === "<p></p>" || trimmedContent === "<br>") {
+        Logger.debug(`[save_idea_draft] 빈 내용 저장 차단 - ideaId: ${ideaId}`);
+        return { success: true, skipped: true, message: "빈 내용은 저장하지 않습니다." };
+      }
+      
+      const userId = await getCurrentUserId();
+      const snap = await get(ref(getDb(), `kanban/${userId}`));
       const allCards = snap?.val() || {};
+      
+      let foundStatus = null;
+      let cardData = null;
+      
+      // 카드 찾기
       for (const status in allCards) {
-        if (allCards[status][ideaId]) {
-          await update(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`), { draftContent: draft });
-          return { success: true };
+        if (allCards[status] && allCards[status][ideaId]) {
+          foundStatus = status;
+          cardData = allCards[status][ideaId];
+          break;
         }
       }
-      return { success: false, error: "아이디어를 찾을 수 없습니다." };
+      
+      if (!foundStatus || !cardData) {
+        return { success: false, error: "아이디어를 찾을 수 없습니다." };
+      }
+      
+      // 초안 저장 및 자동 이동: 'ideas' 컬럼에 있으면 'in-progress'로 이동
+      if (foundStatus === 'ideas') {
+        Logger.debug(`[save_idea_draft] 초안 저장 및 자동 이동 - ideaId: ${ideaId} (ideas → in-progress)`);
+        
+        // 카드 데이터에 초안 추가
+        const updatedCardData = {
+          ...cardData,
+          draftContent: draft,
+          workspace: {
+            ...(cardData.workspace || {}),
+            draft: draft
+          }
+        };
+        
+        // 'in-progress' 컬럼에 저장
+        const newPath = `kanban/${userId}/in-progress/${ideaId}`;
+        await set(ref(getDb(), newPath), cleanDataForFirebase(updatedCardData));
+        
+        // 원래 위치에서 삭제
+        const oldPath = `kanban/${userId}/ideas/${ideaId}`;
+        await remove(ref(getDb(), oldPath));
+        
+        Logger.biz(`✅ [save_idea_draft] 초안 저장 및 자동 이동 완료 - ideaId: ${ideaId} (ideas → in-progress)`);
+        
+        // UI 갱신 메시지 전송
+        try {
+          const kanbanRef = ref(getDb(), `kanban/${userId}`);
+          const kanbanSnap = await get(kanbanRef);
+          const kanbanData = kanbanSnap?.val() || {};
+          
+          chrome.runtime.sendMessage({
+            action: "kanban_data_updated",
+            data: kanbanData
+          }).catch((err) => {
+            if (err?.message && !err.message.includes('message port closed') && !err.message.includes('Could not establish connection')) {
+              Logger.debug(`[save_idea_draft] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
+            }
+          });
+          
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                chrome.tabs.sendMessage(tab.id, {
+                  action: "kanban_data_updated",
+                  data: kanbanData
+                }).catch((err) => {
+                  // 조용히 무시
+                });
+              }
+            });
+          });
+        } catch (updateError) {
+          Logger.warn(`[save_idea_draft] UI 갱신 메시지 전송 실패:`, updateError);
+        }
+        
+        return { success: true, moved: true, newStatus: 'in-progress' };
+      } else {
+        // 'ideas'가 아니면 현재 위치에서 초안만 업데이트
+        await update(ref(getDb(), `kanban/${userId}/${foundStatus}/${ideaId}`), { 
+          draftContent: draft,
+          workspace: {
+            ...(cardData.workspace || {}),
+            draft: draft
+          }
+        });
+        Logger.debug(`[save_idea_draft] 초안 저장 완료 - ideaId: ${ideaId}, status: ${foundStatus}`);
+        return { success: true, moved: false, newStatus: foundStatus };
+      }
     })());
   }
 
@@ -957,16 +1364,97 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "link_scrap_to_idea") {
     return handleAsync((async () => {
       const { ideaId, scrapId, status } = msg.data;
-      const ideaRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`);
+      const userId = await getCurrentUserId();
+      const ideaRef = ref(getDb(), `kanban/${userId}/${status}/${ideaId}`);
       const ideaSnap = await get(ideaRef);
       const idea = ideaSnap?.val();
       if (idea) {
-        const linkedScraps = idea.workspace?.linkedScraps || [];
+        // linkedScraps를 배열로 정규화
+        let linkedScraps = idea.linkedScraps || idea.workspace?.linkedScraps || [];
+        if (!Array.isArray(linkedScraps) && typeof linkedScraps === 'object') {
+          linkedScraps = Object.keys(linkedScraps);
+        }
         if (!linkedScraps.includes(scrapId)) {
           linkedScraps.push(scrapId);
-          await update(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}/workspace`), { linkedScraps });
+          // linkedScraps를 객체 형태로 저장 (Firebase REST API 호환)
+          const linkedScrapsObj = {};
+          linkedScraps.forEach(id => { linkedScrapsObj[id] = true; });
+          
+          // workspace.linkedScraps 업데이트
+          const workspace = idea.workspace || {};
+          await update(ref(getDb(), `kanban/${userId}/${status}/${ideaId}`), {
+            linkedScraps: linkedScrapsObj,
+            workspace: {
+              ...workspace,
+              linkedScraps: linkedScrapsObj
+            }
+          });
         }
       }
+      return { success: true };
+    })());
+  }
+
+  if (msg.action === "unlink_scrap_from_idea") {
+    return handleAsync((async () => {
+      const { ideaId, scrapId, status } = msg.data || msg;
+      if (!ideaId || !scrapId || !status) {
+        return { success: false, error: "ID 또는 상태가 유효하지 않습니다." };
+      }
+
+      const userId = await getCurrentUserId();
+      const cardPath = `kanban/${userId}/${status}/${ideaId}`;
+      const cardSnap = await get(ref(getDb(), cardPath));
+      const cardData = cardSnap?.val();
+      
+      if (!cardData) {
+        return { success: false, error: "카드를 찾을 수 없습니다." };
+      }
+      
+      // linkedScraps 업데이트 (루트 레벨) - 배열과 객체 모두 처리
+      let linkedScraps = cardData.linkedScraps || {};
+      if (Array.isArray(linkedScraps)) {
+        linkedScraps = linkedScraps.filter(id => id !== scrapId);
+        // 배열을 객체로 변환
+        const linkedScrapsObj = {};
+        linkedScraps.forEach(id => { linkedScrapsObj[id] = true; });
+        linkedScraps = linkedScrapsObj;
+      } else if (linkedScraps && typeof linkedScraps === 'object') {
+        linkedScraps = { ...linkedScraps };
+        delete linkedScraps[scrapId];
+      } else {
+        linkedScraps = {};
+      }
+      
+      // workspace.linkedScraps 업데이트 - 배열과 객체 모두 처리
+      const workspace = cardData.workspace || {};
+      let workspaceLinkedScraps = workspace.linkedScraps || {};
+      if (Array.isArray(workspaceLinkedScraps)) {
+        workspaceLinkedScraps = workspaceLinkedScraps.filter(id => id !== scrapId);
+        // 배열을 객체로 변환
+        const workspaceLinkedScrapsObj = {};
+        workspaceLinkedScraps.forEach(id => { workspaceLinkedScrapsObj[id] = true; });
+        workspaceLinkedScraps = workspaceLinkedScrapsObj;
+      } else if (workspaceLinkedScraps && typeof workspaceLinkedScraps === 'object') {
+        workspaceLinkedScraps = { ...workspaceLinkedScraps };
+        delete workspaceLinkedScraps[scrapId];
+      } else {
+        workspaceLinkedScraps = {};
+      }
+      
+      // 업데이트할 데이터 구성
+      const updates = {
+        linkedScraps: linkedScraps,
+        workspace: {
+          ...workspace,
+          linkedScraps: workspaceLinkedScraps
+        }
+      };
+      
+      await update(ref(getDb(), cardPath), cleanDataForFirebase(updates));
+      
+      Logger.biz(`✅ [unlink_scrap_from_idea] 스크랩 연결 해제 완료 - ideaId: ${ideaId}, scrapId: ${scrapId}`);
+      
       return { success: true };
     })());
   }
