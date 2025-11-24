@@ -397,20 +397,31 @@ export function renderChannelMode(container) {
         
         if (response && response.success) {
           // GA4 속성 목록 저장
-          if (response.data.gaProperties) {
+          if (response.data && response.data.gaProperties) {
             gaPropertiesList = response.data.gaProperties;
             updateGa4Dropdown();
           }
           
           // AdSense 계정 ID 자동 입력
-          if (response.data.adSenseAccountId) {
+          if (response.data && response.data.adSenseAccountId) {
             const adsenseIdEl = container.querySelector("#modal-adsense-id");
             if (adsenseIdEl && !adsenseIdEl.value) {
               adsenseIdEl.value = response.data.adSenseAccountId;
             }
           }
           
-          // 로그인 상태 UI 업데이트
+          // 로그인 상태 UI 즉시 업데이트 (response.data에서 직접 사용)
+          const authStatusEl = container.querySelector("#google-auth-status");
+          const authEmailEl = container.querySelector("#google-auth-email");
+          const loginBtn = container.querySelector("#modal-google-login-btn");
+          
+          if (response.data && response.data.email) {
+            if (authStatusEl) authStatusEl.style.display = "block";
+            if (authEmailEl) authEmailEl.textContent = `✅ ${response.data.email}`;
+            if (loginBtn) loginBtn.style.display = "none";
+          }
+          
+          // 추가로 storage에서도 확인 (백업)
           checkGoogleAuthStatus();
           
           alert("✅ Google 계정 연동이 완료되었습니다!");

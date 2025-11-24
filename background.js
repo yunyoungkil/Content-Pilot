@@ -531,7 +531,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { youtubeApiKey, geminiApiKey, channels } = msg.data;
       await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
-      await set(ref(getDb(), `channels/${CONSTANTS.USER_ID}`), channels);
+      
+      // [Firebase Fix] undefined 값을 제거하여 Firebase 저장 오류 방지
+      // Firebase는 undefined 값을 허용하지 않으므로, cleanDataForFirebase로 정제
+      // channels.default_user 등에 undefined가 포함되어 있을 수 있음
+      const cleanChannels = cleanDataForFirebase(channels);
+      
+      await set(ref(getDb(), `channels/${CONSTANTS.USER_ID}`), cleanChannels);
       // 데이터 수집 트리거
       await fetchAllChannelData();
       return { success: true, message: "채널 정보가 저장되었습니다." };

@@ -85,9 +85,11 @@ export async function refreshAuthToken(interactive = false) {
     
     // 기존 토큰 제거 (캐시 무효화)
     const storage = await chrome.storage.local.get('googleAuthToken');
-    if (storage.googleAuthToken) {
+    if (storage.googleAuthToken && typeof storage.googleAuthToken === 'string') {
       try {
-        await chrome.identity.removeCachedAuthToken({ token: storage.googleAuthToken });
+        await new Promise((resolve) => {
+          chrome.identity.removeCachedAuthToken({ token: storage.googleAuthToken }, resolve);
+        });
       } catch (e) {
         console.warn('[refreshAuthToken] 기존 토큰 제거 실패:', e);
       }
@@ -216,22 +218,49 @@ export async function startGoogleAuth() {
   try {
     const token = await chrome.identity.getAuthToken({ interactive: true });
     
-    // 토큰 만료 시간 저장
-    await saveTokenExpiry(token);
-    
-    // GA4 속성 및 AdSense 계정 ID 가져오기
-    const [properties, adSenseId] = await Promise.all([
+    // 사용자 이메일, GA4 속성 및 AdSense 계정 ID 가져오기
+    const [userInfoResponse, properties, adSenseId] = await Promise.all([
+      fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => null),
       fetchGaProperties(token).catch(() => []),
       fetchAdSenseAccountId(token).catch(() => null)
     ]);
     
+    // 사용자 이메일 추출
+    let userEmail = null;
+    if (userInfoResponse && userInfoResponse.ok) {
+      const userInfo = await userInfoResponse.json();
+      userEmail = userInfo.email || null;
+    }
+    
+    // 토큰 만료 시간 계산
+    const expiry = Date.now() + TOKEN_DEFAULT_EXPIRY;
+    
+    // 모든 정보를 한 번에 chrome.storage에 저장 (중복 저장 방지)
     await chrome.storage.local.set({ 
+      googleAuthToken: token,
+      googleAuthTokenExpiry: expiry,
+      googleAuthTokenIssued: Date.now(),
+      googleUserEmail: userEmail,
       adSenseAccountId: adSenseId,
       gaProperties: properties 
     });
     
-    console.log('🔑 [Auth] 로그인 성공, 토큰 만료 시간 저장 완료');
-    return { success: true, token, properties, adSenseId };
+    console.log('🔑 [Auth] 로그인 성공, 토큰 만료 시간:', new Date(expiry).toLocaleString());
+    
+    // UI에서 기대하는 형식으로 반환
+    return { 
+      success: true, 
+      data: {
+        email: userEmail,
+        gaProperties: properties,
+        adSenseAccountId: adSenseId
+      },
+      token,
+      properties,
+      adSenseId
+    };
   } catch (error) {
     console.error('[startGoogleAuth] 오류:', error);
     return { success: false, error: error.message };
@@ -245,16 +274,31 @@ export async function startGoogleAuth() {
 export async function revokeGoogleAuth() {
   try {
     const { googleAuthToken } = await chrome.storage.local.get('googleAuthToken');
+    
     if (googleAuthToken) {
+      // 1. Google OAuth 서버에서 토큰 무효화 (선택적, 실패해도 계속 진행)
+      try {
+        await fetch(`https://oauth2.googleapis.com/revoke?token=${googleAuthToken}`);
+      } catch (e) {
+        console.warn('[revokeGoogleAuth] OAuth 서버 토큰 무효화 실패 (무시):', e);
+      }
+      
+      // 2. Chrome의 인증 캐시에서 제거
       await chrome.identity.removeCachedAuthToken({ token: googleAuthToken });
     }
+    
+    // 3. storage에 저장된 모든 관련 정보 삭제
     await chrome.storage.local.remove([
       'googleAuthToken',
       'googleAuthTokenExpiry',
       'googleAuthTokenIssued',
+      'googleUserEmail',
       'adSenseAccountId',
-      'gaProperties'
+      'gaProperties',
+      'selectedGaPropertyId'
     ]);
+    
+    console.log('🔑 [Auth] 로그아웃 완료');
     return { success: true };
   } catch (error) {
     console.error('[revokeGoogleAuth] 오류:', error);
