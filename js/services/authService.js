@@ -424,6 +424,7 @@ export async function startGoogleAuth() {
     // 보안: 토큰 길이만 로깅 (값은 마스킹)
     Logger.debug('[startGoogleAuth] 토큰 발급 성공, 길이:', tokenString.length);
     
+<<<<<<< HEAD
     // 토큰 만료 시간 저장
     await saveTokenExpiry(tokenString);
     
@@ -481,12 +482,19 @@ export async function startGoogleAuth() {
     
     Logger.biz(`🔑 [Auth] 로그인 성공: ${userInfo.email} (ID: ${userInfo.id})`);
     console.log('🔑 [Auth] 로그인 성공, 토큰 만료 시간 저장 완료');
+    
+    // UI 호환성을 위해 data 객체도 포함
     return { 
       success: true, 
       token: tokenString, 
       properties, 
       adSenseId,
-      userInfo 
+      userInfo,
+      data: {
+        email: userInfo.email,
+        gaProperties: properties,
+        adSenseAccountId: adSenseId
+      }
     };
   } catch (error) {
     Logger.error('[startGoogleAuth] 오류:', error);
@@ -505,7 +513,19 @@ export async function revokeGoogleAuth() {
     
     if (googleAuthToken) {
       try {
-        // 토큰이 문자열인지 확인
+        // 1. Google OAuth 서버에서 토큰 무효화 (선택적, 실패해도 계속 진행)
+        try {
+          const tokenToRevoke = typeof googleAuthToken === 'string' 
+            ? googleAuthToken 
+            : (googleAuthToken?.token || String(googleAuthToken));
+          if (tokenToRevoke && typeof tokenToRevoke === 'string') {
+            await fetch(`https://oauth2.googleapis.com/revoke?token=${tokenToRevoke}`);
+          }
+        } catch (e) {
+          Logger.warn('[revokeGoogleAuth] OAuth 서버 토큰 무효화 실패 (무시):', e);
+        }
+        
+        // 2. 토큰이 문자열인지 확인하고 Chrome의 인증 캐시에서 제거
         const tokenToRemove = typeof googleAuthToken === 'string' 
           ? googleAuthToken 
           : (googleAuthToken?.token || String(googleAuthToken));
@@ -520,17 +540,17 @@ export async function revokeGoogleAuth() {
       }
     }
     
-    // 모든 인증 관련 데이터 삭제
+    // 3. storage에 저장된 모든 관련 정보 삭제
     await chrome.storage.local.remove([
       'googleAuthToken',
       'googleAuthTokenExpiry',
       'googleAuthTokenIssued',
-      'adSenseAccountId',
-      'gaProperties',
-      // 사용자 정보도 함께 삭제
       'googleUserEmail',
       'googleUserId',
-      'googleUserName'
+      'googleUserName',
+      'adSenseAccountId',
+      'gaProperties',
+      'selectedGaPropertyId'
     ]);
     
     Logger.biz('🔑 [Auth] 로그아웃 완료 - 모든 사용자 정보 삭제됨');

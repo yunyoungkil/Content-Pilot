@@ -396,6 +396,7 @@ export function renderChannelMode(container) {
         `;
         
         if (response && response.success) {
+<<<<<<< HEAD
           // GA4 속성 목록 저장 (응답 구조에 따라 처리)
           // response.data가 있으면 data 내부에서, 없으면 직접 접근
           const gaProperties = response.data?.gaProperties || response.gaProperties || response.properties;
@@ -414,7 +415,18 @@ export function renderChannelMode(container) {
             }
           }
           
-          // 로그인 상태 UI 업데이트
+          // 로그인 상태 UI 즉시 업데이트 (response.data에서 직접 사용)
+          const authStatusEl = container.querySelector("#google-auth-status");
+          const authEmailEl = container.querySelector("#google-auth-email");
+          const loginBtn = container.querySelector("#modal-google-login-btn");
+          
+          if (response.data && response.data.email) {
+            if (authStatusEl) authStatusEl.style.display = "block";
+            if (authEmailEl) authEmailEl.textContent = `✅ ${response.data.email}`;
+            if (loginBtn) loginBtn.style.display = "none";
+          }
+          
+          // 추가로 storage에서도 확인 (백업)
           checkGoogleAuthStatus();
           
           alert("✅ Google 계정 연동이 완료되었습니다!");

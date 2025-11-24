@@ -5,21 +5,82 @@ import { ref, get, update } from 'firebase/database';
 import { getValidToken } from './authService.js';
 
 // 1. 에러 전파 유틸리티
+// [Performance Fix] chrome.runtime.sendMessage를 사용하여 확장 프로그램 UI(팝업/사이드 패널)에 직접 전송
+// 이렇게 하면 웹페이지 탭이 활성화되지 않아도 에러 메시지가 표시됨
 export async function sendErrorToUI(errorType, message) {
   try {
-    const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
-    if (tabs && tabs.length > 0) {
-      let icon = "⚠️";
-      let msg = message;
-      if (errorType === "TOKEN_EXPIRED") { icon = "🔑"; msg = "인증 토큰 만료. 재로그인이 필요합니다."; }
-      else if (errorType === "QUOTA_EXCEEDED") { icon = "📊"; msg = "API 할당량 초과."; }
-      
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: "show_error_toast",
-        errorType, message: msg, icon
-      }).catch(() => {});
+    // 에러 타입별 아이콘 및 메시지 매핑
+    let icon = "⚠️";
+    let msg = message;
+    
+    switch (errorType) {
+      case "TOKEN_EXPIRED":
+        icon = "🔑";
+        msg = "인증 토큰 만료. 재로그인이 필요합니다.";
+        break;
+      case "QUOTA_EXCEEDED":
+        icon = "📊";
+        msg = "API 할당량 초과.";
+        break;
+      case "API_KEY_MISSING":
+        icon = "🔑";
+        msg = "API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+        break;
+      case "UNAUTHORIZED":
+        icon = "🔴";
+        msg = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
+        break;
+      case "FORBIDDEN":
+        icon = "🚫";
+        msg = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
+        break;
+      case "API_ERROR":
+        icon = "⚠️";
+        msg = message || "API 호출 중 오류가 발생했습니다.";
+        break;
+      default:
+        icon = "⚠️";
+        msg = message || "오류가 발생했습니다.";
     }
-  } catch (e) { console.error(e); }
+    
+    // 1. 확장 프로그램 UI(팝업/사이드 패널)에 직접 전송 (우선순위 1)
+    // chrome.runtime.sendMessage는 모든 확장 프로그램 컨텍스트에서 수신 가능
+    chrome.runtime.sendMessage({
+      action: "show_error_toast",
+      errorType,
+      message: msg,
+      icon
+    }).catch(() => {
+      // 메시지 전송 실패 시 조용히 처리 (확장 프로그램이 닫혔을 수 있음)
+    });
+    
+    // 2. 활성 웹페이지 탭에도 전송 (fallback, 선택적)
+    // 웹페이지에서 확장 프로그램을 사용하는 경우를 위해 유지
+    try {
+      const tabs = await new Promise((resolve) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, resolve);
+      });
+      
+      if (tabs && tabs.length > 0 && tabs[0].id) {
+        // chrome:// 페이지나 특수 페이지는 제외
+        const url = tabs[0].url || '';
+        if (url && !url.startsWith('chrome://') && !url.startsWith('edge://') && !url.startsWith('about:')) {
+          chrome.tabs.sendMessage(tabs[0].id, {
+            action: "show_error_toast",
+            errorType,
+            message: msg,
+            icon
+          }).catch(() => {
+            // 탭이 닫혔거나 content script가 없는 경우 조용히 실패
+          });
+        }
+      }
+    } catch (tabError) {
+      // 탭 조회 실패 시 무시 (확장 프로그램 UI에만 표시)
+    }
+  } catch (e) {
+    console.error('[sendErrorToUI] 에러 전파 실패:', e);
+  }
 }
 
 // 2. 데이터 수집 (GA4)

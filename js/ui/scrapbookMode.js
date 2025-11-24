@@ -78,6 +78,99 @@ function requestScrapsAndRender(container) {
     });
 }
 
+/**
+ * [Performance Optimization] 스크랩 카드 HTML 생성 헬퍼 함수
+ * 청크 렌더링을 위해 별도 함수로 분리
+ */
+function createScrapCardHTML(scrap) {
+    const tagsHtml = scrap.tags && Array.isArray(scrap.tags) && scrap.tags.length > 0
+        ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
+        : '';
+    const cleanedTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim() : '제목 없음';
+    
+    // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
+    // [CSP 준수] 인라인 이벤트 핸들러 제거, CSS :hover 사용
+    const isDedicated = scrap.channelId !== null && scrap.channelId !== undefined;
+    const toggleBtn = `<button class="scrap-share-toggle-btn ${isDedicated ? 'scrap-toggle-dedicated' : 'scrap-toggle-public'}" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
+      style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
+      title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}">
+      ${isDedicated ? '🔒' : '🌐'}
+    </button>`;
+    
+    return `
+        <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}" style="position: relative;">
+          ${toggleBtn}
+          <button class="scrap-card-delete-btn" data-id="${scrap.id}"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
+          ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ''}
+          <div class="scrap-card-info">
+            <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
+              <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
+            </div>
+            <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
+            ${tagsHtml}
+          </div>
+        </div>
+    `;
+}
+
+/**
+ * [Performance Optimization] 청크 렌더링 함수
+ * requestAnimationFrame을 사용하여 UI 블로킹을 방지
+ */
+function renderScrapListChunked(scrapsToRender, listContainer, container) {
+    const CHUNK_SIZE = 20; // 한 번에 렌더링할 아이템 수
+    let currentIndex = 0;
+    const totalItems = scrapsToRender.length;
+    
+    // 초기 상태: 로딩 메시지 제거하고 빈 컨테이너 준비
+    listContainer.innerHTML = '';
+    
+    // 진행 상태 표시 (선택적)
+    const progressIndicator = document.createElement('div');
+    progressIndicator.style.cssText = 'text-align: center; color: #888; padding: 10px; font-size: 12px;';
+    progressIndicator.textContent = `로딩 중... (0/${totalItems})`;
+    listContainer.appendChild(progressIndicator);
+    
+    /**
+     * 다음 청크를 렌더링하는 함수
+     */
+    function renderNextChunk() {
+        const endIndex = Math.min(currentIndex + CHUNK_SIZE, totalItems);
+        const chunk = scrapsToRender.slice(currentIndex, endIndex);
+        
+        // 청크 HTML 생성
+        const chunkHTML = chunk.map(scrap => createScrapCardHTML(scrap)).join('');
+        
+        // 임시 컨테이너에 추가 (DOM 조작 최소화)
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = chunkHTML;
+        
+        // 실제 DOM에 추가
+        while (tempDiv.firstChild) {
+            listContainer.insertBefore(tempDiv.firstChild, progressIndicator);
+        }
+        
+        currentIndex = endIndex;
+        
+        // 진행 상태 업데이트
+        if (currentIndex < totalItems) {
+            progressIndicator.textContent = `로딩 중... (${currentIndex}/${totalItems})`;
+            
+            // 다음 청크를 requestAnimationFrame으로 예약
+            requestAnimationFrame(renderNextChunk);
+        } else {
+            // 모든 아이템 렌더링 완료
+            progressIndicator.remove();
+            
+            // 이벤트 리스너 연결 (기존 로직 유지)
+            attachScrapListEventListeners(listContainer, container, scraps);
+        }
+    }
+    
+    // 첫 번째 청크 렌더링 시작
+    requestAnimationFrame(renderNextChunk);
+}
+
 function renderScrapList(scraps, container) {
     const listContainer = container.querySelector('.scrapbook-list-cards');
     const keywordInput = container.querySelector('#scrapbook-keyword-input');
@@ -114,38 +207,28 @@ function renderScrapList(scraps, container) {
     if (scrapsToRender.length === 0) {
         listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">일치하는 스크랩이 없습니다.</p>';
     } else {
-        listContainer.innerHTML = scrapsToRender.map(scrap => {
-            const tagsHtml = scrap.tags && Array.isArray(scrap.tags) && scrap.tags.length > 0
-                ? `<div class="card-tags">${scrap.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>`
-                : '';
-            const cleanedTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim() : '제목 없음';
-            
-            // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
-            // [CSP 준수] 인라인 이벤트 핸들러 제거, CSS :hover 사용
-            const isDedicated = scrap.channelId !== null && scrap.channelId !== undefined;
-            const toggleBtn = `<button class="scrap-share-toggle-btn ${isDedicated ? 'scrap-toggle-dedicated' : 'scrap-toggle-public'}" data-scrap-id="${scrap.id}" data-current-channel-id="${scrap.channelId || ''}" 
-              style="position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; z-index: 10; transition: all 0.2s;"
-              title="${isDedicated ? '공용으로 변경' : '전용으로 변경'}">
-              ${isDedicated ? '🔒' : '🌐'}
-            </button>`;
-            
-            return `
-                <div class="scrap-card ${selectedScrapId === scrap.id ? 'active' : ''}" data-id="${scrap.id}" style="position: relative;">
-                  ${toggleBtn}
-                  <button class="scrap-card-delete-btn" data-id="${scrap.id}"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
-                  ${scrap.image ? `<div class="scrap-card-img-wrap"><img src="${scrap.image}" alt="scrap image"></div>` : ''}
-                  <div class="scrap-card-info">
-                    <div class="scrap-card-title" style="display: flex; align-items: center; gap: 4px; min-width: 0;">
-                      <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cleanedTitle.substring(0, 20)}...</span>
-                    </div>
-                    <div class="scrap-card-snippet">${shortenLink(scrap.url, 25)}</div>
-                    ${tagsHtml}
-                  </div>
-                </div>
-            `;
-        }).join('');
+        // [Performance Optimization] 청크 렌더링 사용
+        // 스크랩이 30개 이상일 때만 청크 렌더링 사용 (작은 목록은 즉시 렌더링)
+        if (scrapsToRender.length >= 30) {
+            renderScrapListChunked(scrapsToRender, listContainer, container);
+        } else {
+            // 작은 목록은 기존 방식으로 즉시 렌더링
+            listContainer.innerHTML = scrapsToRender.map(scrap => createScrapCardHTML(scrap)).join('');
+            attachScrapListEventListeners(listContainer, container, scraps);
+        }
     }
 
+    // 이벤트 리스너는 attachScrapListEventListeners에서 처리
+    if (scrapsToRender.length < 30) {
+        attachScrapListEventListeners(listContainer, container, scraps);
+    }
+}
+
+/**
+ * [Performance Optimization] 스크랩 목록 이벤트 리스너 연결 함수
+ * 청크 렌더링과 즉시 렌더링 모두에서 사용
+ */
+function attachScrapListEventListeners(listContainer, container, scraps) {
     // ▼▼▼ [추가] 활성화된 태그 하이라이팅 ▼▼▼
     listContainer.querySelectorAll('.card-tags .tag').forEach(tagEl => {
         if (activeScrapbookTagFilter && tagEl.textContent.replace('#', '') === activeScrapbookTagFilter) {

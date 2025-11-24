@@ -286,7 +286,26 @@ export function createAndShowPanel() {
     }
     
     renderHeaderAndTabs(shadowRoot);
-    addEventListenersToPanel(shadowRoot); 
+    addEventListenersToPanel(shadowRoot);
+    
+    // [Performance Fix] 에러 메시지 리스너 등록 (확장 프로그램 UI에서 직접 수신)
+    // chrome.runtime.onMessage를 사용하여 background.js나 analyticsService.js에서 전송된 에러를 수신
+    if (!window.__cp_error_listener_attached) {
+        chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+            if (msg.action === "show_error_toast") {
+                // Shadow DOM 내부에서 showToast 함수 사용
+                import("../utils.js").then(utils => {
+                    const icon = msg.icon || "⚠️";
+                    const message = msg.message || "오류가 발생했습니다.";
+                    utils.showToast(`${icon} ${message}`);
+                }).catch(err => {
+                    console.error("[Panel] 에러 토스트 표시 실패:", err);
+                });
+            }
+        });
+        window.__cp_error_listener_attached = true;
+        console.log("[Panel] 에러 메시지 리스너 등록 완료");
+    }
 
     // [수정] 초기 로드 로직 (온보딩 체크 + 마이그레이션 확인)
     chrome.storage.local.get(["activeChannelId", "migration_completed"], (res) => {
