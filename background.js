@@ -361,10 +361,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // 저장
       const userId = await getCurrentUserId();
-      const newRef = push(ref(getDb(), `kanban/${userId}/${msg.status || 'ideas'}`));
-      await set(newRef, { ...ideaData, createdAt: Date.now(), channelId: msg.channelId });
+      const path = `kanban/${userId}/${msg.status || 'ideas'}`;
+      const newKey = await push(path, { ...ideaData, createdAt: Date.now(), channelId: msg.channelId });
 
-      return { success: true, firebaseKey: newRef.key };
+      return { success: true, firebaseKey: newKey };
     })());
   }
 
@@ -396,12 +396,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       try {
         // 원래 위치의 카드 데이터 읽기
-        const snapshot = await get(originalRef);
-        if (!snapshot.exists()) {
+        const cardData = await get(originalRef);
+        if (!cardData) {
           return { success: false, error: "이동할 카드를 찾을 수 없습니다." };
         }
-
-        const cardData = snapshot.val();
         
         // 새 위치에 카드 데이터 저장
         await set(newRef, cardData);
@@ -426,7 +424,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // 실시간 리스너 등록 (한 번만)
     if (!kanbanRealtimeListenerAttached) {
       onValue(dbRef, (snapshot) => {
-        const data = snapshot.val() || {};
+        const data = snapshot || {};
         // 모든 탭에 업데이트 메시지 전송
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach((tab) => {
@@ -443,7 +441,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     
       const snap = await get(dbRef);
-      const data = snap.val() || {};
+      const data = snap || {};
       // 즉시 UI에 업데이트 메시지 전송
       if (sender.tab?.id) {
         chrome.tabs.sendMessage(sender.tab.id, {
@@ -459,7 +457,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
       const snap = await get(ref(getDb(), `scraps/${userId}`));
-      const val = snap.val() || {};
+      const val = snap || {};
       const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
       // 필터링
       const filtered = arr.filter(s => s.channelId === undefined || s.channelId === null || s.channelId === msg.channelId);
@@ -472,8 +470,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const userId = await getCurrentUserId();
       const targetChannelId = msg.channelId || null;
       try {
-        const snap = await get(ref(getDb(), `scraps/${userId}`));
-        const val = snap.val() || {};
+        const val = await get(ref(getDb(), `scraps/${userId}`)) || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
         // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
         const filtered = arr.filter(scrap => {
@@ -498,9 +495,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         get(ref(getDb(), `channels/${userId}`))
       ]);
       
-      const content = contentSnap.val() || {};
-      const metas = metaSnap.val() || {};
-      const channels = channelsSnap.val() || {
+      const content = contentSnap || {};
+      const metas = metaSnap || {};
+      const channels = channelsSnap || {
         myChannels: {},
         competitorChannels: {}
       };
@@ -534,7 +531,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         data: {
           youtubeApiKey: storage.youtubeApiKey || "",
           geminiApiKey: storage.geminiApiKey || "",
-          ...(channelsSnap.val() || {})
+          ...(channelsSnap || {})
         }
       };
     })());
@@ -544,7 +541,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const userId = await getCurrentUserId();
       const snap = await get(ref(getDb(), `channels/${userId}`));
-      const channels = snap.val() || {};
+      const channels = snap || {};
       return { success: true, channels: channels.myChannels || { blogs: [], youtubes: [] } };
     })());
   }
@@ -568,7 +565,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { ideaId } = msg;
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap.val() || {};
+      const allCards = snap || {};
       for (const status in allCards) {
         if (allCards[status][ideaId]) {
           return { success: true, data: allCards[status][ideaId], status };
@@ -582,7 +579,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { cardId } = msg;
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap.val() || {};
+      const allCards = snap || {};
       for (const status in allCards) {
         if (allCards[status][cardId]) {
           return { success: true, status, data: allCards[status][cardId] };
@@ -596,7 +593,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const { ideaId, draft } = msg;
     return handleAsync((async () => {
       const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
-      const allCards = snap.val() || {};
+      const allCards = snap || {};
       for (const status in allCards) {
         if (allCards[status][ideaId]) {
           await update(ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`), { draftContent: draft });
@@ -630,12 +627,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // Firebase에 저장
         const userId = await getCurrentUserId();
-        const scrapRef = push(ref(getDb(), `scraps/${userId}`));
-        await set(scrapRef, cleanDataForFirebase(scrapPayload));
+        const path = `scraps/${userId}`;
+        const newKey = await push(path, cleanDataForFirebase(scrapPayload));
 
         return { 
           success: true, 
-          scrapId: scrapRef.key,
+          scrapId: newKey,
           scrapData: scrapPayload
         };
       } catch (error) {
@@ -656,9 +653,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { scrapId, imageUrl } = msg.data;
       const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-      const snap = await get(scrapRef);
-      if (snap.exists()) {
-        const scrap = snap.val();
+      const scrap = await get(scrapRef);
+      if (scrap) {
         if (scrap.images && Array.isArray(scrap.images)) {
           scrap.images = scrap.images.filter(img => img !== imageUrl);
           await update(scrapRef, { images: scrap.images });
@@ -689,13 +685,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       
       const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-      const snap = await get(scrapRef);
+      const scrapData = await get(scrapRef);
       
-      if (!snap.exists()) {
+      if (!scrapData) {
         return { success: false, error: "스크랩을 찾을 수 없습니다." };
       }
-      
-      const scrapData = snap.val();
       const currentChannelIdValue = scrapData.channelId;
       const isCurrentlyPublic = currentChannelIdValue === null || currentChannelIdValue === undefined;
       
@@ -725,9 +719,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync((async () => {
       const { ideaId, scrapId, status } = msg.data;
       const ideaRef = ref(getDb(), `kanban/${CONSTANTS.USER_ID}/${status}/${ideaId}`);
-      const ideaSnap = await get(ideaRef);
-      if (ideaSnap.exists()) {
-        const idea = ideaSnap.val();
+      const idea = await get(ideaRef);
+      if (idea) {
         const linkedScraps = idea.workspace?.linkedScraps || [];
         if (!linkedScraps.includes(scrapId)) {
           linkedScraps.push(scrapId);
