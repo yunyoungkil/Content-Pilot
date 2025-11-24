@@ -4,6 +4,7 @@ import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
+import { Logger } from '../utils.js';
 
 // 1. 에러 전파 유틸리티
 // [Performance Fix] chrome.runtime.sendMessage를 사용하여 확장 프로그램 UI(팝업/사이드 패널)에 직접 전송
@@ -237,6 +238,16 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
   
   try {
+    // [수정] 경쟁사 포스트인지 확인
+    const cardSnap = await get(ref(db, path));
+    const card = cardSnap?.val() || {};
+    const isCompetitorPost = card.origin?.type === 'competitor_post';
+    
+    if (isCompetitorPost) {
+      Logger.info(`[updateSinglePerformanceMetric] 경쟁사 포스트이므로 성과 추적을 건너뜁니다: ${contentInfo.id}`);
+      return; // 경쟁사 포스트는 성과 추적하지 않음
+    }
+    
     await update(ref(db, `${path}/performance`), { collecting: true, collectingStartedAt: Date.now() });
 
     // 토큰 검증 및 자동 갱신
@@ -312,6 +323,12 @@ export async function updateAllPerformanceMetrics() {
   for (const status in cards) {
     for (const id in cards[status]) {
       const card = cards[status][id];
+      // [수정] 경쟁사 포스트는 성과 추적 제외
+      const isCompetitorPost = card.origin?.type === 'competitor_post';
+      if (isCompetitorPost) {
+        continue; // 경쟁사 포스트는 건너뛰기
+      }
+      
       // 6시간 경과 체크
       if (card.performanceTracked && card.publishedUrl) {
         if (!card.performance?.lastUpdatedAt || now - card.performance.lastUpdatedAt > 21600000) {
@@ -425,8 +442,235 @@ export async function getUserFeedbackPatterns() {
   return null; // AI 분석 로직 분리를 위해 데이터 반환 형태로 변경 권장 (현재는 단순화)
 }
 
-// 9. 진단 로직 (Stub)
-export async function checkAdSenseRegistrationStatus() { return { updatedCards: 0 }; }
+// 9. 진단 로직
+/**
+ * AdSense URL 채널 등록 상태 확인
+ * @param {string|null} retryToken - 재시도용 토큰
+ * @param {string|null} targetUrl - 특정 URL만 체크할 경우 (null이면 전체 체크)
+ * @param {string|null} targetCardId - 특정 카드 ID만 업데이트할 경우 (null이면 전체 업데이트)
+ * @param {string|null} targetStatus - 특정 카드의 상태 (targetCardId와 함께 사용)
+ */
+export async function checkAdSenseRegistrationStatus(retryToken = null, targetUrl = null, targetCardId = null, targetStatus = null) {
+  if (!initializeFirebase()) {
+    throw new Error("Firebase 초기화 실패");
+  }
+  
+  const isSingleCardCheck = targetUrl && targetCardId && targetStatus;
+  Logger.info(`🚀 [AdSense] 등록 확인 시작...${isSingleCardCheck ? ` [단일 카드: ${targetCardId}]` : ' [전체 카드]'}`);
+  
+  let token = retryToken;
+  let accountId = null;
+
+  if (!token) {
+    const storage = await chrome.storage.local.get(["googleAuthToken", "adSenseAccountId"]);
+    token = storage.googleAuthToken;
+    accountId = storage.adSenseAccountId;
+  } else {
+    const storage = await chrome.storage.local.get("adSenseAccountId");
+    accountId = storage.adSenseAccountId;
+  }
+
+  if (!token || !accountId) {
+    throw new Error("인증 정보가 없습니다. Google 로그인 및 AdSense 계정 ID 설정이 필요합니다.");
+  }
+
+  try {
+    // 1. 계정 확인
+    let accountName = `accounts/${accountId}`;
+    try {
+      const listRes = await fetch("https://adsense.googleapis.com/v2/accounts", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (listRes.status === 401) throw new Error("UNAUTHORIZED");
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const normalizedInput = accountId.trim().replace(/^accounts\//, '');
+        const matched = listData.accounts?.find(acc => acc.name.includes(normalizedInput));
+        if (matched) accountName = matched.name;
+      }
+    } catch (e) { 
+      if (e.message === "UNAUTHORIZED") {
+        await sendErrorToUI("UNAUTHORIZED", "인증 토큰이 만료되었습니다. 재로그인이 필요합니다.");
+        throw e;
+      }
+    }
+
+    // 2. 클라이언트 및 URL 채널 조회
+    const registeredUrls = new Set();
+    
+    const clientsRes = await fetch(`https://adsense.googleapis.com/v2/${accountName}/adclients`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    
+    if (clientsRes.status === 401) {
+      await sendErrorToUI("UNAUTHORIZED", "인증 토큰이 만료되었습니다. 재로그인이 필요합니다.");
+      throw new Error("UNAUTHORIZED");
+    }
+    if (!clientsRes.ok) {
+      throw new Error(`AdSense 조회 실패 (${clientsRes.status})`);
+    }
+    
+    const clientsData = await clientsRes.json();
+    const adClients = clientsData.adClients || [];
+
+    await Promise.all(adClients.map(async (client) => {
+      if (client.productCode === "YOUTUBE" || client.name.includes("ca-yt")) return;
+
+      Logger.debug(`📡 [AdSense] 조회 중: ${client.name}`);
+
+      let nextPageToken = null;
+      do {
+        let url = `https://adsense.googleapis.com/v2/${client.name}/urlchannels?pageSize=1000`;
+        if (nextPageToken) url += `&pageToken=${nextPageToken}`;
+        
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 401) throw new Error("UNAUTHORIZED");
+        if (!res.ok) return;
+
+        const json = await res.json();
+        if (json.urlChannels) {
+          json.urlChannels.forEach(ch => {
+            const urlValue = ch.uriPattern || ch.urlPattern;
+            if (urlValue) {
+              // 디코딩 및 정규화하여 저장
+              let normalized = "";
+              try {
+                // URL 정규화: 소문자 변환, 프로토콜 제거, 마지막 슬래시 제거
+                normalized = decodeURIComponent(urlValue).toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+              } catch (e) {
+                normalized = urlValue.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+              }
+              registeredUrls.add(normalized);
+            }
+          });
+        }
+        nextPageToken = json.nextPageToken;
+      } while (nextPageToken);
+    }));
+
+    Logger.info(`📦 [AdSense] 수집된 URL 패턴: ${registeredUrls.size}개`);
+
+    // 3. 데이터베이스 업데이트 (유연한 매칭 로직 적용)
+    let updatedCount = 0;
+    let matchedCount = 0;
+    let alreadyRegisteredCount = 0;
+    let notMatchedCount = 0;
+    
+    if (registeredUrls.size > 0) {
+      const db = getDb();
+      const userId = CONSTANTS.USER_ID;
+      const snapshot = await get(ref(db, `kanban/${userId}`));
+      const allCards = snapshot.val() || {};
+      const updates = {};
+      const normalizer = (u) => u.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const urlList = [...registeredUrls]; // 배열로 변환
+
+      // 단일 카드 체크 모드인 경우 해당 카드만 처리
+      const statusesToCheck = isSingleCardCheck ? [targetStatus] : Object.keys(allCards);
+
+      for (const status of statusesToCheck) {
+        const cardsToCheck = isSingleCardCheck ? { [targetCardId]: allCards[status]?.[targetCardId] } : (allCards[status] || {});
+        
+        for (const cardId in cardsToCheck) {
+          // 단일 카드 모드인 경우 해당 카드만 처리
+          if (isSingleCardCheck && cardId !== targetCardId) continue;
+          
+          const card = cardsToCheck[cardId];
+          if (!card) continue;
+          
+          if (card.publishedUrl) {
+            // 단일 카드 모드인 경우 targetUrl과 일치하는지 확인
+            if (isSingleCardCheck && card.publishedUrl !== targetUrl) continue;
+            
+            let normUrl = "";
+            try { 
+              normUrl = normalizer(decodeURIComponent(card.publishedUrl)); 
+            } catch(e) { 
+              normUrl = normalizer(card.publishedUrl); 
+            }
+            
+            // 🔥 [핵심 업그레이드] 매칭 로직 3단계
+            // 1. 정확히 일치 (Exact Match)
+            // 2. 등록된 패턴으로 시작 (Prefix Match): 예) example.com/blog -> example.com/blog/1
+            // 3. 카드 URL이 등록된 패턴을 포함 (Contains Match): 예) k-posting.info -> costcatcher.k-posting.info
+            const isReg = urlList.some(reg => {
+                return normUrl === reg || normUrl.startsWith(reg) || (normUrl.includes(reg) && reg.includes('.'));
+            });
+            
+            // 통계 수집
+            if (isReg) {
+              matchedCount++;
+              if (card.adSenseRegistered === true) {
+                alreadyRegisteredCount++;
+              }
+            } else {
+              notMatchedCount++;
+            }
+            
+            // 현재 상태 확인 (undefined도 false로 처리)
+            const currentStatus = card.adSenseRegistered === true;
+            const needsUpdate = currentStatus !== isReg;
+            
+            if (needsUpdate) {
+              const cardPath = `kanban/${userId}/${status}/${cardId}`;
+              updates[cardPath] = { adSenseRegistered: isReg };
+              updatedCount++;
+              Logger.info(`🔄 [상태 업데이트] 카드 ${cardId}: ${currentStatus} → ${isReg}`, {
+                url: normUrl,
+                title: card.title || "제목 없음"
+              });
+            }
+          }
+        }
+      }
+      
+      // Firebase 업데이트 (배치 업데이트)
+      if (updatedCount > 0) {
+        Logger.info(`💾 [AdSense] Firebase 업데이트 시작: ${updatedCount}개 카드`);
+        for (const [path, data] of Object.entries(updates)) {
+          await update(ref(db, path), data);
+        }
+        Logger.info(`✅ [AdSense] Firebase 업데이트 완료: ${updatedCount}개 카드`);
+      }
+      
+      // 상태 요약 로그
+      const summaryMessage = updatedCount === 0 && alreadyRegisteredCount === matchedCount 
+        ? "✅ 모든 카드가 이미 올바르게 등록되어 있습니다."
+        : updatedCount === 0 && matchedCount === 0
+        ? "⚠️ 매칭된 카드가 없습니다. URL 패턴을 확인하세요."
+        : updatedCount > 0
+        ? `🔄 ${updatedCount}개 카드 상태가 업데이트되었습니다.`
+        : "ℹ️ 상태 변경이 필요하지 않습니다.";
+        
+      Logger.info(`📊 [AdSense] 상태 요약:`, {
+        총_수집된_URL_패턴: registeredUrls.size,
+        매칭_성공_카드: matchedCount,
+        이미_등록됨: alreadyRegisteredCount,
+        매칭_실패_카드: notMatchedCount,
+        업데이트_필요: updatedCount,
+        메시지: summaryMessage
+      });
+    }
+
+    return {
+      success: true,
+      totalRegistered: registeredUrls.size,
+      updatedCards: updatedCount,
+      matchedCards: matchedCount,
+      alreadyRegistered: alreadyRegisteredCount,
+      notMatched: notMatchedCount
+    };
+  } catch (error) {
+    Logger.error(`[AdSense] 등록 상태 확인 실패:`, error);
+    
+    if (error.message === "UNAUTHORIZED") {
+      await sendErrorToUI("UNAUTHORIZED", "인증 토큰이 만료되었습니다. 재로그인이 필요합니다.");
+    }
+    
+    throw error;
+  }
+}
+
 export async function runFullSystemDiagnosis() { return { checks: [], errors: [] }; }
 export async function runAdSenseDeepDiagnosis() { return { success: true }; }
 export async function testBlogConnection() { return { success: true }; }

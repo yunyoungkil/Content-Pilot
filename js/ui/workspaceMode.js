@@ -719,6 +719,57 @@ function buildPermalinkUrl(channelUrl, permalink, isTistory = null) {
   } catch (e) { return ''; }
 }
 
+/**
+ * publishedUrl에서 permalink 부분을 추출하는 함수
+ * @param {string} publishedUrl - 전체 URL
+ * @returns {string} - 추출된 permalink
+ */
+function extractPermalinkFromUrl(publishedUrl) {
+  if (!publishedUrl) return '';
+  
+  try {
+    const urlObj = new URL(publishedUrl);
+    const host = urlObj.hostname.toLowerCase();
+    const pathname = urlObj.pathname;
+    
+    // Tistory: /entry/12345 형식
+    if (host.includes('tistory.com')) {
+      const match = pathname.match(/\/entry\/([^\/\?]+)/);
+      if (match) return match[1];
+    }
+    
+    // Naver Blog: /12345 형식 또는 /PostView.naver?blogId=xxx&logNo=12345
+    if (host.includes('blog.naver.com')) {
+      // /PostView.naver?logNo=12345 형식
+      const logNoMatch = urlObj.searchParams.get('logNo');
+      if (logNoMatch) return logNoMatch;
+      
+      // /12345 형식
+      const pathMatch = pathname.match(/^\/([^\/\?]+)$/);
+      if (pathMatch && pathMatch[1] !== 'PostView.naver') return pathMatch[1];
+    }
+    
+    // Brunch: /@username/12345 형식
+    if (host.includes('brunch.co.kr')) {
+      const match = pathname.match(/\/@[^\/]+\/([^\/\?]+)/);
+      if (match) return match[1];
+    }
+    
+    // 일반적인 경우: 마지막 경로 세그먼트를 permalink로 사용
+    const segments = pathname.split('/').filter(s => s);
+    if (segments.length > 0) {
+      const lastSegment = segments[segments.length - 1];
+      // 확장자 제거 (예: .html, .php 등)
+      return lastSegment.replace(/\.[^\.]+$/, '');
+    }
+    
+    return '';
+  } catch (e) {
+    Logger.warn('[extractPermalinkFromUrl] URL 파싱 실패:', e);
+    return '';
+  }
+}
+
 function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   // 기존 패널 제거
   const existingInfo = workspaceEl.querySelector('.publish-info-panel');
@@ -833,12 +884,22 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
     if (connectBtn && fullUrl) {
       connectBtn.addEventListener('click', () => {
+        // 현재 카드의 실제 status 가져오기
+        const currentStatus = ideaData.status || window.__cp_workspace_idea_data?.status || "in-progress";
         chrome.runtime.sendMessage({
           action: "link_published_url",
-          data: { cardId: ideaData.id, url: fullUrl, status: "draft" } // 상태는 예시
+          data: { cardId: ideaData.id, url: fullUrl, status: currentStatus }
         }, (res) => {
-          if (res && res.success) alert("✅ 발행 URL이 연결되었습니다.");
-          else alert("연결 실패: " + (res?.error || "오류"));
+          if (res && res.success) {
+            showToast("✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.");
+            // 로컬 데이터 업데이트
+            if (window.__cp_workspace_idea_data) {
+              window.__cp_workspace_idea_data.publishedUrl = fullUrl;
+              window.__cp_workspace_idea_data.performanceTracked = true;
+            }
+          } else {
+            showToast(`❌ 연결 실패: ${res?.error || "알 수 없는 오류"}`, 'error');
+          }
         });
       });
     }
@@ -891,6 +952,9 @@ export function renderWorkspace(container, ideaData) {
   if (!ideaData.tags && ideaData.workspace.keywords) ideaData.tags = ideaData.workspace.keywords;
   if (!ideaData.outline && ideaData.workspace.outline) ideaData.outline = ideaData.workspace.outline;
   
+  // "즉시 추적(Instant Tracking)" 카드 감지
+  const isTrackingOnly = ideaData.origin?.type === "tracking_only";
+  
   // 브리핑이 이미 생성되었는지 확인 (outline, mainKeywords, longTailKeywords, tags 중 하나라도 있으면 생성된 것으로 간주)
   const hasBriefing = ideaData.outline?.length > 0 
     || ideaData.mainKeywords?.length > 0 
@@ -898,7 +962,8 @@ export function renderWorkspace(container, ideaData) {
     || (ideaData.tags && ideaData.tags.length > 1);
   
   // 브리핑이 없고, tags도 없거나 1개 이하일 때만 브리핑 요청 (중복 호출 방지)
-  if (ideaData.title && !hasBriefing && (!ideaData.tags || ideaData.tags.length <= 1)) {
+  // tracking_only인 경우는 브리핑 생성하지 않음
+  if (!isTrackingOnly && ideaData.title && !hasBriefing && (!ideaData.tags || ideaData.tags.length <= 1)) {
      Logger.debug(`[Workspace] 브리핑 요청 - cardId: ${ideaData.id}, title: ${ideaData.title}`);
      chrome.runtime.sendMessage({
         action: "generate_idea_briefing",
@@ -915,7 +980,11 @@ export function renderWorkspace(container, ideaData) {
        Logger.warn(`[Workspace] 브리핑 요청 실패:`, err);
      });
   } else {
-    Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - hasBriefing: ${hasBriefing}, tags: ${ideaData.tags?.length || 0}`);
+    if (isTrackingOnly) {
+      Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - tracking_only 카드`);
+    } else {
+      Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - hasBriefing: ${hasBriefing}, tags: ${ideaData.tags?.length || 0}`);
+    }
   }
 
   // 에디터 저장 리스너
@@ -980,6 +1049,34 @@ export function renderWorkspace(container, ideaData) {
       : "<li>추천 검색어 없음</li>";
 
   const hasDraft = !!ideaData.draftContent;
+  
+  // tracking_only인 경우 특별한 UI 렌더링
+  const trackingOnlyContent = isTrackingOnly ? `
+    <div style="padding: 20px; background: #fff; border-radius: 8px; margin: 20px;">
+      ${ideaData.thumbnail ? `
+        <div style="margin-bottom: 20px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <img src="${ideaData.thumbnail}" alt="${ideaData.title || '썸네일'}" 
+               style="width: 100%; height: auto; display: block; max-height: 400px; object-fit: cover;"
+               onerror="this.style.display='none';">
+        </div>
+      ` : ''}
+      ${ideaData.publishedUrl ? `
+        <div style="margin-bottom: 20px; padding: 12px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #4285f4;">
+          <a href="${ideaData.publishedUrl}" target="_blank" rel="noopener noreferrer" 
+             style="display: inline-flex; align-items: center; gap: 8px; color: #4285f4; text-decoration: none; font-weight: 500; font-size: 14px;">
+            <span>🔗</span>
+            <span>원문 보기</span>
+            <span style="font-size: 12px; opacity: 0.7;">→</span>
+          </a>
+        </div>
+      ` : ''}
+      ${ideaData.description ? `
+        <div style="line-height: 1.8; color: #333; font-size: 14px; padding: 16px; background: #f8f9fa; border-radius: 6px; white-space: pre-wrap;">
+          ${ideaData.description}
+        </div>
+      ` : '<p style="color: #888; font-style: italic;">설명이 없습니다.</p>'}
+    </div>
+  ` : '';
 
   container.innerHTML = `
     <div class="workspace-container">
@@ -988,6 +1085,7 @@ export function renderWorkspace(container, ideaData) {
             <input type="text" id="workspace-title-input" value="${ideaData.title || "제목 없음"}" style="width:100%; font-size:16px; border:none; background:transparent; font-weight:bold;">
             <button id="save-title-btn" style="display:none;">저장</button>
         </div>
+        ${isTrackingOnly ? trackingOnlyContent : `
         <div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">
             <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
             ${hasDraft ? `<button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>` : ""}
@@ -1000,6 +1098,7 @@ export function renderWorkspace(container, ideaData) {
                 </div>
             </div>
         </div>
+        `}
       </div>
 
       <div id="resource-library-panel" class="workspace-column">
@@ -1248,6 +1347,35 @@ export function renderWorkspace(container, ideaData) {
   // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
   renderThumbnailButton(workspaceEl, ideaData);
   
+  // tracking_only 카드인 경우 publishedUrl에서 permalink 추출
+  if (isTrackingOnly && ideaData.publishedUrl && !ideaData.publishInfo?.permalink) {
+    const extractedPermalink = extractPermalinkFromUrl(ideaData.publishedUrl);
+    if (extractedPermalink) {
+      // publishInfo 객체가 없으면 생성
+      if (!ideaData.publishInfo) {
+        ideaData.publishInfo = {};
+      }
+      ideaData.publishInfo.permalink = extractedPermalink;
+      
+      // Firebase에 저장 (비동기, 실패해도 계속 진행)
+      chrome.runtime.sendMessage({
+        action: "update_kanban_card",
+        data: {
+          cardId: ideaData.id,
+          status: ideaData.status || "done",
+          updates: {
+            publishInfo: {
+              ...ideaData.publishInfo,
+              permalink: extractedPermalink
+            }
+          }
+        }
+      }).catch((err) => {
+        Logger.warn('[Workspace] permalink 저장 실패:', err);
+      });
+    }
+  }
+  
   if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
       setTimeout(() => showPublishInfo(container.querySelector(".workspace-container"), ideaData.publishInfo?.permalink, ideaData.publishInfo?.tags, ideaData.seoTitle, ideaData), 200);
   }
@@ -1256,6 +1384,9 @@ export function renderWorkspace(container, ideaData) {
 function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     console.log("[Workspace] addWorkspaceEventListeners 함수 호출됨");
     
+    // "즉시 추적" 카드인지 확인
+    const isTrackingOnly = ideaData.origin?.type === "tracking_only";
+    
     const tabBtns = workspaceEl.querySelectorAll(".resource-tab-btn");
     const allScrapsList = workspaceEl.querySelector(".all-scraps-list");
     const linkedScrapsList = workspaceEl.querySelector(".linked-scraps-list");
@@ -1263,6 +1394,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     const resourceLibrary = workspaceEl.querySelector("#resource-library-panel");
     
     console.log("[Workspace] editorIframe 찾기:", editorIframe);
+    console.log("[Workspace] isTrackingOnly:", isTrackingOnly);
     
     // 연결된 스크랩 목록 초기 렌더링
     if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
@@ -2342,29 +2474,33 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     // dragover 이벤트: 드롭 영역 시각적 피드백
     workspaceEl.addEventListener("dragover", (e) => {
         e.preventDefault();
-        // linked-scraps-list 위에 있을 때 시각적 피드백
-        if (linkedScrapsList.contains(e.target) || e.target.closest(".linked-scraps-list")) {
+        // linked-scraps-list 위에 있을 때 시각적 피드백 (null 체크)
+        if (linkedScrapsList && (linkedScrapsList.contains(e.target) || e.target.closest(".linked-scraps-list"))) {
             linkedScrapsList.classList.add("drag-over");
-        } else {
+        } else if (linkedScrapsList) {
             linkedScrapsList.classList.remove("drag-over");
         }
     });
     
-    // dragleave 이벤트: 드래그가 영역을 벗어날 때 피드백 제거
-    linkedScrapsList.addEventListener("dragleave", (e) => {
-        if (!linkedScrapsList.contains(e.relatedTarget)) {
-            linkedScrapsList.classList.remove("drag-over");
-        }
-    });
+    // dragleave 이벤트: 드래그가 영역을 벗어날 때 피드백 제거 (null 체크)
+    if (linkedScrapsList) {
+        linkedScrapsList.addEventListener("dragleave", (e) => {
+            if (!linkedScrapsList.contains(e.relatedTarget)) {
+                linkedScrapsList.classList.remove("drag-over");
+            }
+        });
+    }
     
     workspaceEl.addEventListener("drop", (e) => {
         e.preventDefault();
-        linkedScrapsList.classList.remove("drag-over"); // 드롭 시 피드백 제거
+        if (linkedScrapsList) {
+            linkedScrapsList.classList.remove("drag-over"); // 드롭 시 피드백 제거
+        }
         const data = e.dataTransfer.getData("application/json");
         if (!data) return;
         const scrapData = JSON.parse(data);
         
-        if (linkedScrapsList.contains(e.target) || e.target.closest(".linked-scraps-list")) {
+        if (linkedScrapsList && (linkedScrapsList.contains(e.target) || e.target.closest(".linked-scraps-list"))) {
             // 중복 체크: 이미 연결된 스크랩인지 확인
             const linkedScrapsIds = Array.isArray(ideaData.linkedScraps) 
                 ? ideaData.linkedScraps 
@@ -2438,7 +2574,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
             // 드롭이 linked-scraps-list 외부에서 발생했는지 확인
             setTimeout(() => {
                 const relatedTarget = document.elementFromPoint(e.clientX, e.clientY);
-                if (!relatedTarget || (!linkedScrapsList.contains(relatedTarget) && !relatedTarget.closest(".linked-scraps-list"))) {
+                if (linkedScrapsList && (!relatedTarget || (!linkedScrapsList.contains(relatedTarget) && !relatedTarget.closest(".linked-scraps-list")))) {
                     // 외부로 드래그된 경우 삭제 (confirm 없이)
                     const scrapId = item.dataset.scrapId;
                     if (scrapId) {
@@ -2478,18 +2614,19 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         });
     }
     
-    // 기존 연결된 스크랩에 이벤트 리스너 설정
-    linkedScrapsList.querySelectorAll(".linked-scrap-item").forEach(item => {
-        setupLinkedScrapItem(item);
-    });
-    
-    // 이벤트 위임: 연결 해제 버튼 클릭 이벤트 (동적 요소에서도 작동)
-    linkedScrapsList.addEventListener('click', (e) => {
-        const unlinkBtn = e.target.closest('.unlink-scrap-btn');
-        if (!unlinkBtn) return;
+    // 기존 연결된 스크랩에 이벤트 리스너 설정 (null 체크)
+    if (linkedScrapsList) {
+        linkedScrapsList.querySelectorAll(".linked-scrap-item").forEach(item => {
+            setupLinkedScrapItem(item);
+        });
         
-        e.preventDefault();
-        e.stopPropagation();
+        // 이벤트 위임: 연결 해제 버튼 클릭 이벤트 (동적 요소에서도 작동)
+        linkedScrapsList.addEventListener('click', (e) => {
+            const unlinkBtn = e.target.closest('.unlink-scrap-btn');
+            if (!unlinkBtn) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
         
         const item = unlinkBtn.closest('.linked-scrap-item');
         if (!item) return;
@@ -2534,7 +2671,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 showToast(`❌ 스크랩 연결 해제에 실패했습니다: ${res?.error || "알 수 없는 오류"}`);
             }
         });
-    });
+        });
+    }
 
     // 목차 기능을 위한 헬퍼 함수
     const updateOutlineInFirebase = (newOutline, callback) => {

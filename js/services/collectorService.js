@@ -541,6 +541,80 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
 
       const contentId = btoa(url.split('?')[0]).replace(/=/g, '');
       
+      // [수정] sourceId를 정확히 설정
+      // sourceId가 전달되면 그대로 사용, 없으면 channelId를 기반으로 생성
+      let finalSourceId = sourceId;
+      if (!finalSourceId && channelId) {
+        // channelId가 base64 인코딩된 apiUrl인지 확인
+        try {
+          const decoded = atob(channelId.replace(/=/g, ''));
+          if (decoded.startsWith('http')) {
+            finalSourceId = channelId; // 이미 base64 인코딩된 apiUrl이면 그대로 사용
+            Logger.debug(`[fetchAndSaveSinglePost] channelId가 base64 인코딩된 URL: ${decoded.substring(0, 50)}...`);
+          } else {
+            // channelId가 일반 ID면, 채널 정보에서 apiUrl을 찾아서 인코딩
+            const channelsSnap = await get(ref(db, `channels/${userId}`));
+            const channels = channelsSnap?.val() || {};
+            const myBlogs = channels.myChannels?.blogs || [];
+            const matchedChannel = myBlogs.find(blog => {
+              const blogId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null);
+              return blogId === channelId;
+            });
+            
+            if (matchedChannel && matchedChannel.apiUrl) {
+              finalSourceId = btoa(matchedChannel.apiUrl).replace(/=/g, '');
+              Logger.debug(`[fetchAndSaveSinglePost] 채널에서 apiUrl 찾음, sourceId 생성: ${finalSourceId.substring(0, 20)}...`);
+            } else if (matchedChannel && matchedChannel.url) {
+              // apiUrl이 없으면 url을 RSS URL로 변환 후 인코딩
+              const urlObj = new URL(matchedChannel.url);
+              const host = urlObj.hostname.toLowerCase();
+              let rssUrl = null;
+              
+              if (host.includes('tistory.com')) {
+                rssUrl = `${urlObj.origin}/rss`;
+              } else if (host.includes('blog.naver.com')) {
+                const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+                if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+                  rssUrl = `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+                } else {
+                  rssUrl = `${urlObj.origin}/rss`;
+                }
+              } else {
+                rssUrl = matchedChannel.url.endsWith('/') ? `${matchedChannel.url}feed` : `${matchedChannel.url}/feed`;
+              }
+              
+              finalSourceId = btoa(rssUrl).replace(/=/g, '');
+              Logger.debug(`[fetchAndSaveSinglePost] RSS URL로 sourceId 생성: ${finalSourceId.substring(0, 20)}...`);
+            } else {
+              finalSourceId = channelId; // fallback: channelId 사용
+              Logger.warn(`[fetchAndSaveSinglePost] 채널을 찾지 못해 channelId를 sourceId로 사용: ${channelId}`);
+            }
+          }
+        } catch (e) {
+          // channelId가 base64가 아닌 경우, 채널 정보에서 찾기
+          try {
+            const channelsSnap = await get(ref(db, `channels/${userId}`));
+            const channels = channelsSnap?.val() || {};
+            const myBlogs = channels.myChannels?.blogs || [];
+            const matchedChannel = myBlogs.find(blog => {
+              const blogId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null);
+              return blogId === channelId;
+            });
+            
+            if (matchedChannel && matchedChannel.apiUrl) {
+              finalSourceId = btoa(matchedChannel.apiUrl).replace(/=/g, '');
+            } else {
+              finalSourceId = channelId; // 최종 fallback
+            }
+          } catch (err) {
+            finalSourceId = channelId; // 최종 fallback
+            Logger.warn(`[fetchAndSaveSinglePost] sourceId 생성 실패, channelId 사용: ${channelId}`, err);
+          }
+        }
+      }
+      
+      Logger.info(`[fetchAndSaveSinglePost] 최종 sourceId: ${finalSourceId?.substring(0, 20) || 'null'}...`);
+      
       const finalData = {
         title,
         fullLink: url,
@@ -548,7 +622,7 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
         description: parsed.description,
         thumbnail: parsed.thumbnail,
         cleanText: parsed.cleanText,
-        sourceId: sourceId || channelId,
+        sourceId: finalSourceId || channelId,
         channelType: "myChannels",
         fetchedAt: Date.now(),
         ...parsed.metrics,

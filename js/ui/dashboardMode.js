@@ -500,16 +500,25 @@ function createContentCard(item, type, sourceName = null, trackedUrls = new Map(
     }
     const commentAnalysisButton = isVideo ? `<button class="comment-analyze-btn" data-video-id="${item.videoId}" title="댓글 분석">💡</button>` : '';
     
-    // 미등록 상태일 때만 리뉴얼 버튼 표시 (추적 중 배지는 card-channel-name 영역에 표시됨)
+    // 미등록 상태일 때만 리뉴얼 버튼과 성과 등록 버튼 표시
+    // [수정] 경쟁 채널에는 성과 등록 버튼을 표시하지 않음
     let actionButtonHtml = '';
     if (!isTracked) {
-        // 미등록 -> 리뉴얼 버튼 표시
+        // 미등록 -> 리뉴얼 버튼과 성과 등록 버튼 표시
         const postObjectString = JSON.stringify(item).replace(/'/g, "&#39;");
-        actionButtonHtml = `<button class="add-post-to-kanban-btn" data-post-object='${postObjectString}' data-channel-type="${type}" data-item-url="${itemUrl.replace(/"/g, '&quot;')}" title="${type === 'myChannels' ? '리뉴얼 아이디어로 추가' : '벤치마킹 아이디어로 추가'}">
-            <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
-                <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
-            </svg>
-        </button>`;
+        const isMyChannel = type === 'myChannels';
+        actionButtonHtml = `
+            <button class="add-post-to-kanban-btn" data-post-object='${postObjectString}' data-channel-type="${type}" data-item-url="${itemUrl.replace(/"/g, '&quot;')}" title="${isMyChannel ? '리뉴얼 아이디어로 추가' : '벤치마킹 아이디어로 추가'}" style="margin-right: 4px;">
+                <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor">
+                    <path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/>
+                </svg>
+            </button>
+            ${isMyChannel ? `
+            <button class="track-post-btn" data-post-object='${postObjectString}' data-channel-type="${type}" data-item-url="${itemUrl.replace(/"/g, '&quot;')}" title="성과 추적 시작 (발행 완료 컬럼에 추가)" style="background: #4285f4; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 500;">
+                📊 성과 등록
+            </button>
+            ` : ''}
+        `;
     }
     // [체크리스트 1] chrome-extension://invalid/ 방지: 썸네일 URL 유효성 검사
     // [체크리스트 2-A] referrerpolicy 적용
@@ -679,11 +688,17 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
                     }
                     
                     // [체크리스트 2-C] 백그라운드에 Base64 변환 요청
+                    // [수정] originalUrl 유효성 검사 추가
+                    if (!originalUrl || originalUrl.trim() === '' || originalUrl.startsWith('chrome-extension://invalid')) {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    
                     chrome.runtime.sendMessage({ 
                         action: "fetch_image_as_base64", 
                         url: originalUrl 
                     }, (response) => {
-                        if (response && response.success) {
+                        if (response && response.success && response.dataUrl && response.dataUrl.startsWith('data:')) {
                             imgEl.src = response.dataUrl; // Base64로 교체
                         } else {
                             // 실패 시 기본 이미지로 대체 또는 숨김
@@ -780,11 +795,17 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
                     }
                     
                     // [체크리스트 2-C] 백그라운드에 Base64 변환 요청
+                    // [수정] originalUrl 유효성 검사 추가
+                    if (!originalUrl || originalUrl.trim() === '' || originalUrl.startsWith('chrome-extension://invalid')) {
+                        imgEl.style.display = 'none';
+                        return;
+                    }
+                    
                     chrome.runtime.sendMessage({ 
                         action: "fetch_image_as_base64", 
                         url: originalUrl 
                     }, (response) => {
-                        if (response && response.success) {
+                        if (response && response.success && response.dataUrl && response.dataUrl.startsWith('data:')) {
                             imgEl.src = response.dataUrl; // Base64로 교체
                         } else {
                             // 실패 시 기본 이미지로 대체 또는 숨김
@@ -799,7 +820,26 @@ function renderPaginatedContent(listContainer, controlsContainer, sourceId, allC
         controlsContainer.innerHTML = '';
     }
 }
+
+// [수정] 중복 렌더링 방지를 위한 디바운싱
+let updateDashboardUITimeout = null;
 async function updateDashboardUI(container) {
+    if (!cachedData) return;
+    
+    // [수정] 디바운싱: 100ms 내에 여러 번 호출되면 마지막 호출만 실행
+    if (updateDashboardUITimeout) {
+        clearTimeout(updateDashboardUITimeout);
+    }
+    
+    return new Promise((resolve) => {
+        updateDashboardUITimeout = setTimeout(async () => {
+            await updateDashboardUIInternal(container);
+            resolve();
+        }, 100);
+    });
+}
+
+async function updateDashboardUIInternal(container) {
     if (!cachedData) return;
 
     // [체크리스트 1] 추적 중인 URL 목록 확보 (상태 정보 포함)
@@ -926,13 +966,36 @@ async function updateDashboardUI(container) {
             }
             
             // 3. 실제 콘텐츠에서 sourceId 확인 (fallback)
+            // [수정] sourceId가 매칭되지 않는 경우, 모든 콘텐츠의 sourceId를 확인하여 가장 많이 사용된 것을 사용
             if (sourceId && cachedData.content.length > 0) {
                 const foundItem = cachedData.content.find(item => item.sourceId === sourceId);
-                if (!foundItem && cachedData.content.length > 0) {
-                    // sourceId가 매칭되지 않으면, 실제 콘텐츠의 sourceId를 사용
-                    const actualSourceId = cachedData.content[0].sourceId;
-                    if (actualSourceId) {
-                        console.log(`[Dashboard] sourceId 매칭 실패, 실제 sourceId 사용: ${actualSourceId} (예상: ${sourceId})`);
+                if (!foundItem) {
+                    // sourceId가 매칭되지 않으면, 실제 콘텐츠의 sourceId를 확인
+                    // 같은 채널의 콘텐츠들 중 가장 많이 사용된 sourceId 찾기
+                    const sourceIdCounts = {};
+                    cachedData.content.forEach(item => {
+                        if (item.sourceId) {
+                            sourceIdCounts[item.sourceId] = (sourceIdCounts[item.sourceId] || 0) + 1;
+                        }
+                    });
+                    
+                    // 가장 많이 사용된 sourceId 찾기
+                    let maxCount = 0;
+                    let mostUsedSourceId = null;
+                    Object.entries(sourceIdCounts).forEach(([sid, count]) => {
+                        if (count > maxCount) {
+                            maxCount = count;
+                            mostUsedSourceId = sid;
+                        }
+                    });
+                    
+                    if (mostUsedSourceId) {
+                        console.log(`[Dashboard] sourceId 매칭 실패, 가장 많이 사용된 sourceId 사용: ${mostUsedSourceId.substring(0, 20)}... (예상: ${sourceId?.substring(0, 20) || 'null'}...)`);
+                        sourceId = mostUsedSourceId;
+                    } else if (cachedData.content.length > 0 && cachedData.content[0].sourceId) {
+                        // fallback: 첫 번째 콘텐츠의 sourceId 사용
+                        const actualSourceId = cachedData.content[0].sourceId;
+                        console.log(`[Dashboard] sourceId 매칭 실패, 첫 번째 콘텐츠의 sourceId 사용: ${actualSourceId.substring(0, 20)}...`);
                         sourceId = actualSourceId;
                     }
                 }
@@ -1179,51 +1242,59 @@ function addDashboardEventListeners(container) {
 
     const CACHE_KEY = getCacheKey();
 
-    chrome.runtime.onMessage.addListener((msg) => {
-        const dashboardGrid = container.querySelector('.dashboard-grid');
-        if (!dashboardGrid) return;
+    // [수정] 중복 리스너 등록 방지
+    if (!container.dataset.messageListenerAttached) {
+        container.dataset.messageListenerAttached = 'true';
+        chrome.runtime.onMessage.addListener((msg) => {
+            const dashboardGrid = container.querySelector('.dashboard-grid');
+            if (!dashboardGrid) return;
 
-        if (msg.action === 'cp_data_refreshed') {
-            chrome.runtime.sendMessage({ action: 'get_channel_content' }, (response) => {
-                if (response && response.success) {
-                    cachedData = response.data;
-                    updateDashboardUI(container);
-                }
-            });
-        } else if (msg.action === 'cp_item_updated') {
-            const newItem = msg.data;
-            if (!newItem || !cachedData) return;
-            const contentIndex = cachedData.content.findIndex(item => (item.videoId || item.fullLink) === (newItem.videoId || newItem.fullLink));
-            if (contentIndex > -1) {
-                cachedData.content[contentIndex] = newItem;
-            } else {
-                cachedData.content.unshift(newItem);
-            }
-            updateDashboardUI(container);
-        }
-    });
-
-    // [신규] 채널 변경 감지 -> 대시보드 UI 새로고침 및 캐시 복원
-    chrome.storage.onChanged.addListener(async (changes, namespace) => {
-        if (namespace === "local" && changes.activeChannelId) {
-            console.log("[Dashboard] 채널 변경 감지, UI 새로고침");
-            // cachedData가 있으면 바로 업데이트, 없으면 데이터 다시 로드
-            if (cachedData) {
-                await updateDashboardUI(container);
-            } else {
-                chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (response) => {
+            if (msg.action === 'cp_data_refreshed') {
+                chrome.runtime.sendMessage({ action: 'get_channel_content' }, (response) => {
                     if (response && response.success) {
                         cachedData = response.data;
-                        await updateDashboardUI(container);
+                        updateDashboardUI(container);
                     }
                 });
+            } else if (msg.action === 'cp_item_updated') {
+                const newItem = msg.data;
+                if (!newItem || !cachedData) return;
+                const contentIndex = cachedData.content.findIndex(item => (item.videoId || item.fullLink) === (newItem.videoId || newItem.fullLink));
+                if (contentIndex > -1) {
+                    cachedData.content[contentIndex] = newItem;
+                } else {
+                    cachedData.content.unshift(newItem);
+                }
+                updateDashboardUI(container);
             }
-            // 채널 변경 시 새로운 채널의 캐시 복원
-            setTimeout(() => {
-                initDashboardMode(container);
-            }, 200);
-        }
-    });
+        });
+    }
+
+    // [신규] 채널 변경 감지 -> 대시보드 UI 새로고침 및 캐시 복원
+    // [수정] 중복 리스너 등록 방지
+    if (!container.dataset.storageListenerAttached) {
+        container.dataset.storageListenerAttached = 'true';
+        chrome.storage.onChanged.addListener(async (changes, namespace) => {
+            if (namespace === "local" && changes.activeChannelId) {
+                console.log("[Dashboard] 채널 변경 감지, UI 새로고침");
+                // cachedData가 있으면 바로 업데이트, 없으면 데이터 다시 로드
+                if (cachedData) {
+                    await updateDashboardUI(container);
+                } else {
+                    chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (response) => {
+                        if (response && response.success) {
+                            cachedData = response.data;
+                            await updateDashboardUI(container);
+                        }
+                    });
+                }
+                // 채널 변경 시 새로운 채널의 캐시 복원
+                setTimeout(() => {
+                    initDashboardMode(container);
+                }, 200);
+            }
+        });
+    }
 
     // [Phase 2] URL 추가 버튼 클릭 이벤트 (이벤트 위임 사용)
     // 버튼이 동적으로 생성될 수 있으므로 이벤트 위임 사용
@@ -1461,6 +1532,116 @@ function addDashboardEventListeners(container) {
                         const errorMsg = response?.error || "알 수 없는 오류";
                         myAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder error">분석 실패: ${errorMsg}</p>`;
                         competitorAnalysisContentEl.innerHTML = `<p class="ai-ideas-placeholder error">분석 실패</p>`;
+                    }
+                });
+            });
+            return;
+        }
+
+        // 성과 등록 버튼 클릭 (바로 발행 완료 컬럼에 추가)
+        if (target.closest('.track-post-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const button = target.closest('.track-post-btn');
+            const post = JSON.parse(button.dataset.postObject);
+            const channelType = button.dataset.channelType;
+            const channelName = cachedData?.metas[post.sourceId]?.title || '알 수 없는 채널';
+            
+            const ideaForTracking = {
+                title: post.title, // [리뉴얼] 접두어 없이 원본 제목 그대로
+                description: post.cleanText || post.description || "", // 내용은 참고용
+                publishedUrl: post.fullLink || post.link, // 👈 핵심: 원본 URL을 발행 URL로 설정
+                keywords: post.tags || [],
+                origin: {
+                    type: "tracking_only", // 성과 추적 전용
+                    channelName: channelName,
+                    postUrl: post.fullLink || post.link
+                }
+            };
+
+            // [수정] 현재 활성 채널 ID를 가져와서 함께 전송
+            chrome.storage.local.get("activeChannelId", (res) => {
+                const channelId = res.activeChannelId || null;
+
+                chrome.runtime.sendMessage({ 
+                    action: 'add_idea_to_kanban', 
+                    data: JSON.stringify(ideaForTracking),
+                    status: 'done', // 👈 핵심: 바로 '발행 완료'로 보냄
+                    channelId: channelId
+                }, (response) => {
+                    if (response && response.success) {
+                        showToast(`"${post.title}"이(가) 성과 추적 목록에 추가되었습니다.`, 'success');
+                        
+                        // [체크리스트 4] 추가 직후 UI 업데이트: 버튼 제거하고 card-channel-name 영역에 배지 추가
+                        const card = button.closest('.content-card');
+                        if (card) {
+                            // 모든 버튼 제거 (리뉴얼 버튼도 함께)
+                            const addBtn = card.querySelector('.add-post-to-kanban-btn');
+                            if (addBtn) addBtn.remove();
+                            button.remove();
+                            
+                            // card-channel-name 영역 찾기 또는 생성
+                            let channelNameDiv = card.querySelector('.card-channel-name');
+                            if (!channelNameDiv) {
+                                const cardInfo = card.querySelector('.card-info');
+                                if (cardInfo) {
+                                    channelNameDiv = document.createElement('div');
+                                    channelNameDiv.className = 'card-channel-name';
+                                    channelNameDiv.style.cssText = `
+                                        margin-bottom: 6px;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: flex-end;
+                                        height: 18px;
+                                    `;
+                                    const cardTitle = cardInfo.querySelector('.card-title');
+                                    if (cardTitle) {
+                                        cardInfo.insertBefore(channelNameDiv, cardTitle);
+                                    } else {
+                                        cardInfo.insertBefore(channelNameDiv, cardInfo.firstChild);
+                                    }
+                                }
+                            }
+                            
+                            // 상태 배지 추가 (성과 추적 중)
+                            if (channelNameDiv) {
+                                const statusBadge = document.createElement('div');
+                                statusBadge.className = 'status-badge';
+                                statusBadge.style.cssText = `
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 2px;
+                                    padding: 1px 4px;
+                                    background: #e8f5e9;
+                                    color: #2e7d32;
+                                    border-radius: 3px;
+                                    font-size: 10px;
+                                    font-weight: 500;
+                                    line-height: 1.2;
+                                    margin-left: auto;
+                                    height: 18px;
+                                `;
+                                statusBadge.textContent = '✅ 추적 중';
+                                statusBadge.title = '발행 완료 및 성과 추적 중입니다';
+                                channelNameDiv.appendChild(statusBadge);
+                            }
+                        }
+                        
+                        // trackedUrls에 추가 (다음 렌더링 시 반영)
+                        setTimeout(() => {
+                            updateDashboardUI(container);
+                        }, 300);
+                    } else {
+                        // 중복 검사 실패 시 친절한 메시지 표시
+                        if (response?.code === 'DUPLICATE_FOUND') {
+                            const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
+                                : response.cardInfo?.status === 'in-progress' ? '작성 중'
+                                : response.cardInfo?.status === 'done' ? '발행 완료'
+                                : response.cardInfo?.status || '알 수 없음';
+                            showToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`, 'warning');
+                        } else {
+                            showToast(`❌ 성과 등록 실패: ${response?.error || response?.message || '알 수 없는 오류'}`, 'error');
+                        }
                     }
                 });
             });
@@ -1928,12 +2109,34 @@ function handleUrlFetch(container) {
             
             if (currentChannel && currentChannel.apiUrl) {
                 channelSourceId = btoa(currentChannel.apiUrl).replace(/=/g, "");
+            } else if (currentChannel && currentChannel.url) {
+                // apiUrl이 없으면 url을 RSS URL로 변환 후 인코딩
+                const urlObj = new URL(currentChannel.url);
+                const host = urlObj.hostname.toLowerCase();
+                let rssUrl = null;
+                
+                if (host.includes('tistory.com')) {
+                    rssUrl = `${urlObj.origin}/rss`;
+                } else if (host.includes('blog.naver.com')) {
+                    const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+                    if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+                        rssUrl = `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+                    } else {
+                        rssUrl = `${urlObj.origin}/rss`;
+                    }
+                } else {
+                    rssUrl = currentChannel.url.endsWith('/') ? `${currentChannel.url}feed` : `${currentChannel.url}/feed`;
+                }
+                
+                channelSourceId = btoa(rssUrl).replace(/=/g, "");
             }
         }
         
         // [체크리스트 2] sourceId를 찾지 못했을 때 경고 (하지만 channelId는 있으므로 계속 진행)
         if (!channelSourceId && activeChannelId) {
             console.warn("[URL 추가] sourceId를 찾지 못했지만 channelId로 진행합니다:", activeChannelId);
+        } else {
+            console.log(`[URL 추가] 계산된 sourceId: ${channelSourceId?.substring(0, 20) || 'null'}...`);
         }
         
         // 백엔드로 요청 (channelId 포함)
@@ -1974,40 +2177,65 @@ function handleUrlFetch(container) {
             `;
             
             // [Phase 2] 리스트 갱신 및 피드백
-            if (cachedData && cachedData.content) {
-                cachedData.content.unshift(data); // 맨 앞에 추가
-                
-                // [체크리스트] URL 추가 성공 시 자동 정렬 전환
-                const type = 'myChannels';
-                viewState[type].sortOrder = 'fetchedAt'; // 최근 수집 순으로 정렬 기준 변경
-                viewState[type].currentPage = 0; // 1페이지로 이동
-                
-                updateDashboardUI(container);
-                
-                // 시각적 강조 (Flash 효과)
-                setTimeout(() => {
-                    const contentId = data.videoId || btoa(data.fullLink).replace(/=/g, '');
-                    const newCard = container.querySelector(`[data-content-id="${contentId}"]`);
-                    if (!newCard) {
-                        // contentId 속성이 없을 수 있으므로 다른 방법으로 찾기
-                        const allCards = container.querySelectorAll('.content-card');
-                        if (allCards.length > 0) {
-                            const firstCard = allCards[0];
-                            firstCard.style.transition = 'background-color 0.3s';
-                            firstCard.style.backgroundColor = '#e8f5e9';
-                            setTimeout(() => {
-                                firstCard.style.backgroundColor = '';
-                            }, 2000);
+            // [수정] 로컬 캐시에 추가하는 대신 서버에서 최신 데이터를 다시 가져오기
+            // 이렇게 하면 sourceId가 정확히 일치하여 필터링 문제를 방지할 수 있음
+            // 약간의 지연을 두어 Firebase에 데이터가 완전히 저장되도록 함
+            setTimeout(() => {
+                chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (refreshResponse) => {
+                    if (refreshResponse && refreshResponse.success) {
+                        cachedData = refreshResponse.data;
+                        
+                        // 디버깅: 저장된 데이터의 sourceId 확인
+                        const savedItem = refreshResponse.data.content.find(item => {
+                            const itemUrl = item.fullLink || item.link || '';
+                            return itemUrl === url || itemUrl === data.fullLink;
+                        });
+                        if (savedItem) {
+                            console.log(`[URL 추가] 저장된 데이터의 sourceId: ${savedItem.sourceId?.substring(0, 20) || 'null'}...`);
+                        } else {
+                            console.warn(`[URL 추가] 저장된 데이터를 찾을 수 없습니다. URL: ${url}`);
                         }
-                    } else {
-                        newCard.style.transition = 'background-color 0.3s';
-                        newCard.style.backgroundColor = '#e8f5e9';
+                        
+                        // [체크리스트] URL 추가 성공 시 자동 정렬 전환
+                        const type = 'myChannels';
+                        viewState[type].sortOrder = 'fetchedAt'; // 최근 수집 순으로 정렬 기준 변경
+                        viewState[type].currentPage = 0; // 1페이지로 이동
+                        
+                        await updateDashboardUI(container);
+                        
+                        // 시각적 강조 (Flash 효과)
                         setTimeout(() => {
-                            newCard.style.backgroundColor = '';
-                        }, 2000);
+                            const contentId = data.videoId || btoa(data.fullLink || url).replace(/=/g, '');
+                            const newCard = container.querySelector(`[data-content-id="${contentId}"]`);
+                            if (!newCard) {
+                                // contentId 속성이 없을 수 있으므로 다른 방법으로 찾기
+                                const allCards = container.querySelectorAll('.content-card');
+                                if (allCards.length > 0) {
+                                    const firstCard = allCards[0];
+                                    firstCard.style.transition = 'background-color 0.3s';
+                                    firstCard.style.backgroundColor = '#e8f5e9';
+                                    setTimeout(() => {
+                                        firstCard.style.backgroundColor = '';
+                                    }, 2000);
+                                }
+                            } else {
+                                newCard.style.transition = 'background-color 0.3s';
+                                newCard.style.backgroundColor = '#e8f5e9';
+                                setTimeout(() => {
+                                    newCard.style.backgroundColor = '';
+                                }, 2000);
+                            }
+                        }, 100);
+                    } else {
+                        // 데이터 새로고침 실패 시 로컬 캐시에 추가 (fallback)
+                        console.warn('[URL 추가] 데이터 새로고침 실패, 로컬 캐시에 추가');
+                        if (cachedData && cachedData.content) {
+                            cachedData.content.unshift(data);
+                            updateDashboardUI(container);
+                        }
                     }
-                }, 100);
-            }
+                });
+            }, 500); // Firebase 저장 완료 대기
             
             showToast('✅ 콘텐츠가 추가되었습니다.');
             

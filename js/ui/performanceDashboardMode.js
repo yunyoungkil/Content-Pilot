@@ -192,6 +192,12 @@ async function processPerformanceData(allCards, container) {
 function renderPerformanceList(container, sortBy = "earnings-desc") {
   const contentEl = container.querySelector("#perf-dashboard-content");
   
+  // [수정] 스크롤 위치 저장 (자동 스크롤 방지)
+  let scrollPosition = 0;
+  if (contentEl) {
+    scrollPosition = contentEl.scrollTop || 0;
+  }
+  
   // [수정] 이전 내용 완전히 제거 (중복 방지)
   if (contentEl) {
     contentEl.innerHTML = '';
@@ -277,12 +283,21 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
   const dailyGoal = 1; // 기본 목표: 1일 1포
   const goalAchieved = todayPublishedCount >= dailyGoal;
   
-  // 목표 달성 시 축하 애니메이션
+  // 목표 달성 시 축하 애니메이션 (스크롤 위치에 영향 주지 않도록 수정)
   if (goalAchieved && !window.goalAchievedToday) {
     window.goalAchievedToday = true;
+    // 스크롤 위치 저장 (confetti 애니메이션 전)
+    const savedScrollPosition = contentEl ? contentEl.scrollTop : 0;
     setTimeout(() => {
       triggerConfettiAnimation();
       showToast(`🎉 축하합니다! 오늘 ${todayPublishedCount}개의 콘텐츠를 발행했습니다!`, 5000);
+      
+      // [수정] confetti 애니메이션 후에도 스크롤 위치 유지
+      if (contentEl && savedScrollPosition > 0) {
+        requestAnimationFrame(() => {
+          contentEl.scrollTop = savedScrollPosition;
+        });
+      }
     }, 500);
   }
   
@@ -314,7 +329,7 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
         <div class="stat-label">총 세션 ${growthRates.sessions.arrow} ${growthRates.sessions.percent !== null ? `<span class="growth-rate ${growthRates.sessions.isPositive ? 'positive' : 'negative'}">${growthRates.sessions.percent}%</span>` : ''}</div>
         <div class="stat-value ${growthRates.sessions.isPositive ? 'growth-positive' : ''}">${totalSessions.toLocaleString()}</div>
       </div>
-      <div class="perf-stat-card ${goalAchieved ? 'goal-achieved' : ''}">
+      <div class="perf-stat-card ${goalAchieved ? 'goal-achieved' : ''}" id="perf-goal-card">
         <div class="stat-label">발행 콘텐츠 ${goalAchieved ? '🎯' : ''}</div>
         <div class="stat-value">${sortedData.length}개</div>
         ${goalAchieved ? `<div class="goal-badge">오늘 ${todayPublishedCount}개 발행! 🎉</div>` : ''}
@@ -369,6 +384,20 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
       ${sortedData.map((item, index) => createPerformanceCard(item, index)).join("")}
     </div>
   `;
+  
+  // [수정] 스크롤 위치 복원 (자동 스크롤 방지)
+  if (contentEl && scrollPosition > 0) {
+    // DOM이 완전히 렌더링된 후 스크롤 위치 복원 (여러 번 시도하여 확실하게)
+    requestAnimationFrame(() => {
+      contentEl.scrollTop = scrollPosition;
+      // 추가 확인 (애니메이션이 실행된 후에도 스크롤 위치 유지)
+      setTimeout(() => {
+        if (contentEl.scrollTop !== scrollPosition) {
+          contentEl.scrollTop = scrollPosition;
+        }
+      }, 200);
+    });
+  }
   
   // [디버깅] 실제 렌더링된 카드 수 확인
   setTimeout(() => {
@@ -770,10 +799,17 @@ function triggerConfettiAnimation() {
         border: 2px solid #FFD700 !important;
         box-shadow: 0 0 20px rgba(255, 215, 0, 0.5) !important;
         animation: goal-pulse 2s ease-in-out infinite;
+        /* [수정] 스크롤에 영향 주지 않도록 transform 대신 opacity와 box-shadow만 사용 */
       }
       @keyframes goal-pulse {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.05); }
+        0%, 100% { 
+          box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+          opacity: 1;
+        }
+        50% { 
+          box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+          opacity: 0.95;
+        }
       }
       .goal-badge {
         margin-top: 8px;
