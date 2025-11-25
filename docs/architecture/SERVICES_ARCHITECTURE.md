@@ -1,7 +1,7 @@
 # 서비스 아키텍처 개요
 
-> **최종 업데이트**: 2025-01-25  
-> **상태**: ✅ 최신
+> **최종 업데이트**: 2025-01-27  
+> **상태**: ✅ 최신 (제휴 링크 기능 추가)
 
 ## 📋 개요
 
@@ -11,15 +11,18 @@ Content Pilot은 모듈화된 서비스 아키텍처를 채택하여 각 기능�
 
 ```
 js/services/
-├── aiService.js           # AI 기능 (Gemini API)
-├── analyticsService.js    # 성과 분석 (GA4, AdSense)
-├── authService.js         # 인증 (Google OAuth)
-├── collectorService.js    # 콘텐츠 수집 (RSS, YouTube)
-├── firebaseService.js     # Firebase 연동
-├── kanbanService.js       # 칸반 보드 관리
-├── migrationService.js    # 데이터 마이그레이션
-├── scrapService.js        # 스크랩 관리
-└── thumbnailService.js    # 썸네일 생성
+├── aiService.js              # AI 기능 (Gemini API)
+├── analyticsService.js       # 성과 분석 (GA4, AdSense)
+├── authService.js            # 인증 (Google OAuth)
+├── cascadeDeleteService.js   # 연쇄 삭제 (채널/경쟁 채널 삭제)
+├── collectorService.js       # 콘텐츠 수집 (RSS, YouTube)
+├── firebaseService.js        # Firebase 연동 (REST API)
+├── kanbanService.js          # 칸반 보드 관리
+├── migrationService.js       # 데이터 마이그레이션
+├── offscreenService.js       # Offscreen Document 관리
+├── promptService.js          # 프롬프트 빌더 (페르소나, 톤, 스킬)
+├── scrapService.js           # 스크랩 관리
+└── thumbnailService.js       # 썸네일 생성
 ```
 
 ---
@@ -49,6 +52,7 @@ kanban/{userId}/{status}/{cardId}
 scraps/{userId}/{scrapId}
 channels/{userId}/myChannels/blogs
 channels/{userId}/myChannels/youtubes
+affiliate_links/{userId}/{linkKey}  # 제휴 링크 데이터
 ```
 
 ---
@@ -59,23 +63,24 @@ channels/{userId}/myChannels/youtubes
 
 **주요 기능**:
 - 아이디어 브리핑 생성
-- 콘텐츠 초안 자동 생성
+- 콘텐츠 초안 자동 생성 (제휴 링크 자동 삽입 포함)
 - 키워드 갭 분석
 - 트렌드 분석
 - 이미지 생성
+- 제휴 링크 조회 및 필터링
 
 **주요 함수**:
 - `callGeminiAPI()`: Gemini API 호출
 - `generateIdeaBriefing()`: 브리핑 생성
-- `generateDraftFromIdea()`: 초안 생성
+- `generateDraftFromIdea()`: 초안 생성 (PromptService 사용, 제휴 링크 자동 삽입)
+- `getRelevantAffiliateLinks()`: 관련 제휴 링크 조회 및 필터링
 - `analyzeKeywordGap()`: 키워드 갭 분석
 - `getEmergingTopics()`: 트렌드 분석
 - `generateAiImage()`: 이미지 생성
 
-**페르소나 시스템**:
-- 전문가형 (`professional`)
-- 친근한형 (`friendly`)
-- 바이럴형 (`viral`)
+**프롬프트 시스템**:
+- `promptService.js`를 사용하여 모듈형 프롬프트 빌더 패턴 적용
+- 페르소나, 톤, 스킬을 레이어로 분리하여 조립
 
 **관련 문서**: [AI 서비스 가이드](../guides/AI_SERVICE_GUIDE.md)
 
@@ -232,6 +237,60 @@ channels/{userId}/myChannels/youtubes
 
 ---
 
+### 10. Offscreen Service (`offscreenService.js`)
+
+**역할**: Offscreen Document 생성 및 관리, HTML 정제 및 포매팅.
+
+**주요 기능**:
+- Offscreen Document 생성 및 관리 (싱글톤 패턴)
+- HTML 정제 및 포매팅 (DOMPurify 사용)
+- 이미지 리사이징
+- 템플릿 렌더링
+- HTML 파싱
+
+**주요 함수**:
+- `sanitizeHtmlInOffscreen()`: HTML 정제 및 포매팅 (XSS 방어)
+- `resizeImageInOffscreen()`: 이미지 리사이징
+- `renderTemplateInOffscreen()`: 템플릿 렌더링
+- `parseHtmlInOffscreen()`: HTML 파싱
+
+**보안 기능**:
+- DOMPurify를 통한 XSS 공격 방어
+- 위험한 태그/속성 자동 제거 (`<script>`, `onerror`, `onclick`, `<iframe>` 등)
+- Marked를 통한 안전한 마크다운 변환
+
+**사용 예시**:
+```javascript
+import { sanitizeHtmlInOffscreen } from './offscreenService.js';
+
+const cleanedHtml = await sanitizeHtmlInOffscreen(rawHtml);
+```
+
+---
+
+### 12. Cascade Delete Service (`cascadeDeleteService.js`)
+
+**역할**: 채널 및 경쟁 채널 삭제 시 연쇄 삭제 처리.
+
+**주요 기능**:
+- 경쟁 채널 삭제 시 관련 데이터 연쇄 삭제
+- 채널 삭제 시 관련 데이터 연쇄 삭제
+- 삭제된 경쟁 채널 감지
+
+**주요 함수**:
+- `deleteCompetitorData()`: 경쟁 채널 데이터 삭제
+- `deleteChannelDataCascade()`: 채널 데이터 연쇄 삭제
+- `findDeletedCompetitors()`: 삭제된 경쟁 채널 URL 찾기
+
+**삭제 대상 데이터**:
+- `channel_content/{userId}/blogs` (경쟁 채널 콘텐츠)
+- `channel_content/{userId}/youtubes` (경쟁 채널 콘텐츠)
+- `channel_meta/{userId}/{sourceId}` (채널 메타데이터)
+- `scraps/{userId}` (채널 관련 스크랩)
+- `kanban/{userId}/{status}/{cardId}` (채널 관련 칸반 카드)
+
+---
+
 ## 🔄 서비스 간 상호작용
 
 ### 데이터 흐름 예시
@@ -261,6 +320,39 @@ collectorService.fetchAllChannelData()
     → firebaseService.set() (포스트 저장)
 ```
 
+#### 4. 초안 생성 및 HTML 정제 (제휴 링크 포함)
+```
+aiService.generateDraftFromIdea()
+  → aiService.getRelevantAffiliateLinks() (제휴 링크 조회 및 필터링)
+    → firebaseService.get() (affiliate_links/{userId} 조회)
+    → 키워드 기반 필터링 (제목, 태그와 관련된 링크만 선택)
+  → promptService.PromptBuilder() (프롬프트 조립)
+    → detectPersona() (페르소나 자동 감지)
+    → setTone() (톤앤매너 설정)
+    → addSkill() (글쓰기 스킬 추가)
+    → setTrendContext() (트렌드 데이터 주입)
+    → buildSystemPrompt() (시스템 프롬프트 생성)
+    → 제휴 링크 삽입 규칙 주입 (문맥 기반, CTA 자동 생성, 최대 3개 제한)
+  → aiService.callGeminiAPI() (초안 생성)
+  → offscreenService.sanitizeHtmlInOffscreen() (HTML 정제 및 포매팅)
+    → DOMPurify (XSS 방어)
+    → Marked (마크다운 변환)
+    → DOM API (스타일링, 제휴 링크 녹색 스타일 보존)
+  → firebaseService.update() (초안 저장)
+```
+
+#### 5. 채널/경쟁 채널 삭제
+```
+background.js (delete_channel 액션)
+  → cascadeDeleteService.deleteChannelDataCascade()
+    → firebaseService.remove() (연관 데이터 삭제)
+
+background.js (save_channels_and_key 액션)
+  → cascadeDeleteService.findDeletedCompetitors()
+  → cascadeDeleteService.deleteCompetitorData()
+    → firebaseService.remove() (경쟁 채널 데이터 삭제)
+```
+
 ---
 
 ## 📦 의존성 관리
@@ -274,13 +366,23 @@ firebaseService (기본)
   ├── kanbanService
   ├── scrapService
   ├── migrationService
-  └── thumbnailService
+  ├── thumbnailService
+  ├── cascadeDeleteService
+  └── collectorService
 
 authService
   └── analyticsService
 
 aiService
-  └── analyticsService (순환 참조 방지: 순수 함수만 import)
+  ├── analyticsService (순환 참조 방지: 순수 함수만 import)
+  ├── offscreenService (HTML 정제)
+  └── promptService (프롬프트 빌더)
+
+offscreenService
+  └── (독립적, Offscreen Document에서 실행)
+
+cascadeDeleteService
+  └── firebaseService
 ```
 
 ### 순환 참조 방지

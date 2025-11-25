@@ -1,7 +1,7 @@
 // js/ui/kanbanMode.js (수정 완료된 최종 버전)
 
 import { renderWorkspace } from "./workspaceMode.js";
-import { showToast } from "../utils.js";
+import { showToast, Logger } from "../utils.js";
 import { renderPanelHeader, renderHeaderAndTabs } from "./header.js";
 
 let allKanbanData = {};
@@ -741,6 +741,10 @@ function createKanbanCard(id, data, status) {
   return card;
 }
 
+// 이벤트 리스너 핸들러를 저장하여 중복 등록 방지
+let kanbanClickHandler = null;
+let kanbanAddCardHandler = null;
+
 function addKanbanEventListeners(container) {
   const root = container.querySelector("#cp-kanban-board-root");
   if (!root) return;
@@ -750,6 +754,14 @@ function addKanbanEventListeners(container) {
     return; // 이미 등록됨
   }
   root.dataset.listenersAttached = 'true';
+  
+  // 기존 리스너가 있다면 제거 (안전장치)
+  if (kanbanClickHandler) {
+    root.removeEventListener("click", kanbanClickHandler);
+  }
+  if (kanbanAddCardHandler) {
+    root.removeEventListener("click", kanbanAddCardHandler);
+  }
 
   // K-3: 초안 삭제 버튼 클릭 이벤트 리스너 완전 제거
   const sortControls = container.querySelector(".kanban-sort-controls");
@@ -783,7 +795,7 @@ function addKanbanEventListeners(container) {
   });
 
   // ▼▼▼ [추가] "+ 카드 추가" 버튼 클릭 이벤트 리스너 ▼▼▼
-  root.addEventListener("click", (e) => {
+  kanbanAddCardHandler = (e) => {
     const addCardBtn = e.target.closest(".kanban-add-card-btn");
     if (addCardBtn) {
       e.stopPropagation();
@@ -791,9 +803,10 @@ function addKanbanEventListeners(container) {
       showAddCardInput(container, status, addCardBtn);
       return;
     }
-  });
+  };
+  root.addEventListener("click", kanbanAddCardHandler);
 
-  root.addEventListener("click", (e) => {
+  kanbanClickHandler = (e) => {
     const card = e.target.closest(".cp-kanban-card");
     if (!card) return;
 
@@ -898,7 +911,9 @@ function addKanbanEventListeners(container) {
         renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
       }
     }
-  });
+  };
+  
+  root.addEventListener("click", kanbanClickHandler);
 
   root.addEventListener("dragstart", (e) => {
     const card = e.target.closest(".cp-kanban-card");
@@ -1392,12 +1407,24 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
 /**
  * 발행 URL 연결 모달을 표시하는 함수
  */
+// 모달이 이미 열려있는지 추적하는 플래그
+let isPublishUrlModalOpen = false;
+
 function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl = "") {
+  // 이미 모달이 열려있으면 무시 (중복 호출 방지)
+  if (isPublishUrlModalOpen) {
+    Logger.debug("[KanbanMode] 발행 URL 모달이 이미 열려있음, 중복 호출 무시");
+    return;
+  }
+  
   // 기존 모달이 있으면 제거
   const existingModal = container.querySelector(".cp-publish-url-modal-wrap");
   if (existingModal) {
     existingModal.remove();
   }
+  
+  // 모달 열림 플래그 설정
+  isPublishUrlModalOpen = true;
 
   // URL 히스토리 가져오기
   chrome.storage.local.get(["publishUrlHistory"], (result) => {
@@ -1433,7 +1460,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
         </div>
         <div class="cp-modal-footer">
           <button class="cp-btn cp-btn-secondary" id="cancel-btn">취소</button>
-          <button class="cp-btn cp-btn-primary" id="submit-btn">연결하기</button>
+          <button class="cp-btn cp-btn-primary" id="submit-btn">${isEditing ? "변경하기" : "연결하기"}</button>
         </div>
       </div>
     `;
@@ -1563,6 +1590,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
 
     const cleanup = () => {
       modalWrap.remove();
+      isPublishUrlModalOpen = false; // 모달 닫힘 플래그 리셋
     };
 
     submitBtn.addEventListener("click", () => {
@@ -1570,6 +1598,27 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
       if (!validateAndDetectPlatform(url)) {
         return;
       }
+
+      // [UX 개선] 즉시 로딩 상태 표시 (사용자 피드백)
+      submitBtn.disabled = true;
+      const originalBtnText = submitBtn.textContent;
+      submitBtn.innerHTML = '<span style="display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle;"></span>처리 중...';
+      submitBtn.style.opacity = "0.7";
+      submitBtn.style.cursor = "not-allowed";
+      submitBtn.style.pointerEvents = "none";
+      
+      // URL 히스토리 리스트 즉시 숨기기 (딜레이 제거)
+      urlHistoryList.style.display = "none";
+      
+      // 입력 필드 비활성화
+      urlInput.disabled = true;
+      urlInput.style.opacity = "0.6";
+      urlInput.style.cursor = "not-allowed";
+      
+      // 취소 버튼도 비활성화 (일관성)
+      cancelBtn.disabled = true;
+      cancelBtn.style.opacity = "0.6";
+      cancelBtn.style.cursor = "not-allowed";
 
       // URL 히스토리에 추가 (중복 제거)
       const newHistory = [url, ...urlHistory.filter(h => h !== url)].slice(0, 10);
@@ -1584,6 +1633,19 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
           status: status,
         },
       }, (response) => {
+        // 버튼 상태 복원 (에러 발생 시에도)
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnText;
+        submitBtn.style.opacity = "1";
+        submitBtn.style.cursor = "pointer";
+        submitBtn.style.pointerEvents = "auto";
+        urlInput.disabled = false;
+        urlInput.style.opacity = "1";
+        urlInput.style.cursor = "text";
+        cancelBtn.disabled = false;
+        cancelBtn.style.opacity = "1";
+        cancelBtn.style.cursor = "pointer";
+        
         if (response && response.success) {
           showToast(isEditing 
             ? "✅ 발행 URL이 변경되었습니다. 성과 추적이 다시 시작됩니다." 
@@ -1816,9 +1878,10 @@ function showPerformanceDetailModal(container, cardId, cardData) {
   const cancelBtn = modalWrap.querySelector("#close-detail-btn");
   const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
 
-  const cleanup = () => {
-    modalWrap.remove();
-  };
+    const cleanup = () => {
+      modalWrap.remove();
+      isPublishUrlModalOpen = false; // 모달 닫힘 플래그 리셋
+    };
 
   closeBtn.addEventListener("click", cleanup);
   cancelBtn.addEventListener("click", cleanup);

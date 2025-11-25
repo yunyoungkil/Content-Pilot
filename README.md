@@ -24,6 +24,8 @@
 ### 3. 통합 워크스페이스
 - **통합 에디터**: Rich Text Editor를 활용한 전문적인 콘텐츠 작성 환경
 - **AI 초안 자동 생성**: 브리핑 데이터를 기반으로 초안을 자동 생성합니다.
+- **AI 기반 제휴 링크 자동 삽입**: 사용자가 등록한 제휴 링크를 문맥에 맞게 자연스럽게 삽입하고, 매력적인 CTA 문구를 자동 생성합니다.
+- **스마트 썸네일 생성**: 3가지 컨셉(호기심 자극형, 정보 요약형, 감성/공감형)의 썸네일을 자동 생성하고 선택할 수 있습니다.
 - **리소스 통합 관리**: AI 브리핑, 추천 목차, 추천 검색어, 모든 스크랩, 이미지 갤러리를 탭으로 관리합니다.
 - **실시간 동기화**: Firebase를 통한 실시간 데이터 동기화
 
@@ -57,8 +59,10 @@
 - **Backend & Database**: Firebase (Realtime Database)
 - **Platform**: Chrome Extension (Manifest V3 with Offscreen Document)
 - **Editor**: Quill Rich Text Editor
-- **API Integration**: Google Analytics 4 API, Google AdSense API
+- **API Integration**: Google Analytics 4 API, Google AdSense API, Google Gemini API
 - **Authentication**: Google OAuth 2.0
+- **Security**: DOMPurify (XSS 방어)
+- **Markdown**: Marked (마크다운 파싱)
 
 ## 🚀 설치 및 개발 환경 설정
 
@@ -142,7 +146,7 @@ Content-Pilot/
 ├── 📄 background.js               # 서비스 워커 (Firebase, API 호출)
 ├── 📄 content.js                  # Webpack 진입점
 ├── 📄 offscreen.html              # Offscreen Document HTML
-├── 📄 offscreen.js                # DOM 분석 전용 스크립트
+├── 📄 offscreen.js                # DOM 분석 및 HTML 정제 전용 스크립트 (Webpack 빌드 대상)
 ├── 📄 webpack.config.js           # Webpack 빌드 설정
 ├── 📄 package.json                # 프로젝트 의존성 관리
 ├── 📁 js/                         # 소스 코드
@@ -193,9 +197,9 @@ Content-Pilot/
 
 - **`content.js`**: 실제 웹페이지에 삽입되는 **현장 요원**입니다. `js/` 폴더의 모든 UI 및 핵심 로직 모듈을 가져와(`import`) 실행하는 Webpack 번들의 시작점입니다. 페이지 UI를 그리고 사용자의 상호작용(하이라이트, 클릭)을 직접 처리합니다.
 
-- **`offscreen.html` & `offscreen.js`**: **DOM 분석 전문가**입니다. `background.js`는 보안상의 이유로 DOM API(`DOMParser` 등) 사용에 제약이 있습니다. 이 제약을 극복하기 위해, `background.js`는 수집한 HTML 텍스트를 `offscreen` 페이지로 보냅니다. `offscreen.js`는 완전한 DOM 환경을 활용하여 HTML을 안전하고 정확하게 분석한 후, 이미지, 요약 등의 결과만 다시 `background.js`로 돌려주는 핵심적인 역할을 수행합니다.
+- **`offscreen.html` & `offscreen.js`**: **DOM 분석 및 HTML 정제 전문가**입니다. `background.js`는 보안상의 이유로 DOM API(`DOMParser` 등) 사용에 제약이 있습니다. 이 제약을 극복하기 위해, `background.js`는 수집한 HTML 텍스트를 `offscreen` 페이지로 보냅니다. `offscreen.js`는 완전한 DOM 환경을 활용하여 HTML을 안전하고 정확하게 분석한 후, 이미지, 요약 등의 결과만 다시 `background.js`로 돌려주는 핵심적인 역할을 수행합니다. 또한 **DOMPurify와 Marked를 사용하여 XSS 공격을 방어하고 마크다운을 안전하게 HTML로 변환**하는 역할도 담당합니다.
 
-- **`webpack.config.js`**: Webpack 빌더의 **설정 파일**입니다. `content.js`를 시작점으로 `js/` 폴더의 여러 JavaScript 파일들을 어떻게 하나의 최종 결과물(`dist/bundle.js`)로 합칠지 정의합니다.
+- **`webpack.config.js`**: Webpack 빌더의 **설정 파일**입니다. `content.js`, `background.js`, `offscreen.js`를 시작점으로 `js/` 폴더의 여러 JavaScript 파일들을 어떻게 하나의 최종 결과물(`dist/*.bundle.js`)로 합칠지 정의합니다.
 
 - **`package.json`**: 프로젝트의 **정보 파일**입니다. 프로젝트의 이름, 버전과 함께 `webpack`, `babel`, `quill` 등 개발에 필요한 도구(패키지)들의 목록을 관리합니다.
 
@@ -205,6 +209,18 @@ Content-Pilot/
 
   - **`/js/core`**: 스크랩 하이라이터, 스크랩북 관리 등 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
   - **`/js/ui`**: 메인 패널, 대시보드, 기획 보드, 워크스페이스, 성과 대시보드 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
+  - **`/js/services`**: AI 서비스, Firebase 연동, 인증, 데이터 수집, 칸반 보드 관리 등 각 기능을 독립적인 서비스로 분리한 파일들이 위치합니다.
+    - `aiService.js`: Gemini API를 활용한 AI 기능
+    - `analyticsService.js`: GA4 및 AdSense 데이터 수집 및 분석
+    - `authService.js`: Google OAuth 인증
+    - `cascadeDeleteService.js`: 채널/경쟁 채널 삭제 시 연쇄 삭제 처리
+    - `collectorService.js`: RSS 및 YouTube 콘텐츠 수집
+    - `firebaseService.js`: Firebase REST API 연동
+    - `kanbanService.js`: 칸반 보드 관리
+    - `migrationService.js`: 데이터 마이그레이션
+    - `offscreenService.js`: Offscreen Document 관리 및 HTML 정제
+    - `scrapService.js`: 스크랩 관리
+    - `thumbnailService.js`: 썸네일 생성
   - **`/js/utils`**: 에디터 변환, 마크다운 처리 등 유틸리티 함수들이 위치합니다.
 
 - **`/css`**: UI 스타일을 정의하는 CSS 파일들이 위치합니다.
@@ -214,7 +230,9 @@ Content-Pilot/
 
 - **`/dist`**: Webpack이 소스 코드들을 하나로 합쳐서 만들어낸 **빌드 결과물**이 저장되는 폴더입니다.
 
-  - `bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
+  - `content.bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
+  - `background.bundle.js`: `background.js`와 관련 서비스 파일들이 합쳐진 Service Worker 파일입니다.
+  - `offscreen.bundle.js`: `offscreen.js`와 DOMPurify, Marked 등이 합쳐진 Offscreen Document 파일입니다.
 
 - **`/images`**: 확장 프로그램 아이콘 및 UI 이미지 파일들을 보관합니다.
 
@@ -294,7 +312,9 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 프로젝트의 상세한 기술 문서와 가이드는 `docs/` 폴더에 주제별로 정리되어 있습니다:
 
 ### 📖 가이드 문서 (`docs/guides/`)
-- **`AI_SERVICE_GUIDE.md`**: AI 서비스 사용 가이드 (Gemini API, 브리핑 생성, 초안 생성)
+- **`AI_SERVICE_GUIDE.md`**: AI 서비스 사용 가이드 (Gemini API, 브리핑 생성, 초안 생성, HTML 정제, 제휴 링크 삽입)
+- **`AFFILIATE_LINKS_GUIDE.md`**: 제휴 마케팅 링크 가이드 (문맥 인식 자동 삽입, AI 기반 CTA 생성, 스마트 필터링)
+- **`PROMPT_BUILDER_TEST_GUIDE.md`**: 프롬프트 빌더 시스템 검증 및 테스트 가이드
 - **`MIGRATION_SERVICE_GUIDE.md`**: 데이터 마이그레이션 서비스 가이드
 - **`DEVELOPMENT_GUIDE.md`**: 개발자를 위한 개발 환경 설정 및 코딩 가이드
 - **`AUTHENTICATION_FLOW.md`**: Google OAuth 인증 흐름 및 Service Worker에서의 Firebase 작업

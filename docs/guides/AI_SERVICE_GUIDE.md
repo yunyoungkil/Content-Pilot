@@ -1,7 +1,7 @@
 # AI 서비스 가이드
 
-> **최종 업데이트**: 2025-01-25  
-> **상태**: ✅ 최신
+> **최종 업데이트**: 2025-01-27  
+> **상태**: ✅ 최신 (제휴 링크 삽입 기능 추가)
 
 ## 📋 개요
 
@@ -31,31 +31,51 @@ const result = await callGeminiAPI(prompt);
 
 ---
 
-### 2. 페르소나 시스템 (`PERSONA_TEMPLATES`)
+### 2. 프롬프트 빌더 시스템 (`promptService.js`)
 
-**기능**: 콘텐츠 작성 시 사용할 톤앤매너를 자동으로 선택합니다.
+**기능**: 모듈형 프롬프트 빌더 패턴을 사용하여 페르소나, 톤, 스킬을 레이어로 분리하여 동적으로 프롬프트를 조립합니다.
+
+**프롬프트 레이어 구조**:
+1. **System Instruction**: 페르소나 역할 및 기본 정체성
+2. **Tone & Manner Guide**: 어조 및 말투 세부 조정
+3. **Writing Skills Applied**: 글쓰기 스킬 옵션
+4. **Trend Data & Context**: SEO 강화를 위한 트렌드 키워드
 
 **지원 페르소나**:
 
 #### 전문가형 (`professional`)
-- **톤앤매너**: 신뢰감 있고 정제된 비즈니스 톤 ("~입니다", "~합니다")
-- **특징**: 객관적인 사실, 통계, 전문 용어 활용
+- **기본 톤**: 논리적 (`logical`)
+- **특징**: 권위 있는 전문가, 깊이 있는 통찰력
+- **기본 스킬**: 수치 증명, 비교 분석
 - **적용 키워드**: 가이드, 사용법, 강좌, 정리, 뉴스, 소식, 트렌드, 통계, 비교, 장단점, 분석
 
 #### 친근한형 (`friendly`)
-- **톤앤매너**: 친근하고 편안한 구어체, 반드시 존댓말 사용
-- **특징**: 개인적인 경험담과 감성적 표현
-- **적용 키워드**: 후기, 리뷰, 일상, 여행, 맛집, 추천, 솔직, 내돈내산
+- **기본 톤**: 감성적 (`emotional`)
+- **특징**: 소통을 좋아하는 인플루언서, 공감대 형성
+- **기본 스킬**: 질문 던지기, 스토리텔링
+- **적용 키워드**: 후기, 리뷰, 일상, 여행, 맛집, 추천, 솔직, 내돈내산, 소통, 이웃
 
 #### 바이럴형 (`viral`)
-- **톤앤매너**: 강렬하고 임팩트 있는 문장, 호기심 자극
-- **특징**: 숫자, 비교, 놀라운 사실 활용
-- **적용 키워드**: 비밀, 꿀팁, 초간단, 초보, 모르는, 충격, 놀라운, 반드시, 절대
+- **기본 톤**: 임팩트 (`impact`)
+- **특징**: 클릭을 유도하는 카피라이팅, 호기심 자극
+- **기본 스킬**: 클리프행어
+- **적용 키워드**: 비밀, 꿀팁, 초간단, 초보, 모르는, 충격, 놀라운, 반드시, 절대, 공개
+
+**톤앤매너 오버라이드**:
+- 페르소나와 별개로 톤을 강제로 설정할 수 있습니다.
+- 예: 전문가형 페르소나에 친근한 톤 적용 가능
+
+**글쓰기 스킬**:
+- `questioning`: 질문 던지기
+- `statistics`: 수치 증명
+- `storytelling`: 스토리텔링
+- `comparison`: 비교 분석
+- `cliffhanger`: 클리프행어
 
 **페르소나 선택 우선순위**:
-1. 아이디어 데이터에 명시적으로 설정된 `persona` 또는 `tone`
+1. 아이디어 데이터에 명시적으로 설정된 `persona`
 2. 사용자 설정의 `defaultPersona` 또는 `defaultTone`
-3. 자동 감지 (키워드 스코어링)
+3. 자동 감지 (`detectPersona` 함수 사용)
 
 ---
 
@@ -115,6 +135,13 @@ await generateIdeaBriefing(cardId, title, description, {
 - 이미지 생성 프롬프트 (본문 중간)
 - 썸네일 정보 (JSON 형식)
 
+**HTML 정제 및 포매팅**:
+- Gemini API로 생성된 초안은 `offscreenService.sanitizeHtmlInOffscreen()`을 통해 안전하게 정제됩니다.
+- DOMPurify를 사용하여 XSS 공격을 방어합니다.
+- Marked를 사용하여 마크다운을 안전하게 HTML로 변환합니다.
+- DOM API를 사용하여 스타일링 및 포매팅을 적용합니다.
+- 위험한 정규식 기반 함수(`formatDraftForReadability`)는 제거되었습니다.
+
 **작성 규칙**:
 1. **이모지 사용 금지**: 텍스트만 사용
 2. **제목 최적화**: SEO 최적화된 제목을 별도로 생성
@@ -130,14 +157,29 @@ await generateIdeaBriefing(cardId, title, description, {
 <span style="color: #2e7d32;">[이미지 생성 프롬프트 (한글): [주제]에 대한 고품질 사진, 전문적인 조명, 사실적 스타일]</span>
 ```
 
-**썸네일 정보 형식**:
+**썸네일 정보 형식** (3가지 컨셉 배열):
 ```xml
 <썸네일정보>
-{
-  "thumbnailPromptEn": "영어 프롬프트",
-  "thumbnailPromptKo": "한글 프롬프트",
-  "thumbnailText": "썸네일 문구 (12자 이내)"
-}
+[
+  {
+    "type": "curiosity",
+    "thumbnailPromptEn": "영어 프롬프트",
+    "thumbnailPromptKo": "한글 프롬프트",
+    "thumbnailText": "호기심 문구 (12자 이내)"
+  },
+  {
+    "type": "informative",
+    "thumbnailPromptEn": "영어 프롬프트",
+    "thumbnailPromptKo": "한글 프롬프트",
+    "thumbnailText": "정보형 문구 (12자 이내)"
+  },
+  {
+    "type": "emotional",
+    "thumbnailPromptEn": "영어 프롬프트",
+    "thumbnailPromptKo": "한글 프롬프트",
+    "thumbnailText": "공감형 문구 (12자 이내)"
+  }
+]
 </썸네일정보>
 ```
 
@@ -155,10 +197,28 @@ const ideaData = {
 
 const result = await generateDraftFromIdea(ideaData);
 if (result.success) {
-  console.log(result.draft); // 생성된 초안
+  console.log(result.draft); // 정제된 초안 (XSS 방어 적용)
   console.log(result.thumbnailInfo); // 썸네일 정보
+  console.log(result.seoTitle); // SEO 최적화된 제목
 }
 ```
+
+**제휴 마케팅 링크 삽입**:
+- 초안 생성 시 사용자가 등록한 제휴 링크를 자동으로 조회하고 필터링합니다.
+- 글의 주제(제목, 태그)와 관련된 링크만 선별하여 프롬프트에 주입합니다.
+- AI가 문맥을 이해하고 구매 의도가 발생하는 순간에 자연스럽게 링크를 삽입합니다.
+- 매력적인 CTA(Call To Action) 문구를 자동 생성합니다 (예: "최저가 확인하기", "더 자세한 스펙 보기").
+- 최대 3개까지만 삽입하여 글의 품질을 유지합니다.
+- 녹색 텍스트 스타일(`<span style="color: #2e7d32;">`)로 시각적 강조를 적용합니다.
+
+**제휴 링크 데이터 구조**:
+- Firebase 경로: `affiliate_links/{userId}/{linkKey}`
+- 필수 필드: `keyword`, `url`
+- 선택 필드: `productName`, `description`, `createdAt`
+
+**제휴 링크 필터링 로직**:
+- 글의 제목, 태그, 설명에 키워드가 포함된 링크만 선택
+- 최대 10개까지만 프롬프트에 포함 (토큰 절약)
 
 ---
 
@@ -224,6 +284,43 @@ const data = {
 
 const ideas = await generateContentIdeas(data);
 ```
+
+---
+
+### 9. 제휴 마케팅 링크 관리
+
+**기능**: 사용자가 등록한 제휴 링크를 Firebase에 저장하고, 초안 생성 시 자동으로 삽입합니다.
+
+**데이터 저장 경로**:
+```
+affiliate_links/{userId}/{linkKey}
+```
+
+**링크 데이터 구조**:
+```javascript
+{
+  keyword: "아이폰",           // 필수: 키워드
+  productName: "아이폰 15",     // 선택: 상품명
+  url: "https://coupang.com/...", // 필수: 제휴 링크 URL
+  description: "아이폰 15 최신 모델", // 선택: 설명
+  createdAt: 1234567890         // 선택: 생성 시간
+}
+```
+
+**테스트 데이터 추가**:
+- `test-add-affiliate-links.js` 스크립트를 사용하여 Firebase에 테스트 데이터를 추가할 수 있습니다.
+- Service Worker 콘솔에서 스크립트를 실행하면 자동으로 인증 토큰을 가져와 데이터를 추가합니다.
+
+**초안 생성 시 자동 삽입**:
+- `generateDraftFromIdea` 함수가 자동으로 관련 제휴 링크를 조회합니다.
+- 글의 제목, 태그, 설명과 관련된 링크만 선별합니다.
+- AI가 문맥을 이해하고 자연스럽게 링크를 삽입합니다.
+
+**링크 삽입 규칙**:
+1. **문맥 기반 자연스러운 삽입**: 구매 의도가 발생하는 순간에 배치
+2. **AI 기반 CTA 자동 생성**: 문맥에 어울리는 매력적인 문구 생성
+3. **개수 제한**: 최대 3개까지만 삽입
+4. **시각적 강조**: 녹색 텍스트 스타일 적용
 
 ---
 

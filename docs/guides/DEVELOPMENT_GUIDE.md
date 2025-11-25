@@ -1,6 +1,6 @@
 # 개발 가이드
 
-> **최종 업데이트**: 2025-01-25  
+> **최종 업데이트**: 2025-01-26  
 > **상태**: ✅ 최신
 
 ## 📋 개요
@@ -57,7 +57,14 @@ Content-Pilot/
 │   │   ├── aiService.js
 │   │   ├── analyticsService.js
 │   │   ├── authService.js
-│   │   └── ...
+│   │   ├── cascadeDeleteService.js
+│   │   ├── collectorService.js
+│   │   ├── firebaseService.js
+│   │   ├── kanbanService.js
+│   │   ├── migrationService.js
+│   │   ├── offscreenService.js
+│   │   ├── scrapService.js
+│   │   └── thumbnailService.js
 │   └── ui/                 # UI 컴포넌트
 │       ├── panel.js        # 메인 패널
 │       ├── header.js       # 헤더
@@ -185,19 +192,30 @@ const data = snapshot.val();
 await set(ref(getDb(), `kanban/${userId}/${cardId}`), cardData);
 ```
 
-### 3. Offscreen Document
+### 3. Offscreen Document 및 HTML 정제
 
-DOM 분석이 필요한 경우 Offscreen Document를 사용합니다:
+DOM 분석 및 HTML 정제가 필요한 경우 Offscreen Service를 사용합니다:
 
 ```javascript
-import { getOffscreenDocument } from './collectorService.js';
+import { sanitizeHtmlInOffscreen, parseHtmlInOffscreen } from './offscreenService.js';
 
-const offscreen = await getOffscreenDocument();
-const result = await chrome.runtime.sendMessage({
-  action: 'parseHtml',
-  html: htmlContent
-});
+// HTML 정제 (XSS 방어)
+const cleanedHtml = await sanitizeHtmlInOffscreen(rawHtml);
+
+// HTML 파싱
+const result = await parseHtmlInOffscreen(htmlContent, baseUrl);
 ```
+
+**Offscreen Service 주요 기능**:
+- `sanitizeHtmlInOffscreen()`: DOMPurify를 사용한 HTML 정제 및 포매팅
+- `resizeImageInOffscreen()`: 이미지 리사이징
+- `renderTemplateInOffscreen()`: 템플릿 렌더링
+- `parseHtmlInOffscreen()`: HTML 파싱 및 메타데이터 추출
+
+**보안 기능**:
+- DOMPurify를 통한 XSS 공격 방어
+- 위험한 태그/속성 자동 제거
+- Marked를 통한 안전한 마크다운 변환
 
 ---
 
@@ -315,6 +333,7 @@ await signInToFirebaseWithGoogleToken(token);
 
 - `chrome.storage.local` 용량 제한: 10MB
 - Service Worker 생명주기 관리 필요
+- Service Worker에서 동적 `import()` 사용 불가 (정적 import만 가능)
 
 ### 4. Firebase 보안 규칙
 
@@ -333,9 +352,10 @@ await signInToFirebaseWithGoogleToken(token);
 
 ### 프로젝트 문서
 
-- [서비스 아키텍처](./architecture/SERVICES_ARCHITECTURE.md)
+- [서비스 아키텍처](../architecture/SERVICES_ARCHITECTURE.md)
 - [AI 서비스 가이드](./AI_SERVICE_GUIDE.md)
-- [Firebase 채널 구조](./firebase/FIREBASE_CHANNELS_STRUCTURE.md)
+- [마이그레이션 서비스 가이드](./MIGRATION_SERVICE_GUIDE.md)
+- [Firebase 채널 구조](../firebase/FIREBASE_CHANNELS_STRUCTURE.md)
 
 ---
 

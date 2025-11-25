@@ -407,7 +407,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     // 즉시 모달 열기 (기존 데이터로)
     const draftData = {
       seoTitle: ideaData.seoTitle || ideaData.title,
-      thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null
+      thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null,
+      // [신규] 저장된 컨셉 선택 인덱스 포함 (publishInfo에서 직접 가져오기)
+      selectedThumbnailIndex: ideaData.publishInfo?.selectedThumbnailIndex ?? 
+                              (Array.isArray(ideaData.publishInfo?.thumbnailInfo) ? 0 : undefined)
     };
     
     // 공통 콜백 함수들
@@ -431,12 +434,34 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     const onSave = (newThumbnailInfo) => {
       // 메모리 업데이트
       if (!ideaData.publishInfo) ideaData.publishInfo = {};
-      ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+      
+      // thumbnailInfo가 배열인 경우 처리
+      if (Array.isArray(ideaData.publishInfo.thumbnailInfo)) {
+        // 배열 전체를 유지하면서 선택된 컨셉만 업데이트
+        const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
+        if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
+          // 선택된 컨셉의 정보만 업데이트 (selectedThumbnailIndex 제외)
+          const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
+          ideaData.publishInfo.thumbnailInfo[selectedIndex] = {
+            ...ideaData.publishInfo.thumbnailInfo[selectedIndex],
+            ...infoToUpdate
+          };
+        }
+        // selectedThumbnailIndex는 publishInfo에 별도로 저장
+        ideaData.publishInfo.selectedThumbnailIndex = selectedIndex;
+      } else {
+        // 단일 객체인 경우 (구버전 호환)
+        ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+        if (newThumbnailInfo.selectedThumbnailIndex !== undefined) {
+          ideaData.publishInfo.selectedThumbnailIndex = newThumbnailInfo.selectedThumbnailIndex;
+        }
+      }
 
       // Firebase 업데이트
       const publishInfoUpdates = {
         ...(ideaData.publishInfo || {}),
-        thumbnailInfo: newThumbnailInfo
+        thumbnailInfo: ideaData.publishInfo.thumbnailInfo,
+        selectedThumbnailIndex: ideaData.publishInfo.selectedThumbnailIndex
       };
       
       chrome.runtime.sendMessage({
@@ -1377,7 +1402,12 @@ export function renderWorkspace(container, ideaData) {
   }
   
   if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
-      setTimeout(() => showPublishInfo(container.querySelector(".workspace-container"), ideaData.publishInfo?.permalink, ideaData.publishInfo?.tags, ideaData.seoTitle, ideaData), 200);
+      // tags가 배열인 경우 쉼표로 조인
+      let tagsForDisplay = ideaData.publishInfo?.tags || '';
+      if (Array.isArray(tagsForDisplay)) {
+          tagsForDisplay = tagsForDisplay.join(', ');
+      }
+      setTimeout(() => showPublishInfo(container.querySelector(".workspace-container"), ideaData.publishInfo?.permalink, tagsForDisplay, ideaData.seoTitle, ideaData), 200);
   }
 }
 
@@ -2203,7 +2233,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                                     tags: response.tags || ideaData.publishInfo?.tags || '',
                                     thumbnailInfo: response.thumbnailInfo || ideaData.publishInfo?.thumbnailInfo
                                 };
-                                showPublishInfo(workspaceEl, publishInfo.permalink, publishInfo.tags, response.seoTitle || ideaData.seoTitle || '', ideaData);
+                                // tags가 문자열이 아닌 배열인 경우 쉼표로 조인
+                                let tagsForDisplay = publishInfo.tags;
+                                if (Array.isArray(tagsForDisplay)) {
+                                    tagsForDisplay = tagsForDisplay.join(', ');
+                                }
+                                showPublishInfo(workspaceEl, publishInfo.permalink, tagsForDisplay || '', response.seoTitle || ideaData.seoTitle || '', ideaData);
                             }, 200);
                         }
                         

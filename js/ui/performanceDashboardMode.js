@@ -5,6 +5,8 @@ import { showToast, Logger } from "../utils.js";
 
 let allPerformanceData = [];
 let previousDayStats = null; // 전일 통계 저장
+let isProcessingData = false; // 데이터 처리 중 플래그 (중복 호출 방지)
+let processDataTimeout = null; // 디바운싱을 위한 timeout
 
 /**
  * 성과 대시보드 렌더링
@@ -93,13 +95,17 @@ function loadPerformanceData(container, retryCount = 0) {
       }
     });
     
-    // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
+    // [수정] 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청 (단, 처리 중이 아닐 때만)
     setTimeout(() => {
-      if (allPerformanceData.length === 0) {
+      if (allPerformanceData.length === 0 && !isProcessingData) {
         console.log("[PerformanceDashboard] 콜백 미실행 감지, 재요청");
-        chrome.runtime.sendMessage({ action: "get_kanban_data" });
+        chrome.runtime.sendMessage({ action: "get_kanban_data" }, (response) => {
+          if (response && response.success && response.data) {
+            processPerformanceData(response.data || {}, container);
+          }
+        });
       }
-    }, 1000);
+    }, 1500); // 1.5초로 증가 (디바운싱 시간 고려)
     
     // 실시간 업데이트 리스너 등록 (한 번만)
     if (!window.performanceDashboardListenerAttached) {
@@ -127,13 +133,28 @@ function loadPerformanceData(container, retryCount = 0) {
  * 성과 데이터 처리
  */
 async function processPerformanceData(allCards, container) {
-  console.log("[PerformanceDashboard] processPerformanceData 호출:", {
-    cardsCount: Object.keys(allCards || {}).length,
-    hasContainer: !!container,
-    hasContentEl: !!container.querySelector("#perf-dashboard-content")
-  });
+  // [수정] 중복 호출 방지: 이미 처리 중이면 무시
+  if (isProcessingData) {
+    Logger.debug("[Performance Dashboard] 이미 데이터 처리 중, 호출 무시");
+    return;
+  }
   
-  allPerformanceData = [];
+  // [수정] 디바운싱: 짧은 시간 내 여러 호출이 있으면 마지막 호출만 처리
+  if (processDataTimeout) {
+    clearTimeout(processDataTimeout);
+  }
+  
+  processDataTimeout = setTimeout(async () => {
+    isProcessingData = true;
+    
+    try {
+      console.log("[PerformanceDashboard] processPerformanceData 호출:", {
+        cardsCount: Object.keys(allCards || {}).length,
+        hasContainer: !!container,
+        hasContentEl: !!container.querySelector("#perf-dashboard-content")
+      });
+      
+      allPerformanceData = [];
 
   // [신규] 현재 활성 채널 ID 가져오기
   const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
@@ -219,32 +240,52 @@ async function processPerformanceData(allCards, container) {
     }
   }
 
-  // [디버깅] 실제 done status의 카드 수 확인
-  const doneCardsCount = allCards.done ? Object.keys(allCards.done).length : 0;
-  Logger.debug(`[Performance Dashboard] 디버깅 정보:`);
-  Logger.debug(`  - done status 실제 카드 수: ${doneCardsCount}개`);
-  Logger.debug(`  - 성과 데이터 필터링 후: ${allPerformanceData.length}개`);
-  Logger.debug(`  - 카드 목록:`, allPerformanceData.map(item => ({ id: item.id, title: item.title, status: item.status })));
-  
-  if (doneCardsCount !== allPerformanceData.length) {
-    Logger.warn(`[Performance Dashboard] ⚠️ 불일치 발견! done에 ${doneCardsCount}개가 있지만 ${allPerformanceData.length}개가 표시됩니다.`);
-    
-    // done의 모든 카드 확인
-    if (allCards.done) {
-      Logger.debug(`  - done status의 모든 카드:`, Object.keys(allCards.done).map(cardId => {
-        const card = allCards.done[cardId];
-        return {
-          id: cardId,
-          title: card.title || "제목 없음",
-          hasPublishedUrl: !!card.publishedUrl,
-          hasPerformance: !!card.performance,
-          hasError: !!card.performance?.error
-        };
-      }));
-    }
-  }
+      // [디버깅] 실제 done status의 카드 수 확인
+      const doneCardsCount = allCards.done ? Object.keys(allCards.done).length : 0;
+      Logger.debug(`[Performance Dashboard] 디버깅 정보:`);
+      Logger.debug(`  - done status 실제 카드 수: ${doneCardsCount}개`);
+      Logger.debug(`  - 성과 데이터 필터링 후: ${allPerformanceData.length}개`);
+      Logger.debug(`  - 카드 목록:`, allPerformanceData.map(item => ({ id: item.id, title: item.title, status: item.status })));
+      
+      // [수정] 중복 카드 ID 확인 및 제거
+      const cardIdMap = new Map();
+      const uniqueData = [];
+      for (const item of allPerformanceData) {
+        if (!cardIdMap.has(item.id)) {
+          cardIdMap.set(item.id, true);
+          uniqueData.push(item);
+        } else {
+          Logger.warn(`[Performance Dashboard] 중복 카드 ID 발견 (제거): ${item.id}, title: ${item.title}`);
+        }
+      }
+      allPerformanceData = uniqueData;
+      
+      Logger.debug(`[Performance Dashboard] 중복 제거 후: ${allPerformanceData.length}개`);
+      
+      if (doneCardsCount !== allPerformanceData.length) {
+        Logger.warn(`[Performance Dashboard] ⚠️ 불일치 발견! done에 ${doneCardsCount}개가 있지만 ${allPerformanceData.length}개가 표시됩니다.`);
+        
+        // done의 모든 카드 확인
+        if (allCards.done) {
+          Logger.debug(`  - done status의 모든 카드:`, Object.keys(allCards.done).map(cardId => {
+            const card = allCards.done[cardId];
+            return {
+              id: cardId,
+              title: card.title || "제목 없음",
+              hasPublishedUrl: !!card.publishedUrl,
+              hasPerformance: !!card.performance,
+              hasError: !!card.performance?.error
+            };
+          }));
+        }
+      }
 
-  renderPerformanceList(container);
+      renderPerformanceList(container);
+    } finally {
+      isProcessingData = false;
+      processDataTimeout = null;
+    }
+  }, 300); // 300ms 디바운싱
 }
 
 /**

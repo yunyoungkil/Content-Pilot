@@ -1,6 +1,6 @@
 // js/ui/thumbnailMaker.js
 import { renderTemplateFromData, createSmartTemplate } from "./thumbnailGenerator.js";
-import { showToast } from "../utils.js";
+import { showToast, Logger } from "../utils.js";
 
 /**
  * 썸네일 제작 모달을 엽니다.
@@ -10,18 +10,71 @@ import { showToast } from "../utils.js";
  * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
  */
 export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
-  // 1. 기존 데이터에서 썸네일 정보 추출 (없으면 기본값)
-  const thumbInfo = draftData.thumbnailInfo || {
-    thumbnailText: draftData.seoTitle || "제목을 입력하세요",
-    thumbnailPromptEn: "Abstract modern background, minimalistic, professional, 4k, soft lighting",
-    thumbnailPromptKo: "심플하고 모던한 배경",
-    // [신규] 저장된 스타일 정보가 있으면 불러오기
-    fontFamily: "'Pretendard', sans-serif",
-    textColor: "auto",
-    ratio: "16:9",
-    subtitle: "",
-    bgImage: null // Base64 이미지 데이터
-  };
+  // 1. 기존 데이터에서 썸네일 정보 추출 (배열 지원)
+  let thumbInfo = null;
+  let thumbnailCandidates = []; // 3가지 컨셉 후보 저장
+  let selectedConceptIndex = 0; // 현재 선택된 컨셉 인덱스
+  
+  // thumbnailInfo가 배열인 경우
+  if (Array.isArray(draftData.thumbnailInfo)) {
+    thumbnailCandidates = draftData.thumbnailInfo;
+    // 저장된 선택 인덱스가 있으면 사용, 없으면 첫 번째 요소 사용
+    const savedIndex = draftData.selectedThumbnailIndex || 0;
+    selectedConceptIndex = savedIndex >= 0 && savedIndex < thumbnailCandidates.length ? savedIndex : 0;
+    thumbInfo = thumbnailCandidates[selectedConceptIndex] || thumbnailCandidates[0] || null;
+    Logger.debug('[ThumbnailMaker] 썸네일 배열에서 선택된 컨셉 사용:', {
+      index: selectedConceptIndex,
+      type: thumbInfo?.type,
+      total: thumbnailCandidates.length
+    });
+  } else if (draftData.thumbnailInfo) {
+    // 단일 객체인 경우 (구버전 호환)
+    thumbInfo = draftData.thumbnailInfo;
+    thumbnailCandidates = [draftData.thumbnailInfo];
+  }
+  
+  // 썸네일 정보가 없으면 기본값 (3가지 컨셉 강제 생성)
+  if (!thumbInfo || thumbnailCandidates.length === 0) {
+    const baseTitle = draftData.seoTitle || "제목을 입력하세요";
+    thumbnailCandidates = [
+      {
+        type: "curiosity",
+        thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+        thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
+        thumbnailText: "이거 실화냐?",
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: "auto",
+        ratio: "16:9",
+        subtitle: "",
+        bgImage: null
+      },
+      {
+        type: "informative",
+        thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", text overlay style, bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
+        thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
+        thumbnailText: "완벽 정리",
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: "auto",
+        ratio: "16:9",
+        subtitle: "",
+        bgImage: null
+      },
+      {
+        type: "emotional",
+        thumbnailPromptEn: `Warm, cozy thumbnail for "${baseTitle}", soft lighting, human element, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio`,
+        thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
+        thumbnailText: "당신을 위한",
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: "auto",
+        ratio: "16:9",
+        subtitle: "",
+        bgImage: null
+      }
+    ];
+    selectedConceptIndex = 0;
+    thumbInfo = thumbnailCandidates[0];
+    Logger.debug('[ThumbnailMaker] 기본 컨셉 3개 생성:', thumbnailCandidates.length);
+  }
 
   // 초기화 데이터 로깅 시 Base64 숨기기
   const logThumbInfo = { ...thumbInfo };
@@ -41,6 +94,44 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const escapedPromptEn = (thumbInfo.thumbnailPromptEn || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const escapedPromptKo = (thumbInfo.thumbnailPromptKo || '자동 설정됨').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const escapedThumbText = (thumbInfo.thumbnailText || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  
+  // 컨셉 선택 UI 생성 (3가지 컨셉이 있을 때만 표시)
+  const conceptSelectorHtml = thumbnailCandidates.length > 1 ? `
+    <div style="margin-bottom:16px;padding:12px;background:#2d2d2d;border-radius:8px;border:1px solid #444;">
+      <label style="display:block;font-size:12px;color:#aaa;margin-bottom:8px;font-weight:600;">🎨 썸네일 컨셉 선택 (A/B 테스팅)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${thumbnailCandidates.map((candidate, idx) => {
+          const typeLabels = {
+            curiosity: "🔥 호기심 자극형",
+            informative: "📊 정보 요약형",
+            emotional: "💝 감성/공감형"
+          };
+          const isSelected = idx === selectedConceptIndex;
+          const label = typeLabels[candidate.type] || `컨셉 ${idx + 1}`;
+          return `
+            <button class="tm-concept-btn" data-index="${idx}" style="
+              flex:1;min-width:120px;padding:10px 12px;
+              background:${isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e'};
+              color:${isSelected ? '#fff' : '#ccc'};
+              border:1px solid ${isSelected ? '#6c5ce7' : '#444'};
+              border-radius:6px;
+              cursor:pointer;
+              font-size:12px;
+              font-weight:${isSelected ? '600' : '400'};
+              transition:all 0.2s;
+              text-align:center;
+            ">
+              ${label}${isSelected ? ' ✓' : ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+      <div style="margin-top:8px;padding:8px;background:#1e1e1e;border-radius:4px;font-size:11px;color:#888;line-height:1.5;">
+        <strong style="color:#aaa;">선택된 컨셉:</strong> ${thumbInfo.thumbnailText || '없음'}<br>
+        <span style="font-size:10px;opacity:0.8;">각 컨셉을 클릭하여 프롬프트와 문구를 변경할 수 있습니다.</span>
+      </div>
+    </div>
+  ` : '';
   
   modal.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-shrink:0;">
@@ -148,12 +239,15 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       <canvas id="tm-preview" width="1280" height="720" style="max-width:100%;max-height:calc(50vh - 40px);width:auto;height:auto;object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);"></canvas>
     </div>
 
+    ${conceptSelectorHtml}
+    
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0;">
       <div style="flex:1;min-width:200px;background:#2d2d2d;padding:10px 12px;border-radius:8px;display:flex;flex-direction:column;justify-content:center;">
-        <span style="font-size:10px;color:#888;margin-bottom:2px;">적용된 프롬프트 (자동)</span>
-        <span style="font-size:12px;color:#ccc;word-wrap:break-word;word-break:break-word;line-height:1.4;" title="${escapedPromptEn}">
-          ${escapedPromptKo}
-        </span>
+        <span style="font-size:10px;color:#888;margin-bottom:4px;">적용된 프롬프트 (자동)</span>
+        <div id="tm-prompt-display" style="font-size:12px;color:#ccc;word-wrap:break-word;word-break:break-word;line-height:1.4;" title="${escapedPromptEn}">
+          <div style="margin-bottom:4px;">${escapedPromptKo}</div>
+          <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${escapedPromptEn}</div>
+        </div>
       </div>
       
       <div style="display:flex;gap:8px;flex-shrink:0;align-items:center;">
@@ -257,7 +351,9 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         textColor: document.getElementById("tm-text-color")?.value || "auto",
         ratio: document.getElementById("tm-ratio")?.value || "16:9",
         // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback)
-        bgImage: bgImageToSave
+        bgImage: bgImageToSave,
+        // [신규] 선택된 컨셉 인덱스 저장 (영구 저장)
+        selectedThumbnailIndex: selectedConceptIndex
       };
       
       // 로깅 시 Base64 숨기기
@@ -546,6 +642,88 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const bgModeUpload = document.getElementById("tm-bg-mode-upload");
   if (bgModeUpload) bgModeUpload.onclick = () => toggleTabs('upload');
 
+  // [신규] 컨셉 선택 버튼 이벤트 리스너
+  if (thumbnailCandidates.length > 1) {
+    const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
+    conceptButtons.forEach((btn, idx) => {
+      btn.addEventListener('click', () => {
+        // 선택된 컨셉으로 전환
+        selectedConceptIndex = idx;
+        const selectedConcept = thumbnailCandidates[idx];
+        
+        // UI 업데이트: 버튼 스타일
+        conceptButtons.forEach((b, i) => {
+          const isSelected = i === idx;
+          b.style.background = isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e';
+          b.style.color = isSelected ? '#fff' : '#ccc';
+          b.style.border = `1px solid ${isSelected ? '#6c5ce7' : '#444'}`;
+          b.style.fontWeight = isSelected ? '600' : '400';
+          // 체크마크 업데이트
+          const label = b.textContent.replace(/\s✓$/, '');
+          b.textContent = label + (isSelected ? ' ✓' : '');
+        });
+        
+        // 입력 필드 업데이트
+        const titleInput = modal.querySelector('#tm-title');
+        if (titleInput && selectedConcept.thumbnailText) {
+          titleInput.value = selectedConcept.thumbnailText;
+        }
+        
+        // 프롬프트 정보 업데이트 (ID로 정확히 찾기)
+        const promptDisplay = modal.querySelector('#tm-prompt-display');
+        if (promptDisplay) {
+          const newPromptKo = selectedConcept.thumbnailPromptKo || '자동 설정됨';
+          const newPromptEn = selectedConcept.thumbnailPromptEn || '';
+          // 한글과 영문 프롬프트 모두 표시
+          promptDisplay.innerHTML = `
+            <div style="margin-bottom:4px;">${newPromptKo}</div>
+            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>
+          `;
+          promptDisplay.title = newPromptEn; // 전체 영문 프롬프트를 툴팁으로도 제공
+          Logger.debug('[ThumbnailMaker] 프롬프트 업데이트:', {
+            ko: newPromptKo.substring(0, 50) + '...',
+            en: newPromptEn.substring(0, 50) + '...'
+          });
+        } else {
+          Logger.warn('[ThumbnailMaker] 프롬프트 표시 영역을 찾을 수 없습니다.');
+        }
+        
+        // thumbInfo 업데이트 (현재 선택된 컨셉으로, 기존 스타일 정보는 유지)
+        const oldStyle = {
+          fontFamily: thumbInfo.fontFamily,
+          textColor: thumbInfo.textColor,
+          ratio: thumbInfo.ratio,
+          subtitle: thumbInfo.subtitle,
+          bgImage: thumbInfo.bgImage,
+          templateType: thumbInfo.templateType
+        };
+        thumbInfo = { ...selectedConcept, ...oldStyle };
+        
+        Logger.debug('[ThumbnailMaker] 컨셉 변경:', {
+          index: idx,
+          type: selectedConcept.type,
+          text: selectedConcept.thumbnailText
+        });
+        
+        // 프리뷰 업데이트 (updatePreview 함수가 정의된 후 호출)
+        // updatePreview는 나중에 정의되므로, 약간의 지연 후 호출
+        setTimeout(() => {
+          if (typeof updatePreview === 'function') {
+            updatePreview();
+          }
+        }, 100);
+        
+        // 자동 저장 트리거 (선택된 컨셉 인덱스도 함께 저장)
+        triggerAutoSave();
+      });
+    });
+    
+    Logger.debug('[ThumbnailMaker] 컨셉 선택 버튼 이벤트 리스너 연결 완료:', {
+      buttonCount: conceptButtons.length,
+      candidates: thumbnailCandidates.length
+    });
+  }
+
   // [신규] 파일 업로드 처리
   const uploadBtn = document.getElementById("tm-upload-btn");
   if (uploadBtn) uploadBtn.onclick = () => {
@@ -634,8 +812,20 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         promptSuffix = "dark mode background, minimalistic, modern, high contrast, text-friendly";
       }
 
-      // 기본 프롬프트와 스타일 프롬프트 결합
-      const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}, ${promptSuffix}`;
+      // 메인 타이틀 가져오기
+      const titleInput = document.getElementById("tm-title");
+      const mainTitle = titleInput ? titleInput.value.trim() : thumbInfo.thumbnailText || '';
+      
+      // Gemini API 문서 참고: 고화질 텍스트 렌더링을 위해 텍스트를 명시적으로 포함
+      // https://ai.google.dev/gemini-api/docs/image-generation?hl=ko
+      // 프롬프트에 메인 타이틀 텍스트를 포함하여 이미지에 텍스트가 렌더링되도록 함
+      let textPrompt = '';
+      if (mainTitle) {
+        textPrompt = `, with text "${mainTitle}" rendered in high-quality, readable font, properly positioned`;
+      }
+      
+      // 기본 프롬프트 + 스타일 프롬프트 + 텍스트 렌더링 지시 결합
+      const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, high-quality text rendering, 16:9 aspect ratio`;
 
       // background.js에 이미지 생성 요청
       const response = await chrome.runtime.sendMessage({

@@ -1,5 +1,126 @@
 // offscreen.js (Lazy Loading 대응 시점으로 복원)
 
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+
+// --- 유틸리티 함수 ---
+
+/**
+ * HTML 정제 및 포매팅 로직 (기존 aiService.js 로직 이관 및 개선)
+ * @param {string} text - 정제할 원본 텍스트
+ * @returns {Promise<string>} 정제 및 포매팅된 HTML
+ */
+async function sanitizeAndFormatHtml(text) {
+    if (!text) return '';
+
+    // 0. 썸네일 정보 태그 제거 (본문에 포함되지 않도록 먼저 제거)
+    // (aiService.js에서 이미 제거했지만, 안전장치로 여기서도 제거)
+    let cleanedText = text.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+
+    // 1. 마크다운 감지 및 변환
+    // (기존의 복잡한 정규식 대신 marked가 안전하게 처리하도록 함)
+    let html = cleanedText;
+    const isMarkdownCandidate = /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\[.*\]\(.*\)/m.test(cleanedText);
+    
+    if (isMarkdownCandidate) {
+        // marked 옵션 설정: 줄바꿈 처리 등
+        marked.use({ breaks: true, gfm: true });
+        html = await marked.parse(cleanedText);
+    }
+
+    // 2. DOMPurify를 통한 강력한 XSS 방어 (Sanitization)
+    const cleanHtml = DOMPurify.sanitize(html, {
+        ALLOWED_TAGS: [
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'ul', 'ol', 'li', 
+            'strong', 'b', 'i', 'em', 'mark', 'span', 'div', 'a', 'img', 'blockquote', 
+            'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td'
+        ],
+        ALLOWED_ATTR: [
+            'href', 'src', 'alt', 'title', 'target', 'rel', 'style', 'class', 'id', 
+            'width', 'height', 'align'
+        ],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'style'], // 위험 태그 명시적 차단
+        FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover'], // 이벤트 핸들러 차단
+    });
+
+    // 3. DOM 조작을 통한 스타일링 및 포매팅
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(cleanHtml, 'text/html');
+    const body = doc.body;
+
+    // 3.1 링크 스타일링 및 보안 속성 추가
+    body.querySelectorAll('a').forEach(a => {
+        a.style.textDecoration = 'none';
+        
+        // [수정] 제휴 링크 스타일 보존: 부모 span에 녹색 스타일이 있으면 유지
+        const parentSpan = a.closest('span[style*="#2e7d32"], span[style*="rgb(46, 125, 50)"]');
+        
+        if (parentSpan) {
+            // 제휴 링크인 경우: 부모 span의 스타일을 링크에 직접 적용
+            const spanStyle = parentSpan.getAttribute('style') || '';
+            const colorMatch = spanStyle.match(/color:\s*(#[0-9a-fA-F]{6}|rgb\([^)]+\))/);
+            if (colorMatch) {
+                a.style.color = colorMatch[1];
+            } else {
+                a.style.color = '#2e7d32'; // 기본 녹색
+            }
+            // span의 스타일이 링크에 적용되었으므로 span은 제거하지 않고 유지 (시각적 강조)
+        } else {
+            // 제휴 링크가 아니면 기본 파란색 적용
+            a.style.color = '#1a73e8';
+        }
+        
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer'); // 보안 강화
+    });
+
+    // 3.2 "참고 자료 (1)" 같은 불필요한 텍스트 노드 제거 (TreeWalker 사용)
+    const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        // 괄호나 대괄호로 감싸진 참고 자료 번호 패턴 제거
+        if (/[\(\[]참고\s*자료\s*\d+[\)\]]/i.test(node.nodeValue)) {
+            node.nodeValue = node.nodeValue.replace(/[\(\[]참고\s*자료\s*\d+[\)\]]/gi, '');
+        }
+    }
+
+    // 3.3 중요 문장 하이라이팅 (<mark> 태그가 없는 경우 자동 적용)
+    if (!body.querySelector('mark')) {
+        const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수'];
+        let markCount = 0;
+        
+        // 텍스트 노드를 순회하며 키워드가 포함된 문장 찾기 (단순화된 로직)
+        // 실제로는 DOM 구조를 깨지 않기 위해 주의가 필요함. 
+        // 여기서는 안전하게 <p> 태그 내의 텍스트만 대상으로 함
+        body.querySelectorAll('p').forEach(p => {
+            if (markCount >= 2) return;
+            const text = p.innerHTML; // innerHTML 사용 (태그 포함 유지)
+            
+            // 이미 다른 태그가 복잡하게 섞인 경우 건너뜀
+            if (text.includes('<hr') || text.includes('<img')) return;
+
+            for (const keyword of importantKeywords) {
+                if (text.includes(keyword) && text.length > 20 && markCount < 2) {
+                    p.style.backgroundColor = 'rgba(255, 255, 204, 0.5)';
+                    p.style.padding = '4px';
+                    p.style.borderRadius = '4px';
+                    markCount++;
+                    break; 
+                }
+            }
+        });
+    }
+
+    // 3.4 <hr> 태그 스타일링
+    body.querySelectorAll('hr').forEach(hr => {
+        hr.style.border = 'none';
+        hr.style.borderTop = '2px solid #e0e0e0';
+        hr.style.margin = '24px 0 32px 0';
+    });
+
+    return body.innerHTML;
+}
+
 /**
  * 텍스트에서 불필요한 공백과 줄 바꿈을 제거하고 문단 구조를 유지합니다.
  */
@@ -314,6 +435,27 @@ async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight
 
 // --- 메시지 리스너 (background.js로부터 요청 처리) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // [신규] HTML 정제 및 포매팅 요청 처리
+    if (request.action === 'sanitize_html_in_offscreen') {
+        sanitizeAndFormatHtml(request.rawText)
+            .then(cleanedHtml => {
+                chrome.runtime.sendMessage({
+                    action: 'sanitize_html_in_offscreen_response',
+                    success: true,
+                    cleanedHtml
+                });
+            })
+            .catch(error => {
+                console.error('[Offscreen] HTML 정제 중 오류:', error);
+                chrome.runtime.sendMessage({
+                    action: 'sanitize_html_in_offscreen_response',
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true; // 비동기 응답
+    }
+    
     if (request.action === 'parse_html_in_offscreen') {
         const { html, baseUrl } = request;
         try {

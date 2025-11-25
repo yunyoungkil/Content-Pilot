@@ -75,6 +75,13 @@ import {
   deleteScrap
 } from './js/services/scrapService.js';
 
+import {
+  sanitizeHtmlInOffscreen,
+  resizeImageInOffscreen,
+  renderTemplateInOffscreen,
+  parseHtmlInOffscreen
+} from './js/services/offscreenService.js';
+
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 // import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
 import { ref, update, remove, set, get, push, serverTimestamp, onValue } from './js/services/firebaseService.js';
@@ -84,7 +91,6 @@ initializeFirebase();
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
-let offscreenDocumentId = null; // Offscreen 문서 ID 추적
 
 // Service Worker 시작 시 세션 복원
 (async () => {
@@ -96,182 +102,6 @@ let offscreenDocumentId = null; // Offscreen 문서 ID 추적
 })();
 
 Logger.info("🚀 [System] Service Worker Started (Lightweight Router)");
-
-/**
- * Offscreen 문서 생성 및 관리
- * 이미지 처리를 백그라운드로 이관하여 메인 스레드 부하 감소
- */
-async function ensureOffscreenDocument() {
-  if (offscreenDocumentId) {
-    // 이미 생성되어 있는지 확인
-    try {
-      const clients = await chrome.offscreen.hasDocument();
-      if (clients) {
-        Logger.debug('[Offscreen] 문서가 이미 존재합니다.');
-        return offscreenDocumentId;
-      }
-    } catch (e) {
-      // 문서가 없거나 오류 발생
-      offscreenDocumentId = null;
-    }
-  }
-
-  try {
-    // Offscreen 문서 생성
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['DOM_SCRAPING', 'WORKERS'], // 이미지 처리용
-      justification: '이미지 리사이징 및 템플릿 렌더링을 백그라운드에서 처리'
-    });
-    
-    // 문서 ID 추적 (chrome.offscreen API는 직접 ID를 반환하지 않지만, 
-    // hasDocument()로 존재 여부 확인 가능)
-    offscreenDocumentId = 'offscreen-doc';
-    Logger.info('[Offscreen] 문서 생성 완료');
-    return offscreenDocumentId;
-  } catch (error) {
-    Logger.error('[Offscreen] 문서 생성 실패:', error);
-    return null;
-  }
-}
-
-/**
- * Offscreen 문서로 이미지 리사이징 요청
- * @param {string} imageDataUrl - 원본 이미지 DataURL
- * @param {number} maxWidth - 최대 너비
- * @param {number} maxHeight - 최대 높이
- * @param {number} quality - JPEG 품질 (0-1)
- * @returns {Promise<string>} 리사이즈된 이미지 DataURL
- */
-async function resizeImageInOffscreen(imageDataUrl, maxWidth, maxHeight, quality = 0.9) {
-  const startTime = performance.now();
-  
-  try {
-    await ensureOffscreenDocument();
-    
-    // Offscreen 문서로 메시지 전송 (Promise 기반)
-    // chrome.runtime.sendMessage는 offscreen 문서의 chrome.runtime.onMessage 리스너로 전달됨
-    const response = await new Promise((resolve, reject) => {
-      // 응답을 받을 리스너 등록
-      const responseListener = (msg, sender, sendResponse) => {
-        if (msg.action === 'resize_image_in_offscreen_response') {
-          chrome.runtime.onMessage.removeListener(responseListener);
-          if (msg.success) {
-            resolve(msg);
-          } else {
-            reject(new Error(msg.error || '이미지 리사이징 실패'));
-          }
-          return true;
-        }
-        return false;
-      };
-      
-      chrome.runtime.onMessage.addListener(responseListener);
-      
-      // Offscreen 문서로 메시지 전송
-      // offscreen.js의 chrome.runtime.onMessage 리스너가 이를 받아 처리
-      chrome.runtime.sendMessage({
-        action: 'resize_image_in_offscreen',
-        imageDataUrl,
-        maxWidth,
-        maxHeight,
-        quality
-      }).catch((err) => {
-        // "message port closed"는 정상적인 상황일 수 있음
-        if (err?.message && !err.message.includes('message port closed')) {
-          reject(err);
-        } else {
-          reject(new Error('Offscreen 문서 연결 실패'));
-        }
-      });
-      
-      // 타임아웃 설정 (30초)
-      setTimeout(() => {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        reject(new Error('이미지 리사이징 타임아웃'));
-      }, 30000);
-    });
-    
-    if (response && response.success) {
-      const elapsed = Math.round(performance.now() - startTime);
-      Logger.info(`⚡ [Offscreen] 이미지 리사이징 완료 (${elapsed}ms)`);
-      return response.dataUrl;
-    } else {
-      throw new Error(response?.error || '이미지 리사이징 실패');
-    }
-  } catch (error) {
-    Logger.error('[Offscreen] 이미지 리사이징 오류:', error);
-    throw error;
-  }
-}
-
-/**
- * Offscreen 문서로 템플릿 렌더링 요청
- * @param {Object} templateData - 템플릿 데이터
- * @param {number} canvasWidth - 캔버스 너비
- * @param {number} canvasHeight - 캔버스 높이
- * @param {Object} dynamicText - 동적 텍스트
- * @returns {Promise<string>} 렌더링된 이미지 DataURL
- */
-async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight, dynamicText = {}) {
-  const startTime = performance.now();
-  
-  try {
-    await ensureOffscreenDocument();
-    
-    // Offscreen 문서로 메시지 전송 (Promise 기반)
-    const response = await new Promise((resolve, reject) => {
-      // 응답을 받을 리스너 등록
-      const responseListener = (msg, sender, sendResponse) => {
-        if (msg.action === 'render_template_in_offscreen_response') {
-          chrome.runtime.onMessage.removeListener(responseListener);
-          if (msg.success) {
-            resolve(msg);
-          } else {
-            reject(new Error(msg.error || '템플릿 렌더링 실패'));
-          }
-          return true;
-        }
-        return false;
-      };
-      
-      chrome.runtime.onMessage.addListener(responseListener);
-      
-      // Offscreen 문서로 메시지 전송
-      chrome.runtime.sendMessage({
-        action: 'render_template_in_offscreen',
-        templateData,
-        canvasWidth,
-        canvasHeight,
-        dynamicText
-      }).catch((err) => {
-        // "message port closed"는 정상적인 상황일 수 있음
-        if (err?.message && !err.message.includes('message port closed')) {
-          reject(err);
-        } else {
-          reject(new Error('Offscreen 문서 연결 실패'));
-        }
-      });
-      
-      // 타임아웃 설정 (60초 - 템플릿 렌더링은 더 오래 걸릴 수 있음)
-      setTimeout(() => {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        reject(new Error('템플릿 렌더링 타임아웃'));
-      }, 60000);
-    });
-    
-    if (response && response.success) {
-      const elapsed = Math.round(performance.now() - startTime);
-      Logger.info(`⚡ [Offscreen] 템플릿 렌더링 완료 (${elapsed}ms)`);
-      return response.dataUrl;
-    } else {
-      throw new Error(response?.error || '템플릿 렌더링 실패');
-    }
-  } catch (error) {
-    Logger.error('[Offscreen] 템플릿 렌더링 오류:', error);
-    throw error;
-  }
-}
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
 chrome.action.onClicked.addListener((tab) => {
@@ -303,6 +133,19 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   } else if (alarm.name === "update-performance-metrics") {
     Logger.biz("⏰ [Alarm] 성과 지표 업데이트 시작");
     updateAllPerformanceMetrics();
+  }
+});
+
+// [최적화] 콘텐츠 스크립트와의 롱 런타임 연결(Keep-alive) 처리
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "content-script-keepalive") {
+    Logger.debug(`[Background] 콘텐츠 스크립트 연결됨: ${port.sender?.tab?.id}`);
+    
+    // 포트가 끊어졌을 때의 처리 (선택 사항)
+    port.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError;
+      Logger.debug(`[Background] 콘텐츠 스크립트 연결 해제: ${port.sender?.tab?.id}`, err ? `(Error: ${err.message})` : '');
+    });
   }
 });
 
@@ -369,9 +212,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // 3. 메시지 라우터 (Message Router)
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Offscreen 응답 메시지는 라우터에서 제외 (내부 Promise 리스너가 처리)
-  if (msg.action === 'resize_image_in_offscreen_response' || 
-      msg.action === 'render_template_in_offscreen_response') {
+  // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
+  if (msg.action.endsWith('_in_offscreen_response')) {
     return false; // 다른 리스너가 처리하도록 함
   }
   
@@ -385,6 +227,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
     return true; // 비동기 응답 표시
   };
+
+  // === [System] 연결 확인 ===
+  if (msg.action === "ping") {
+    sendResponse({ success: true, message: "pong" });
+    return true;
+  }
 
   // === [Collector Service] 데이터 수집 ===
   if (msg.action === "fetch_all_channel_data") return handleAsync(fetchAllChannelData());
@@ -436,6 +284,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [Offscreen Image Processing] 이미지 처리 가속 ===
   if (msg.action === "resize_image_in_offscreen") {
+    // [변경] OffscreenService의 함수 호출
     return handleAsync(resizeImageInOffscreen(
       msg.data.imageDataUrl,
       msg.data.maxWidth || 1920,
@@ -445,6 +294,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "render_template_in_offscreen") {
+    // [변경] OffscreenService의 함수 호출
     return handleAsync(renderTemplateInOffscreen(
       msg.data.templateData,
       msg.data.canvasWidth || 1280,
@@ -453,9 +303,69 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ).then(dataUrl => ({ success: true, dataUrl })));
   }
 
+  // [신규] 외부(팝업 등)에서 HTML 정제를 요청할 경우를 대비한 라우트
+  if (msg.action === "sanitize_html") {
+    Logger.debug('[Router] sanitize_html 요청 수신');
+    return handleAsync(sanitizeHtmlInOffscreen(msg.rawText || msg.data?.rawText || '')
+      .then(cleanedHtml => {
+        Logger.debug('[Router] sanitize_html 정제 완료');
+        return { success: true, cleanedHtml };
+      })
+      .catch(error => {
+        Logger.error('[Router] sanitize_html 정제 실패:', error);
+        throw error;
+      }));
+  }
+
   // === [Auth Service] 인증 ===
   if (msg.action === "start_google_auth") return handleAsync(startGoogleAuth());
   if (msg.action === "revoke_google_auth") return handleAsync(revokeGoogleAuth());
+  
+  // === [System] 인증 토큰 가져오기 (테스트 스크립트용) ===
+  if (msg.action === "get_auth_token") {
+    return handleAsync((async () => {
+      try {
+        const { getValidToken } = await import('./js/services/authService.js');
+        const token = await getValidToken(false);
+        if (token) {
+          return { success: true, token };
+        } else {
+          // 토큰이 없으면 interactive 모드로 재시도
+          const interactiveToken = await getValidToken(true);
+          if (interactiveToken) {
+            return { success: true, token: interactiveToken };
+          }
+          return { success: false, error: "토큰을 가져올 수 없습니다. 로그인이 필요합니다." };
+        }
+      } catch (error) {
+        Logger.error('[get_auth_token] 오류:', error);
+        return { success: false, error: error.message };
+      }
+    })());
+  }
+
+  // === [System] 인증 토큰 갱신 (테스트 스크립트용) ===
+  if (msg.action === "refresh_auth_token") {
+    return handleAsync((async () => {
+      try {
+        const { refreshAuthToken } = await import('./js/services/authService.js');
+        const result = await refreshAuthToken(false);
+        if (result.success) {
+          return { success: true, token: result.token };
+        } else {
+          // interactive 모드로 재시도
+          const interactiveResult = await refreshAuthToken(true);
+          if (interactiveResult.success) {
+            return { success: true, token: interactiveResult.token };
+          }
+          return { success: false, error: result.error || "토큰 갱신 실패" };
+        }
+      } catch (error) {
+        Logger.error('[refresh_auth_token] 오류:', error);
+        return { success: false, error: error.message };
+      }
+    })());
+  }
 
   // === [DB Operations] 단순 데이터 조작 (직접 처리) ===
   if (msg.action === "add_idea_to_kanban") {
@@ -1931,12 +1841,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })());
   }
 
-  // 핑 테스트
-  if (msg.action === "ping") {
-    sendResponse({ success: true, mode: "module-router" });
-    return false;
-  }
-  
   // 알 수 없는 액션
   Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });

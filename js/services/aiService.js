@@ -6,6 +6,9 @@ import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
 import { Logger } from '../utils.js';
+import { sanitizeHtmlInOffscreen } from './offscreenService.js'; // [추가]
+// [추가] PromptService 임포트
+import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 
 // 1. Gemini API 호출 (Core)
 export async function callGeminiAPI(prompt) {
@@ -38,116 +41,9 @@ export async function callGeminiAPI(prompt) {
   }
 }
 
-// 2. 페르소나 및 유틸리티
-/**
- * [PersonaInjector] 페르소나 기반 AI 톤앤매너 주입 시스템
- * 사용자 설정에 따라 동적으로 System Instruction을 교체합니다.
- */
-export const PERSONA_TEMPLATES = {
-  professional: {
-    name: "전문가형",
-    systemPrompt: `당신은 해당 분야의 10년 차 전문가이자 전문 칼럼니스트입니다.
-
-[톤앤매너 지침]
-- 신뢰감 있고 정제된 비즈니스 톤을 사용하세요 ("~입니다", "~합니다").
-- 객관적인 사실, 통계, 전문 용어를 적절히 섞어 깊이 있는 정보를 제공하세요.
-- 독자가 '진짜 전문가가 썼구나'라고 느끼도록 논리적인 구조로 작성하세요.
-- 첫 문장은 전문적이고 신뢰감 있는 톤으로 시작하세요 (예: "본 글에서는...", "이번에는...").
-
-[작성 스타일]
-- 서론에서 독자의 문제를 명확히 정의하고, 본론에서 체계적으로 해결책을 제시하세요.
-- 데이터와 근거를 바탕으로 설득력 있는 내용을 구성하세요.`,
-    tone: "전문적/신뢰감",
-    firstSentenceExamples: ["본 글에서는", "이번에는", "다음과 같은", "주목할 만한"]
-  },
-  friendly: {
-    name: "친근한형",
-    systemPrompt: `당신은 구독자와 소통하는 것을 좋아하는 인기 블로거입니다.
-
-[톤앤매너 지침]
-- 옆집 언니/오빠처럼 친근하고 편안한 구어체를 사용하되, 반드시 존댓말을 사용하세요 ("~했어요", "~거예요", "~네요", "~어요").
-- 절대 반말("~해", "~야", "~지")을 사용하지 마세요. 항상 존댓말로 작성하세요.
-- 자신의 경험담을 이야기하듯 감성적인 표현을 풍부하게 사용하세요.
-- 독자의 공감을 이끌어내는 질문을 던지며 소통하듯 작성하세요 ("~해보셨어요?", "~아시나요?").
-- 첫 문장은 친근하고 편안한 톤으로 시작하세요 (예: "안녕하세요!", "오늘은", "여러분께").
-
-[작성 스타일]
-- 개인적인 경험과 일화를 자연스럽게 녹여내세요.
-- 이모티콘은 사용하지 않되, 따뜻하고 친근한 말투를 유지하세요.`,
-    tone: "친근함/감성적",
-    firstSentenceExamples: ["안녕하세요!", "오늘은", "여러분께", "꿀팁 드려요", "혹시"]
-  },
-  viral: {
-    name: "바이럴형",
-    systemPrompt: `당신은 바이럴 콘텐츠를 만드는 전문가입니다. 독자의 호기심을 자극하고 클릭을 유도하는 글을 작성합니다.
-
-[톤앤매너 지침]
-- 강렬하고 임팩트 있는 첫 문장으로 독자의 관심을 즉시 끌어야 합니다 (예: "이거 진짜 놀라운데요?", "아무도 모르는 비밀", "이거 하나만 알면").
-- 숫자, 비교, 놀라운 사실을 활용해 호기심을 자극하세요 ("3가지", "10배", "99%가 모르는").
-- 짧고 임팩트 있는 문장을 사용하고, 긴 문단은 피하세요.
-- 독자의 감정을 자극하는 표현을 사용하세요 ("충격적", "놀라운", "반드시", "절대").
-- 클릭을 유도하는 제목과 첫 문장을 작성하세요.
-
-[작성 스타일]
-- 리스트 형식을 활용해 가독성을 높이세요.
-- 핵심 정보를 앞부분에 배치하고, 긴 설명은 뒤로 미루세요.
-- 독자가 끝까지 읽고 싶게 만드는 클리프행어 기법을 사용하세요.`,
-    tone: "바이럴/임팩트",
-    firstSentenceExamples: ["이거 진짜 놀라운데요?", "아무도 모르는 비밀", "이거 하나만 알면", "99%가 모르는", "충격적인 사실"]
-  }
-};
-
-/**
- * 페르소나 선택 함수
- * 1. ideaData.persona 또는 ideaData.tone 설정 확인
- * 2. 사용자 설정에서 기본 톤앤매너 확인
- * 3. 자동 감지 (기존 로직)
- */
-async function selectPersona(ideaData) {
-  // 1. 명시적으로 설정된 페르소나가 있으면 사용
-  if (ideaData.persona && PERSONA_TEMPLATES[ideaData.persona]) {
-    return PERSONA_TEMPLATES[ideaData.persona];
-  }
-  
-  // 2. 사용자 설정에서 기본 톤앤매너 확인
-  try {
-    const storage = await chrome.storage.local.get(['defaultPersona', 'defaultTone']);
-    const userPersona = storage.defaultPersona || storage.defaultTone;
-    if (userPersona && PERSONA_TEMPLATES[userPersona]) {
-      return PERSONA_TEMPLATES[userPersona];
-    }
-  } catch (e) {
-    console.warn('[selectPersona] 사용자 설정 읽기 실패:', e);
-  }
-  
-  // 3. 자동 감지 (기존 로직)
-  const text = `${ideaData.title} ${ideaData.description} ${(ideaData.tags||[]).join(' ')}`.toLowerCase();
-  
-  // 키워드 스코어링
-  let scores = { professional: 0, friendly: 0, viral: 0 };
-  
-  // 친근한 키워드
-  if (/후기|리뷰|일상|여행|맛집|추천|솔직|내돈내산/.test(text)) scores.friendly += 3;
-  // 전문적 키워드
-  if (/가이드|사용법|강좌|정리|뉴스|소식|트렌드|통계/.test(text)) scores.professional += 3;
-  // 바이럴 키워드
-  if (/비밀|꿀팁|초간단|초보|모르는|충격|놀라운|반드시|절대/.test(text)) scores.viral += 3;
-  // 비판적 키워드 (전문가형으로 분류)
-  if (/비교|장단점|분석|문제점|해결|vs/.test(text)) scores.professional += 2;
-  
-  // 최고 점수 페르소나 선택 (동점일 경우 professional 기본)
-  const selectedKey = Object.keys(scores).reduce((a, b) => scores[a] >= scores[b] ? a : b);
-  
-  return PERSONA_TEMPLATES[selectedKey];
-}
-
-/**
- * 보라색 콘솔 로그 출력 (Logger.biz 사용)
- */
-function logPersona(persona) {
-  const personaName = persona.name || persona.tone || 'Unknown';
-  Logger.biz(`🎭 [Persona: ${personaName}]`, `톤앤매너: ${persona.tone}`);
-}
+// [삭제] PERSONA_TEMPLATES 상수 삭제 (PromptService로 이관됨)
+// [삭제] selectPersona 함수 삭제 (detectPersona로 대체 및 generateDraftFromIdea 내부로 통합)
+// [삭제] logPersona 함수 삭제 (PromptBuilder의 getPersonaName/getToneName으로 대체)
 
 // 3. 키워드 갭 분석 (AI 분석)
 export async function analyzeKeywordGap(myContent, competitorContent) {
@@ -169,156 +65,122 @@ export async function getEmergingTopics(channelContext) {
   return await callGeminiAPI(prompt);
 }
 
-// 5. 초안 생성 (메인 로직)
-function formatDraftForReadability(draftText) {
-  if (!draftText) return draftText;
-  
-  let html = draftText;
-  
-  // 마크다운 형식인지 확인 (마크다운 문법이 있으면 HTML로 변환 필요)
-  const isMarkdown = /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|^>\s|\[.*\]\(.*\)/m.test(draftText);
-  
-  // 마크다운이면 HTML로 변환
-  if (isMarkdown) {
-    // 마크다운 링크를 HTML로 변환하면서 밑줄 제거
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="text-decoration: none; color: #1a73e8;">$1</a>');
-  }
-  
-  // 기존 HTML 링크의 밑줄 제거
-  html = html.replace(/<a\s+([^>]*?)>/gi, (match, attrs) => {
-    if (!attrs.includes('style=')) {
-      return `<a ${attrs} style="text-decoration: none; color: #1a73e8;">`;
-    } else if (!attrs.includes('text-decoration')) {
-      return `<a ${attrs.replace(/style="([^"]*)"/, 'style="$1; text-decoration: none; color: #1a73e8;"')}>`;
+// [신규] 제휴 링크 조회 및 필터링 헬퍼 함수
+async function getRelevantAffiliateLinks(userId, contextText) {
+  try {
+    const snap = await get(ref(getDb(), `affiliate_links/${userId}`));
+    const linksMap = snap?.val();
+    
+    if (!linksMap) {
+      Logger.debug('[getRelevantAffiliateLinks] 제휴 링크 없음');
+      return [];
     }
-    return match;
-  });
-  
-  // 마크다운 형식의 구분선을 HTML로 변환 (기존 구분선은 유지)
-  // 단, mark 태그 안에 있는 것은 제외
-  html = html.replace(/\n\s*---\s*\n/gi, (match, offset, string) => {
-    // mark 태그 안에 있는지 확인
-    const beforeMatch = string.substring(0, offset);
-    const lastMarkOpen = beforeMatch.lastIndexOf('<mark');
-    const lastMarkClose = beforeMatch.lastIndexOf('</mark>');
-    // 마지막 <mark>가 </mark>보다 뒤에 있으면 mark 태그 안에 있음
-    if (lastMarkOpen > lastMarkClose) {
-      return match; // 변환하지 않음
+    
+    const links = Object.values(linksMap);
+    if (links.length === 0) {
+      Logger.debug('[getRelevantAffiliateLinks] 제휴 링크 배열이 비어있음');
+      return [];
     }
-    return '\n<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0 32px 0;">\n';
-  });
-  
-  // 잘못된 mark 태그 안의 hr 태그 제거
-  html = html.replace(/<mark[^>]*>\s*<hr[^>]*>/gi, '<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">');
-  html = html.replace(/<\/mark>\s*<hr[^>]*>/gi, '</mark>');
-  
-  // "(참고 자료 X)" 같은 번호 표기 제거
-  if (!isMarkdown || html.includes('<')) {
-    // HTML 태그를 임시로 치환하여 텍스트만 처리
-    const textNodes = [];
-    let tagIndex = 0;
-    const tagPlaceholder = '__TAG_PLACEHOLDER__';
     
-    // HTML 태그를 임시로 치환
-    html = html.replace(/<[^>]+>/g, (match) => {
-      textNodes[tagIndex] = match;
-      return `${tagPlaceholder}${tagIndex++}${tagPlaceholder}`;
+    // contextText(제목+태그)에 키워드가 포함된 링크만 필터링 (토큰 절약 및 정확도 향상)
+    // 키워드가 없거나, 키워드가 문맥에 포함된 경우 선택
+    const contextLower = contextText.toLowerCase();
+    const relevantLinks = links.filter(link => {
+      if (!link.keyword || !link.url) {
+        Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
+        return false;
+      }
+      
+      const keywordLower = link.keyword.toLowerCase();
+      const productNameLower = (link.productName || '').toLowerCase();
+      
+      // 키워드나 상품명이 문맥에 포함된 경우 선택
+      const isRelevant = contextLower.includes(keywordLower) || 
+                        (productNameLower && contextLower.includes(productNameLower));
+      
+      if (isRelevant) {
+        Logger.debug(`[getRelevantAffiliateLinks] 관련 링크 발견: ${link.keyword} (${link.url.substring(0, 50)}...)`);
+      }
+      
+      return isRelevant;
     });
     
-    // 텍스트에서 참고 자료 번호 표기 제거
-    html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
-    html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+/gi, '');
-    // 문장 중간에 있는 경우 처리
-    html = html.replace(/[ \t]*\(참고\s*자료\s*\d+\)[ \t]*/gi, ' ');
-    html = html.replace(/[ \t]*\[참고\s*자료\s*\d+\][ \t]*/gi, ' ');
-    // 빈 괄호 제거
-    html = html.replace(/\([ \t]*\)/g, '');
-    // 연속된 공백을 하나로 (줄바꿈은 유지)
-    html = html.replace(/[ \t]{2,}/g, ' ');
-    // 마침표 앞 공백 정리
-    html = html.replace(/[ \t]+\./g, '.');
-    html = html.replace(/\.[ \t]+\./g, '.');
-    
-    // 태그 복원
-    html = html.replace(new RegExp(`${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)${tagPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), (match, index) => {
-      return textNodes[parseInt(index)] || match;
-    });
-  } else {
-    // 마크다운 형식이면 텍스트에서만 제거
-    html = html.replace(/\(참고\s*자료\s*\d+\)/gi, '');
-    html = html.replace(/\[참고\s*자료\s*\d+\]/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에\s*따르면/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에서/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+\s*에\s*의하면/gi, '');
-    html = html.replace(/참고\s*자료\s*\d+/gi, '');
+    // 최대 10개까지만 반환 (프롬프트 과부하 방지)
+    const result = relevantLinks.slice(0, 10);
+    Logger.info(`[getRelevantAffiliateLinks] 관련 링크 ${result.length}개 선택됨 (전체 ${links.length}개 중)`);
+    return result;
+  } catch (error) {
+    Logger.warn('[getRelevantAffiliateLinks] 제휴 링크 조회 실패:', error);
+    return [];
   }
-  
-  // 중요한 문장에 배경색 적용 (AI가 <mark> 태그를 사용하지 않은 경우)
-  // 단, hr 태그나 다른 블록 요소가 포함된 경우는 제외
-  // 서론 부분(제목 다음, 첫 번째 h2 이전)은 제외
-  if (!html.includes('<mark')) {
-    const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수', '반드시', '꼭'];
-    let importantCount = 0;
-    
-    // 서론 부분 찾기 (h1 다음부터 첫 번째 h2 이전까지)
-    const h1Match = html.match(/<h1[^>]*>.*?<\/h1>/i);
-    const firstH2Match = html.match(/<h2[^>]*>/i);
-    const introEndIndex = firstH2Match ? firstH2Match.index : html.length;
-    const introStartIndex = h1Match ? h1Match.index + h1Match[0].length : 0;
-    
-    importantKeywords.forEach(keyword => {
-      if (importantCount >= 2) return;
-      // 문장 단위로 찾기
-      const regex = new RegExp(`([^<]*${keyword}[^<]*[.!?])`, 'gi');
-      html = html.replace(regex, (match, p1, offset, string) => {
-        // 서론 부분이면 mark 태그를 추가하지 않음
-        if (offset >= introStartIndex && offset < introEndIndex) {
-          return match;
-        }
-        // hr 태그나 다른 블록 요소가 포함되어 있으면 mark 태그를 추가하지 않음
-        if (match.includes('<hr') || match.includes('<div') || match.includes('<p>') || match.includes('<h')) {
-          return match;
-        }
-        if (importantCount < 2 && !match.includes('<mark') && match.trim().length > 10) {
-          importantCount++;
-          return `<mark style="background-color: rgb(255, 255, 204); padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
-        }
-        return match;
-      });
-    });
-  }
-  
-  // 이미 mark 태그 안에 hr 태그가 잘못 들어간 경우 수정
-  html = html.replace(/<mark([^>]*)>([^<]*)<hr([^>]*)>([^<]*)<\/mark>/gi, '<hr$3><mark$1>$2$4</mark>');
-  html = html.replace(/<mark([^>]*)><hr([^>]*)>/gi, '<hr$2><mark$1>');
-  
-  // 서론 부분(제목 다음, 첫 번째 h2 이전)의 mark 태그 제거
-  const h1Match = html.match(/<h1[^>]*>.*?<\/h1>/i);
-  const firstH2Match = html.match(/<h2[^>]*>/i);
-  if (h1Match && firstH2Match) {
-    const introStartIndex = h1Match.index + h1Match[0].length;
-    const introEndIndex = firstH2Match.index;
-    const beforeIntro = html.substring(0, introStartIndex);
-    const introSection = html.substring(introStartIndex, introEndIndex);
-    const afterIntro = html.substring(introEndIndex);
-    
-    // 서론 부분에서 mark 태그 제거
-    const cleanedIntro = introSection.replace(/<mark[^>]*>/gi, '').replace(/<\/mark>/gi, '');
-    html = beforeIntro + cleanedIntro + afterIntro;
-  }
-  
-  return html;
 }
+
+// 5. 초안 생성 (메인 로직)
+// [삭제] function formatDraftForReadability(draftText) { ... } 
+// 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
 
 export async function generateDraftFromIdea(ideaData) {
   try {
-    // 페르소나 선택 및 로깅
-    const persona = await selectPersona(ideaData);
-    logPersona(persona);
+    // 1. 페르소나 결정 (사용자 설정 > 자동 감지)
+    let personaKey = ideaData.persona;
+    
+    // 사용자 설정이 없으면 자동 감지
+    if (!personaKey || !PROMPT_CONFIG.personas[personaKey]) {
+      // 사용자 설정에서 기본 톤앤매너 확인
+      try {
+        const storage = await chrome.storage.local.get(['defaultPersona', 'defaultTone']);
+        personaKey = storage.defaultPersona || storage.defaultTone;
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] 사용자 설정 읽기 실패:', e);
+      }
+      
+      // 여전히 없으면 자동 감지
+      if (!personaKey || !PROMPT_CONFIG.personas[personaKey]) {
+        const textToAnalyze = `${ideaData.title} ${ideaData.description} ${(ideaData.tags||[]).join(' ')}`;
+        personaKey = detectPersona(textToAnalyze);
+        Logger.debug(`[generateDraftFromIdea] 페르소나 자동 감지: ${personaKey}`);
+      }
+    }
+
+    // 2. PromptBuilder 초기화
+    const builder = new PromptBuilder(personaKey);
+
+    // 3. 톤앤매너 오버라이드 (ideaData.tone이 있다면)
+    if (ideaData.tone && PROMPT_CONFIG.tones[ideaData.tone]) {
+      builder.setTone(ideaData.tone);
+    }
+
+    // 4. 트렌드 데이터 주입 (SEO 강화)
+    const keywords = (ideaData.tags || []).filter(t => t !== "#AI-추천");
+    const trends = ideaData.recommendedSearches || []; // 연관 검색어 활용
+    builder.setTrendContext(keywords, trends);
+
+    // 4-A. 제휴 마케팅 링크 데이터 준비
+    const userId = await getCurrentUserId();
+    const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(' ')} ${ideaData.description || ''}`;
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
+
+    // 5. 글쓰기 스킬 주입 (동적 옵션)
+    if (ideaData.skills && Array.isArray(ideaData.skills)) {
+      ideaData.skills.forEach(skill => builder.addSkill(skill));
+    } else {
+      // 기본 스킬 매핑
+      if (personaKey === 'viral') {
+        builder.addSkill('cliffhanger');
+      }
+      if (personaKey === 'professional') {
+        builder.addSkill('statistics').addSkill('comparison');
+      }
+      if (personaKey === 'friendly') {
+        builder.addSkill('questioning').addSkill('storytelling');
+      }
+    }
+
+    // 6. 시스템 프롬프트 생성
+    const systemPrompt = builder.buildSystemPrompt();
+    
+    // 로깅
+    Logger.biz(`🎭 [Persona Build]`, `Type: ${builder.getPersonaName()}, Custom Tone: ${ideaData.tone || builder.getToneName()}`);
     
     // 데이터 준비 (analyticsService 활용)
     const performanceData = await analyzePerformanceData(ideaData.channelId);
@@ -398,11 +260,10 @@ export async function generateDraftFromIdea(ideaData) {
     
     // 백업 파일의 상세한 프롬프트 구성
     const prompt = `
-            ${persona.systemPrompt}
+            ${systemPrompt}
             
             [작성 요청]
             아래 정보를 바탕으로 블로그 포스트 초안을 작성해주세요.
-            톤앤매너: ${persona.tone}
             
             SEO에 최적화되고 독자의 흥미를 끄는 완성도 높은 블로그 포스트 초안을 작성해주세요.
 
@@ -526,11 +387,104 @@ export async function generateDraftFromIdea(ideaData) {
                 * 각 섹션의 내용과 직접 관련된 이미지 프롬프트를 작성하세요.
                 * 예: "SmartThings AI 콤보" 섹션이면 SmartThings 관련 이미지, "해결 방법" 섹션이면 해결 과정 관련 이미지
               - **절대 금지**: 글의 주제와 무관한 예시 이미지(예: 갤럭시 탭, 사무실 등)를 사용하지 마세요. 반드시 해당 글의 실제 내용과 관련된 이미지만 생성하세요.
-            10. **썸네일 정보 생성**: 초안 생성 후 다음 정보를 JSON 형식으로 반환해주세요:
-              - 썸네일 텍스트 이미지 프롬프트 (영어): 썸네일 이미지 생성을 위한 영어 프롬프트 (상세하고 기술적으로, Gemini 이미지 생성 가이드 참고)
-              - 썸네일 텍스트 이미지 프롬프트 (한글): 썸네일 이미지 생성을 위한 한글 프롬프트 (의미 전달 중심)
-              - 썸네일 문구: 썸네일에 표시할 짧은 문구 (12자 이내, 핵심 키워드)
-              형식: <썸네일정보>{"thumbnailPromptEn": "영어 프롬프트", "thumbnailPromptKo": "한글 프롬프트", "thumbnailText": "썸네일 문구"}</썸네일정보>
+            ${affiliateLinks.length > 0 ? `
+            10. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
+              아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 키워드나 구매 의도가 나타나는 문맥에 **자연스럽게** 제휴 링크를 삽입해주세요.
+
+              [제휴 링크 목록]
+              ${affiliateLinks.map(link => `- 키워드: "${link.keyword}"${link.productName ? ` / 상품명: "${link.productName}"` : ''} / URL: ${link.url}`).join('\n              ')}
+
+              [링크 삽입 규칙]
+              1. **문맥 기반 자연스러운 삽입 (Context-Aware Injection)**: 
+                 - 단순히 키워드를 링크로 바꾸지 마세요. 
+                 - 독자가 해당 상품에 관심을 가질만한 타이밍(장점 설명, 추천, 필요성 언급 등)에 자연스럽게 배치하세요.
+                 - 글의 흐름을 방해하지 않는 것이 최우선입니다.
+                 - 예: "이 기능을 사용하려면 [최저가 확인하기](URL)에서 구매할 수 있습니다." (기능 설명 후)
+                 - 예: "더 자세한 스펙은 [상품 상세보기](URL)에서 확인하세요." (스펙 언급 후)
+
+              2. **AI 기반 CTA(Call To Action) 자동 생성**: 
+                 - 문맥에 어울리는 매력적인 문구로 링크를 감싸주세요.
+                 - 예: "최저가 확인하기", "더 자세한 스펙 보기", "사용자 후기 모음", "현재 할인 가격 알아보기", "지금 구매하기", "상품 상세보기"
+                 - 형식: **[CTA 문구](URL)** (마크다운 링크 형식)
+
+              3. **개수 제한**: 
+                 - 전체 글에서 제휴 링크는 **최대 3개**까지만 삽입하세요. (과도한 광고는 독자를 이탈시킵니다.)
+                 - 가장 효과적일 것 같은 위치 3곳을 엄선하여 배치하세요.
+                 - 중복 키워드가 있어도 링크는 최대 3개까지만 삽입하세요.
+
+              4. **시각적 강조 (매우 중요)**: 
+                 - 제휴 링크는 눈에 띄도록 녹색 텍스트 스타일을 적용해주세요.
+                 - **반드시** 다음 형식을 정확히 따라주세요: <span style="color: #2e7d32;"><a href="URL">CTA 문구</a></span>
+                 - 또는 마크다운 형식: <span style="color: #2e7d32;">[CTA 문구](URL)</span>
+                 - 예시 1 (HTML): <span style="color: #2e7d32;"><a href="https://coupang.com/...">아이폰 15 최저가 확인하기</a></span>
+                 - 예시 2 (마크다운): <span style="color: #2e7d32;">[아이폰 15 최저가 확인하기](https://coupang.com/...)</span>
+                 - **중요**: span 태그로 링크를 감싸야 하며, span의 style 속성에 color: #2e7d32가 반드시 포함되어야 합니다.
+
+              5. **구매 의도 발생 시점 파악**:
+                 - 상품의 장점이나 필요성을 설명한 직후
+                 - 비교 분석 후 추천할 때
+                 - 사용 방법이나 리뷰를 언급한 후
+                 - "이런 기능이 필요하다면", "더 자세히 알고 싶다면" 같은 전환 문구와 함께 배치
+
+              **중요**: 제휴 링크는 글의 품질을 해치지 않으면서도 자연스럽게 수익화를 달성하는 것이 목표입니다. 무리하게 삽입하지 마세요.
+            ` : ''}
+            10. **스마트 썸네일 A/B 테스팅 정보 생성 (매우 중요)**: 
+
+              초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
+              
+              각 컨셉의 특징:
+
+              1. **호기심 자극형 (curiosity)**: "이거 모르면 손해", "충격적인 사실" 등 강렬한 문구와 시선을 끄는 이미지.
+
+              2. **정보 요약형 (informative)**: 핵심 키워드나 숫자를 강조하여 유용함을 어필 (예: "3가지 방법", "완벽 가이드").
+
+              3. **감성/공감형 (emotional)**: 사용자의 고민이나 상황에 공감하는 따뜻한 이미지와 문구.
+
+              형식: 
+
+              <썸네일정보>
+
+              [
+
+                {
+
+                  "type": "curiosity",
+
+                  "thumbnailPromptEn": "영어 프롬프트 (High contrast, surprised face, question mark, dramatic lighting, vibrant colors, 16:9 aspect ratio)",
+
+                  "thumbnailPromptKo": "한글 프롬프트 (호기심 자극, 강렬한 색상, 드라마틱한 조명)",
+
+                  "thumbnailText": "호기심 문구 (12자 내)"
+
+                },
+
+                {
+
+                  "type": "informative",
+
+                  "thumbnailPromptEn": "영어 프롬프트 (Clean layout, numbers, checkmarks, professional design, bright lighting, organized composition, 16:9 aspect ratio)",
+
+                  "thumbnailPromptKo": "한글 프롬프트 (정보 강조, 깔끔한 레이아웃, 숫자 표시)",
+
+                  "thumbnailText": "정보형 문구 (12자 내)"
+
+                },
+
+                {
+
+                  "type": "emotional",
+
+                  "thumbnailPromptEn": "영어 프롬프트 (Warm lighting, happy person, cozy atmosphere, soft colors, welcoming feeling, 16:9 aspect ratio)",
+
+                  "thumbnailPromptKo": "한글 프롬프트 (감성 전달, 따뜻한 조명, 공감대 형성)",
+
+                  "thumbnailText": "공감형 문구 (12자 내)"
+
+                }
+
+              ]
+
+              </썸네일정보>
               - **썸네일 문구 작성 요령 (매우 중요)**: 
                 * 심플하지만 호기심을 유발하는 문구로 작성해주세요.
                 * 단순한 키워드 나열(예: "스마트홈 컨트롤")이 아니라, 독자의 호기심을 자극하는 문구여야 합니다.
@@ -600,12 +554,49 @@ export async function generateDraftFromIdea(ideaData) {
     cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
     cleanedDraft = cleanedDraft.trim();
     
-    // 2. 가독성 포맷팅
-    let formattedDraft = formatDraftForReadability(cleanedDraft);
+    // [신규] 1-1. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
+    let thumbnailCandidates = [];
+    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
+    
+    if (thumbnailMatch && thumbnailMatch[1]) {
+      try {
+        const parsed = JSON.parse(thumbnailMatch[1].trim());
+        if (Array.isArray(parsed)) {
+          thumbnailCandidates = parsed;
+        } else {
+          // 배열이 아닌 단일 객체로 온 경우 (구버전 호환)
+          thumbnailCandidates = [parsed];
+        }
+        
+        // 태그 제거 (HTML 변환 전에 제거하여 본문에 포함되지 않도록)
+        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+        Logger.debug('[generateDraftFromIdea] 썸네일 정보 추출 완료:', {
+          count: thumbnailCandidates.length,
+          types: thumbnailCandidates.map(c => c.type)
+        });
+      } catch (e) {
+        Logger.error('[generateDraftFromIdea] 썸네일 JSON 파싱 실패:', e);
+        // 파싱 실패 시에도 태그는 제거
+        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+      }
+    }
+    
+    // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
+    Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
+    let formattedDraft;
+    try {
+      formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
+    } catch (sanitizationError) {
+      Logger.error('[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):', sanitizationError);
+      // 정제 실패 시 비상 대책: 최소한의 특수문자만이라도 이스케이프하거나 에러 반환
+      // 여기서는 안전을 위해 에러를 던지는 것이 맞음
+      throw new Error("보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.");
+    }
     
     // 3. SEO 최적화된 제목 추출 (h1 태그에서)
+    // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
     let seoTitle = null;
-    const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || formattedDraft.match(/^#\s+(.+)$/m);
+    const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
     if (h1Match && h1Match[1]) {
       seoTitle = h1Match[1].trim();
     }
@@ -727,34 +718,30 @@ export async function generateDraftFromIdea(ideaData) {
       .filter(t => t && t !== 'AI-추천')
       .join(', ');
     
-    // 7. 썸네일 정보 추출 (초안에서 <썸네일정보> 태그 찾기)
-    let thumbnailInfo = null;
-    // cleanedDraft에서 먼저 찾고, 없으면 formattedDraft에서 찾기
-    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/) || formattedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
-    if (thumbnailMatch && thumbnailMatch[1]) {
-      try {
-        thumbnailInfo = JSON.parse(thumbnailMatch[1].trim());
-        // 초안에서 썸네일 정보 태그 제거 (cleanedDraft와 formattedDraft 모두에서)
-        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
-        formattedDraft = formattedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '');
-      } catch (e) {
-        Logger.error('[generateDraftFromIdea] 썸네일 정보 JSON 파싱 실패:', e);
-        // JSON 파싱 실패 시 기본값 사용 (아래에서 처리)
-      }
-    }
-    
-    // 8. 썸네일 정보가 없으면 기본값 생성 (Gemini 이미지 생성 API 최적화)
-    if (!thumbnailInfo) {
-      // Gemini 2.5 Flash Image 모델에 최적화된 프롬프트
-      const thumbnailPromptEn = `Create a high-quality, eye-catching cover image for a blog post titled "${seoTitle || title}". 
-The image should have vibrant colors, professional composition, modern design, and a compelling visual narrative that captures the essence of the topic. 
-Use a 16:9 aspect ratio with a realistic style. The image should be suitable for use as a thumbnail and should draw the viewer's attention.`;
-      
-      thumbnailInfo = {
-        thumbnailPromptEn: thumbnailPromptEn.trim(),
-        thumbnailPromptKo: `"${seoTitle || title}"에 대한 고품질 썸네일 이미지, 생생한 색상, 전문적인 구성, 현대적인 디자인, 눈길을 사로잡는 시각적 내러티브, 16:9 비율, 사실적인 스타일`,
-        thumbnailText: (seoTitle || title || '').substring(0, 12)
-      };
+    // 7. 썸네일 정보가 없거나 실패 시 기본값 생성 (3가지 컨셉 강제 생성)
+    // (썸네일 정보는 이미 위에서 추출되었으므로, 여기서는 기본값 생성만 처리)
+    if (thumbnailCandidates.length === 0) {
+      const baseTitle = seoTitle || title || "콘텐츠";
+      thumbnailCandidates = [
+        {
+          type: "curiosity",
+          thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+          thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
+          thumbnailText: "이거 실화냐?"
+        },
+        {
+          type: "informative",
+          thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", text overlay style, bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
+          thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
+          thumbnailText: "완벽 정리"
+        },
+        {
+          type: "emotional",
+          thumbnailPromptEn: `Warm, cozy thumbnail for "${baseTitle}", soft lighting, human element, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio`,
+          thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
+          thumbnailText: "당신을 위한"
+        }
+      ];
     }
     
     return { 
@@ -763,7 +750,7 @@ Use a 16:9 aspect ratio with a realistic style. The image should be suitable for
       permalink: permalink,
       tags: tagsForPublish,
       seoTitle: seoTitle, // SEO 최적화된 제목
-      thumbnailInfo: thumbnailInfo // 썸네일 정보
+      thumbnailInfo: thumbnailCandidates // 썸네일 정보 (배열 형태)
     };
 
   } catch (e) {
@@ -1116,26 +1103,98 @@ export async function generateAiImage(prompt, count = 1) {
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API 오류: ${res.status}`);
+        const errorMessage = errorData.error?.message || `API 오류: ${res.status}`;
+        Logger.error(`[generateAiImage] API 오류 (${res.status}):`, errorMessage);
+        throw new Error(errorMessage);
       }
       
       const data = await res.json();
-      const base64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      
+      // [수정] 응답 구조 디버깅 및 다양한 경로 확인
+      Logger.debug(`[generateAiImage] 응답 ${i + 1}/${count}:`, {
+        hasCandidates: !!data.candidates,
+        candidatesLength: data.candidates?.length,
+        hasError: !!data.error,
+        error: data.error
+      });
+      
+      if (data.error) {
+        Logger.error(`[generateAiImage] API 에러 응답:`, data.error);
+        throw new Error(data.error.message || "이미지 생성 실패");
+      }
+      
+      if (!data.candidates || data.candidates.length === 0) {
+        Logger.warn(`[generateAiImage] candidates가 없음. 전체 응답:`, JSON.stringify(data, null, 2));
+        throw new Error("이미지 생성 응답에 candidates가 없습니다.");
+      }
+      
+      const candidate = data.candidates[0];
+      if (!candidate || !candidate.content || !candidate.content.parts) {
+        Logger.warn(`[generateAiImage] candidate 구조가 예상과 다름:`, candidate);
+        throw new Error("이미지 생성 응답 구조가 올바르지 않습니다.");
+      }
+      
+      // [수정] 모든 parts를 순회하며 inlineData 찾기
+      let base64 = null;
+      let mimeType = 'image/png'; // 기본값
+      
+      for (const part of candidate.content.parts) {
+        Logger.debug(`[generateAiImage] Part 확인:`, {
+          hasInlineData: !!part.inlineData,
+          hasText: !!part.text,
+          inlineDataKeys: part.inlineData ? Object.keys(part.inlineData) : []
+        });
+        
+        if (part.inlineData && part.inlineData.data) {
+          base64 = part.inlineData.data;
+          mimeType = part.inlineData.mimeType || 'image/png';
+          Logger.debug(`[generateAiImage] ✅ Base64 데이터 발견 (${mimeType})`);
+          break;
+        }
+        
+        // [추가] 텍스트 응답에 Base64가 포함된 경우 (일부 모델)
+        if (part.text) {
+          const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+          if (base64Match) {
+            base64 = base64Match[1];
+            const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
+            if (mimeMatch) {
+              mimeType = `image/${mimeMatch[1]}`;
+            }
+            Logger.debug(`[generateAiImage] ✅ 텍스트에서 Base64 발견 (${mimeType})`);
+            break;
+          }
+        }
+      }
       
       if (base64) {
+        const dataUrl = `data:${mimeType};base64,${base64}`;
         const url = await uploadImageToFirebaseStorage(
-           `data:image/png;base64,${base64}`, 
-           `thumbnails/${userId}/${Date.now()}_${i}.png`,
-           userId
+          dataUrl, 
+          `thumbnails/${userId}/${Date.now()}_${i}.png`,
+          userId
         );
         images.push(url);
+        Logger.debug(`[generateAiImage] ✅ 이미지 ${i + 1}/${count} 업로드 완료:`, url.substring(0, 80) + '...');
       } else {
-        console.warn(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패: base64 데이터 없음`);
+        Logger.error(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패: base64 데이터 없음`);
+        Logger.error(`[generateAiImage] 전체 응답 구조:`, JSON.stringify(data, null, 2));
+        throw new Error("이미지 생성 응답에서 base64 데이터를 찾을 수 없습니다.");
       }
     } catch(e) { 
-      console.error(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패:`, e);
+      Logger.error(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패:`, e);
+      // 에러가 발생해도 다음 이미지 생성 시도는 계속
+      if (i === count - 1 && images.length === 0) {
+        // 모든 이미지 생성이 실패한 경우에만 에러 throw
+        throw new Error(`이미지 생성 실패: ${e.message}`);
+      }
     }
   }
+  
+  if (images.length === 0) {
+    throw new Error("생성된 이미지가 없습니다.");
+  }
+  
   return images;
 }
 
