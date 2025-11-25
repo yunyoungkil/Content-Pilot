@@ -42,6 +42,33 @@ import {
   restoreAuthSession
 } from './js/services/authService.js';
 
+import { 
+  runDataMigration,
+  checkMigrationNeeded
+} from './js/services/migrationService.js';
+
+import { 
+  validateTemplateData,
+  getThumbnailTemplates,
+  deleteTemplate,
+  generateThumbnailTexts
+} from './js/services/thumbnailService.js';
+
+import { 
+  createAndSaveNewIdea,
+  addIdeaToKanban,
+  removeIdeaFromKanban,
+  deleteKanbanCard
+} from './js/services/kanbanService.js';
+
+import { 
+  saveScrapElement,
+  getFirebaseScraps,
+  getScrapDetail,
+  saveEntireAnalysis,
+  deleteScrap
+} from './js/services/scrapService.js';
+
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 // import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
 import { ref, update, remove, set, get, push, serverTimestamp, onValue } from './js/services/firebaseService.js';
@@ -286,6 +313,51 @@ chrome.runtime.onInstalled.addListener((details) => {
       highlightToggleState: false,
       isKeywordExtractionEnabled: true,
     });
+    
+    // [체크리스트 2-🅰️] 업데이트 시 마이그레이션 자동 실행
+    // 마이그레이션 완료 상태 확인
+    chrome.storage.local.get("migration_completed", async (result) => {
+      if (!result.migration_completed) {
+        Logger.info("[Migration] 마이그레이션 필요 여부 확인 중...");
+        // [체크리스트 2-🅰️] 자동 실행: 백그라운드에서 조용히 실행
+        try {
+          // 마이그레이션 필요 여부 확인
+          const userId = await getCurrentUserId();
+          const channelsSnap = await get(ref(getDb(), `channels/${userId}/myChannels/blogs`));
+          const myBlogs = channelsSnap?.val() || [];
+          
+          if (myBlogs.length > 0) {
+            // [체크리스트 2-🅰️] 단일 채널 사용자: 모든 데이터를 그 1개 채널의 소유로 자동 변환
+            let targetChannelId = null;
+            if (myBlogs.length === 1) {
+              const blog = myBlogs[0];
+              targetChannelId = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : null);
+              Logger.info(`[Migration] 단일 채널 감지. 자동 마이그레이션 실행: ${targetChannelId}`);
+            } else {
+              // [체크리스트 2-🅰️] 다중 채널 사용자: 데이터를 '공용(null)'으로 안전하게 변환
+              targetChannelId = null;
+              Logger.info("[Migration] 다중 채널 감지. 기존 데이터를 '공용'으로 유지합니다.");
+            }
+            
+            // 마이그레이션 실행
+            await runDataMigration(userId, targetChannelId);
+            Logger.info("[Migration] 자동 마이그레이션 완료");
+            
+            // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지
+            // UI가 로드된 후 표시하기 위해 storage 이벤트로 전달
+            chrome.storage.local.set({ 
+              migration_completed: true,
+              migration_toast_message: "✅ 데이터 구조가 업데이트되었습니다."
+            });
+          } else {
+            Logger.info("[Migration] 등록된 채널이 없어 마이그레이션을 건너뜁니다.");
+          }
+        } catch (error) {
+          Logger.error("[Migration] 자동 마이그레이션 실패:", error);
+          // 실패해도 UI에서 수동으로 실행할 수 있도록 상태를 저장하지 않음
+        }
+      }
+    });
   }
 });
 
@@ -383,93 +455,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "add_idea_to_kanban") {
     return handleAsync((async () => {
       const ideaData = JSON.parse(msg.data);
-
-      // 제목 검증
-      if (!ideaData.title || !ideaData.title.trim()) {
-        return { success: false, error: "제목은 필수입니다." };
-      }
-      if (ideaData.title.length > 200) {
-        ideaData.title = ideaData.title.substring(0, 200);
-      }
-
-      // 중복 검사 (Collector Service 활용)
-      if (ideaData.origin?.postUrl) {
-        const dupCheck = await checkDuplicateUrl(ideaData.origin.postUrl);
-        if (dupCheck.exists) {
-          const statusMap = {
-            "ideas": "기획",
-            "in-progress": "작성 중",
-            "done": "발행 완료"
-          };
-          const statusText = statusMap[dupCheck.status] || dupCheck.status;
-          return { 
-            success: false, 
-            code: "DUPLICATE_FOUND", 
-            error: `이미 '${statusText}' 단계에 등록된 아이디어입니다.`,
-            message: `이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${dupCheck.title}`,
-            cardInfo: dupCheck 
-          };
-        }
-      }
-
-      // 요약 (AI Service 활용)
-      if (ideaData.description?.length > 200) {
-        ideaData.description = await summarizeText(ideaData.description);
-      }
-
-      // 저장
-      const userId = await getCurrentUserId();
       const status = msg.status || 'ideas';
-      const path = `kanban/${userId}/${status}`;
-      const finalData = { ...ideaData, createdAt: Date.now(), channelId: msg.channelId };
-      const pushResult = await push(path, finalData);
-      const cardId = pushResult.key; // push()는 { key: string, set: function } 객체를 반환
-
-      // URL 인덱스 업데이트 (중복 검사를 위해 필수)
-      if (ideaData.origin?.postUrl) {
-        try {
-          // publishedUrl이 있으면 publishedUrl도 인덱스에 추가
-          const publishedUrl = ideaData.publishedUrl || null;
-          await updateUrlIndex(cardId, status, ideaData.origin.postUrl, publishedUrl);
-        } catch (error) {
-          Logger.warn('[add_idea_to_kanban] URL 인덱스 업데이트 실패:', error);
-          // 인덱스 업데이트 실패해도 카드 추가는 성공으로 처리
-        }
-      } else if (ideaData.publishedUrl) {
-        // origin.postUrl이 없지만 publishedUrl이 있는 경우 (성과 추적 전용)
-        try {
-          await updateUrlIndex(cardId, status, null, ideaData.publishedUrl);
-        } catch (error) {
-          Logger.warn('[add_idea_to_kanban] publishedUrl 인덱스 업데이트 실패:', error);
-        }
-      }
-
-      // AI 브리핑 자동 생성
-      // 'manual_entry'를 제외한 모든 아이디어는 생성 즉시 AI 브리핑을 실행
-      // (ai_generated, my_post, competitor_post, my_post_renewal, origin이 없는 경우 등 모든 경우)
-      const originType = ideaData.origin?.type;
-      const shouldGenerateBriefing = originType !== 'manual_entry' && ideaData.title && status === 'ideas';
-      
-      if (shouldGenerateBriefing) {
-        // 비동기로 실행 (응답을 기다리지 않음)
-        Logger.info(`[add_idea_to_kanban] AI 브리핑 자동 생성 시작 - cardId: ${cardId}, originType: ${originType || 'undefined'}, status: ${status}`);
-        generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
-          status: status, // status 전달
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-          generateMainKeywords: true
-        }).then(() => {
-          Logger.biz(`✅ [add_idea_to_kanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        }).catch((error) => {
-          Logger.error('[add_idea_to_kanban] AI 브리핑 생성 실패:', error);
-          // 브리핑 생성 실패해도 카드 추가는 성공으로 처리
-        });
-      } else {
-        Logger.debug(`[add_idea_to_kanban] AI 브리핑 자동 생성 건너뜀 - originType: ${originType || 'undefined'}, status: ${status}, title: ${ideaData.title ? '있음' : '없음'}`);
-      }
-
-      return { success: true, firebaseKey: cardId };
+      const channelId = msg.channelId || null;
+      return await addIdeaToKanban(ideaData, status, channelId);
     })());
   }
 
@@ -630,75 +618,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   
   if (msg.action === "delete_kanban_card") {
     return handleAsync((async () => {
-      try {
-        const { cardId, status } = msg.data;
-        if (!cardId || !status) {
-          return { success: false, error: "카드 ID와 상태가 필요합니다." };
-        }
-
-        const userId = await getCurrentUserId();
-        const cardPath = `kanban/${userId}/${status}/${cardId}`;
-        
-        // 카드 데이터를 먼저 읽어서 URL 인덱스 삭제에 사용
-        const cardSnap = await get(ref(getDb(), cardPath));
-        const cardData = cardSnap?.val();
-        
-        if (!cardData) {
-          return { success: false, error: "삭제할 카드를 찾을 수 없습니다." };
-        }
-
-        // 카드 삭제
-        Logger.info(`[delete_kanban_card] 카드 삭제 시작 - cardId: ${cardId}, status: ${status}`);
-        await remove(ref(getDb(), cardPath));
-
-        // URL 인덱스에서도 제거 (origin.postUrl 또는 publishedUrl이 있는 경우)
-        if (cardData.origin?.postUrl || cardData.publishedUrl) {
-          try {
-            const updatePromises = [];
-            
-            if (cardData.origin?.postUrl) {
-              const normalizedUrl = normalizeUrlForComparison(cardData.origin.postUrl);
-              if (normalizedUrl) {
-                const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-                const originIndexPath = `url_index/${userId}/${encodedKey}/origin/${cardId}`;
-                updatePromises.push(
-                  remove(ref(getDb(), originIndexPath)).catch(error => {
-                    Logger.warn(`[delete_kanban_card] origin URL 인덱스 삭제 실패 (${originIndexPath}):`, error);
-                    return null;
-                  })
-                );
-              }
-            }
-            
-            if (cardData.publishedUrl) {
-              const normalizedUrl = normalizeUrlForComparison(cardData.publishedUrl);
-              if (normalizedUrl) {
-                const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-                const publishedIndexPath = `url_index/${userId}/${encodedKey}/published/${cardId}`;
-                updatePromises.push(
-                  remove(ref(getDb(), publishedIndexPath)).catch(error => {
-                    Logger.warn(`[delete_kanban_card] published URL 인덱스 삭제 실패 (${publishedIndexPath}):`, error);
-                    return null;
-                  })
-                );
-              }
-            }
-            
-            if (updatePromises.length > 0) {
-              await Promise.all(updatePromises);
-            }
-          } catch (indexError) {
-            Logger.warn('[delete_kanban_card] URL 인덱스 삭제 중 오류:', indexError);
-            // 인덱스 삭제 실패해도 카드 삭제는 성공으로 처리
-          }
-        }
-
-        Logger.biz(`✅ [delete_kanban_card] 카드 삭제 완료 - cardId: ${cardId}`);
-        return { success: true };
-      } catch (error) {
-        Logger.error('[delete_kanban_card] 카드 삭제 실패:', error);
-        return { success: false, error: error.message };
-      }
+      const { cardId, status } = msg.data;
+      return await deleteKanbanCard(cardId, status);
     })());
   }
 
@@ -1049,74 +970,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === "cp_get_firebase_scraps") {
     return handleAsync((async () => {
-      const userId = await getCurrentUserId();
       const targetChannelId = msg.channelId || null;
-      try {
-        const snap = await get(ref(getDb(), `scraps/${userId}`));
-        const val = snap?.val() || {};
-        const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-        Logger.debug(`[cp_get_firebase_scraps] 전체 스크랩 개수: ${arr.length}, targetChannelId: ${targetChannelId}`);
-        // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
-        const filtered = arr.filter(scrap => {
-          // channelId가 없거나 null인 경우 포함 (구버전 데이터 또는 공용 스크랩)
-          if (scrap.channelId === undefined || scrap.channelId === null) {
-            return true;
-          }
-          
-          // 정확히 일치하는 경우 포함
-          if (scrap.channelId === targetChannelId) {
-            return true;
-          }
-          
-          // URL의 origin이 일치하는 경우 포함 (칸반과 동일한 로직)
-          if (scrap.channelId && targetChannelId) {
-            try {
-              const scrapUrl = atob(scrap.channelId.replace(/=/g, ''));
-              const targetUrl = atob(targetChannelId.replace(/=/g, ''));
-              
-              const scrapUrlObj = new URL(scrapUrl);
-              const targetUrlObj = new URL(targetUrl);
-              
-              if (scrapUrlObj.origin === targetUrlObj.origin) {
-                Logger.debug(`[cp_get_firebase_scraps] URL origin 일치: ${scrapUrlObj.origin} === ${targetUrlObj.origin}`);
-                return true;
-              }
-            } catch (e) {
-              // base64 디코딩 실패 시 무시
-            }
-          }
-          
-          return false;
-        });
-        
-        Logger.info(`[cp_get_firebase_scraps] 필터링 후 스크랩 개수: ${filtered.length}`);
-        const sortedScraps = filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        const responseData = { data: sortedScraps };
-        
-        Logger.debug(`[cp_get_firebase_scraps] 응답 데이터 준비 완료 - 스크랩 개수: ${sortedScraps.length}, responseData.data.length: ${responseData.data.length}`);
-        
-        // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
-        // 모든 탭에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach((tab) => {
-            if (tab.id) {
-              chrome.tabs.sendMessage(tab.id, {
-                action: "scraps_data_updated",
-                scraps: responseData.data
-              }).catch((err) => {
-                // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
-                // 조용히 무시
-              });
-            }
-          });
-        });
-        
-        Logger.debug(`[cp_get_firebase_scraps] 응답 반환 - responseData.data.length: ${responseData.data.length}`);
-        return responseData;
-      } catch (error) {
-        Logger.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
-        return { data: [] };
-      }
+      return await getFirebaseScraps(targetChannelId);
     })());
   }
 
@@ -1138,12 +993,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         competitorChannels: {}
       };
 
-      // 필터링: null 값 제거
-      const blogs = Object.values(content.blogs || {}).filter(item => item !== null);
-      const youtubes = Object.values(content.youtubes || {}).filter(item => item !== null);
+      // 필터링: null 값 제거 및 undefined 값도 제거
+      const blogsRaw = content.blogs || {};
+      const youtubesRaw = content.youtubes || {};
+      
+      // 디버깅: 원본 데이터 개수 확인
+      const blogsRawCount = Object.keys(blogsRaw).length;
+      const youtubesRawCount = Object.keys(youtubesRaw).length;
+      Logger.debug(`[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`);
+      
+      const blogs = Object.values(blogsRaw).filter(item => item !== null && item !== undefined);
+      const youtubes = Object.values(youtubesRaw).filter(item => item !== null && item !== undefined);
       const allContent = [...blogs, ...youtubes];
       
-      Logger.info(`[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length}, youtubes: ${youtubes.length}, total: ${allContent.length}`);
+      // 디버깅: 필터링 후 개수 확인
+      Logger.info(`[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`);
+      
+      // 디버깅: null/undefined로 필터링된 항목 확인
+      if (blogsRawCount > blogs.length) {
+        const filteredOut = Object.entries(blogsRaw).filter(([key, value]) => value === null || value === undefined);
+        Logger.warn(`[get_channel_content] blogs에서 필터링된 항목: ${filteredOut.length}개`, filteredOut.map(([key]) => key));
+      }
+      if (youtubesRawCount > youtubes.length) {
+        const filteredOut = Object.entries(youtubesRaw).filter(([key, value]) => value === null || value === undefined);
+        Logger.warn(`[get_channel_content] youtubes에서 필터링된 항목: ${filteredOut.length}개`, filteredOut.map(([key]) => key));
+      }
 
       return {
         success: true,
@@ -1410,7 +1284,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           workspace: {
             ...(cardData.workspace || {}),
             draft: draft
-          }
+          },
+          updatedAt: serverTimestamp()
         };
         
         // 'in-progress' 컬럼에 저장
@@ -1462,7 +1337,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           workspace: {
             ...(cardData.workspace || {}),
             draft: draft
-          }
+          },
+          updatedAt: serverTimestamp()
         });
         Logger.debug(`[save_idea_draft] 초안 저장 완료 - ideaId: ${ideaId}, status: ${foundStatus}`);
         return { success: true, moved: false, newStatus: foundStatus };
@@ -1473,39 +1349,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // === [Scrap Management] 스크랩 관리 ===
   if (msg.action === "scrap_element" && msg.data) {
     return handleAsync((async () => {
-      try {
-        const { data } = msg;
-        const channelId = msg.channelId !== undefined ? msg.channelId : null;
-        
-        // 스크랩 데이터 준비
-        const scrapPayload = {
-          text: data.text || '',
-          html: data.html || '',
-          tag: data.tag || 'UNKNOWN',
-          url: data.url || '',
-          image: data.image || null,
-          images: data.images || [],
-          highlights: data.highlights || [], // 하이라이트 메타데이터 포함
-          hasHighlights: data.hasHighlights || false,
-          timestamp: Date.now(),
-          channelId: channelId
-        };
-
-        // Firebase에 저장
-        const userId = await getCurrentUserId();
-        const path = `scraps/${userId}`;
-        const pushResult = await push(path, cleanDataForFirebase(scrapPayload));
-        const scrapId = pushResult.key; // push()는 { key: string, set: function } 객체를 반환
-
-        return { 
-          success: true, 
-          scrapId: scrapId,
-          scrapData: scrapPayload
-        };
-      } catch (error) {
-        Logger.error('[scrap_element] 저장 실패:', error);
-        return { success: false, error: error.message };
-      }
+      const { data } = msg;
+      const channelId = msg.channelId !== undefined ? msg.channelId : null;
+      return await saveScrapElement(data, channelId);
     })());
   }
 
@@ -1535,12 +1381,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "delete_scrap") {
     return handleAsync((async () => {
       const scrapId = msg.id;
-      if (!scrapId) {
-        return { success: false, error: "스크랩 ID가 필요합니다." };
-      }
-      const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-      await remove(scrapRef);
-      return { success: true };
+      return await deleteScrap(scrapId);
     })());
   }
 
@@ -1552,7 +1393,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return { success: false, error: "스크랩 ID가 필요합니다." };
       }
       
-      const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
+      const userId = await getCurrentUserId();
+      const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
       const scrapSnap = await get(scrapRef);
       const scrapData = scrapSnap?.val();
       
@@ -1690,6 +1532,369 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })());
   }
 
+  // === [Migration & System Fix] 데이터 마이그레이션 및 시스템 수정 ===
+  if (msg.action === "run_data_migration") {
+    return handleAsync((async () => {
+      try {
+        const userId = await getCurrentUserId();
+        const targetChannelId = msg.targetChannelId || null;
+        await runDataMigration(userId, targetChannelId);
+        return { success: true, message: "데이터 마이그레이션이 완료되었습니다." };
+      } catch (error) {
+        Logger.error("[데이터 마이그레이션] 오류:", error);
+        throw error;
+      }
+    })());
+  }
+  
+  if (msg.action === "check_migration_needed") {
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      return await checkMigrationNeeded(userId);
+    })());
+  }
+  
+  if (msg.action === "fix_active_channel_mismatch") {
+    return handleAsync((async () => {
+      try {
+        const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+        if (!activeChannelId) {
+          throw new Error("활성 채널이 설정되지 않았습니다.");
+        }
+
+        const userId = await getCurrentUserId();
+        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+        const channelsData = channelsSnap?.val() || {};
+        const myChannels = channelsData.myChannels || { blogs: [], youtubes: [] };
+        const allChannels = [...(myChannels.blogs || []), ...(myChannels.youtubes || [])];
+        
+        const channelExists = allChannels.some(ch => {
+          if (ch.id && ch.id === activeChannelId) return true;
+          if (ch.channelId && ch.channelId === activeChannelId) return true;
+          if (ch.apiUrl) {
+            const generatedId = btoa(ch.apiUrl).replace(/=/g, "");
+            if (generatedId === activeChannelId) return true;
+          }
+          return false;
+        });
+        
+        if (channelExists) {
+          return { success: true, message: "활성 채널이 정상입니다." };
+        }
+
+        // 활성 채널이 목록에 없으면 첫 번째 채널로 변경
+        if (allChannels.length > 0) {
+          const firstChannel = allChannels[0];
+          const newActiveChannelId = firstChannel.id || (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, "") : null);
+          
+          if (newActiveChannelId) {
+            await chrome.storage.local.set({ activeChannelId: newActiveChannelId });
+            return { success: true, message: `활성 채널을 첫 번째 채널로 변경했습니다. (${newActiveChannelId})` };
+          } else {
+            throw new Error("채널 ID를 생성할 수 없습니다.");
+          }
+        } else {
+          await chrome.storage.local.remove("activeChannelId");
+          return { success: true, message: "등록된 채널이 없어 활성 채널을 제거했습니다." };
+        }
+      } catch (error) {
+        Logger.error("[활성 채널 수정] 오류:", error);
+        throw error;
+      }
+    })());
+  }
+  
+  if (msg.action === "fix_channel_structure") {
+    return handleAsync((async () => {
+      try {
+        const userId = await getCurrentUserId();
+        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+        const channelsData = channelsSnap?.val() || {};
+        
+        let fixedCount = 0;
+        const updates = {};
+        
+        // 1. 구버전 전역 competitorChannels를 내 채널의 competitors로 마이그레이션
+        if (channelsData.competitorChannels) {
+          const oldCompetitors = [
+            ...(channelsData.competitorChannels.blogs || []),
+            ...(channelsData.competitorChannels.youtubes || [])
+          ];
+          
+          if (oldCompetitors.length > 0) {
+            const myBlogs = channelsData.myChannels?.blogs || [];
+            
+            if (myBlogs.length > 0) {
+              const firstBlog = myBlogs[0];
+              const firstBlogIndex = myBlogs.findIndex(b => 
+                (b.id || (b.apiUrl ? btoa(b.apiUrl).replace(/=/g, "") : null)) === 
+                (firstBlog.id || (firstBlog.apiUrl ? btoa(firstBlog.apiUrl).replace(/=/g, "") : null))
+              );
+              
+              if (firstBlogIndex >= 0) {
+                const existingCompetitors = firstBlog.competitors || [];
+                const newCompetitors = oldCompetitors.map(comp => ({
+                  inputUrl: comp.inputUrl || comp.url || comp.apiUrl || "",
+                  apiUrl: comp.apiUrl || comp.inputUrl || comp.url || ""
+                }));
+                
+                // 중복 제거
+                const mergedCompetitors = [...existingCompetitors];
+                newCompetitors.forEach(newComp => {
+                  const exists = mergedCompetitors.some(existing => 
+                    existing.inputUrl === newComp.inputUrl || existing.apiUrl === newComp.apiUrl
+                  );
+                  if (!exists) mergedCompetitors.push(newComp);
+                });
+                
+                updates[`channels/${userId}/myChannels/blogs/${firstBlogIndex}/competitors`] = mergedCompetitors;
+                fixedCount++;
+              }
+            }
+            
+            // 전역 competitorChannels 제거
+            updates[`channels/${userId}/competitorChannels`] = null;
+          }
+        }
+        
+        // 2. competitors 배열이 없는 채널에 빈 배열 추가
+        const myBlogs = channelsData.myChannels?.blogs || [];
+        myBlogs.forEach((blog, index) => {
+          if (!blog.competitors || !Array.isArray(blog.competitors)) {
+            updates[`channels/${userId}/myChannels/blogs/${index}/competitors`] = [];
+            fixedCount++;
+          }
+        });
+        
+        // 업데이트 실행
+        if (Object.keys(updates).length > 0) {
+          await Promise.all(Object.entries(updates).map(([path, value]) => {
+            if (value === null) {
+              return remove(ref(getDb(), path));
+            } else {
+              return set(ref(getDb(), path), value);
+            }
+          }));
+          
+          return { 
+            success: true, 
+            message: `채널 데이터 구조가 수정되었습니다. (${fixedCount}개 항목 처리)` 
+          };
+        } else {
+          return { success: true, message: "수정할 항목이 없습니다. 구조가 이미 정상입니다." };
+        }
+      } catch (error) {
+        Logger.error("[채널 구조 수정] 오류:", error);
+        throw error;
+      }
+    })());
+  }
+  
+  // === [Draft Management] 초안 관리 ===
+  if (msg.action === "save_draft_content") {
+    return handleAsync((async () => {
+      const { ideaId, status, draft } = msg.data;
+      if (!ideaId || !status) {
+        throw new Error("Idea ID or status is missing.");
+      }
+
+      const userId = await getCurrentUserId();
+      const currentRef = ref(getDb(), `kanban/${userId}/${status}/${ideaId}`);
+      const newStatus = "in-progress";
+
+      const cardSnap = await get(currentRef);
+      const cardData = cardSnap?.val();
+      if (!cardData) {
+        throw new Error("Card data not found for move.");
+      }
+
+      const updates = { draftContent: draft };
+      
+      // 'ideas' 컬럼에 있을 때만 이동
+      if (status === "ideas") {
+        const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${ideaId}`);
+        const dataToMove = { ...cardData, ...updates };
+        await set(newRef, dataToMove);
+        await remove(currentRef);
+        return {
+          success: true,
+          moved: true,
+          newStatus: newStatus,
+        };
+      } else {
+        await update(currentRef, updates);
+        return {
+          success: true,
+          moved: false,
+          newStatus: status,
+        };
+      }
+    })());
+  }
+  
+  if (msg.action === "delete_draft_content") {
+    return handleAsync((async () => {
+      const cardId = msg.data?.cardId;
+      if (!cardId) {
+        throw new Error("Card ID is missing.");
+      }
+      
+      try {
+        const userId = await getCurrentUserId();
+        const kanbanSnap = await get(ref(getDb(), `kanban/${userId}`));
+        const allCards = kanbanSnap?.val() || {};
+        
+        let foundStatus = null;
+        for (const status in allCards) {
+          if (allCards[status] && allCards[status][cardId]) {
+            foundStatus = status;
+            break;
+          }
+        }
+        
+        if (!foundStatus) {
+          throw new Error("Card not found.");
+        }
+        
+        // draftContent를 null로 업데이트
+        await update(ref(getDb(), `kanban/${userId}/${foundStatus}/${cardId}`), { draftContent: null });
+        return { success: true };
+      } catch (error) {
+        Logger.error("Error deleting draft content:", error);
+        throw error;
+      }
+    })());
+  }
+  
+  // === [Scrap Management] 스크랩 관리 ===
+  if (msg.action === "get_scrap_detail") {
+    return handleAsync((async () => {
+      const { scrapId, channelId } = msg;
+      return await getScrapDetail(scrapId, channelId);
+    })());
+  }
+  
+  if (msg.action === "scrap_entire_analysis") {
+    return handleAsync((async () => {
+      const analysisContent = msg.data;
+      return await saveEntireAnalysis(analysisContent);
+    })());
+  }
+  
+  // === [Keyword Management] 키워드 관리 ===
+  if (msg.action === "regenerate_search_keywords") {
+    return handleAsync(generateAndSendKeywords(msg.data, sender));
+  }
+  
+  // === [Content Management] 콘텐츠 관리 ===
+  if (msg.action === "clear_blog_content") {
+    return handleAsync((async () => {
+      const userId = await getCurrentUserId();
+      await remove(ref(getDb(), `channel_content/${userId}/blogs`));
+      return {
+        success: true,
+        message: "블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요."
+      };
+    })());
+  }
+  
+  // === [Kanban Management] 칸반 관리 ===
+  if (msg.action === "remove_idea_from_kanban") {
+    return handleAsync((async () => {
+      const firebaseKey = msg.key;
+      const status = msg.status || 'ideas';
+      return await removeIdeaFromKanban(firebaseKey, status);
+    })());
+  }
+  
+  // === [Template Management] 템플릿 관리 ===
+  if (msg.action === "get_thumbnail_templates") {
+    return handleAsync((async () => {
+      return await getThumbnailTemplates();
+    })());
+  }
+  
+  if (msg.action === "delete_template") {
+    return handleAsync((async () => {
+      const templateId = msg.templateId;
+      return await deleteTemplate(templateId);
+    })());
+  }
+  
+  // === [Thumbnail Generation] 썸네일 생성 ===
+  if (msg.action === "gemini_generate_thumbnail_texts") {
+    return handleAsync((async () => {
+      if (!Array.isArray(msg.data?.outlines)) {
+        throw new Error("outlines 배열이 필요합니다.");
+      }
+      
+      const outlines = msg.data.outlines;
+      const draft = msg.data.draft || "";
+      return await generateThumbnailTexts(outlines, draft);
+    })());
+  }
+  
+  // === [Alarm Management] 알람 관리 ===
+  if (msg.action === "register_alarms") {
+    return handleAsync((async () => {
+      try {
+        // 기존 알람 제거
+        await chrome.alarms.clearAll();
+        
+        // 알람 재등록
+        chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
+        chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
+        
+        // 등록 확인
+        const alarms = await chrome.alarms.getAll();
+        const hasFetch = alarms.some(a => a.name === "fetch-channels");
+        const hasUpdate = alarms.some(a => a.name === "update-performance-metrics");
+        
+        if (hasFetch && hasUpdate) {
+          return { 
+            success: true, 
+            message: "알람이 성공적으로 재등록되었습니다. (fetch-channels, update-performance-metrics)" 
+          };
+        } else {
+          throw new Error(`일부 알람 등록 실패 (fetch: ${hasFetch ? "성공" : "실패"}, update: ${hasUpdate ? "성공" : "실패"})`);
+        }
+      } catch (error) {
+        Logger.error("[알람 재등록] 오류:", error);
+        throw error;
+      }
+    })());
+  }
+  
+  // === [AdSense Management] AdSense 관리 ===
+  if (msg.action === "get_adsense_accounts") {
+    return handleAsync((async () => {
+      const { googleAuthToken } = await chrome.storage.local.get(['googleAuthToken']);
+      
+      if (!googleAuthToken) {
+        throw new Error("Google 계정이 연동되지 않았습니다.");
+      }
+
+      const accountsListUrl = "https://adsense.googleapis.com/v2/accounts";
+      const accountsListResponse = await fetch(accountsListUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${googleAuthToken}`
+        }
+      });
+
+      if (accountsListResponse.ok) {
+        const accountsData = await accountsListResponse.json();
+        return {
+          success: true,
+          accounts: accountsData.accounts || []
+        };
+      } else {
+        const errorData = await accountsListResponse.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `계정 목록 조회 실패 (${accountsListResponse.status})`);
+      }
+    })());
+  }
+
   // 핑 테스트
   if (msg.action === "ping") {
     sendResponse({ success: true, mode: "module-router" });
@@ -1701,3 +1906,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });
   return false;
 });
+
+// === [Migration Function] 데이터 마이그레이션 함수 ===
+// migrationService.js로 이동됨 - import로 사용

@@ -717,7 +717,57 @@ function renderCompetitorPaginatedContent(listContainer, controlsContainer, sour
 function renderPaginatedContent(listContainer, controlsContainer, sourceId, allContent, type, platform, channelName = null, trackedUrls = new Map()) {
     const state = viewState[type];
     const isVideo = platform === 'youtube';
-    let filteredContent = allContent.filter(item => item.sourceId === sourceId && (isVideo ? !!item.videoId : !item.videoId));
+    
+    // 디버깅: 필터링 전 데이터 확인
+    console.log(`[renderPaginatedContent] 필터링 전 - sourceId: ${sourceId}, allContent.length: ${allContent.length}, platform: ${platform}`);
+    
+    // sourceId를 URL origin으로 비교 (칸반/스크랩과 동일한 로직)
+    let targetUrlOrigin = null;
+    try {
+        const decodedTargetUrl = atob(sourceId.replace(/=/g, ''));
+        targetUrlOrigin = new URL(decodedTargetUrl).origin;
+    } catch (e) {
+        console.warn(`[renderPaginatedContent] targetSourceId 디코딩 실패:`, e);
+    }
+    
+    let filteredContent = allContent.filter(item => {
+        if (!item.sourceId) {
+            return false;
+        }
+        
+        // 1. 정확히 일치하는 경우
+        if (item.sourceId === sourceId) {
+            const videoIdCheck = isVideo ? !!item.videoId : !item.videoId;
+            return videoIdCheck;
+        }
+        
+        // 2. URL origin이 일치하는 경우 (칸반/스크랩과 동일한 로직)
+        if (targetUrlOrigin && item.sourceId) {
+            try {
+                const decodedItemUrl = atob(item.sourceId.replace(/=/g, ''));
+                const itemUrlOrigin = new URL(decodedItemUrl).origin;
+                
+                if (itemUrlOrigin === targetUrlOrigin) {
+                    const videoIdCheck = isVideo ? !!item.videoId : !item.videoId;
+                    if (videoIdCheck) {
+                        console.debug(`[renderPaginatedContent] URL origin 일치로 포함:`, {
+                            itemSourceId: item.sourceId.substring(0, 30),
+                            targetSourceId: sourceId.substring(0, 30),
+                            origin: itemUrlOrigin,
+                            title: item.title?.substring(0, 30)
+                        });
+                    }
+                    return videoIdCheck;
+                }
+            } catch (e) {
+                // base64 디코딩 실패 시 무시
+            }
+        }
+        
+        return false;
+    });
+    
+    console.log(`[renderPaginatedContent] 필터링 후 - filteredContent.length: ${filteredContent.length}`);
     if (activeTagFilter) {
         filteredContent = filteredContent.filter(item => item.tags && item.tags.includes(activeTagFilter));
     }
