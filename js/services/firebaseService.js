@@ -97,6 +97,13 @@ export function initializeFirebase() {
 // 1. DB URL 생성기
 const getDbUrl = (path) => {
   const baseUrl = firebaseConfig.databaseURL;
+  
+  // path가 문자열이 아니면 에러 처리
+  if (typeof path !== 'string') {
+    Logger.error('[getDbUrl] path가 문자열이 아닙니다:', typeof path, path);
+    throw new Error(`getDbUrl: path는 문자열이어야 합니다. 받은 타입: ${typeof path}, 값: ${path}`);
+  }
+  
   if (path.startsWith('https://')) return path;
   
   const cleanPath = path.startsWith('/') ? path.substring(1) : path;
@@ -228,6 +235,13 @@ export async function remove(path) {
 
 export async function push(path, data = null) {
   // REST API의 POST 메서드를 사용하여 새 자식 노드(Key)를 생성합니다.
+  
+  // path가 문자열인지 확인
+  if (typeof path !== 'string') {
+    Logger.error('[push] path가 문자열이 아닙니다:', typeof path, path);
+    throw new Error(`push: path는 문자열이어야 합니다. 받은 타입: ${typeof path}, 값: ${path}`);
+  }
+  
   if (data !== null) {
     const response = await dbRequest('POST', path, data);
     const newKey = response.name; // Firebase REST는 생성된 키를 'name' 속성으로 반환

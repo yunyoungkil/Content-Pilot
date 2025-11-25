@@ -217,9 +217,10 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
 
     // Firebase에 저장
     const finalData = { ...newCard, createdAt: Date.now(), channelId: channelId };
-    const pushResult = await push(ref(getDb(), `kanban/${userId}/${status}`));
+    const cardPath = `kanban/${userId}/${status}`;
+    const pushResult = await push(ref(getDb(), cardPath));
     const cardId = pushResult.key;
-    await set(pushResult, cleanDataForFirebase(finalData));
+    await pushResult.set(cleanDataForFirebase(finalData));
 
     // URL 인덱스 업데이트 (중복 검사를 위해 필수)
     if (ideaData.origin?.postUrl) {

@@ -1,6 +1,6 @@
 // js/services/collectorService.js
 
-import { getDb, CONSTANTS, cleanDataForFirebase } from './firebaseService.js';
+import { getDb, CONSTANTS, cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, set, update, remove } from './firebaseService.js';
 import { sendErrorToUI } from './analyticsService.js';
@@ -641,25 +641,31 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
 
 export async function deleteChannelData(urlToDelete) {
   try {
-    const userId = CONSTANTS.USER_ID;
+    const userId = await getCurrentUserId();
     const db = getDb();
     const channelsRef = ref(db, `channels/${userId}`);
     const snap = await get(channelsRef);
     const allChannels = snap.val();
     if (!allChannels) throw new Error("채널 정보 없음");
 
+    let channelIdToDelete = null;
     let sourceIdToDelete = null;
     let platformToDelete = null;
     let channelFound = false;
+    let channelInfo = null;
 
     // 채널 찾기 및 삭제
     for (const type of ["myChannels", "competitorChannels"]) {
       for (const platform of ["blogs", "youtubes"]) {
         const list = allChannels[type]?.[platform] || [];
-        const idx = list.findIndex(c => c.inputUrl === urlToDelete);
+        const idx = list.findIndex(c => {
+          const url = c.inputUrl || c.url;
+          return url === urlToDelete;
+        });
         if (idx > -1) {
-          const info = list[idx];
-          sourceIdToDelete = platform === "blogs" ? btoa(info.apiUrl).replace(/=/g, "") : info.apiUrl;
+          channelInfo = list[idx];
+          channelIdToDelete = channelInfo.id || (channelInfo.apiUrl ? btoa(channelInfo.apiUrl).replace(/=/g, "") : null);
+          sourceIdToDelete = platform === "blogs" ? btoa(channelInfo.apiUrl || channelInfo.inputUrl || channelInfo.url).replace(/=/g, "") : (channelInfo.apiUrl || channelInfo.inputUrl || channelInfo.url);
           platformToDelete = platform;
           list.splice(idx, 1); // 배열에서 제거
           channelFound = true;
@@ -671,6 +677,18 @@ export async function deleteChannelData(urlToDelete) {
 
     if (!channelFound) return { success: true, message: "삭제할 채널을 찾지 못함" };
 
+    // [중요] 연쇄 삭제: 채널 ID로 연결된 모든 데이터 삭제
+    if (channelIdToDelete) {
+      try {
+        const { deleteChannelDataCascade } = await import('./cascadeDeleteService.js');
+        const cascadeResult = await deleteChannelDataCascade(channelIdToDelete, userId);
+        Logger.info(`[deleteChannelData] 연쇄 삭제 완료 - 삭제된 항목: ${cascadeResult.deletedCount || 0}개`);
+      } catch (error) {
+        Logger.error(`[deleteChannelData] 연쇄 삭제 중 오류:`, error);
+        // 연쇄 삭제 실패해도 채널 설정 삭제는 계속 진행
+      }
+    }
+
     // DB 업데이트
     await Promise.all([
       set(channelsRef, allChannels), // 목록 업데이트
@@ -679,6 +697,7 @@ export async function deleteChannelData(urlToDelete) {
 
     return { success: true };
   } catch (e) {
+    Logger.error('[deleteChannelData] 오류:', e);
     return { success: false, error: e.message };
   }
 }

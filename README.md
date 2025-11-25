@@ -221,6 +221,12 @@ Content-Pilot/
 - **`/lib`**: Firebase SDK, Quill 에디터, TUI Image Editor 등 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
 
 - **`/docs`**: 프로젝트 문서 및 사용 가이드가 위치합니다.
+  - `guides/`: 사용 가이드 및 개발 가이드
+  - `architecture/`: 아키텍처 및 구조 문서
+  - `firebase/`: Firebase 관련 문서
+  - `analytics/`: Analytics 관련 문서
+  - `audits/`: 감사 및 검증 문서
+  - `reviews/`: 코드 리뷰 문서
 
 ## 🎯 주요 모드 및 기능
 
@@ -285,34 +291,47 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 
 ## 📚 문서
 
-프로젝트의 상세한 기술 문서와 가이드는 다음과 같습니다:
+프로젝트의 상세한 기술 문서와 가이드는 `docs/` 폴더에 주제별로 정리되어 있습니다:
 
-### 데이터 구조
+### 📖 가이드 문서 (`docs/guides/`)
+- **`AI_SERVICE_GUIDE.md`**: AI 서비스 사용 가이드 (Gemini API, 브리핑 생성, 초안 생성)
+- **`MIGRATION_SERVICE_GUIDE.md`**: 데이터 마이그레이션 서비스 가이드
+- **`DEVELOPMENT_GUIDE.md`**: 개발자를 위한 개발 환경 설정 및 코딩 가이드
+- **`AUTHENTICATION_FLOW.md`**: Google OAuth 인증 흐름 및 Service Worker에서의 Firebase 작업
+- **`CORS_SETUP_GUIDE.md`**: CORS 설정 가이드
+- **`성과-데이터-시각화-사용-패턴.md`**: 성과 데이터 시각화 기능 사용자 사용 패턴
+
+### 🏗️ 아키텍처 문서 (`docs/architecture/`)
+- **`SERVICES_ARCHITECTURE.md`**: 서비스 아키텍처 개요 및 서비스 간 상호작용
+- **`ACTUAL_SAVE_STRUCTURE.md`**: 실제 저장되는 데이터 구조 및 수정 이력
+- **`CARD_ADDITION_LOGIC.md`**: 카드 추가 로직 설명
+
+### 🔥 Firebase 문서 (`docs/firebase/`)
 - **`FIREBASE_CHANNELS_STRUCTURE.md`**: Firebase 채널 데이터 구조 상세 설명
   - 채널 데이터 저장 경로 및 구조
   - 필드 설명 (`inputUrl`, `apiUrl`, `url`, `gaPropertyId`, `adSenseAccountId`, `competitors`)
   - 데이터 읽기/쓰기 예시
-- **`ACTUAL_SAVE_STRUCTURE.md`**: 실제 저장되는 데이터 구조 및 수정 이력
-
-### 인증 및 보안
-- **`AUTHENTICATION_FLOW.md`**: Google OAuth 인증 흐름 및 Service Worker에서의 Firebase 작업
-- **`FIREBASE_SECURITY_RULES.md`**: Firebase Database 보안 규칙 설정 가이드
 - **`FIREBASE_AUTH_SETUP.md`**: Firebase 인증 설정 가이드
-
-### 기술 문서
 - **`FIREBASE_REST_API_MIGRATION.md`**: Firebase REST API 마이그레이션 완료 문서
 - **`FIREBASE_SDK_USAGE.md`**: Firebase SDK 사용 가이드
-- **`PERFORMANCE_OPTIMIZATION_WORK.md`**: 성능 최적화 작업 내역
+- **`FIREBASE_SECURITY_RULES.md`**: Firebase Database 보안 규칙 설정 가이드
 
-### 기능별 문서
+### 📊 Analytics 문서 (`docs/analytics/`)
 - **`GA4_PIPELINE_VALIDATION.md`**: GA4 데이터 파이프라인 검증
 - **`GA4_COLLECTED_METRICS.md`**: 수집되는 GA4 메트릭 목록
-- **`CARD_ADDITION_LOGIC.md`**: 카드 추가 로직 설명
+- **`GA4_ADDITIONAL_METRICS_CHECK.md`**: GA4 추가 메트릭 체크
+
+### 🔍 감사 및 검증 문서 (`docs/audits/`)
 - **`DASHBOARD_TAG_ANALYSIS_AUDIT.md`**: 대시보드 태그 분석 감사
-
-### 개발 가이드
-- **`CODE_REVIEW.md`**: 코드 리뷰 체크리스트
-- **`CORS_SETUP_GUIDE.md`**: CORS 설정 가이드
+- **`FUNCTION_LISTENER_VALIDATION.md`**: 함수 리스너 검증
+- **`IDEA_CARD_ADDITION_AUDIT.md`**: 아이디어 카드 추가 감사
+- **`PERFORMANCE_OPTIMIZATION_WORK.md`**: 성능 최적화 작업 내역
 - **`REFRESH_LOGIC_VALIDATION.md`**: 새로고침 로직 검증
+- **`SEARCH_TERMS_VERIFICATION_TODO.md`**: 검색어 검증 TODO
+- **`ZERO_METRICS_DEBUG_CHECKLIST.md`**: 제로 메트릭 디버그 체크리스트
 
-모든 문서는 프로젝트 루트 디렉토리에 위치합니다.
+### 📝 코드 리뷰 (`docs/reviews/`)
+- **`CODE_REVIEW.md`**: 코드 리뷰 체크리스트
+- **`CODE_REVIEW_content.js.md`**: content.js 코드 리뷰
+
+모든 문서는 `docs/` 폴더에 주제별로 정리되어 있습니다.

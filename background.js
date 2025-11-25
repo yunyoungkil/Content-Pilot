@@ -23,6 +23,12 @@ import {
   encodeUrlForFirebaseKey
 } from './js/services/collectorService.js';
 
+import {
+  deleteCompetitorData,
+  deleteChannelDataCascade,
+  findDeletedCompetitors
+} from './js/services/cascadeDeleteService.js';
+
 import { 
   generateDraftFromIdea, 
   generateIdeaBriefing, 
@@ -1171,15 +1177,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               
               if (existingIndex >= 0) {
                 // 기존 채널이 있으면 업데이트 (competitors 포함 모든 필드 병합)
+                const existingChannel = merged[existingIndex];
+                const oldCompetitors = existingChannel.competitors || [];
+                const newCompetitors = newChannel.competitors !== undefined ? newChannel.competitors : oldCompetitors;
+                
                 Logger.debug(`[save_channels_and_key] 기존 채널 업데이트 (ID: ${newId})`, {
-                  existing: merged[existingIndex],
+                  existing: existingChannel,
                   new: newChannel
                 });
+                
+                // 삭제된 경쟁 채널 감지 및 데이터 삭제
+                if (Array.isArray(oldCompetitors) && oldCompetitors.length > 0 && Array.isArray(newCompetitors)) {
+                  const deletedUrls = findDeletedCompetitors(oldCompetitors, newCompetitors);
+                  if (deletedUrls.length > 0) {
+                    Logger.info(`[save_channels_and_key] 삭제된 경쟁 채널 감지: ${deletedUrls.length}개`, deletedUrls);
+                    // 비동기로 삭제 (저장은 계속 진행)
+                    Promise.all(deletedUrls.map(url => {
+                      Logger.info(`[save_channels_and_key] 경쟁 채널 삭제 시작: ${url}`);
+                      return deleteCompetitorData(url, userId);
+                    }))
+                      .then(results => {
+                        const totalDeleted = results.reduce((sum, r) => sum + (r.deletedCount || 0), 0);
+                        Logger.info(`[save_channels_and_key] ✅ 경쟁 채널 데이터 삭제 완료 - 총 ${totalDeleted}개 항목 삭제`);
+                        results.forEach((result, index) => {
+                          if (result.deletedCount > 0) {
+                            Logger.info(`[save_channels_and_key]   - ${deletedUrls[index]}: ${result.deletedCount}개 삭제`);
+                          }
+                        });
+                      })
+                      .catch(error => {
+                        Logger.error(`[save_channels_and_key] 경쟁 채널 데이터 삭제 중 오류:`, error);
+                      });
+                  }
+                }
+                
                 merged[existingIndex] = {
-                  ...merged[existingIndex],
+                  ...existingChannel,
                   ...newChannel,
                   // competitors는 새 값으로 덮어쓰기 (명시적으로 설정된 경우)
-                  competitors: newChannel.competitors !== undefined ? newChannel.competitors : merged[existingIndex].competitors
+                  competitors: newCompetitors
                 };
               } else {
                 // 기존 채널이 없으면 추가
