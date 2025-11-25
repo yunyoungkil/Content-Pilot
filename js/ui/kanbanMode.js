@@ -79,12 +79,92 @@ function renderKanban(container) {
     </div>
   `;
 
-  chrome.runtime.sendMessage({ action: "get_kanban_data" });
+  // 인증 상태 확인 후 데이터 로드
+  loadKanbanData();
 
   if (!window.kanbanListenersAttached) {
     addRealtimeUpdateListener();
     window.kanbanListenersAttached = true;
   }
+  
+  // 칸반 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "kanban_data_updated") {
+      console.log("[KanbanMode] 칸반 데이터 업데이트 메시지 수신:", Object.keys(msg.data || {}).length, "개 카드");
+      
+      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
+      if (!kanbanContainer || !kanbanContainer.querySelector("#cp-kanban-board-root")) {
+        console.log("[KanbanMode] 칸반 모드가 아닌 상태에서 메시지 수신, 무시");
+        return false;
+      }
+      
+      if (msg.data) {
+        console.log("[KanbanMode] updateKanbanUI 호출 시작");
+        allKanbanData = msg.data || {};
+        updateKanbanUI(allKanbanData);
+        console.log("[KanbanMode] updateKanbanUI 호출 완료");
+      }
+    }
+    return false;
+  });
+  
+  // 인증 상태 변경 감지하여 데이터 재로드
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.googleUserEmail) {
+      const newValue = changes.googleUserEmail.newValue;
+      const oldValue = changes.googleUserEmail.oldValue;
+      
+      if (newValue && !oldValue) {
+        // 로그인: 새로 로그인한 경우 데이터 로드
+        console.log("[KanbanMode] 로그인 감지, 데이터 재로드");
+        loadKanbanData();
+      } else if (!newValue && oldValue) {
+        // 로그아웃: 로그아웃한 경우 데이터 초기화
+        console.log("[KanbanMode] 로그아웃 감지, 데이터 초기화");
+        allKanbanData = {};
+        updateKanbanUI({});
+      }
+    }
+  });
+}
+
+// 칸반 데이터 로드 함수 (인증 상태 확인 후 실행)
+function loadKanbanData(retryCount = 0) {
+  const MAX_RETRIES = 10;
+  
+  chrome.storage.local.get(["googleUserEmail"], (authResult) => {
+    if (!authResult.googleUserEmail) {
+      if (retryCount < MAX_RETRIES) {
+        console.log(`[KanbanMode] 인증 대기 중... (${retryCount + 1}/${MAX_RETRIES})`);
+        setTimeout(() => {
+          loadKanbanData(retryCount + 1);
+        }, 1000);
+      } else {
+        console.warn("[KanbanMode] 인증 대기 시간 초과");
+        // 로그아웃 상태이므로 데이터 초기화
+        allKanbanData = {};
+        updateKanbanUI({});
+      }
+      return;
+    }
+    
+    // 인증 완료 후 데이터 로드
+    console.log("[KanbanMode] 인증 확인 완료, 칸반 데이터 로드");
+    chrome.runtime.sendMessage({ action: "get_kanban_data" }, (response) => {
+      console.log("[KanbanMode] loadKanbanData - 응답 받음:", response);
+      if (response && response.success && response.data) {
+        updateKanbanUI(response.data);
+      }
+    });
+    
+    // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
+    setTimeout(() => {
+      if (Object.keys(allKanbanData).length === 0) {
+        console.log("[KanbanMode] 콜백 미실행 감지, 재요청");
+        chrome.runtime.sendMessage({ action: "get_kanban_data" });
+      }
+    }, 1000);
+  });
 }
 
 /**
@@ -149,12 +229,35 @@ function addRealtimeUpdateListener() {
  * 전체 칸반 UI를 데이터에 따라 다시 그리는 함수
  */
 async function updateKanbanUI(allCards) {
-  if (!kanbanContainer) return;
+  console.log("[KanbanMode] updateKanbanUI 호출:", {
+    hasKanbanContainer: !!kanbanContainer,
+    cardsCount: Object.keys(allCards || {}).length,
+    allCards: allCards
+  });
+  
+  if (!kanbanContainer) {
+    console.warn("[KanbanMode] updateKanbanUI - kanbanContainer 없음");
+    return;
+  }
+  
   const rootEl = kanbanContainer.querySelector("#cp-kanban-board-root");
-  if (!rootEl) return;
+  if (!rootEl) {
+    console.warn("[KanbanMode] updateKanbanUI - rootEl 없음");
+    return;
+  }
+
+  console.log("[KanbanMode] updateKanbanUI - rootEl 확인 완료, activeChannelId 가져오기 시작");
 
   // [신규] 현재 활성 채널 ID 가져오기
-  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+  let activeChannelId;
+  try {
+    const result = await chrome.storage.local.get("activeChannelId");
+    activeChannelId = result.activeChannelId;
+    console.log("[KanbanMode] updateKanbanUI - activeChannelId:", activeChannelId);
+  } catch (error) {
+    console.error("[KanbanMode] updateKanbanUI - activeChannelId 가져오기 실패:", error);
+    activeChannelId = null;
+  }
 
   // 각 컬럼의 카드 목록을 비움
   rootEl
@@ -170,6 +273,7 @@ async function updateKanbanUI(allCards) {
 
   // 채널이 선택되지 않았을 때 온보딩 메시지 표시
   if (!activeChannelId) {
+    console.log("[KanbanMode] updateKanbanUI - activeChannelId 없음, 온보딩 메시지 표시");
     const ideasCol = rootEl.querySelector(
       '[data-status="ideas"] .kanban-col-cards'
     );
@@ -211,6 +315,7 @@ async function updateKanbanUI(allCards) {
 
   // 데이터가 없을 때 처리
   if (!allCards || Object.keys(allCards).length === 0) {
+    console.log("[KanbanMode] updateKanbanUI - 데이터 없음");
     const ideasCol = rootEl.querySelector(
       '[data-status="ideas"] .kanban-col-cards'
     );
@@ -220,6 +325,8 @@ async function updateKanbanUI(allCards) {
     return;
   }
 
+  console.log("[KanbanMode] updateKanbanUI - 카드 렌더링 시작, status 개수:", Object.keys(allCards).length);
+
   for (const status in allCards) {
     const colContainer = rootEl.querySelector(
       `.cp-kanban-col[data-status="${status}"] .kanban-col-cards`
@@ -228,21 +335,58 @@ async function updateKanbanUI(allCards) {
       // [수정] 채널 ID로 데이터 필터링
       const rawCards = allCards[status] || {};
       const filteredCards = {};
+      
+      console.log(`[KanbanMode] updateKanbanUI - status: ${status}, rawCards 개수:`, Object.keys(rawCards).length);
 
       for (const [cardId, cardData] of Object.entries(rawCards)) {
         // [수정] 채널 ID 필터링 로직
         // 1. channelId가 현재 활성 채널과 일치하는 카드 표시
         // 2. channelId가 undefined인 경우 (구버전 데이터)는 일단 포함 (마이그레이션 전까지 호환성 유지)
         // 3. channelId가 null인 경우는 제외 (칸반은 채널별로 관리)
-        if (cardData.channelId === activeChannelId || 
-            (cardData.channelId === undefined && activeChannelId)) {
+        console.log(`[KanbanMode] updateKanbanUI - 카드 필터링: cardId=${cardId}, cardData.channelId=${cardData.channelId}, activeChannelId=${activeChannelId}`);
+        
+        let shouldInclude = false;
+        
+        if (cardData.channelId === undefined && activeChannelId) {
+          // 구버전 데이터 (channelId가 없는 경우)
+          shouldInclude = true;
+        } else if (cardData.channelId && activeChannelId) {
+          // channelId가 있는 경우 - 정확히 일치하거나 URL의 기본 경로가 일치하는지 확인
+          if (cardData.channelId === activeChannelId) {
+            shouldInclude = true;
+          } else {
+            // base64 디코딩하여 URL의 기본 경로 비교
+            try {
+              const cardUrl = atob(cardData.channelId.replace(/=/g, ''));
+              const activeUrl = atob(activeChannelId.replace(/=/g, ''));
+              
+              // URL 객체로 변환하여 origin 비교
+              const cardUrlObj = new URL(cardUrl);
+              const activeUrlObj = new URL(activeUrl);
+              
+              // origin이 같으면 같은 채널로 간주
+              if (cardUrlObj.origin === activeUrlObj.origin) {
+                shouldInclude = true;
+                console.log(`[KanbanMode] updateKanbanUI - URL origin 일치: ${cardUrlObj.origin} === ${activeUrlObj.origin}`);
+              }
+            } catch (e) {
+              // base64 디코딩 실패 시 정확히 일치하는 경우만 포함
+              console.warn(`[KanbanMode] updateKanbanUI - channelId 디코딩 실패:`, e);
+            }
+          }
+        }
+        
+        if (shouldInclude) {
           filteredCards[cardId] = cardData;
         }
       }
 
+      console.log(`[KanbanMode] updateKanbanUI - status: ${status}, filteredCards 개수:`, Object.keys(filteredCards).length);
       renderCardsInColumn(colContainer, status, filteredCards);
     }
   }
+  
+  console.log("[KanbanMode] updateKanbanUI 완료");
 }
 
 function renderCardsInColumn(columnEl, status, cards) {

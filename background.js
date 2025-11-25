@@ -964,7 +964,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const data = snap?.val() || {};
       const cardsCount = Object.keys(data).length;
       Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
-      // 즉시 UI에 업데이트 메시지 전송
+      
+      const responseData = { success: true, data: data };
+      
+      // 즉시 UI에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
       if (sender.tab?.id) {
         chrome.tabs.sendMessage(sender.tab.id, {
           action: "kanban_data_updated",
@@ -974,7 +977,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // 조용히 무시
         });
       }
-      return { success: true, data: data };
+      
+      return responseData;
     })());
   }
 
@@ -985,11 +989,61 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const snap = await get(ref(getDb(), `scraps/${userId}`));
       const val = snap?.val() || {};
       const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-      Logger.debug(`[get_all_scraps] 전체 스크랩 개수: ${arr.length}`);
-      // 필터링
-      const filtered = arr.filter(s => s.channelId === undefined || s.channelId === null || s.channelId === msg.channelId);
+      const targetChannelId = msg.channelId || null;
+      Logger.debug(`[get_all_scraps] 전체 스크랩 개수: ${arr.length}, targetChannelId: ${targetChannelId}`);
+      // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
+      const filtered = arr.filter(scrap => {
+        // channelId가 없거나 null인 경우 포함 (구버전 데이터 또는 공용 스크랩)
+        if (scrap.channelId === undefined || scrap.channelId === null) {
+          return true;
+        }
+        
+        // 정확히 일치하는 경우 포함
+        if (scrap.channelId === targetChannelId) {
+          return true;
+        }
+        
+        // URL의 origin이 일치하는 경우 포함 (칸반과 동일한 로직)
+        if (scrap.channelId && targetChannelId) {
+          try {
+            const scrapUrl = atob(scrap.channelId.replace(/=/g, ''));
+            const targetUrl = atob(targetChannelId.replace(/=/g, ''));
+            
+            const scrapUrlObj = new URL(scrapUrl);
+            const targetUrlObj = new URL(targetUrl);
+            
+            if (scrapUrlObj.origin === targetUrlObj.origin) {
+              Logger.debug(`[get_all_scraps] URL origin 일치: ${scrapUrlObj.origin} === ${targetUrlObj.origin}`);
+              return true;
+            }
+          } catch (e) {
+            // base64 디코딩 실패 시 무시
+          }
+        }
+        
+        return false;
+      });
       Logger.info(`[get_all_scraps] 필터링 후 스크랩 개수: ${filtered.length}`);
-      return { success: true, scraps: filtered.sort((a, b) => b.timestamp - a.timestamp) };
+      
+      const responseData = { success: true, scraps: filtered.sort((a, b) => b.timestamp - a.timestamp) };
+      
+      // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
+      // 모든 탭에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: "scraps_data_updated",
+              scraps: responseData.scraps
+            }).catch((err) => {
+              // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+              // 조용히 무시
+            });
+          }
+        });
+      });
+      
+      return responseData;
     })());
   }
 
@@ -1001,13 +1055,64 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const snap = await get(ref(getDb(), `scraps/${userId}`));
         const val = snap?.val() || {};
         const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+        Logger.debug(`[cp_get_firebase_scraps] 전체 스크랩 개수: ${arr.length}, targetChannelId: ${targetChannelId}`);
         // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
         const filtered = arr.filter(scrap => {
-          return scrap.channelId === undefined || 
-                 scrap.channelId === null || 
-                 scrap.channelId === targetChannelId;
+          // channelId가 없거나 null인 경우 포함 (구버전 데이터 또는 공용 스크랩)
+          if (scrap.channelId === undefined || scrap.channelId === null) {
+            return true;
+          }
+          
+          // 정확히 일치하는 경우 포함
+          if (scrap.channelId === targetChannelId) {
+            return true;
+          }
+          
+          // URL의 origin이 일치하는 경우 포함 (칸반과 동일한 로직)
+          if (scrap.channelId && targetChannelId) {
+            try {
+              const scrapUrl = atob(scrap.channelId.replace(/=/g, ''));
+              const targetUrl = atob(targetChannelId.replace(/=/g, ''));
+              
+              const scrapUrlObj = new URL(scrapUrl);
+              const targetUrlObj = new URL(targetUrl);
+              
+              if (scrapUrlObj.origin === targetUrlObj.origin) {
+                Logger.debug(`[cp_get_firebase_scraps] URL origin 일치: ${scrapUrlObj.origin} === ${targetUrlObj.origin}`);
+                return true;
+              }
+            } catch (e) {
+              // base64 디코딩 실패 시 무시
+            }
+          }
+          
+          return false;
         });
-        return { data: filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
+        
+        Logger.info(`[cp_get_firebase_scraps] 필터링 후 스크랩 개수: ${filtered.length}`);
+        const sortedScraps = filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const responseData = { data: sortedScraps };
+        
+        Logger.debug(`[cp_get_firebase_scraps] 응답 데이터 준비 완료 - 스크랩 개수: ${sortedScraps.length}, responseData.data.length: ${responseData.data.length}`);
+        
+        // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
+        // 모든 탭에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: "scraps_data_updated",
+                scraps: responseData.data
+              }).catch((err) => {
+                // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+                // 조용히 무시
+              });
+            }
+          });
+        });
+        
+        Logger.debug(`[cp_get_firebase_scraps] 응답 반환 - responseData.data.length: ${responseData.data.length}`);
+        return responseData;
       } catch (error) {
         Logger.error('[cp_get_firebase_scraps] Firebase 로드 오류:', error);
         return { data: [] };
@@ -1067,7 +1172,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const youtubesCount = channelsData.myChannels?.youtubes?.length || 0;
       Logger.info(`[get_channels_and_key] 채널 데이터 로드 완료 - blogs: ${blogsCount}, youtubes: ${youtubesCount}`);
       
-      return {
+      const responseData = {
         success: true,
         data: {
           youtubeApiKey: storage.youtubeApiKey || "",
@@ -1075,6 +1180,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ...channelsData
         }
       };
+      
+      // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
+      if (sender.tab?.id) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "channels_data_updated",
+          data: responseData.data
+        }).catch((err) => {
+          // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
+          // 조용히 무시
+        });
+      }
+      
+      return responseData;
     })());
   }
 
@@ -1107,8 +1225,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // 채널 ID 생성 헬퍼 함수
       const generateChannelId = (channel) => {
         if (channel.id) return channel.id;
+        // inputUrl 우선, 없으면 url 사용 (하위 호환성)
+        const urlToUse = channel.inputUrl || channel.url;
         if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
-        if (channel.url) return btoa(channel.url).replace(/=/g, "");
+        if (urlToUse) return btoa(urlToUse).replace(/=/g, "");
         return null;
       };
       

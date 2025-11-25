@@ -56,25 +56,98 @@ export function renderScrapbook(container) {
   keywordInput.addEventListener('keyup', () => {
       renderScrapList(allScraps, container); // 키워드 입력 시에도 전체 목록을 다시 렌더링하여 필터링
   });
+  
+  // 스크랩 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "scraps_data_updated") {
+      console.log("[ScrapbookMode] 스크랩 데이터 업데이트 메시지 수신:", msg.scraps?.length || 0, "개");
+      
+      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
+      const listContainer = container.querySelector('.scrapbook-list-cards');
+      if (!listContainer) {
+        console.log("[ScrapbookMode] 스크랩 모드가 아닌 상태에서 메시지 수신, 무시");
+        return false;
+      }
+      
+      if (msg.scraps && Array.isArray(msg.scraps)) {
+        allScraps = msg.scraps.sort((a, b) => b.timestamp - a.timestamp);
+        renderScrapList(allScraps, container);
+      }
+    }
+    return false;
+  });
+  
+  // 인증 상태 변경 감지하여 데이터 재로드
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.googleUserEmail) {
+      const newValue = changes.googleUserEmail.newValue;
+      const oldValue = changes.googleUserEmail.oldValue;
+      
+      if (newValue && !oldValue) {
+        // 로그인: 새로 로그인한 경우 데이터 로드
+        console.log("[ScrapbookMode] 로그인 감지, 데이터 재로드");
+        requestScrapsAndRender(container);
+      } else if (!newValue && oldValue) {
+        // 로그아웃: 로그아웃한 경우 데이터 초기화
+        console.log("[ScrapbookMode] 로그아웃 감지, 데이터 초기화");
+        allScraps = [];
+        const listContainer = container.querySelector('.scrapbook-list-cards');
+        if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">로그인이 필요합니다.</p>';
+      }
+    }
+  });
 }
 
-function requestScrapsAndRender(container) {
-    // [수정] 활성 채널 ID를 가져와서 함께 전송
-    chrome.storage.local.get("activeChannelId", (res) => {
+function requestScrapsAndRender(container, retryCount = 0) {
+    const MAX_RETRY_COUNT = 10;
+    
+    // 인증 상태 확인
+    chrome.storage.local.get(["googleUserEmail", "activeChannelId"], (res) => {
+        // 인증이 완료되지 않았으면 재시도
+        if (!res.googleUserEmail) {
+            if (retryCount < MAX_RETRY_COUNT) {
+                console.log(`[ScrapbookMode] 인증 대기 중... (${retryCount + 1}/${MAX_RETRY_COUNT})`);
+                setTimeout(() => {
+                    requestScrapsAndRender(container, retryCount + 1);
+                }, 1000);
+            } else {
+                console.warn("[ScrapbookMode] 인증 대기 시간 초과");
+                const listContainer = container.querySelector('.scrapbook-list-cards');
+                if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">로그인이 필요합니다.</p>';
+            }
+            return;
+        }
+        
+        // 인증 완료 후 데이터 로드
         const activeChannelId = res.activeChannelId || null;
+        console.log("[ScrapbookMode] 인증 확인 완료, 스크랩 데이터 로드");
 
         chrome.runtime.sendMessage({ 
             action: "cp_get_firebase_scraps",
-            channelId: activeChannelId // 👈 추가됨
+            channelId: activeChannelId
         }, (response) => {
+            console.log("[ScrapbookMode] requestScrapsAndRender - 응답 받음:", response);
             if (response && response.data) {
                 allScraps = response.data.sort((a, b) => b.timestamp - a.timestamp);
+                console.log("[ScrapbookMode] 스크랩 데이터 로드 완료:", allScraps.length, "개");
                 renderScrapList(allScraps, container);
             } else {
+                console.log("[ScrapbookMode] 스크랩 데이터 없음 또는 응답 실패");
                 const listContainer = container.querySelector('.scrapbook-list-cards');
                 if(listContainer) listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">스크랩이 없습니다.</p>';
             }
         });
+        
+        // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
+        setTimeout(() => {
+            if (allScraps.length === 0) {
+                console.log("[ScrapbookMode] 콜백 미실행 감지, 재요청");
+                chrome.runtime.sendMessage({ 
+                    action: "cp_get_firebase_scraps",
+                    channelId: activeChannelId
+                });
+            }
+        }, 1000);
     });
 }
 

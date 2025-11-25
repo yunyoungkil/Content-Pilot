@@ -43,6 +43,7 @@
 - **채널별 데이터 필터링**: 모든 탭(대시보드, 기획 보드, 스크랩북, 워크스페이스)에서 현재 선택된 채널의 데이터만 표시됩니다.
 - **자동 데이터 마이그레이션**: 기존 데이터를 자동으로 마이그레이션하여 새 아키텍처에 맞게 변환합니다.
 - **연동 상태 모니터링**: 각 채널의 연동 상태를 실시간으로 확인하고 테스트할 수 있습니다.
+- **채널 데이터 구조**: 각 채널은 `inputUrl`(원본 URL), `apiUrl`(RSS URL), `gaPropertyId`, `adSenseAccountId`, `competitors`(경쟁 채널 목록)를 포함합니다. 자세한 구조는 `FIREBASE_CHANNELS_STRUCTURE.md` 참조.
 
 ### 6. 시스템 진단
 - **종합 시스템 진단**: 5개 핵심 영역(API 연동, 데이터 구조, Firebase 연결, 성과 데이터 수집, 외부 API 연동)에 대한 20개 항목을 점검합니다.
@@ -275,8 +276,43 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - 채널별 데이터 필터링
 - 자동 데이터 마이그레이션
 - 연동 상태 모니터링
+- **채널 데이터 구조**: `inputUrl`(원본 URL), `apiUrl`(RSS URL 자동 생성), `gaPropertyId`, `adSenseAccountId`, `competitors`(경쟁 채널 배열) 포함
 
 ### 8. 시스템 진단 (System Diagnosis)
 - 종합 시스템 진단 (5개 영역, 20개 항목)
 - 실시간 진단 리포트
 - 자동 문제 감지 및 알림
+
+## 📚 문서
+
+프로젝트의 상세한 기술 문서와 가이드는 다음과 같습니다:
+
+### 데이터 구조
+- **`FIREBASE_CHANNELS_STRUCTURE.md`**: Firebase 채널 데이터 구조 상세 설명
+  - 채널 데이터 저장 경로 및 구조
+  - 필드 설명 (`inputUrl`, `apiUrl`, `url`, `gaPropertyId`, `adSenseAccountId`, `competitors`)
+  - 데이터 읽기/쓰기 예시
+- **`ACTUAL_SAVE_STRUCTURE.md`**: 실제 저장되는 데이터 구조 및 수정 이력
+
+### 인증 및 보안
+- **`AUTHENTICATION_FLOW.md`**: Google OAuth 인증 흐름 및 Service Worker에서의 Firebase 작업
+- **`FIREBASE_SECURITY_RULES.md`**: Firebase Database 보안 규칙 설정 가이드
+- **`FIREBASE_AUTH_SETUP.md`**: Firebase 인증 설정 가이드
+
+### 기술 문서
+- **`FIREBASE_REST_API_MIGRATION.md`**: Firebase REST API 마이그레이션 완료 문서
+- **`FIREBASE_SDK_USAGE.md`**: Firebase SDK 사용 가이드
+- **`PERFORMANCE_OPTIMIZATION_WORK.md`**: 성능 최적화 작업 내역
+
+### 기능별 문서
+- **`GA4_PIPELINE_VALIDATION.md`**: GA4 데이터 파이프라인 검증
+- **`GA4_COLLECTED_METRICS.md`**: 수집되는 GA4 메트릭 목록
+- **`CARD_ADDITION_LOGIC.md`**: 카드 추가 로직 설명
+- **`DASHBOARD_TAG_ANALYSIS_AUDIT.md`**: 대시보드 태그 분석 감사
+
+### 개발 가이드
+- **`CODE_REVIEW.md`**: 코드 리뷰 체크리스트
+- **`CORS_SETUP_GUIDE.md`**: CORS 설정 가이드
+- **`REFRESH_LOGIC_VALIDATION.md`**: 새로고침 로직 검증
+
+모든 문서는 프로젝트 루트 디렉토리에 위치합니다.

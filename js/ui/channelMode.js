@@ -155,40 +155,294 @@ export function renderChannelMode(container) {
   container.appendChild(style);
 
   let myChannelsData = []; // 로컬 상태 관리
+  let loadRetryCount = 0;
+  const MAX_RETRY_COUNT = 10; // 최대 10회 재시도 (약 10초)
 
-  // 데이터 로드
-  chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+  // 블로그 URL을 RSS URL로 변환하는 헬퍼 함수
+  function resolveBlogUrlToRss(url) {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return null;
+    }
+    
+    try {
+      const urlObj = new URL(url);
+      const host = urlObj.hostname.toLowerCase();
+      const origin = urlObj.origin;
+      
+      // 플랫폼별 RSS 경로
+      if (host.includes('tistory.com')) {
+        return `${origin}/rss`;
+      } else if (host.includes('blog.naver.com')) {
+        const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
+        if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
+          return `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
+        }
+        const blogId = new URLSearchParams(urlObj.search).get('blogId');
+        if (blogId) {
+          return `https://rss.blog.naver.com/${blogId}.xml`;
+        }
+        return `${origin}/rss`;
+      } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
+        return url.endsWith('/') ? `${url}feed` : `${url}/feed`;
+      } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
+        return `${origin}/feeds/posts/default?alt=rss`;
+      }
+      
+      // 기본값: /feed 또는 /rss 시도
+      return url.endsWith('/') ? `${url}feed` : `${url}/feed`;
+    } catch (e) {
+      console.warn('[ChannelMode] URL 파싱 실패:', url, e);
+      return null;
+    }
+  }
+
+  // 채널 데이터 응답 처리 함수 (공통)
+  function processChannelDataResponse(response) {
+    console.log("[ChannelMode] processChannelDataResponse - 응답 처리 시작:", {
+      hasResponse: !!response,
+      success: response?.success,
+      hasData: !!response?.data,
+      hasMyChannels: !!response?.data?.myChannels,
+      hasBlogs: !!response?.data?.myChannels?.blogs,
+      blogsLength: response?.data?.myChannels?.blogs?.length || 0
+    });
+    
     if (response && response.success) {
       const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
       const geminiApiKeyEl = container.querySelector("#gemini-api-key");
       if (youtubeApiKeyEl) youtubeApiKeyEl.value = response.data.youtubeApiKey || "";
       if (geminiApiKeyEl) geminiApiKeyEl.value = response.data.geminiApiKey || "";
       
-      // 데이터 구조가 변경되었으므로 response.data.myChannels.blogs 사용
-      // 각 블로그 객체에는 { inputUrl, gaPropertyId, adSenseAccountId, competitors: [] } 가 포함됨
-      myChannelsData = (response.data.myChannels?.blogs || []).map(blog => ({
-        url: blog.inputUrl || blog.url,
-        gaPropertyId: blog.gaPropertyId || "",
-        adSenseAccountId: blog.adSenseAccountId || "",
-        competitors: (blog.competitors || []).map(c => c.inputUrl || c)
-      }));
+      // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
+      const blogs = response.data.myChannels?.blogs || [];
+      console.log("[ChannelMode] processChannelDataResponse - 블로그 데이터 변환 시작, 개수:", blogs.length);
+      
+      myChannelsData = blogs.map(blog => {
+        console.log("[ChannelMode] processChannelDataResponse - 블로그 변환:", blog);
+        return {
+          inputUrl: blog.inputUrl || blog.url,  // inputUrl 우선, 없으면 url (하위 호환성)
+          url: blog.url || blog.inputUrl,        // 하위 호환성 유지
+          apiUrl: blog.apiUrl || null,           // RSS URL
+          gaPropertyId: blog.gaPropertyId || "",
+          adSenseAccountId: blog.adSenseAccountId || "",
+          competitors: (blog.competitors || []).map(c => {
+            // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+            return typeof c === 'object' && c.inputUrl ? c.inputUrl : (c || '');
+          })
+        };
+      });
+      
+      console.log("[ChannelMode] processChannelDataResponse - 채널 데이터 로드 완료:", myChannelsData.length, "개", myChannelsData);
+      
+      // UI 업데이트
+      const listEl = container.querySelector("#my-channel-list");
+      console.log("[ChannelMode] processChannelDataResponse - 목록 요소 확인:", !!listEl);
       
       renderMyChannels();
+      
+      console.log("[ChannelMode] processChannelDataResponse - renderMyChannels 호출 완료");
+    } else {
+      console.error("[ChannelMode] processChannelDataResponse - 채널 데이터 로드 실패:", response);
+      // 실패 시 재시도는 하지 않음 (인증은 완료되었으므로)
+      const listEl = container.querySelector("#my-channel-list");
+      if (listEl) {
+        listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">데이터를 불러올 수 없습니다.<br>잠시 후 다시 시도해주세요.</div>`;
+      }
+    }
+  }
+  
+  // 데이터 로드 함수 (인증 상태 확인 후 실행) - 실제 사용되는 함수
+  function loadChannelData() {
+    // 인증 상태 확인
+    chrome.storage.local.get(["googleUserEmail"], (authResult) => {
+      // 인증이 완료되지 않았으면 잠시 대기 후 재시도
+      if (!authResult.googleUserEmail) {
+        if (loadRetryCount < MAX_RETRY_COUNT) {
+          loadRetryCount++;
+          console.log(`[ChannelMode] 인증 대기 중... (${loadRetryCount}/${MAX_RETRY_COUNT}) 1초 후 재시도`);
+          setTimeout(() => {
+            loadChannelData();
+          }, 1000);
+        } else {
+          console.warn("[ChannelMode] 인증 대기 시간 초과. 로그인이 필요할 수 있습니다.");
+          // 재시도 횟수 초기화
+          loadRetryCount = 0;
+        }
+        return;
+      }
+      
+      // 인증 완료 후 재시도 횟수 초기화
+      loadRetryCount = 0;
+      
+      // 인증 완료 후 데이터 로드
+      console.log("[ChannelMode] loadChannelData - 인증 확인 완료, 데이터 요청 시작");
+      
+      // Promise 기반으로 변경하여 콜백 문제 해결
+      new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(response);
+          }
+        });
+      }).then((response) => {
+        console.log("[ChannelMode] loadChannelData - 응답 받음:", {
+          hasResponse: !!response,
+          success: response?.success,
+          hasData: !!response?.data,
+          hasMyChannels: !!response?.data?.myChannels,
+          hasBlogs: !!response?.data?.myChannels?.blogs,
+          blogsLength: response?.data?.myChannels?.blogs?.length || 0
+        });
+        
+        if (response && response.success) {
+          const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
+          const geminiApiKeyEl = container.querySelector("#gemini-api-key");
+          if (youtubeApiKeyEl) youtubeApiKeyEl.value = response.data.youtubeApiKey || "";
+          if (geminiApiKeyEl) geminiApiKeyEl.value = response.data.geminiApiKey || "";
+          
+          // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
+          const blogs = response.data.myChannels?.blogs || [];
+          console.log("[ChannelMode] loadChannelData - 블로그 데이터 변환 시작, 개수:", blogs.length);
+          
+          myChannelsData = blogs.map(blog => {
+            console.log("[ChannelMode] loadChannelData - 블로그 변환:", blog);
+            return {
+              inputUrl: blog.inputUrl || blog.url,  // inputUrl 우선, 없으면 url (하위 호환성)
+              url: blog.url || blog.inputUrl,        // 하위 호환성 유지
+              apiUrl: blog.apiUrl || null,           // RSS URL
+              gaPropertyId: blog.gaPropertyId || "",
+              adSenseAccountId: blog.adSenseAccountId || "",
+              competitors: (blog.competitors || []).map(c => {
+                // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+                return typeof c === 'object' && c.inputUrl ? c.inputUrl : (c || '');
+              })
+            };
+          });
+          
+          console.log("[ChannelMode] loadChannelData - 채널 데이터 로드 완료:", myChannelsData.length, "개", myChannelsData);
+          
+          // UI 업데이트
+          const listEl = container.querySelector("#my-channel-list");
+          console.log("[ChannelMode] loadChannelData - 목록 요소 확인:", !!listEl);
+          
+          renderMyChannels();
+          
+          console.log("[ChannelMode] loadChannelData - renderMyChannels 호출 완료");
+        } else {
+          console.error("[ChannelMode] loadChannelData - 채널 데이터 로드 실패:", response);
+          // 실패 시 재시도는 하지 않음 (인증은 완료되었으므로)
+          const listEl = container.querySelector("#my-channel-list");
+          if (listEl) {
+            listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">데이터를 불러올 수 없습니다.<br>잠시 후 다시 시도해주세요.</div>`;
+          }
+        }
+      }).catch((error) => {
+        console.error("[ChannelMode] loadChannelData - 오류 발생:", error);
+        const listEl = container.querySelector("#my-channel-list");
+        if (listEl) {
+          listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">데이터를 불러오는 중 오류가 발생했습니다.<br>${error.message}</div>`;
+        }
+      });
+    });
+  }
+
+  // 채널 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "channel_data_updated" || msg.action === "channels_data_updated") {
+      console.log("[ChannelMode] 채널 데이터 업데이트 메시지 수신:", msg.data);
+      
+      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
+      const listEl = container.querySelector("#my-channel-list");
+      if (!listEl) {
+        console.log("[ChannelMode] 채널 모드가 아닌 상태에서 메시지 수신, 무시");
+        return false;
+      }
+      
+      // 응답 데이터 구조 처리
+      const responseData = {
+        success: true,
+        data: msg.data
+      };
+      
+      processChannelDataResponse(responseData);
+    }
+    
+    // 다른 메시지는 처리하지 않음
+    return false;
+  });
+  
+  // 초기 데이터 로드
+  loadChannelData();
+  
+  // 인증 상태 변경 감지하여 데이터 재로드
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.googleUserEmail) {
+      const newValue = changes.googleUserEmail.newValue;
+      const oldValue = changes.googleUserEmail.oldValue;
+      
+      if (newValue && !oldValue) {
+        // 로그인: 새로 로그인한 경우 데이터 로드
+        console.log("[ChannelMode] 로그인 감지, 데이터 로드");
+        loadRetryCount = 0;
+        loadChannelData();
+      } else if (!newValue && oldValue) {
+        // 로그아웃: 로그아웃한 경우 데이터 초기화
+        console.log("[ChannelMode] 로그아웃 감지, 데이터 초기화");
+        myChannelsData = [];
+        renderMyChannels();
+        
+        // 모달이 열려있으면 초기화
+        const modal = container.querySelector("#channel-detail-modal");
+        if (modal && modal.style.display !== "none") {
+          const blogUrlEl = container.querySelector("#modal-blog-url");
+          const gaIdEl = container.querySelector("#modal-ga-id");
+          const adsenseIdEl = container.querySelector("#modal-adsense-id");
+          const compListEl = container.querySelector("#modal-competitor-list");
+          
+          if (blogUrlEl) blogUrlEl.value = "";
+          if (gaIdEl) gaIdEl.value = "";
+          if (adsenseIdEl) adsenseIdEl.value = "";
+          if (compListEl) {
+            compListEl.innerHTML = "";
+            addCompetitorInput("");
+          }
+          currentEditingIndex = -1;
+        }
+      } else if (newValue && oldValue && newValue !== oldValue) {
+        // 사용자 변경: 다른 계정으로 로그인한 경우 데이터 재로드
+        console.log("[ChannelMode] 사용자 변경 감지, 데이터 재로드");
+        loadRetryCount = 0;
+        loadChannelData();
+      }
     }
   });
 
   // 내 채널 목록 렌더링
   function renderMyChannels() {
     const listEl = container.querySelector("#my-channel-list");
-    if (!listEl) return;
+    console.log("[ChannelMode] renderMyChannels 호출:", {
+      hasListEl: !!listEl,
+      channelsCount: myChannelsData.length,
+      channelsData: myChannelsData
+    });
+    
+    if (!listEl) {
+      console.error("[ChannelMode] renderMyChannels - 목록 요소를 찾을 수 없습니다!");
+      return;
+    }
+    
     listEl.innerHTML = "";
     
     myChannelsData.forEach((channel, index) => {
+      // inputUrl 우선, 없으면 url 사용 (하위 호환성)
+      const displayUrl = channel.inputUrl || channel.url || "";
       const card = document.createElement("div");
       card.className = "my-channel-card";
       card.innerHTML = `
         <div class="channel-info">
-          <div class="channel-info-main">${channel.url}</div>
+          <div class="channel-info-main">${displayUrl}</div>
           <div class="channel-info-sub">
             경쟁사: ${channel.competitors.length}개 | GA4: ${channel.gaPropertyId ? '✅' : '❌'} | AdSense: ${channel.adSenseAccountId ? '✅' : '❌'}
           </div>
@@ -205,8 +459,54 @@ export function renderChannelMode(container) {
       // 삭제 버튼
       card.querySelector(".delete-btn").addEventListener("click", () => {
         if (confirm("이 채널을 삭제하시겠습니까?")) {
+          // 삭제할 채널 정보 저장 (삭제 후 Firebase에서도 삭제하기 위해)
+          const channelToDelete = myChannelsData[index];
+          const channelUrl = channelToDelete.inputUrl || channelToDelete.url;
+          
+          // 로컬에서 삭제
           myChannelsData.splice(index, 1);
           renderMyChannels();
+          
+          // Firebase에서도 삭제 및 저장
+          if (channelUrl) {
+            console.log("[ChannelMode] Firebase에서 채널 삭제:", channelUrl);
+            chrome.runtime.sendMessage({ 
+              action: "delete_channel", 
+              url: channelUrl 
+            }, (response) => {
+              if (response && response.success) {
+                console.log("[ChannelMode] 채널 삭제 완료");
+                showToast("✅ 채널이 삭제되었습니다.");
+                
+                // 삭제 후 나머지 채널들도 Firebase에 저장 (동기화)
+                saveChannelsToFirebase((saveResponse) => {
+                  if (saveResponse && saveResponse.success) {
+                    console.log("[ChannelMode] 삭제 후 채널 목록 저장 완료");
+                  } else {
+                    console.warn("[ChannelMode] 삭제 후 채널 목록 저장 실패:", saveResponse);
+                  }
+                });
+              } else {
+                console.error("[ChannelMode] 채널 삭제 실패:", response);
+                showToast("❌ 채널 삭제 실패: " + (response?.error || "알 수 없는 오류"));
+                // 실패 시 로컬 데이터 복구
+                myChannelsData.splice(index, 0, channelToDelete);
+                renderMyChannels();
+              }
+            });
+          } else {
+            // URL이 없으면 로컬에서만 삭제하고 Firebase 저장
+            saveChannelsToFirebase((saveResponse) => {
+              if (saveResponse && saveResponse.success) {
+                showToast("✅ 채널이 삭제되었습니다.");
+              } else {
+                showToast("❌ 채널 삭제 실패: " + (saveResponse?.error || "알 수 없는 오류"));
+                // 실패 시 로컬 데이터 복구
+                myChannelsData.splice(index, 0, channelToDelete);
+                renderMyChannels();
+              }
+            });
+          }
         }
       });
       
@@ -265,16 +565,84 @@ export function renderChannelMode(container) {
     
     currentEditingIndex = index;
     const isNew = index === -1;
-    const data = isNew ? { url: "", gaPropertyId: "", adSenseAccountId: "", competitors: [] } : myChannelsData[index];
     
+    // 모달 표시 (로딩 상태로 먼저 표시)
+    targetModal.style.display = "flex";
+    
+    // 기존 채널 편집 시 최신 데이터를 서버에서 다시 불러오기
+    if (!isNew && index >= 0) {
+      console.log("[ChannelMode] 기존 채널 편집 - 최신 데이터 불러오기");
+      
+      // 인증 상태 확인 후 데이터 로드
+      chrome.storage.local.get(["googleUserEmail"], (authResult) => {
+        if (!authResult.googleUserEmail) {
+          console.warn("[ChannelMode] 인증되지 않음, 로컬 데이터 사용");
+          // 인증이 안 되어 있어도 로컬 데이터로 모달 표시
+          if (index >= 0 && index < myChannelsData.length) {
+            populateModalWithData(myChannelsData[index], isNew);
+          } else {
+            showToast("❌ 채널 데이터를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.");
+            targetModal.style.display = "none";
+          }
+          return;
+        }
+        
+        // 인증 완료 후 최신 데이터 로드
+        chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+          if (response && response.success) {
+            // 최신 데이터로 myChannelsData 업데이트
+            const latestChannels = (response.data.myChannels?.blogs || []).map(blog => ({
+              inputUrl: blog.inputUrl || blog.url,  // inputUrl 우선
+              url: blog.url || blog.inputUrl,        // 하위 호환성
+              apiUrl: blog.apiUrl || null,           // RSS URL
+              gaPropertyId: blog.gaPropertyId || "",
+              adSenseAccountId: blog.adSenseAccountId || "",
+              competitors: (blog.competitors || []).map(c => {
+                // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+                return typeof c === 'object' && c.inputUrl ? c.inputUrl : (c || '');
+              })
+            }));
+            
+            // myChannelsData 업데이트
+            myChannelsData = latestChannels;
+            
+            // 인덱스가 유효한지 확인
+            if (index >= 0 && index < myChannelsData.length) {
+              populateModalWithData(myChannelsData[index], isNew);
+            } else {
+              console.error("[ChannelMode] 인덱스가 유효하지 않습니다:", index, "채널 개수:", myChannelsData.length);
+              showToast("❌ 채널 데이터를 불러올 수 없습니다.");
+              targetModal.style.display = "none";
+            }
+          } else {
+            console.error("[ChannelMode] 채널 데이터 불러오기 실패:", response);
+            // 실패해도 로컬 데이터로 시도
+            if (index >= 0 && index < myChannelsData.length) {
+              populateModalWithData(myChannelsData[index], isNew);
+            } else {
+              showToast("❌ 채널 데이터를 불러올 수 없습니다.");
+              targetModal.style.display = "none";
+            }
+          }
+        });
+      });
+    } else {
+      // 새 채널 추가인 경우 빈 데이터로 모달 채우기
+      populateModalWithData({ url: "", gaPropertyId: "", adSenseAccountId: "", competitors: [] }, isNew);
+    }
+  }
+  
+  // 모달에 데이터 채우기 (공통 함수)
+  function populateModalWithData(data, isNew) {
     const modalTitle = container.querySelector(".cp-modal-title");
     if (modalTitle) modalTitle.textContent = isNew ? "새 채널 추가" : "채널 상세 설정";
     const blogUrlEl = container.querySelector("#modal-blog-url");
     const gaIdEl = container.querySelector("#modal-ga-id");
     const adsenseIdEl = container.querySelector("#modal-adsense-id");
-    if (blogUrlEl) blogUrlEl.value = data.url;
-    if (gaIdEl) gaIdEl.value = data.gaPropertyId;
-    if (adsenseIdEl) adsenseIdEl.value = data.adSenseAccountId;
+    // inputUrl 우선, 없으면 url 사용 (하위 호환성)
+    if (blogUrlEl) blogUrlEl.value = data.inputUrl || data.url || "";
+    if (gaIdEl) gaIdEl.value = data.gaPropertyId || "";
+    if (adsenseIdEl) adsenseIdEl.value = data.adSenseAccountId || "";
     
     // Google 로그인 상태 확인 (GA4 목록도 함께 로드)
     checkGoogleAuthStatus();
@@ -317,10 +685,6 @@ export function renderChannelMode(container) {
     } else {
       console.error("[ChannelMode] 경쟁사 리스트 요소를 찾을 수 없습니다!");
     }
-    
-    console.log("[ChannelMode] 모달 표시 전:", targetModal.style.display);
-    targetModal.style.display = "flex";
-    console.log("[ChannelMode] 모달 표시 후:", targetModal.style.display, "모달 요소:", targetModal);
   }
 
   // Google 로그인 상태 확인
@@ -493,12 +857,114 @@ export function renderChannelMode(container) {
           // 추가로 storage에서도 확인 (백업)
           checkGoogleAuthStatus();
           
+          // 🔥 로그인 성공 후 Firebase에서 채널 데이터 다시 불러오기
+          // storage 변경이 완료될 때까지 기다린 후 데이터 로드
+          console.log("[ChannelMode] Google 로그인 성공 - storage 변경 확인 후 채널 데이터 재로드");
+          
+          // storage에 googleUserEmail이 저장될 때까지 확인
+          const checkStorageAndLoad = (retryCount = 0) => {
+            chrome.storage.local.get(["googleUserEmail"], (result) => {
+              if (result.googleUserEmail) {
+                // storage에 이메일이 저장되었으면 데이터 로드
+                console.log("[ChannelMode] storage 확인 완료, 채널 데이터 로드 시작");
+                loadChannelDataAfterLogin();
+              } else if (retryCount < 5) {
+                // 아직 저장되지 않았으면 재시도 (최대 5회)
+                console.log(`[ChannelMode] storage 대기 중... (${retryCount + 1}/5)`);
+                setTimeout(() => checkStorageAndLoad(retryCount + 1), 200);
+              } else {
+                // 재시도 횟수 초과 시 강제 로드
+                console.warn("[ChannelMode] storage 확인 시간 초과, 강제 로드");
+                loadChannelDataAfterLogin();
+              }
+            });
+          };
+          
+          checkStorageAndLoad();
+          
           alert("✅ Google 계정 연동이 완료되었습니다!");
         } else {
           alert("❌ Google 로그인 실패: " + (response?.error || "알 수 없는 오류"));
         }
       });
     });
+  }
+  
+  // 로그인 후 채널 데이터 로드 함수 (별도 함수로 분리)
+  function loadChannelDataAfterLogin() {
+    console.log("[ChannelMode] 로그인 후 채널 데이터 로드 시작");
+    chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (channelResponse) => {
+            console.log("[ChannelMode] 채널 데이터 응답:", channelResponse);
+            if (channelResponse && channelResponse.success) {
+              console.log("[ChannelMode] 응답 데이터 구조:", {
+                hasData: !!channelResponse.data,
+                hasMyChannels: !!channelResponse.data?.myChannels,
+                hasBlogs: !!channelResponse.data?.myChannels?.blogs,
+                blogsLength: channelResponse.data?.myChannels?.blogs?.length || 0,
+                blogsData: channelResponse.data?.myChannels?.blogs
+              });
+              
+              // 최신 데이터로 myChannelsData 업데이트
+              const latestChannels = (channelResponse.data.myChannels?.blogs || []).map(blog => {
+                console.log("[ChannelMode] 블로그 데이터 변환:", blog);
+                return {
+                  inputUrl: blog.inputUrl || blog.url,  // inputUrl 우선
+                  url: blog.url || blog.inputUrl,        // 하위 호환성
+                  apiUrl: blog.apiUrl || null,           // RSS URL
+                  gaPropertyId: blog.gaPropertyId || "",
+                  adSenseAccountId: blog.adSenseAccountId || "",
+                  competitors: (blog.competitors || []).map(c => {
+                    return typeof c === 'object' && c.inputUrl ? c.inputUrl : (c || '');
+                  })
+                };
+              });
+              
+              myChannelsData = latestChannels;
+              console.log("[ChannelMode] 채널 데이터 재로드 완료:", myChannelsData.length, "개", myChannelsData);
+              
+              // 메인 채널 목록 업데이트
+              renderMyChannels();
+              
+              // 모달이 열려있으면 채널 데이터를 모달에 표시
+              const modal = container.querySelector("#channel-detail-modal");
+              const isModalOpen = modal && modal.style.display !== "none" && modal.style.display !== "";
+              
+              console.log("[ChannelMode] 모달 상태 확인:", {
+                modal: !!modal,
+                display: modal?.style.display,
+                isModalOpen: isModalOpen,
+                currentEditingIndex: currentEditingIndex,
+                channelsCount: myChannelsData.length
+              });
+              
+              if (isModalOpen) {
+                if (currentEditingIndex >= 0 && currentEditingIndex < myChannelsData.length) {
+                  // 편집 중인 채널이 있고 데이터가 있으면 해당 채널의 최신 데이터로 모달 업데이트
+                  console.log("[ChannelMode] 모달이 열려있음 - 편집 중인 채널 정보 업데이트:", currentEditingIndex);
+                  populateModalWithData(myChannelsData[currentEditingIndex], false);
+                } else if (myChannelsData.length > 0) {
+                  // 편집 중인 채널이 없지만 데이터가 있으면 첫 번째 채널을 모달에 표시
+                  console.log("[ChannelMode] 모달이 열려있음 - 첫 번째 채널 정보 표시");
+                  currentEditingIndex = 0;
+                  populateModalWithData(myChannelsData[0], false);
+                } else {
+                  // 채널 데이터가 없으면 새 채널 추가 모드로 표시
+                  console.log("[ChannelMode] 모달이 열려있지만 채널 데이터 없음 - 새 채널 모드");
+                  currentEditingIndex = -1;
+                  populateModalWithData({ inputUrl: "", url: "", apiUrl: null, gaPropertyId: "", adSenseAccountId: "", competitors: [] }, true);
+                }
+              } else {
+                console.log("[ChannelMode] 모달이 닫혀있음 - 메인 목록만 업데이트");
+              }
+            } else {
+              console.error("[ChannelMode] 채널 데이터 재로드 실패:", channelResponse);
+              // 실패 시 재시도 (사용자 ID가 아직 업데이트되지 않았을 수 있음)
+              setTimeout(() => {
+                console.log("[ChannelMode] 채널 데이터 재로드 재시도");
+                loadChannelDataAfterLogin();
+              }, 1000);
+            }
+          });
   }
 
   // Google 로그아웃 버튼
@@ -524,7 +990,48 @@ export function renderChannelMode(container) {
             const adsenseIdEl = container.querySelector("#modal-adsense-id");
             if (adsenseIdEl) adsenseIdEl.value = "";
             
-            alert("✅ Google 계정 연동이 해제되었습니다.");
+            // 🔥 로그아웃 시 Firebase에서 가져온 채널 정보 완전 초기화
+            console.log("[ChannelMode] Google 로그아웃 - 채널 정보 완전 초기화");
+            
+            // 1. myChannelsData 초기화 (Firebase 데이터이므로)
+            myChannelsData = [];
+            
+            // 2. 모달이 열려있으면 모든 필드 초기화
+            const modal = container.querySelector("#channel-detail-modal");
+            const isModalOpen = modal && modal.style.display !== "none";
+            
+            if (isModalOpen) {
+              // 블로그 URL 초기화 (Firebase에서 가져온 데이터이므로)
+              const blogUrlEl = container.querySelector("#modal-blog-url");
+              if (blogUrlEl) blogUrlEl.value = "";
+              
+              // GA4, AdSense는 이미 위에서 초기화됨
+              
+              // 경쟁사 목록 초기화 (Firebase에서 가져온 데이터이므로)
+              const compListEl = container.querySelector("#modal-competitor-list");
+              if (compListEl) {
+                compListEl.innerHTML = "";
+                // 빈 입력칸 하나만 남김
+                addCompetitorInput("");
+                console.log("[ChannelMode] 경쟁사 목록 초기화 완료");
+              }
+              
+              // 편집 인덱스 초기화
+              currentEditingIndex = -1;
+            }
+            
+            // 3. 메인 채널 목록 초기화 (빈 상태로 렌더링)
+            renderMyChannels();
+            
+            // 4. API 키 필드도 초기화 (선택사항 - 사용자가 입력한 값이므로 유지할 수도 있음)
+            // 필요시 아래 주석 해제
+            // const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
+            // const geminiApiKeyEl = container.querySelector("#gemini-api-key");
+            // if (youtubeApiKeyEl) youtubeApiKeyEl.value = "";
+            // if (geminiApiKeyEl) geminiApiKeyEl.value = "";
+            
+            console.log("[ChannelMode] 모든 채널 정보 초기화 완료");
+            alert("✅ Google 계정 연동이 해제되었습니다. 채널 정보가 초기화되었습니다.");
           }
         });
       }
@@ -590,8 +1097,13 @@ export function renderChannelMode(container) {
         .map(input => input.value.trim())
         .filter(val => val !== ""); // 빈 값 제거
       
+      // RSS URL 생성
+      const apiUrl = resolveBlogUrlToRss(url);
+      
       const newData = {
-        url: url,
+        inputUrl: url,           // 원본 URL (문서 구조와 일치)
+        url: url,                // 하위 호환성 유지
+        apiUrl: apiUrl || null,  // RSS URL (성능 개선)
         gaPropertyId: gaId,
         adSenseAccountId: adsenseId,
         competitors: competitors
@@ -608,28 +1120,36 @@ export function renderChannelMode(container) {
     });
   }
 
+  // Firebase에 채널 저장하는 공통 함수
+  function saveChannelsToFirebase(callback) {
+    const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
+    const geminiApiKeyEl = container.querySelector("#gemini-api-key");
+    const youtubeApiKey = youtubeApiKeyEl ? youtubeApiKeyEl.value.trim() : "";
+    const geminiApiKey = geminiApiKeyEl ? geminiApiKeyEl.value.trim() : "";
+    const payload = {
+      youtubeApiKey,
+      geminiApiKey,
+      myChannels: { blogs: myChannelsData } // 변경된 데이터 구조에 맞게 전송
+    };
+    
+    chrome.runtime.sendMessage({
+      action: "save_channels_and_key",
+      data: payload
+    }, (response) => {
+      if (callback) callback(response);
+    });
+  }
+
   // 최종 저장 버튼 (서버 전송)
   const saveAllBtn = container.querySelector("#save-all-channels-btn");
   if (saveAllBtn) {
     saveAllBtn.addEventListener("click", () => {
-      const youtubeApiKeyEl = container.querySelector("#youtube-api-key");
-      const geminiApiKeyEl = container.querySelector("#gemini-api-key");
-      const youtubeApiKey = youtubeApiKeyEl ? youtubeApiKeyEl.value.trim() : "";
-      const geminiApiKey = geminiApiKeyEl ? geminiApiKeyEl.value.trim() : "";
-      const payload = {
-        youtubeApiKey,
-        geminiApiKey,
-        myChannels: { blogs: myChannelsData } // 변경된 데이터 구조에 맞게 전송
-      };
       // [체크리스트 4-3 최적화] 저장 중 로딩 표시
       saveAllBtn.disabled = true;
       const originalText = saveAllBtn.textContent;
       saveAllBtn.textContent = "저장 중...";
       
-      chrome.runtime.sendMessage({
-        action: "save_channels_and_key",
-        data: payload
-      }, (response) => {
+      saveChannelsToFirebase((response) => {
         saveAllBtn.disabled = false;
         saveAllBtn.textContent = originalText;
         

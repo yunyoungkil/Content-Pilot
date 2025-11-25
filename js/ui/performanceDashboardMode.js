@@ -45,51 +45,94 @@ export function renderPerformanceDashboard(container) {
 /**
  * Firebase에서 성과 데이터 로드
  */
-function loadPerformanceData(container) {
-  // Firebase가 있으면 직접 접근, 없으면 background.js를 통해 데이터 가져오기
-  const firebase = window.firebase;
+function loadPerformanceData(container, retryCount = 0) {
+  const MAX_RETRY_COUNT = 10;
   
-  if (firebase) {
-    // Firebase 직접 접근
-    const userId = 'default_user'; // CONSTANTS.USER_ID와 동일
-    const kanbanRef = firebase.database().ref(`kanban/${userId}`);
-    kanbanRef.once("value", async (snapshot) => {
-      const allCards = snapshot.val() || {};
-      
-      await processPerformanceData(allCards, container);
+  // 인증 상태 확인
+  chrome.storage.local.get(["googleUserEmail"], (authResult) => {
+    // 인증이 완료되지 않았으면 재시도
+    if (!authResult.googleUserEmail) {
+      if (retryCount < MAX_RETRY_COUNT) {
+        console.log(`[PerformanceDashboard] 인증 대기 중... (${retryCount + 1}/${MAX_RETRY_COUNT})`);
+        setTimeout(() => {
+          loadPerformanceData(container, retryCount + 1);
+        }, 1000);
+      } else {
+        console.warn("[PerformanceDashboard] 인증 대기 시간 초과");
+        const contentEl = container.querySelector("#perf-dashboard-content");
+        if (contentEl) {
+          contentEl.innerHTML = '<div class="perf-loading">로그인이 필요합니다.</div>';
+        }
+      }
+      return;
+    }
+    
+    // 인증 완료 후 데이터 로드
+    console.log("[PerformanceDashboard] 인증 확인 완료, 성과 데이터 로드");
+    
+    // Firebase가 있으면 직접 접근, 없으면 background.js를 통해 데이터 가져오기
+    const firebase = window.firebase;
+    
+    if (firebase) {
+      // Firebase 직접 접근 (하위 호환성을 위해 유지하지만 사용하지 않음)
+      // 실제로는 background.js를 통해 데이터를 가져옴
+      console.warn("[PerformanceDashboard] Firebase 직접 접근은 더 이상 사용하지 않습니다.");
+    }
+    
+    // background.js를 통해 데이터 가져오기
+    chrome.runtime.sendMessage({ action: "get_kanban_data" }, (response) => {
+      console.log("[PerformanceDashboard] loadPerformanceData - 응답 받음:", response);
+      if (response && response.success && response.data) {
+        processPerformanceData(response.data || {}, container);
+      } else {
+        console.error("[PerformanceDashboard] 데이터 로드 실패:", response);
+        const contentEl = container.querySelector("#perf-dashboard-content");
+        if (contentEl) {
+          contentEl.innerHTML = '<div class="perf-loading">데이터를 불러올 수 없습니다.</div>';
+        }
+      }
     });
     
-    // [수정] Firebase 직접 접근 시에도 실시간 리스너 등록 (한 번만)
-    if (!window.performanceDashboardListenerAttached) {
-      kanbanRef.on("value", async (snapshot) => {
-        const allCards = snapshot.val() || {};
-        await processPerformanceData(allCards, container);
-      });
-      window.performanceDashboardListenerAttached = true;
-    }
-  } else {
-    // background.js를 통해 데이터 가져오기
-    chrome.runtime.sendMessage({ action: "get_kanban_data" });
+    // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
+    setTimeout(() => {
+      if (allPerformanceData.length === 0) {
+        console.log("[PerformanceDashboard] 콜백 미실행 감지, 재요청");
+        chrome.runtime.sendMessage({ action: "get_kanban_data" });
+      }
+    }, 1000);
     
     // 실시간 업데이트 리스너 등록 (한 번만)
     if (!window.performanceDashboardListenerAttached) {
       chrome.runtime.onMessage.addListener(async (msg) => {
         if (msg.action === "kanban_data_updated") {
+          console.log("[PerformanceDashboard] 칸반 데이터 업데이트 메시지 수신");
+          
+          // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
           const contentEl = container.querySelector("#perf-dashboard-content");
-          if (contentEl) {
-            await processPerformanceData(msg.data || {}, container);
+          if (!contentEl) {
+            console.log("[PerformanceDashboard] 성과 대시보드 모드가 아닌 상태에서 메시지 수신, 무시");
+            return false;
           }
+          
+          await processPerformanceData(msg.data || {}, container);
         }
+        return false;
       });
       window.performanceDashboardListenerAttached = true;
     }
-  }
+  });
 }
 
 /**
  * 성과 데이터 처리
  */
 async function processPerformanceData(allCards, container) {
+  console.log("[PerformanceDashboard] processPerformanceData 호출:", {
+    cardsCount: Object.keys(allCards || {}).length,
+    hasContainer: !!container,
+    hasContentEl: !!container.querySelector("#perf-dashboard-content")
+  });
+  
   allPerformanceData = [];
 
   // [신규] 현재 활성 채널 ID 가져오기
@@ -122,10 +165,28 @@ async function processPerformanceData(allCards, container) {
       
       
       // [신규] 채널 필터링: 현재 활성 채널과 일치하는 카드만 포함
-      if (activeChannelId && card.channelId !== activeChannelId) {
-        // channelId가 undefined인 구버전 데이터는 일단 포함 (호환성)
-        if (card.channelId !== undefined) {
-          continue;
+      if (activeChannelId && card.channelId !== undefined && card.channelId !== null) {
+        // channelId가 있는 경우 - 정확히 일치하거나 URL의 origin이 일치하는지 확인
+        if (card.channelId !== activeChannelId) {
+          // URL의 origin 비교 (칸반과 동일한 로직)
+          try {
+            const cardUrl = atob(card.channelId.replace(/=/g, ''));
+            const activeUrl = atob(activeChannelId.replace(/=/g, ''));
+            
+            const cardUrlObj = new URL(cardUrl);
+            const activeUrlObj = new URL(activeUrl);
+            
+            // origin이 다르면 제외
+            if (cardUrlObj.origin !== activeUrlObj.origin) {
+              continue;
+            }
+            
+            console.log(`[PerformanceDashboard] URL origin 일치: ${cardUrlObj.origin} === ${activeUrlObj.origin}`);
+          } catch (e) {
+            // base64 디코딩 실패 시 정확히 일치하지 않으면 제외
+            console.warn(`[PerformanceDashboard] channelId 디코딩 실패:`, e);
+            continue;
+          }
         }
       }
       
@@ -841,6 +902,27 @@ function triggerConfettiAnimation() {
  * 이벤트 리스너 추가
  */
 function addPerformanceDashboardEventListeners(container) {
+  // 인증 상태 변경 감지하여 데이터 재로드
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.googleUserEmail) {
+      const newValue = changes.googleUserEmail.newValue;
+      const oldValue = changes.googleUserEmail.oldValue;
+      
+      if (newValue && !oldValue) {
+        // 로그인: 새로 로그인한 경우 데이터 로드
+        console.log("[PerformanceDashboard] 로그인 감지, 데이터 재로드");
+        loadPerformanceData(container);
+      } else if (!newValue && oldValue) {
+        // 로그아웃: 로그아웃한 경우 데이터 초기화
+        console.log("[PerformanceDashboard] 로그아웃 감지, 데이터 초기화");
+        allPerformanceData = [];
+        const contentEl = container.querySelector("#perf-dashboard-content");
+        if (contentEl) {
+          contentEl.innerHTML = '<div class="perf-loading">로그인이 필요합니다.</div>';
+        }
+      }
+    }
+  });
   const sortSelect = container.querySelector("#perf-sort-select");
   const refreshBtn = container.querySelector("#perf-refresh-btn");
 
