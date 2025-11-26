@@ -889,6 +889,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             <button id="copy-tags-btn" style="padding: 6px 12px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; font-size: 12px;">📋 복사</button>
           </div>
         </div>
+        <div>
+          <button id="copy-html-btn" style="width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">📄 HTML 복사 (JSON-LD 포함)</button>
+        </div>
       </div>
     `;
     
@@ -938,7 +941,120 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         }
       });
     }
+    
+    // HTML 복사 버튼 이벤트 리스너
+    const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
+    if (copyHtmlBtn) {
+      copyHtmlBtn.addEventListener('click', async () => {
+        try {
+          copyHtmlBtn.disabled = true;
+          copyHtmlBtn.textContent = "⏳ 생성 중...";
+          
+          // 에디터 내용 가져오기
+          const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+          let editorHtml = '';
+          
+          if (editorIframe && editorIframe.contentWindow) {
+            const messageId = `get-content-html-${Date.now()}`;
+            editorHtml = await new Promise((resolve) => {
+              const handler = (event) => {
+                if (event.data.action === "content-response" && event.data.requestId === messageId) {
+                  window.removeEventListener("message", handler);
+                  resolve(event.data.data?.html || "");
+                }
+              };
+              window.addEventListener("message", handler);
+              editorIframe.contentWindow.postMessage({ action: "get-content", requestId: messageId }, "*");
+              setTimeout(() => {
+                window.removeEventListener("message", handler);
+                resolve("");
+              }, 2000);
+            });
+          }
+          
+          // 에디터 내용이 없으면 ideaData.draftContent 사용
+          if (!editorHtml || editorHtml.trim() === '') {
+            if (ideaData && ideaData.draftContent) {
+              // draftContent가 마크다운 형식일 수 있으므로 HTML로 변환
+              editorHtml = marked.parse(ideaData.draftContent);
+            }
+          }
+          
+          // JSON-LD 스키마 가져오기
+          let jsonLdSchema = null;
+          if (ideaData && ideaData.publishInfo && ideaData.publishInfo.jsonLdSchema) {
+            jsonLdSchema = ideaData.publishInfo.jsonLdSchema;
+          } else if (window.__cp_workspace_idea_data && window.__cp_workspace_idea_data.publishInfo && window.__cp_workspace_idea_data.publishInfo.jsonLdSchema) {
+            jsonLdSchema = window.__cp_workspace_idea_data.publishInfo.jsonLdSchema;
+          }
+          
+          // 완전한 HTML 생성
+          const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, seoTitle || ideaData?.title || '');
+          
+          // 클립보드에 복사
+          await navigator.clipboard.writeText(fullHtml);
+          showToast("✅ HTML이 클립보드에 복사되었습니다! (JSON-LD 포함)");
+          copyHtmlBtn.textContent = "📄 HTML 복사 (JSON-LD 포함)";
+        } catch (error) {
+          console.error('[Workspace] HTML 복사 실패:', error);
+          showToast("❌ HTML 복사에 실패했습니다.", 'error');
+          copyHtmlBtn.textContent = "📄 HTML 복사 (JSON-LD 포함)";
+        } finally {
+          copyHtmlBtn.disabled = false;
+        }
+      });
+    }
   });
+}
+
+// 완전한 HTML 생성 함수 (JSON-LD 포함)
+function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
+  // JSON-LD 스크립트 태그 생성
+  let jsonLdScript = '';
+  if (jsonLdSchema) {
+    try {
+      // JSON-LD 스키마에 필수 필드 업데이트 (없으면 추가)
+      const schema = JSON.parse(JSON.stringify(jsonLdSchema)); // 깊은 복사
+      
+      // headline이 없으면 title 사용
+      if (!schema.headline && title) {
+        schema.headline = title;
+      }
+      
+      // datePublished가 없으면 현재 날짜 사용
+      if (!schema.datePublished) {
+        const now = new Date();
+        schema.datePublished = now.toISOString().split('T')[0]; // YYYY-MM-DD 형식
+      }
+      
+      // author가 없으면 기본값 추가
+      if (!schema.author) {
+        schema.author = {
+          "@type": "Person",
+          "name": "Content Pilot"
+        };
+      }
+      
+      jsonLdScript = `\n<script type="application/ld+json">\n${JSON.stringify(schema, null, 2)}\n</script>`;
+    } catch (error) {
+      console.error('[Workspace] JSON-LD 스키마 처리 실패:', error);
+    }
+  }
+  
+  // 완전한 HTML 문서 생성
+  const fullHtml = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title || '제목 없음'}</title>${jsonLdScript}
+</head>
+<body>
+${contentHtml}
+</body>
+</html>`;
+  
+  return fullHtml;
 }
 
 
@@ -2188,8 +2304,8 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             draft: response.draft
                         });
                         
-                        // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo)
-                        if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo) {
+                        // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo, jsonLdSchema)
+                        if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo || response.jsonLdSchema) {
                             const updates = {};
                             const publishInfoUpdates = {};
                             
@@ -2198,6 +2314,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             if (response.seoTitle) updates.seoTitle = response.seoTitle;
                             if (response.seoTitle) publishInfoUpdates.seoTitle = response.seoTitle;
                             if (response.thumbnailInfo) publishInfoUpdates.thumbnailInfo = response.thumbnailInfo;
+                            if (response.jsonLdSchema) publishInfoUpdates.jsonLdSchema = response.jsonLdSchema;
                             
                             if (Object.keys(publishInfoUpdates).length > 0) {
                                 updates.publishInfo = publishInfoUpdates;
@@ -2225,6 +2342,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             if (response.tags) ideaData.publishInfo.tags = response.tags;
                             if (response.thumbnailInfo) ideaData.publishInfo.thumbnailInfo = response.thumbnailInfo;
                             if (response.seoTitle) ideaData.seoTitle = response.seoTitle;
+                            if (response.jsonLdSchema) ideaData.publishInfo.jsonLdSchema = response.jsonLdSchema;
                             
                             // 발행 정보 UI 업데이트 (Firebase 업데이트와 독립적으로)
                             setTimeout(() => {

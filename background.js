@@ -156,6 +156,15 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create("fetch-channels", { delayInMinutes: 1, periodInMinutes: 240 });
     chrome.alarms.create("update-performance-metrics", { delayInMinutes: 5, periodInMinutes: 360 });
     
+    // [실질적 원인 파악] 업데이트 플래그 설정 (content script에서 실제 업데이트 여부 확인용)
+    if (details.reason === "update") {
+      chrome.storage.local.set({
+        extension_updated: true,
+        extension_updated_time: Date.now()
+      });
+      Logger.info("[System] 확장 프로그램 업데이트 플래그 설정");
+    }
+    
     // 기본 설정 초기화
     chrome.storage.local.set({
       isScrapingActive: false,

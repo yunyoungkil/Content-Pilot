@@ -189,7 +189,11 @@ export function shortenLink(url, maxLength = 40) {
 export function showConfirmationToast(message, onConfirm) {
   // 혹시 이전에 떠 있던 확인 창이 있다면 제거
   const existingToast = document.getElementById("cp-confirm-toast");
-  if (existingToast) existingToast.remove();
+  if (existingToast) {
+    Logger.debug("[showConfirmationToast] 기존 토스트 제거");
+    existingToast.remove();
+    return; // 이미 표시 중이면 새로 표시하지 않음
+  }
 
   const toast = document.createElement("div");
   toast.id = "cp-confirm-toast";

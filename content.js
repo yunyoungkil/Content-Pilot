@@ -46,7 +46,9 @@ Logger.debug("🔧 [Content] window.location:", window.location?.href);
 Logger.debug("🔧 [Content] window === window.top:", window === window.top);
 
 // [최적화] Extension context 무효화 감지 - 이벤트 기반 방식 (폴링 제거)
-let reloadPromptShown = false; // 중복 프롬프트 방지
+// sessionStorage를 사용하여 페이지 세션 동안 한 번만 표시
+const RELOAD_PROMPT_KEY = 'cp_reload_prompt_shown';
+const RELOAD_PROMPT_TIMEOUT = 5 * 60 * 1000; // 5분
 
 // 1. 스크랩 기능은 항상 모든 프레임에서 활성화 준비
 setupHighlighter();
@@ -67,27 +69,99 @@ if (window.self === window.top) {
       
       // 2. 연결이 끊어지는 시점(확장 프로그램 업데이트/삭제/비활성화) 감지
       port.onDisconnect.addListener(() => {
-        Logger.warn("[Content Pilot] 확장 프로그램 컨텍스트가 무효화되었습니다. (업데이트 또는 재로드)");
+        // [실질적 원인 파악] chrome.runtime.lastError 확인
+        const error = chrome.runtime.lastError;
         
-        // 3. 사용자에게 새로고침 안내 UI 표시
-        if (reloadPromptShown) {
-          return; // 이미 표시됨
+        // 에러가 있고 "message port closed"가 아닌 경우만 실제 업데이트로 간주
+        // "message port closed"는 정상적인 연결 종료 (서비스 워커 재시작 등)
+        if (error && error.message && !error.message.includes("message port closed")) {
+          Logger.warn("[Content Pilot] 확장 프로그램 연결 오류:", error.message);
+          // 실제 에러인 경우에만 알림 표시
+        } else if (error && error.message && error.message.includes("message port closed")) {
+          // 정상적인 연결 종료는 무시 (서비스 워커가 비활성 상태에서 종료된 경우)
+          Logger.debug("[Content Pilot] 정상적인 연결 종료 (서비스 워커 재시작)");
+          return;
         }
-        reloadPromptShown = true;
         
-        // showConfirmationToast 사용 (utils.js에 있음)
-        if (typeof showConfirmationToast === 'function') {
-          showConfirmationToast(
-            "Content Pilot이 업데이트되었습니다. 원활한 사용을 위해 페이지를 새로고침해주세요.",
-            () => window.location.reload()
-          );
-        } else {
-          // Fallback UI (utils.js가 없을 경우)
-          const msg = "Content Pilot이 업데이트되었습니다.\n기능을 계속 사용하려면 페이지를 새로고침해주세요.";
-          if (confirm(msg)) {
-            window.location.reload();
+        // [실질적 원인 파악] 실제 업데이트 여부 확인
+        // chrome.runtime.id를 확인하여 확장 프로그램이 여전히 존재하는지 확인
+        try {
+          const extensionId = chrome.runtime.id;
+          if (!extensionId) {
+            // 확장 프로그램이 삭제된 경우
+            Logger.warn("[Content Pilot] 확장 프로그램이 삭제되었습니다.");
+            return;
           }
+        } catch (e) {
+          // chrome.runtime.id 접근 실패 = 확장 프로그램이 실제로 제거됨
+          Logger.warn("[Content Pilot] 확장 프로그램이 제거되었습니다.");
+          return;
         }
+        
+        // [실질적 원인 파악] 서비스 워커가 실제로 업데이트되었는지 확인
+        // chrome.storage.local에 업데이트 플래그가 있는지 확인
+        chrome.storage.local.get(['extension_updated'], (result) => {
+          // 업데이트 플래그가 없으면 단순 재시작으로 간주하고 알림 표시하지 않음
+          if (!result.extension_updated) {
+            Logger.debug("[Content Pilot] 서비스 워커 재시작 감지 (실제 업데이트 아님)");
+            return;
+          }
+          
+          // 업데이트 플래그가 있으면 실제 업데이트로 간주
+          Logger.warn("[Content Pilot] 확장 프로그램이 업데이트되었습니다.");
+          
+          // 업데이트 플래그 제거 (한 번만 알림 표시)
+          chrome.storage.local.remove(['extension_updated']);
+          
+          // 3. 중복 프롬프트 방지 (sessionStorage 사용)
+          try {
+            const lastShownTime = sessionStorage.getItem(RELOAD_PROMPT_KEY);
+            const now = Date.now();
+            
+            // 이전에 표시한 시간이 있고, 5분 이내라면 표시하지 않음
+            if (lastShownTime) {
+              const timeSinceLastShown = now - parseInt(lastShownTime, 10);
+              if (timeSinceLastShown < RELOAD_PROMPT_TIMEOUT) {
+                Logger.debug(`[Content Pilot] 새로고침 프롬프트 건너뜀 (${Math.round(timeSinceLastShown / 1000)}초 전에 표시됨)`);
+                return; // 이미 최근에 표시됨
+              }
+            }
+            
+            // 표시 시간 기록
+            sessionStorage.setItem(RELOAD_PROMPT_KEY, now.toString());
+          } catch (storageError) {
+            // sessionStorage 접근 실패 시에도 계속 진행 (private browsing 등)
+            Logger.warn("[Content Pilot] sessionStorage 접근 실패, 프롬프트 표시 계속:", storageError);
+          }
+          
+          // 4. 사용자에게 새로고침 안내 UI 표시
+          // showConfirmationToast 사용 (utils.js에 있음)
+          if (typeof showConfirmationToast === 'function') {
+            showConfirmationToast(
+              "Content Pilot이 업데이트되었습니다. 원활한 사용을 위해 페이지를 새로고침해주세요.",
+              () => {
+                // 새로고침 시 sessionStorage도 초기화
+                try {
+                  sessionStorage.removeItem(RELOAD_PROMPT_KEY);
+                } catch (e) {
+                  // 무시
+                }
+                window.location.reload();
+              }
+            );
+          } else {
+            // Fallback UI (utils.js가 없을 경우)
+            const msg = "Content Pilot이 업데이트되었습니다.\n기능을 계속 사용하려면 페이지를 새로고침해주세요.";
+            if (confirm(msg)) {
+              try {
+                sessionStorage.removeItem(RELOAD_PROMPT_KEY);
+              } catch (e) {
+                // 무시
+              }
+              window.location.reload();
+            }
+          }
+        });
       });
       
       Logger.info("[Content Pilot] 확장 프로그램 연결 모니터링 시작");
@@ -95,6 +169,37 @@ if (window.self === window.top) {
     } catch (error) {
       // 이미 연결이 끊어진 상태에서 진입했을 경우
       Logger.error("[Content Pilot] 초기 연결 실패 (이미 무효화됨):", error);
+      
+      // 연결 실패 시에도 중복 방지 체크 후 프롬프트 표시
+      try {
+        const lastShownTime = sessionStorage.getItem(RELOAD_PROMPT_KEY);
+        const now = Date.now();
+        
+        if (lastShownTime) {
+          const timeSinceLastShown = now - parseInt(lastShownTime, 10);
+          if (timeSinceLastShown < RELOAD_PROMPT_TIMEOUT) {
+            return; // 이미 최근에 표시됨
+          }
+        }
+        
+        sessionStorage.setItem(RELOAD_PROMPT_KEY, now.toString());
+        
+        if (typeof showConfirmationToast === 'function') {
+          showConfirmationToast(
+            "Content Pilot이 업데이트되었습니다. 원활한 사용을 위해 페이지를 새로고침해주세요.",
+            () => {
+              try {
+                sessionStorage.removeItem(RELOAD_PROMPT_KEY);
+              } catch (e) {
+                // 무시
+              }
+              window.location.reload();
+            }
+          );
+        }
+      } catch (storageError) {
+        Logger.warn("[Content Pilot] 연결 실패 후 프롬프트 표시 실패:", storageError);
+      }
     }
   }
   

@@ -159,6 +159,25 @@ export async function generateDraftFromIdea(ideaData) {
     const userId = await getCurrentUserId();
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(' ')} ${ideaData.description || ''}`;
     const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
+    
+    // 4-B. 채널 정보 가져오기 (JSON-LD용)
+    let channelInfo = null;
+    try {
+      const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+      if (activeChannelId) {
+        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+        const channelsData = channelsSnap?.val() || {};
+        const myBlogs = channelsData.myChannels?.blogs || [];
+        const myYoutubes = channelsData.myChannels?.youtubes || [];
+        const allChannels = [...myBlogs, ...myYoutubes];
+        channelInfo = allChannels.find(ch => {
+          const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
+          return chId === activeChannelId;
+        });
+      }
+    } catch (error) {
+      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
+    }
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -428,7 +447,51 @@ export async function generateDraftFromIdea(ideaData) {
 
               **중요**: 제휴 링크는 글의 품질을 해치지 않으면서도 자연스럽게 수익화를 달성하는 것이 목표입니다. 무리하게 삽입하지 마세요.
             ` : ''}
-            10. **스마트 썸네일 A/B 테스팅 정보 생성 (매우 중요)**: 
+            12. **SEO용 JSON-LD 스키마 마크업 생성 (필수)**:
+               - 구글 검색 엔진이 이 글을 더 잘 이해하고 상위 노출할 수 있도록, 글의 유형에 맞는 JSON-LD 구조화된 데이터를 생성해주세요.
+               - **기본 유형**: 'BlogPosting' 스키마를 기본으로 사용하세요.
+               - **리뷰 글인 경우**: 제품이나 장소를 평가하는 내용이라면 'Review' 스키마를 중첩하거나 사용하세요.
+               - **FAQ가 포함된 경우**: 본문에 Q&A 섹션이 있다면 'FAQPage' 스키마를 포함하세요.
+               - **필수 필드**: 
+                 * headline: 위에서 생성한 SEO 최적화된 실제 초안 제목을 사용하세요. (아이디어 제목이 아닌, 실제 초안의 h1 제목)
+                 * description: 이 글의 핵심 내용을 150-200자 내외로 요약한 설명을 작성하세요. 검색 결과에 표시될 수 있는 중요한 필드입니다.
+                 * author: {
+                     "@type": "Person",
+                     "name": "${channelInfo?.inputUrl ? new URL(channelInfo.inputUrl).hostname.replace('www.', '') : 'Content Pilot'}"
+                   }
+                 * datePublished: 현재 날짜를 YYYY-MM-DD 형식으로 작성하세요. (예: ${new Date().toISOString().split('T')[0]})
+                 * image: 대표 이미지 URL을 작성하세요. 실제 이미지가 있다면 그 URL을, 없다면 채널의 대표 이미지나 기본 이미지 URL을 사용하세요. 플레이스홀더가 아닌 실제 사용 가능한 URL을 작성해주세요.
+                 * url (선택): 발행될 예상 URL이 있다면 포함하세요. (없으면 생략 가능)
+               - **추가 권장 필드**:
+                 * mainEntityOfPage: {
+                     "@type": "WebPage",
+                     "@id": "발행될 예상 URL (없으면 생략)"
+                   }
+                 * publisher: {
+                     "@type": "Organization",
+                     "name": "${channelInfo?.inputUrl ? new URL(channelInfo.inputUrl).hostname.replace('www.', '') : 'Content Pilot'}",
+                     "logo": {
+                       "@type": "ImageObject",
+                       "url": "채널 로고 URL (없으면 생략 가능)"
+                     }
+                   }
+               - **출력 형식**: 반드시 아래 태그로 감싸서 출력해주세요.
+                 <JSON-LD>
+                 {
+                   "@context": "https://schema.org",
+                   "@type": "BlogPosting",
+                   "headline": "SEO 최적화된 제목",
+                   "description": "150-200자 내외의 핵심 요약",
+                   "author": {
+                     "@type": "Person",
+                     "name": "작성자명 또는 채널명"
+                   },
+                   "datePublished": "YYYY-MM-DD",
+                   "image": "실제 이미지 URL",
+                   ...
+                 }
+                 </JSON-LD>
+            13. **스마트 썸네일 A/B 테스팅 정보 생성 (매우 중요)**: 
 
               초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
               
@@ -554,7 +617,30 @@ export async function generateDraftFromIdea(ideaData) {
     cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
     cleanedDraft = cleanedDraft.trim();
     
-    // [신규] 1-1. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
+    // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
+    // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
+    let jsonLdSchema = null;
+    // cleanedDraft에서 먼저 찾고, 없으면 rawDraft에서 찾기
+    const jsonLdMatch = cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) || rawDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i);
+    
+    if (jsonLdMatch && jsonLdMatch[1]) {
+      try {
+        // JSON 파싱 시도
+        jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
+        
+        // 본문에서 태그 제거 (사용자에게는 보이지 않아야 함)
+        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
+        
+        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)');
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] JSON-LD 파싱 실패:', e);
+        // 파싱 실패 시 null 반환 (본문에는 영향 없음)
+        // 태그는 제거
+        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
+      }
+    }
+    
+    // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
     let thumbnailCandidates = [];
     const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
     
@@ -631,6 +717,84 @@ export async function generateDraftFromIdea(ideaData) {
     // seoTitle이 여전히 없으면 기본 title 사용
     if (!seoTitle) {
       seoTitle = title;
+    }
+    
+    // [신규] 4-1. JSON-LD 스키마 후처리 (seoTitle 추출 후 실제 데이터로 보완)
+    if (jsonLdSchema) {
+      try {
+        const now = new Date();
+        const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+        
+        // headline이 없거나 비어있으면 seoTitle 사용
+        if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === '') {
+          jsonLdSchema.headline = seoTitle || ideaData.title || '';
+        }
+        
+        // description이 없거나 비어있으면 ideaData.description 사용
+        if (!jsonLdSchema.description || jsonLdSchema.description.trim() === '') {
+          jsonLdSchema.description = ideaData.description || '';
+          // description이 너무 길면 200자로 제한
+          if (jsonLdSchema.description.length > 200) {
+            jsonLdSchema.description = jsonLdSchema.description.substring(0, 197) + '...';
+          }
+        }
+        
+        // datePublished가 없거나 잘못된 형식이면 현재 날짜 사용
+        if (!jsonLdSchema.datePublished || !/^\d{4}-\d{2}-\d{2}$/.test(jsonLdSchema.datePublished)) {
+          jsonLdSchema.datePublished = today;
+        }
+        
+        // author가 없거나 비어있으면 채널 정보 또는 기본값 사용
+        if (!jsonLdSchema.author || !jsonLdSchema.author.name || jsonLdSchema.author.name === 'Content Pilot') {
+          const authorName = channelInfo?.inputUrl 
+            ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+            : 'Content Pilot';
+          jsonLdSchema.author = {
+            "@type": "Person",
+            "name": authorName
+          };
+        }
+        
+        // image가 플레이스홀더이거나 없으면 채널 정보 또는 제거
+        if (!jsonLdSchema.image || 
+            jsonLdSchema.image === 'https://example.com/image.jpg' ||
+            jsonLdSchema.image.includes('example.com')) {
+          // 채널의 대표 이미지가 있으면 사용, 없으면 제거 (선택 필드)
+          if (channelInfo?.thumbnail || channelInfo?.logo) {
+            jsonLdSchema.image = channelInfo.thumbnail || channelInfo.logo;
+          } else {
+            // image 필드를 제거 (Google은 선택 필드로 처리)
+            delete jsonLdSchema.image;
+          }
+        }
+        
+        // url이 없고 publishInfo에 permalink가 있으면 조합
+        if (!jsonLdSchema.url && ideaData.publishInfo?.permalink && channelInfo?.inputUrl) {
+          try {
+            const channelUrl = new URL(channelInfo.inputUrl);
+            const isTistory = channelUrl.hostname.includes('tistory.com');
+            if (isTistory) {
+              jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
+            } else {
+              jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
+            }
+          } catch (e) {
+            // URL 조합 실패 시 무시
+          }
+        }
+        
+        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 후처리 완료', {
+          headline: jsonLdSchema.headline?.substring(0, 50),
+          hasDescription: !!jsonLdSchema.description,
+          datePublished: jsonLdSchema.datePublished,
+          author: jsonLdSchema.author?.name,
+          hasImage: !!jsonLdSchema.image,
+          hasUrl: !!jsonLdSchema.url
+        });
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] JSON-LD 후처리 실패:', e);
+        // 후처리 실패해도 기본 스키마는 유지
+      }
     }
     
     // 5. 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
@@ -750,7 +914,8 @@ export async function generateDraftFromIdea(ideaData) {
       permalink: permalink,
       tags: tagsForPublish,
       seoTitle: seoTitle, // SEO 최적화된 제목
-      thumbnailInfo: thumbnailCandidates // 썸네일 정보 (배열 형태)
+      thumbnailInfo: thumbnailCandidates, // 썸네일 정보 (배열 형태)
+      jsonLdSchema: jsonLdSchema // [신규] JSON-LD 구조화된 데이터
     };
 
   } catch (e) {

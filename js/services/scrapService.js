@@ -1,8 +1,8 @@
 // js/services/scrapService.js
 // 스크랩 관련 서비스
 
-import { getDb, cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { ref, get, set, remove, update, push } from './firebaseService.js';
+import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
+import { get, remove, push } from './firebaseService.js';
 import { Logger } from '../utils.js';
 
 /**
@@ -43,9 +43,9 @@ export async function saveScrapElement(data, channelId = null) {
 
     // Firebase에 저장
     const userId = await getCurrentUserId();
-    const scrapRef = push(ref(getDb(), `scraps/${userId}`));
+    const scrapPath = `scraps/${userId}`;
+    const scrapRef = await push(scrapPath, cleanDataForFirebase(scrapPayload));
     const scrapId = scrapRef.key;
-    await set(scrapRef, cleanDataForFirebase(scrapPayload));
 
     Logger.info(`[saveScrapElement] 스크랩 저장 완료 - scrapId: ${scrapId}`);
     return { 
@@ -67,7 +67,8 @@ export async function saveScrapElement(data, channelId = null) {
 export async function getFirebaseScraps(targetChannelId = null) {
   try {
     const userId = await getCurrentUserId();
-    const snap = await get(ref(getDb(), `scraps/${userId}`));
+    const scrapPath = `scraps/${userId}`;
+    const snap = await get(scrapPath);
     const val = snap?.val() || {};
     const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
     
@@ -155,7 +156,8 @@ export async function getScrapDetail(scrapId, channelId = null) {
   
   try {
     const userId = await getCurrentUserId();
-    const scrapSnap = await get(ref(getDb(), `scraps/${userId}/${scrapId}`));
+    const scrapPath = `scraps/${userId}/${scrapId}`;
+    const scrapSnap = await get(scrapPath);
     const scrapData = scrapSnap?.val();
     
     if (!scrapData) {
@@ -214,8 +216,8 @@ export async function saveEntireAnalysis(analysisContent) {
 
     const cleanedScrapPayload = cleanDataForFirebase(scrapPayload);
     const userId = await getCurrentUserId();
-    const scrapRef = push(ref(getDb(), `scraps/${userId}`));
-    await set(scrapRef, cleanedScrapPayload);
+    const scrapPath = `scraps/${userId}`;
+    await push(scrapPath, cleanedScrapPayload);
     
     Logger.info("AI 분석 리포트가 스크랩북에 저장되었습니다.");
     return { success: true, message: "AI 분석 리포트가 저장되었습니다." };
@@ -237,7 +239,8 @@ export async function deleteScrap(scrapId) {
 
   try {
     const userId = await getCurrentUserId();
-    await remove(ref(getDb(), `scraps/${userId}/${scrapId}`));
+    const scrapPath = `scraps/${userId}/${scrapId}`;
+    await remove(scrapPath);
     
     Logger.info(`[deleteScrap] 스크랩 삭제 완료 - scrapId: ${scrapId}`);
     return { success: true };
