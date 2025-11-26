@@ -43,8 +43,10 @@
     "client_id": "670273757107-180d6ap7makb2ch4nttomglavsgmkmtq.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
       "https://www.googleapis.com/auth/analytics.readonly",
-      "https://www.googleapis.com/auth/adsense.readonly"
+      "https://www.googleapis.com/auth/adsense.readonly",
+      "https://www.googleapis.com/auth/webmasters.readonly"
     ]
   },
   "web_accessible_resources": [

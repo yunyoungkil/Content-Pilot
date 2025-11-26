@@ -540,20 +540,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const cardSnap = await get(ref(getDb(), cardPath));
         const existingCard = cardSnap?.val() || {};
 
-        // [수정] 경쟁사 포스트인지 확인
-        const isCompetitorPost =
-          existingCard.origin?.type === "competitor_post";
-
-        // publishedUrl과 performanceTracked 업데이트 (경쟁사 포스트는 성과 추적 비활성화)
+        // [수정] 벤치마킹(경쟁사 포스트)이라도 발행 URL을 연결하면 '내 글'로 간주하여 추적 활성화
+        // performanceTracked를 무조건 true로 설정
         await update(ref(getDb(), cardPath), {
           publishedUrl: url,
-          performanceTracked: !isCompetitorPost, // 경쟁사 포스트는 false, 내 포스트는 true
+          performanceTracked: true, // ✅ 항상 추적 활성화
         });
 
         Logger.biz(
-          `✅ [link_published_url] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료${
-            isCompetitorPost ? " (경쟁사 포스트 - 성과 추적 비활성화)" : ""
-          }`
+          `✅ [link_published_url] 아이디어 카드(${cardId})와 URL(${url}) 연결 완료 (성과 추적 시작)`
         );
 
         // URL 인덱스 업데이트
@@ -572,39 +567,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // 인덱스 업데이트 실패해도 연결은 성공으로 처리
         }
 
-        // [수정] 경쟁사 포스트가 아닌 경우에만 성과 추적 실행
-        if (!isCompetitorPost) {
-          // GA4 데이터 수집 시작 (비동기로 실행, 완료를 기다리지 않음)
-          Logger.info(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 시작: ${url}`);
-          updateSinglePerformanceMetric({
-            id: cardId,
-            path: cardPath,
-            url: url,
+        // [수정] 조건문 제거: 모든 경우에 성과 추적 실행
+        Logger.info(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 시작: ${url}`);
+        updateSinglePerformanceMetric({
+          id: cardId,
+          path: cardPath,
+          url: url,
+        })
+          .then(() => {
+            Logger.biz(`✅ [GA4] 카드 ${cardId}의 GA4 데이터 수집 완료`);
           })
-            .then(() => {
-              Logger.biz(`✅ [GA4] 카드 ${cardId}의 GA4 데이터 수집 완료`);
-            })
-            .catch((error) => {
-              Logger.error(
-                `[GA4] 카드 ${cardId}의 GA4 데이터 수집 실패:`,
-                error
-              );
-            });
+          .catch((error) => {
+            Logger.error(`[GA4] 카드 ${cardId}의 GA4 데이터 수집 실패:`, error);
+          });
 
-          // 해당 카드의 AdSense 등록 상태 확인 (단일 카드 모드)
-          try {
-            await checkAdSenseRegistrationStatus(null, url, cardId, status);
-            Logger.info(`[AdSense] 카드 ${cardId}의 등록 상태 확인 완료`);
-          } catch (error) {
-            Logger.warn(
-              `[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`,
-              error
-            );
-          }
-        } else {
-          Logger.info(
-            `[link_published_url] 경쟁사 포스트이므로 성과 추적을 건너뜁니다: ${cardId}`
-          );
+        // 해당 카드의 AdSense 등록 상태 확인 (단일 카드 모드)
+        try {
+          await checkAdSenseRegistrationStatus(null, url, cardId, status);
+          Logger.info(`[AdSense] 카드 ${cardId}의 등록 상태 확인 완료`);
+        } catch (error) {
+          Logger.warn(`[AdSense] 카드 ${cardId}의 등록 상태 확인 실패:`, error);
         }
 
         // UI 갱신을 위해 최신 데이터 전송
