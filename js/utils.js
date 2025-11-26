@@ -192,7 +192,7 @@ export function showConfirmationToast(message, onConfirm) {
   if (existingToast) {
     Logger.debug("[showConfirmationToast] 기존 토스트 제거");
     existingToast.remove();
-    return; // 이미 표시 중이면 새로 표시하지 않음
+    // 기존 토스트를 제거한 후에도 계속 진행하여 새 메시지 표시
   }
 
   const toast = document.createElement("div");

@@ -100,7 +100,7 @@ if (window.self === window.top) {
         
         // [실질적 원인 파악] 서비스 워커가 실제로 업데이트되었는지 확인
         // chrome.storage.local에 업데이트 플래그가 있는지 확인
-        chrome.storage.local.get(['extension_updated'], (result) => {
+        chrome.storage.local.get(['extension_updated', 'extension_updated_time'], (result) => {
           // 업데이트 플래그가 없으면 단순 재시작으로 간주하고 알림 표시하지 않음
           if (!result.extension_updated) {
             Logger.debug("[Content Pilot] 서비스 워커 재시작 감지 (실제 업데이트 아님)");
@@ -109,9 +109,10 @@ if (window.self === window.top) {
           
           // 업데이트 플래그가 있으면 실제 업데이트로 간주
           Logger.warn("[Content Pilot] 확장 프로그램이 업데이트되었습니다.");
+          Logger.debug("[Content Pilot] 업데이트 시간:", result.extension_updated_time ? new Date(result.extension_updated_time).toISOString() : '없음');
           
           // 업데이트 플래그 제거 (한 번만 알림 표시)
-          chrome.storage.local.remove(['extension_updated']);
+          chrome.storage.local.remove(['extension_updated', 'extension_updated_time']);
           
           // 3. 중복 프롬프트 방지 (sessionStorage 사용)
           try {
@@ -129,6 +130,7 @@ if (window.self === window.top) {
             
             // 표시 시간 기록
             sessionStorage.setItem(RELOAD_PROMPT_KEY, now.toString());
+            Logger.debug("[Content Pilot] 새로고침 프롬프트 표시 시작");
           } catch (storageError) {
             // sessionStorage 접근 실패 시에도 계속 진행 (private browsing 등)
             Logger.warn("[Content Pilot] sessionStorage 접근 실패, 프롬프트 표시 계속:", storageError);
@@ -137,6 +139,7 @@ if (window.self === window.top) {
           // 4. 사용자에게 새로고침 안내 UI 표시
           // showConfirmationToast 사용 (utils.js에 있음)
           if (typeof showConfirmationToast === 'function') {
+            Logger.debug("[Content Pilot] showConfirmationToast 함수 호출");
             showConfirmationToast(
               "Content Pilot이 업데이트되었습니다. 원활한 사용을 위해 페이지를 새로고침해주세요.",
               () => {
@@ -150,6 +153,7 @@ if (window.self === window.top) {
               }
             );
           } else {
+            Logger.warn("[Content Pilot] showConfirmationToast 함수를 찾을 수 없음, fallback UI 사용");
             // Fallback UI (utils.js가 없을 경우)
             const msg = "Content Pilot이 업데이트되었습니다.\n기능을 계속 사용하려면 페이지를 새로고침해주세요.";
             if (confirm(msg)) {
@@ -264,14 +268,17 @@ if (window.self === window.top) {
         windowLocation = "cross-origin";
       }
       
-      console.log("📨 [Content] 메시지 수신:", {
-        action: event.data.action,
-        origin: event.origin,
-        source: event.source,
-        windowLocation: windowLocation,
-        isTopWindow: window === window.top,
-        sourceWindow: sourceWindowLocation
-      });
+      // 디버그 모드에서만 상세 로그 출력
+      if (Logger.isDebugMode()) {
+        Logger.debug("📨 [Content] 메시지 수신:", {
+          action: event.data.action,
+          origin: event.origin,
+          source: event.source,
+          windowLocation: windowLocation,
+          isTopWindow: window === window.top,
+          sourceWindow: sourceWindowLocation
+        });
+      }
     }
     
     if (event.data && event.data.action === "cp_show_preview") {
@@ -283,12 +290,13 @@ if (window.self === window.top) {
     
     // TUI 에디터 열기 요청 처리
     if (event.data && event.data.action === "cp_open_tui_editor") {
-      console.log("🏢 [Content] ========================================");
-      console.log("🏢 [Content] 📨 cp_open_tui_editor 메시지 수신!");
-      console.log("🏢 [Content] ========================================");
-      console.log("📦 [Content] 메시지 데이터:", event.data);
-      console.log("🔍 [Content] 이벤트 소스:", event.source);
-      console.log("🔍 [Content] 이벤트 origin:", event.origin);
+      // 디버그 모드에서만 상세 로그 출력
+      if (Logger.isDebugMode()) {
+        Logger.debug("🏢 [Content] 📨 cp_open_tui_editor 메시지 수신!");
+        Logger.debug("📦 [Content] 메시지 데이터:", event.data);
+        Logger.debug("🔍 [Content] 이벤트 소스:", event.source);
+        Logger.debug("🔍 [Content] 이벤트 origin:", event.origin);
+      }
       
       // currentImageUrl 또는 imageUrl 둘 다 처리 (호환성)
       const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
@@ -476,41 +484,46 @@ if (window.self === window.top) {
   
   // 메시지 리스너 등록 (모든 프레임에서)
   window.addEventListener("message", contentMessageListener);
-  console.log("✅ [Content] 전역 메시지 리스너 등록 완료");
-  try {
-    console.log("🔍 [Content] 리스너 등록 위치:", window.location.href);
-  } catch (e) {
-    console.log("🔍 [Content] 리스너 등록 위치: cross-origin (접근 불가)");
+  // 디버그 모드에서만 상세 로그 출력
+  if (Logger.isDebugMode()) {
+    Logger.debug("✅ [Content] 전역 메시지 리스너 등록 완료");
+    try {
+      Logger.debug("🔍 [Content] 리스너 등록 위치:", window.location.href);
+    } catch (e) {
+      Logger.debug("🔍 [Content] 리스너 등록 위치: cross-origin (접근 불가)");
+    }
+    Logger.debug("🔍 [Content] window === window.top:", window === window.top);
   }
-  console.log("🔍 [Content] window === window.top:", window === window.top);
 }
 
 // 메시지 리스너는 모든 프레임에서 등록 (위의 if 블록 밖에서도)
 // 하지만 contentMessageListener는 if 블록 안에서 정의되었으므로, 
 // 모든 프레임에서 사용할 수 있도록 블록 밖에서도 정의해야 함
 const globalContentMessageListener = (event) => {
-  // 디버깅: 모든 메시지 로깅
+  // 디버깅: 모든 메시지 로깅 (디버그 모드에서만)
   if (event.data && typeof event.data === 'object' && event.data.action) {
-    console.log("📨 [Content] 메시지 수신 (전역):", {
-      action: event.data.action,
-      origin: event.origin,
-      source: event.source,
-      windowLocation: (() => {
-        try {
-          return window.location.href;
-        } catch (e) {
-          return "cross-origin";
-        }
-      })(),
-      isTopWindow: window === window.top,
-      sourceWindow: (() => {
-        try {
-          return event.source?.location?.href || "unknown";
-        } catch (e) {
-          return "cross-origin";
-        }
-      })()
-    });
+    if (Logger.isDebugMode()) {
+      Logger.debug("📨 [Content] 메시지 수신 (전역):", {
+        action: event.data.action,
+        origin: event.origin,
+        source: event.source,
+        windowLocation: (() => {
+          try {
+            return window.location.href;
+          } catch (e) {
+            return "cross-origin";
+          }
+        })(),
+        isTopWindow: window === window.top,
+        sourceWindow: (() => {
+          try {
+            return event.source?.location?.href || "unknown";
+          } catch (e) {
+            return "cross-origin";
+          }
+        })()
+      });
+    }
   }
   
   if (event.data && event.data.action === "cp_show_preview") {
@@ -522,12 +535,13 @@ const globalContentMessageListener = (event) => {
   
   // TUI 에디터 열기 요청 처리
   if (event.data && event.data.action === "cp_open_tui_editor") {
-    console.log("🏢 [Content] ========================================");
-    console.log("🏢 [Content] 📨 cp_open_tui_editor 메시지 수신! (전역 리스너)");
-    console.log("🏢 [Content] ========================================");
-    console.log("📦 [Content] 메시지 데이터:", event.data);
-    console.log("🔍 [Content] 이벤트 소스:", event.source);
-    console.log("🔍 [Content] 이벤트 origin:", event.origin);
+    // 디버그 모드에서만 상세 로그 출력
+    if (Logger.isDebugMode()) {
+      Logger.debug("🏢 [Content] 📨 cp_open_tui_editor 메시지 수신! (전역 리스너)");
+      Logger.debug("📦 [Content] 메시지 데이터:", event.data);
+      Logger.debug("🔍 [Content] 이벤트 소스:", event.source);
+      Logger.debug("🔍 [Content] 이벤트 origin:", event.origin);
+    }
     
     // currentImageUrl 또는 imageUrl 둘 다 처리 (호환성)
     const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
@@ -715,9 +729,16 @@ const globalContentMessageListener = (event) => {
 
 // 모든 프레임에서 전역 메시지 리스너 등록
 window.addEventListener("message", globalContentMessageListener);
-console.log("✅ [Content] 전역 메시지 리스너 등록 완료 (모든 프레임)");
-console.log("🔍 [Content] 리스너 등록 위치:", window.location.href);
-console.log("🔍 [Content] window === window.top:", window === window.top);
+// 디버그 모드에서만 상세 로그 출력
+if (Logger.isDebugMode()) {
+  Logger.debug("✅ [Content] 전역 메시지 리스너 등록 완료 (모든 프레임)");
+  try {
+    Logger.debug("🔍 [Content] 리스너 등록 위치:", window.location.href);
+  } catch (e) {
+    Logger.debug("🔍 [Content] 리스너 등록 위치: cross-origin (접근 불가)");
+  }
+  Logger.debug("🔍 [Content] window === window.top:", window === window.top);
+}
 
 // Alt 키 토글 리스너 (최상위 프레임에서만)
 if (window.self === window.top) {

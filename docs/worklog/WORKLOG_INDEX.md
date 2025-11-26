@@ -16,6 +16,7 @@
 ### 3. 버그 해결 로그
 - **[BUG_FIX_LOG.md](./BUG_FIX_LOG.md)**: 버그 해결 이력 및 해결 방법
 - **[ERROR_PATTERNS.md](./ERROR_PATTERNS.md)**: 자주 발생하는 에러 패턴 및 해결 방법
+- **[SHADOW_DOM_STYLE_ISOLATION.md](./SHADOW_DOM_STYLE_ISOLATION.md)**: Shadow DOM 스타일 격리 가이드 및 해결 방법
 
 ### 4. 작업 문서화 시스템
 - **[WORK_SESSION_LOG.md](./WORK_SESSION_LOG.md)**: 작업 세션 추적 및 기록
@@ -45,6 +46,11 @@
 - **성과 데이터 수집**: [PROGRAM_LOGIC.md](./PROGRAM_LOGIC.md#성과-데이터-수집)
 
 ### 주요 버그 해결
+- **대시보드 포스팅 리스트 태그 생성 문제**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#대시보드-포스팅-리스트-태그-생성-문제) / [태그 생성 로직](./DASHBOARD_TAG_GENERATION_LOGIC.md)
+- **Shadow DOM 스타일 격리 문제**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#shadow-dom-스타일-격리-문제-외부-페이지-스타일-침투) / [상세 가이드](./SHADOW_DOM_STYLE_ISOLATION.md)
+- **HTML 복사 기능 1회성 문제**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#html-복사-기능-json-ld-포함-1회성-문제)
+- **퍼머링크 태그 1회성 문제**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#발행-정보-퍼머링크-태그-1회성-적용-문제)
+- **스크랩 삭제 기능 문제**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#스크랩-삭제-기능이-작동하지-않는-문제)
 - **workspace 객체 누락**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#workspace-객체-누락-버그)
 - **브리핑 생성 오류**: [BUG_FIX_LOG.md](./BUG_FIX_LOG.md#브리핑-생성-오류)
 

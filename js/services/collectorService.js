@@ -184,8 +184,15 @@ async function processRssItem(itemText, sourceId, channelType) {
   const parsed = await parseBlogPage(fullLink);
   if (!parsed.success) return;
 
-  // RSS 피드에서 태그를 찾지 못했으면 본문에서 추출 시도
+  // RSS 피드에서 태그를 찾지 못했으면 다른 소스에서 추출 시도
   let finalTags = tags.length > 0 ? tags : null;
+  
+  // 1. HTML 메타 태그에서 태그 추출 (우선순위 높음)
+  if (!finalTags && parsed.metaTags && Array.isArray(parsed.metaTags) && parsed.metaTags.length > 0) {
+    finalTags = parsed.metaTags;
+  }
+  
+  // 2. 본문에서 키워드 추출 (메타 태그도 없을 때만)
   if (!finalTags && parsed.cleanText) {
     const extractedTags = await extractKeywords(parsed.cleanText);
     finalTags = extractedTags && extractedTags.length > 0 ? extractedTags : null;
@@ -234,6 +241,68 @@ export async function fetchRssFeed(url, channelType) {
     });
 
     const text = await res.text();
+    
+    // RSS 피드에서 채널 이름 추출
+    let channelTitle = null;
+    
+    // 1단계: <channel> 태그 안에서 title 찾기 (RSS 2.0 방식)
+    const channelBlockMatch = text.match(/<channel>([\s\S]*?)<\/channel>/);
+    if (channelBlockMatch && channelBlockMatch[1]) {
+      const titleInChannelMatch = channelBlockMatch[1].match(
+        /<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/
+      );
+      if (titleInChannelMatch && titleInChannelMatch[1]) {
+        channelTitle = titleInChannelMatch[1].trim();
+      }
+    }
+    
+    // 2단계: 1단계 실패 시, 첫 게시물(<item> 또는 <entry>) 이전의 <title> 찾기 (Atom 방식)
+    if (!channelTitle) {
+      const firstItemMatch = text.match(/<(item|entry)>/);
+      if (firstItemMatch) {
+        const beforeFirstItem = text.substring(0, firstItemMatch.index);
+        const titleMatches = beforeFirstItem.matchAll(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/gi);
+        for (const match of titleMatches) {
+          if (match[1] && match[1].trim()) {
+            channelTitle = match[1].trim();
+            break;
+          }
+        }
+      }
+    }
+    
+    // 3단계: 여전히 없으면 <feed> 태그의 title 찾기 (Atom)
+    if (!channelTitle) {
+      const feedMatch = text.match(/<feed[^>]*>([\s\S]*?)<\/feed>/);
+      if (feedMatch && feedMatch[1]) {
+        const titleInFeedMatch = feedMatch[1].match(
+          /<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/
+        );
+        if (titleInFeedMatch && titleInFeedMatch[1]) {
+          channelTitle = titleInFeedMatch[1].trim();
+        }
+      }
+    }
+    
+    // 채널 이름이 있으면 메타데이터에 저장
+    if (channelTitle) {
+      await update(metaRef, {
+        title: channelTitle,
+        lastEtag: res.headers.get('ETag'),
+        lastModified: res.headers.get('Last-Modified'),
+        fetchedAt: Date.now(),
+        source: url
+      });
+    } else {
+      // 채널 이름이 없어도 기존 메타데이터 업데이트
+      await update(metaRef, {
+        lastEtag: res.headers.get('ETag'),
+        lastModified: res.headers.get('Last-Modified'),
+        fetchedAt: Date.now(),
+        source: url
+      });
+    }
+    
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
     await limitConcurrency(items.slice(0, 10), item => processRssItem(item, sourceId, channelType));
   } catch (e) { 
@@ -534,7 +603,13 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
       const parsed = await parseBlogPage(url, html);
       if (!parsed.success) throw new Error(parsed.error || "파싱 실패");
 
-      const tags = await extractKeywords(parsed.cleanText);
+      // 태그 추출 우선순위: 메타 태그 > 본문 키워드 추출
+      let tags = null;
+      if (parsed.metaTags && Array.isArray(parsed.metaTags) && parsed.metaTags.length > 0) {
+        tags = parsed.metaTags;
+      } else if (parsed.cleanText) {
+        tags = await extractKeywords(parsed.cleanText);
+      }
       let title = "제목 없음";
       const titleMatch = html.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
       if (titleMatch) title = titleMatch[1].trim();

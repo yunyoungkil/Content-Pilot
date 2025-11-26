@@ -807,19 +807,32 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   
   // Firebase 업데이트 (값이 있을 때만)
   // 모든 값이 빈 문자열이면 Firebase 업데이트를 건너뛰어야 함 (초안 삭제 후 재생성 방지)
+  // 하지만 permalink나 tags가 이미 있더라도 업데이트할 수 있도록 수정
   if (ideaData && ideaData.id) {
     const updates = {};
     const publishInfoUpdates = {};
     let hasNonEmptyValue = false;
     
+    // permalink가 제공되었으면 항상 업데이트 (빈 문자열이 아닌 경우)
     if (permalink !== undefined && permalink.trim() !== '') {
       publishInfoUpdates.permalink = permalink;
       hasNonEmptyValue = true;
+    } else if (permalink !== undefined && permalink.trim() === '' && ideaData.publishInfo?.permalink) {
+      // 빈 문자열이 제공되었지만 기존 permalink가 있으면 유지 (삭제하지 않음)
+      publishInfoUpdates.permalink = ideaData.publishInfo.permalink;
+      hasNonEmptyValue = true;
     }
+    
+    // tags가 제공되었으면 항상 업데이트 (빈 문자열이 아닌 경우)
     if (tags !== undefined && tags.trim() !== '') {
       publishInfoUpdates.tags = tags;
       hasNonEmptyValue = true;
+    } else if (tags !== undefined && tags.trim() === '' && ideaData.publishInfo?.tags) {
+      // 빈 문자열이 제공되었지만 기존 tags가 있으면 유지 (삭제하지 않음)
+      publishInfoUpdates.tags = ideaData.publishInfo.tags;
+      hasNonEmptyValue = true;
     }
+    
     if (seoTitle !== undefined && seoTitle.trim() !== '') {
       updates.seoTitle = seoTitle;
       publishInfoUpdates.seoTitle = seoTitle;
@@ -827,8 +840,17 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
     
     // 실제 값이 있을 때만 Firebase 업데이트 (빈 문자열로 publishInfo 재생성 방지)
+    // 하지만 기존 값이 있으면 항상 업데이트하여 최신 상태 유지
     if (hasNonEmptyValue && Object.keys(publishInfoUpdates).length > 0) {
       publishInfoUpdates.updatedAt = Date.now();
+      // 기존 publishInfo의 다른 필드들도 유지
+      if (ideaData.publishInfo) {
+        Object.keys(ideaData.publishInfo).forEach(key => {
+          if (!publishInfoUpdates.hasOwnProperty(key)) {
+            publishInfoUpdates[key] = ideaData.publishInfo[key];
+          }
+        });
+      }
       updates.publishInfo = publishInfoUpdates;
     }
     
@@ -843,6 +865,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       }, (response) => {
         if (response && !response.success) {
           Logger.error('[Workspace] 발행 정보 저장 실패:', response);
+        } else if (response && response.success) {
+          Logger.debug('[Workspace] 발행 정보 저장 성공:', { permalink, tags, seoTitle });
         }
       });
     }
@@ -943,12 +967,16 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
     
     // HTML 복사 버튼 이벤트 리스너
+    // 주의: 이벤트 리스너 내부에서 항상 최신 데이터를 참조하도록 수정
     const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
     if (copyHtmlBtn) {
       copyHtmlBtn.addEventListener('click', async () => {
         try {
           copyHtmlBtn.disabled = true;
           copyHtmlBtn.textContent = "⏳ 생성 중...";
+          
+          // 최신 ideaData 가져오기 (클로저 캡처 대신 런타임에 참조)
+          const currentIdeaData = window.__cp_workspace_idea_data || ideaData;
           
           // 에디터 내용 가져오기
           const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
@@ -972,24 +1000,32 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             });
           }
           
-          // 에디터 내용이 없으면 ideaData.draftContent 사용
+          // 에디터 내용이 없으면 최신 draftContent 사용
           if (!editorHtml || editorHtml.trim() === '') {
-            if (ideaData && ideaData.draftContent) {
+            const draftContent = currentIdeaData?.workspace?.draft || currentIdeaData?.draftContent || currentIdeaData?.draft || '';
+            if (draftContent) {
               // draftContent가 마크다운 형식일 수 있으므로 HTML로 변환
-              editorHtml = marked.parse(ideaData.draftContent);
+              if (typeof marked !== 'undefined' && marked.parse) {
+                editorHtml = marked.parse(draftContent);
+              } else {
+                // marked가 없으면 그대로 사용
+                editorHtml = draftContent;
+              }
             }
           }
           
-          // JSON-LD 스키마 가져오기
+          // JSON-LD 스키마 가져오기 (최신 데이터 참조)
           let jsonLdSchema = null;
-          if (ideaData && ideaData.publishInfo && ideaData.publishInfo.jsonLdSchema) {
-            jsonLdSchema = ideaData.publishInfo.jsonLdSchema;
-          } else if (window.__cp_workspace_idea_data && window.__cp_workspace_idea_data.publishInfo && window.__cp_workspace_idea_data.publishInfo.jsonLdSchema) {
-            jsonLdSchema = window.__cp_workspace_idea_data.publishInfo.jsonLdSchema;
+          const currentPublishInfo = currentIdeaData?.publishInfo;
+          if (currentPublishInfo && currentPublishInfo.jsonLdSchema) {
+            jsonLdSchema = currentPublishInfo.jsonLdSchema;
           }
           
+          // 최신 seoTitle 가져오기
+          const currentSeoTitle = currentPublishInfo?.seoTitle || currentIdeaData?.seoTitle || currentIdeaData?.title || '';
+          
           // 완전한 HTML 생성
-          const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, seoTitle || ideaData?.title || '');
+          const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, currentSeoTitle);
           
           // 클립보드에 복사
           await navigator.clipboard.writeText(fullHtml);
@@ -2256,14 +2292,14 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                     linkedScrapsContent: linkedScrapsContent
                 };
                 
-                // [체크리스트 4-3] 타임아웃 처리 (30초)
-                const TIMEOUT_MS = 30000; // 30초
+                // [체크리스트 4-3] 타임아웃 처리 (썸네일 생성 포함하여 120초로 증가)
+                const TIMEOUT_MS = 120000; // 120초 (2분) - 썸네일 생성 포함
                 let timeoutId = setTimeout(() => {
                     if (btn.disabled) {
                         btn.disabled = false;
                         btn.textContent = originalText;
-                        alert("⏱️ 초안 생성이 30초를 초과했습니다. 네트워크 상태를 확인하거나 다시 시도해주세요.");
-                        console.error("[Workspace] AI 초안 생성 타임아웃");
+                        alert("⏱️ 초안 생성이 2분을 초과했습니다. 네트워크 상태를 확인하거나 다시 시도해주세요.");
+                        console.error("[Workspace] AI 초안 생성 타임아웃 (120초 초과)");
                     }
                 }, TIMEOUT_MS);
                 
@@ -2303,6 +2339,28 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             ideaId: ideaData.id,
                             draft: response.draft
                         });
+                        
+                        // [수정] window.__cp_workspace_idea_data 업데이트 (최신 초안 데이터 반영)
+                        if (window.__cp_workspace_idea_data) {
+                            // 최신 초안 데이터 업데이트
+                            window.__cp_workspace_idea_data.workspace = window.__cp_workspace_idea_data.workspace || {};
+                            window.__cp_workspace_idea_data.workspace.draft = response.draft;
+                            window.__cp_workspace_idea_data.draftContent = response.draft;
+                            window.__cp_workspace_idea_data.draft = response.draft;
+                            
+                            // 발행 정보도 업데이트
+                            if (!window.__cp_workspace_idea_data.publishInfo) {
+                                window.__cp_workspace_idea_data.publishInfo = {};
+                            }
+                            if (response.permalink) window.__cp_workspace_idea_data.publishInfo.permalink = response.permalink;
+                            if (response.tags) window.__cp_workspace_idea_data.publishInfo.tags = response.tags;
+                            if (response.seoTitle) {
+                                window.__cp_workspace_idea_data.publishInfo.seoTitle = response.seoTitle;
+                                window.__cp_workspace_idea_data.seoTitle = response.seoTitle;
+                            }
+                            if (response.thumbnailInfo) window.__cp_workspace_idea_data.publishInfo.thumbnailInfo = response.thumbnailInfo;
+                            if (response.jsonLdSchema) window.__cp_workspace_idea_data.publishInfo.jsonLdSchema = response.jsonLdSchema;
+                        }
                         
                         // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo, jsonLdSchema)
                         if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo || response.jsonLdSchema) {
@@ -2621,6 +2679,68 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         allScrapsList.addEventListener("dragstart", (e) => {
             const card = e.target.closest(".scrap-card-item");
             if(card) e.dataTransfer.setData("application/json", JSON.stringify({ id: card.dataset.scrapId, text: card.dataset.text }));
+        });
+        
+        // 모든 스크랩 리스트의 삭제 버튼 이벤트 리스너 (이벤트 위임)
+        allScrapsList.addEventListener('click', (e) => {
+            const deleteBtn = e.target.closest('.scrap-card-delete-btn');
+            if (!deleteBtn) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const card = deleteBtn.closest('.scrap-card-item');
+            if (!card) return;
+            
+            const scrapId = card.dataset.scrapId;
+            if (!scrapId) {
+                console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+                return;
+            }
+            
+            showConfirmationToast("정말로 스크랩을 삭제하시겠습니까?", () => {
+                chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapId }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
+                        showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+                        return;
+                    }
+                    if (response && response.success) {
+                        showToast("✅ 스크랩이 삭제되었습니다.");
+                        // 스크랩 리스트 새로고침
+                        chrome.storage.local.get("activeChannelId", (res) => {
+                            chrome.runtime.sendMessage({ action: "get_all_scraps", channelId: res.activeChannelId }, (r) => {
+                                if (r && r.success) {
+                                    const linkedScrapIds = ideaData.linkedScraps || [];
+                                    const availableScraps = r.scraps.filter(s => !linkedScrapIds.includes(s.id));
+                                    if (availableScraps.length > 0) {
+                                        allScrapsList.innerHTML = availableScraps.map(s => createScrapCard(s, false)).join("");
+                                    } else {
+                                        allScrapsList.innerHTML = "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
+                                    }
+                                    // 이미지 갤러리도 갱신
+                                    if (resourceLibrary) {
+                                        const imageGalleryGrid = resourceLibrary.querySelector(".image-gallery-grid");
+                                        if (imageGalleryGrid) {
+                                            const sendCommand = (action, data = {}) => {
+                                                const editorIframe = workspaceEl.querySelector("#quill-editor-iframe");
+                                                if (editorIframe && editorIframe.contentWindow) {
+                                                    editorIframe.contentWindow.postMessage({ action, data }, "*");
+                                                }
+                                            };
+                                            updateImageGalleryFromAllScraps(resourceLibrary, r.scraps, sendCommand, ideaData);
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                    } else {
+                        const errorMsg = response?.error || "알 수 없는 오류";
+                        console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
+                        showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
+                    }
+                });
+            });
         });
     }
     
@@ -3232,6 +3352,54 @@ window.__cp_filterScraps = function(scraps, keyword, searchText) {
 window.__cp_updateScrapList = function(filtered, allCont, linkedCont, ideaData) {
     if (filtered.length > 0) {
         allCont.innerHTML = filtered.map(s => createScrapCard(s, false)).join("");
+        
+        // 삭제 버튼 이벤트 리스너 재등록 (동적 요소 대응)
+        allCont.querySelectorAll('.scrap-card-delete-btn').forEach(deleteBtn => {
+            // 이미 이벤트 리스너가 등록되어 있으면 중복 등록 방지
+            if (deleteBtn.dataset.listenerAttached) return;
+            deleteBtn.dataset.listenerAttached = 'true';
+            
+            deleteBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const card = deleteBtn.closest('.scrap-card-item');
+                if (!card) return;
+                
+                const scrapId = card.dataset.scrapId;
+                if (!scrapId) {
+                    console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+                    return;
+                }
+                
+                showConfirmationToast("정말로 스크랩을 삭제하시겠습니까?", () => {
+                    chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapId }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
+                            showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+                            return;
+                        }
+                        if (response && response.success) {
+                            showToast("✅ 스크랩이 삭제되었습니다.");
+                            // 스크랩 리스트 새로고침
+                            chrome.storage.local.get("activeChannelId", (res) => {
+                                chrome.runtime.sendMessage({ action: "get_all_scraps", channelId: res.activeChannelId }, (r) => {
+                                    if (r && r.success) {
+                                        const linkedScrapIds = ideaData && ideaData.linkedScraps ? (Array.isArray(ideaData.linkedScraps) ? ideaData.linkedScraps : Object.keys(ideaData.linkedScraps)) : [];
+                                        const availableScraps = r.scraps.filter(s => !linkedScrapIds.includes(s.id));
+                                        window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
+                                    }
+                                });
+                            });
+                        } else {
+                            const errorMsg = response?.error || "알 수 없는 오류";
+                            console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
+                            showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
+                        }
+                    });
+                });
+            });
+        });
     } else {
         const searchInput = document.querySelector('#scrap-search-input');
         const filterBtn = document.querySelector('#filter-scrap-by-draft-btn');
@@ -3299,16 +3467,17 @@ export function updateWorkspaceScraps(container, ideaData) {
 // 모듈이 import될 때 즉시 실행됨
 // -----------------------------------------------------------------------------
 (function() {
-    console.log("🔧 [Workspace] ========================================");
-    Logger.debug("🔧 [Workspace] 전역 TUI 에디터 리스너 등록 함수 실행 중...");
-    Logger.debug("🔧 [Workspace] 모듈 로드 확인:", typeof window !== 'undefined');
-    try {
-        Logger.debug("🔧 [Workspace] window.location:", window.location?.href);
-    } catch (e) {
-        Logger.debug("🔧 [Workspace] window.location: cross-origin (접근 불가)");
+    // 디버그 모드에서만 상세 로그 출력
+    if (Logger.isDebugMode()) {
+        Logger.debug("🔧 [Workspace] 전역 TUI 에디터 리스너 등록 함수 실행 중...");
+        Logger.debug("🔧 [Workspace] 모듈 로드 확인:", typeof window !== 'undefined');
+        try {
+            Logger.debug("🔧 [Workspace] window.location:", window.location?.href);
+        } catch (e) {
+            Logger.debug("🔧 [Workspace] window.location: cross-origin (접근 불가)");
+        }
+        Logger.debug("🔧 [Workspace] window === window.top:", window === window.top);
     }
-    Logger.debug("🔧 [Workspace] window === window.top:", window === window.top);
-    Logger.debug("🔧 [Workspace] ========================================");
     
     // 즉시 실행 확인을 위한 추가 로그
     if (typeof window === 'undefined') {
@@ -3561,12 +3730,15 @@ export function updateWorkspaceScraps(container, ideaData) {
     window.__cp_tui_global_listener_attached = true;
     Logger.debug("✅ [Workspace] 전역 TUI 에디터 메시지 리스너 등록 완료");
     try {
-        console.log("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
+        Logger.debug("🔍 [Workspace] 디버깅: window.location.href =", window.location.href);
     } catch (e) {
-        console.log("🔍 [Workspace] 디버깅: window.location.href = cross-origin (접근 불가)");
+        Logger.debug("🔍 [Workspace] 디버깅: window.location.href = cross-origin (접근 불가)");
     }
-    console.log("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
-    console.log("🔍 [Workspace] 디버깅: window.addEventListener 존재 여부 =", typeof window.addEventListener);
-    console.log("🔍 [Workspace] 디버깅: 리스너 함수 타입 =", typeof globalTuiEditorMessageListener);
-    console.log("🔍 [Workspace] 디버깅: 리스너 등록 확인 - window에 message 이벤트 리스너가 등록되었습니다");
+    // 디버그 모드에서만 상세 로그 출력
+    if (Logger.isDebugMode()) {
+        Logger.debug("🔍 [Workspace] 디버깅: window === window.top =", window === window.top);
+        Logger.debug("🔍 [Workspace] 디버깅: window.addEventListener 존재 여부 =", typeof window.addEventListener);
+        Logger.debug("🔍 [Workspace] 디버깅: 리스너 함수 타입 =", typeof globalTuiEditorMessageListener);
+        Logger.debug("🔍 [Workspace] 디버깅: 리스너 등록 확인 - window에 message 이벤트 리스너가 등록되었습니다");
+    }
 })();

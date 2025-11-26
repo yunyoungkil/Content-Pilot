@@ -312,6 +312,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ).then(dataUrl => ({ success: true, dataUrl })));
   }
 
+  // [신규] 이미지 크롭 요청 라우팅 (offscreen.js로 전달)
+  if (msg.action === "crop_image_in_offscreen") {
+    // offscreen.js로 직접 전달 (응답은 offscreen.js에서 처리)
+    chrome.runtime.sendMessage({
+      action: 'crop_image_in_offscreen',
+      imageDataUrl: msg.imageDataUrl,
+      targetRatio: msg.targetRatio
+    }).catch(err => {
+      Logger.error('[Router] 이미지 크롭 요청 전송 실패:', err);
+    });
+    // 응답은 offscreen.js에서 직접 처리하므로 여기서는 true 반환
+    return true;
+  }
+
   // [신규] 외부(팝업 등)에서 HTML 정제를 요청할 경우를 대비한 라우트
   if (msg.action === "sanitize_html") {
     Logger.debug('[Router] sanitize_html 요청 수신');

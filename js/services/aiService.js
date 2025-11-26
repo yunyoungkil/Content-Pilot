@@ -6,7 +6,7 @@ import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
 import { Logger } from '../utils.js';
-import { sanitizeHtmlInOffscreen } from './offscreenService.js'; // [추가]
+import { sanitizeHtmlInOffscreen, cropImageInOffscreen, composeThumbnailInOffscreen } from './offscreenService.js'; // [추가]
 // [추가] PromptService 임포트
 import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 
@@ -460,7 +460,12 @@ export async function generateDraftFromIdea(ideaData) {
                      "name": "${channelInfo?.inputUrl ? new URL(channelInfo.inputUrl).hostname.replace('www.', '') : 'Content Pilot'}"
                    }
                  * datePublished: 현재 날짜를 YYYY-MM-DD 형식으로 작성하세요. (예: ${new Date().toISOString().split('T')[0]})
-                 * image: 대표 이미지 URL을 작성하세요. 실제 이미지가 있다면 그 URL을, 없다면 채널의 대표 이미지나 기본 이미지 URL을 사용하세요. 플레이스홀더가 아닌 실제 사용 가능한 URL을 작성해주세요.
+                 * dateModified: 현재 날짜를 YYYY-MM-DD 형식으로 작성하세요. (필수 필드, datePublished와 동일한 값 사용)
+                 * image: 대표 이미지 URL을 배열(List) 형태로 작성하세요. 3가지 비율의 이미지 URL을 포함해야 합니다:
+                   - [0]: 1:1 비율 이미지 URL (Square)
+                   - [1]: 4:3 비율 이미지 URL (Standard)
+                   - [2]: 16:9 비율 이미지 URL (Wide)
+                   실제 이미지가 있다면 그 URL을, 없다면 채널의 대표 이미지나 기본 이미지 URL을 3번 반복하여 배열로 작성하세요. 플레이스홀더가 아닌 실제 사용 가능한 URL을 작성해주세요.
                  * url (선택): 발행될 예상 URL이 있다면 포함하세요. (없으면 생략 가능)
                - **추가 권장 필드**:
                  * mainEntityOfPage: {
@@ -487,7 +492,8 @@ export async function generateDraftFromIdea(ideaData) {
                      "name": "작성자명 또는 채널명"
                    },
                    "datePublished": "YYYY-MM-DD",
-                   "image": "실제 이미지 URL",
+                   "dateModified": "YYYY-MM-DD",
+                   "image": ["1:1 비율 URL", "4:3 비율 URL", "16:9 비율 URL"],
                    ...
                  }
                  </JSON-LD>
@@ -513,11 +519,13 @@ export async function generateDraftFromIdea(ideaData) {
 
                   "type": "curiosity",
 
-                  "thumbnailPromptEn": "영어 프롬프트 (High contrast, surprised face, question mark, dramatic lighting, vibrant colors, 16:9 aspect ratio)",
+                  "thumbnailPromptEn": "영어 프롬프트 (High contrast, dramatic lighting, vibrant colors, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.)",
 
                   "thumbnailPromptKo": "한글 프롬프트 (호기심 자극, 강렬한 색상, 드라마틱한 조명)",
 
-                  "thumbnailText": "호기심 문구 (12자 내)"
+                  "thumbnailText": "호기심 문구 (12자 내)",
+                  "textPosition": "top",
+                  "altText": "이미지 대체 텍스트 (한글, SEO 최적화된 설명, 50자 내외)"
 
                 },
 
@@ -525,11 +533,13 @@ export async function generateDraftFromIdea(ideaData) {
 
                   "type": "informative",
 
-                  "thumbnailPromptEn": "영어 프롬프트 (Clean layout, numbers, checkmarks, professional design, bright lighting, organized composition, 16:9 aspect ratio)",
+                  "thumbnailPromptEn": "영어 프롬프트 (Clean layout, professional design, bright lighting, organized composition, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.)",
 
                   "thumbnailPromptKo": "한글 프롬프트 (정보 강조, 깔끔한 레이아웃, 숫자 표시)",
 
-                  "thumbnailText": "정보형 문구 (12자 내)"
+                  "thumbnailText": "정보형 문구 (12자 내)",
+                  "textPosition": "center",
+                  "altText": "이미지 대체 텍스트 (한글, SEO 최적화된 설명, 50자 내외)"
 
                 },
 
@@ -537,11 +547,13 @@ export async function generateDraftFromIdea(ideaData) {
 
                   "type": "emotional",
 
-                  "thumbnailPromptEn": "영어 프롬프트 (Warm lighting, happy person, cozy atmosphere, soft colors, welcoming feeling, 16:9 aspect ratio)",
+                  "thumbnailPromptEn": "영어 프롬프트 (Warm lighting, cozy atmosphere, soft colors, welcoming feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.)",
 
                   "thumbnailPromptKo": "한글 프롬프트 (감성 전달, 따뜻한 조명, 공감대 형성)",
 
-                  "thumbnailText": "공감형 문구 (12자 내)"
+                  "thumbnailText": "공감형 문구 (12자 내)",
+                  "textPosition": "bottom",
+                  "altText": "이미지 대체 텍스트 (한글, SEO 최적화된 설명, 50자 내외)"
 
                 }
 
@@ -562,7 +574,7 @@ export async function generateDraftFromIdea(ideaData) {
                 * 전체적인 인상을 생생하게 느낄 수 있는 이미지라면 더더욱 좋습니다.
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
-                * 예: "High-quality, eye-catching cover image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style"
+                * 예: "High-quality, eye-catching background image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay."
             11. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
@@ -744,6 +756,9 @@ export async function generateDraftFromIdea(ideaData) {
           jsonLdSchema.datePublished = today;
         }
         
+        // [신규] dateModified 필드 추가 (필수)
+        jsonLdSchema.dateModified = today;
+        
         // author가 없거나 비어있으면 채널 정보 또는 기본값 사용
         if (!jsonLdSchema.author || !jsonLdSchema.author.name || jsonLdSchema.author.name === 'Content Pilot') {
           const authorName = channelInfo?.inputUrl 
@@ -755,17 +770,26 @@ export async function generateDraftFromIdea(ideaData) {
           };
         }
         
-        // image가 플레이스홀더이거나 없으면 채널 정보 또는 제거
+        // [신규] image 필드를 배열로 처리 (thumbnailUrls가 있으면 실제 URL 사용)
+        // thumbnailUrls는 나중에 설정되므로 여기서는 기본 처리만
         if (!jsonLdSchema.image || 
             jsonLdSchema.image === 'https://example.com/image.jpg' ||
             jsonLdSchema.image.includes('example.com')) {
           // 채널의 대표 이미지가 있으면 사용, 없으면 제거 (선택 필드)
           if (channelInfo?.thumbnail || channelInfo?.logo) {
-            jsonLdSchema.image = channelInfo.thumbnail || channelInfo.logo;
+            // 배열 형태로 변환
+            const channelImage = channelInfo.thumbnail || channelInfo.logo;
+            jsonLdSchema.image = [channelImage, channelImage, channelImage]; // 3가지 비율 모두 동일 이미지
           } else {
             // image 필드를 제거 (Google은 선택 필드로 처리)
             delete jsonLdSchema.image;
           }
+        } else if (typeof jsonLdSchema.image === 'string') {
+          // 문자열인 경우 배열로 변환
+          jsonLdSchema.image = [jsonLdSchema.image, jsonLdSchema.image, jsonLdSchema.image];
+        } else if (!Array.isArray(jsonLdSchema.image)) {
+          // 배열도 문자열도 아닌 경우 배열로 변환
+          jsonLdSchema.image = [String(jsonLdSchema.image), String(jsonLdSchema.image), String(jsonLdSchema.image)];
         }
         
         // url이 없고 publishInfo에 permalink가 있으면 조합
@@ -895,17 +919,134 @@ export async function generateDraftFromIdea(ideaData) {
         },
         {
           type: "informative",
-          thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", text overlay style, bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
+          thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
           thumbnailText: "완벽 정리"
         },
         {
           type: "emotional",
-          thumbnailPromptEn: `Warm, cozy thumbnail for "${baseTitle}", soft lighting, human element, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio`,
+          thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
           thumbnailText: "당신을 위한"
         }
       ];
+    }
+    
+    // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
+    let thumbnailUrls = null; // { url_1x1, url_4x3, url_16x9, altText }
+    if (thumbnailCandidates.length > 0 && permalink) {
+      try {
+        const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
+        Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
+          type: selectedThumbnail.type,
+          permalink: permalink.substring(0, 30)
+        });
+        
+        // 1. 16:9 원본 배경 이미지 생성 (AI - 텍스트 없이)
+        const originalImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+        if (originalImages.length === 0) {
+          throw new Error('썸네일 이미지 생성 실패');
+        }
+        
+        // 2. [신규] 텍스트 합성 (하이브리드 합성)
+        const thumbnailText = selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', { text: thumbnailText });
+        
+        const textPosition = selectedThumbnail.textPosition || "bottom"; // AI가 결정한 위치 또는 기본값
+        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', { text: thumbnailText, position: textPosition });
+        
+        const composedDataUrl = await composeThumbnailInOffscreen(originalImages[0], thumbnailText, textPosition);
+        
+        // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
+        const userId = await getCurrentUserId();
+        const cropPromises = [
+          // 1:1 비율
+          cropImageInOffscreen(composedDataUrl, 1).then(dataUrl => ({ ratio: '1x1', dataUrl })),
+          // 4:3 비율
+          cropImageInOffscreen(composedDataUrl, 4/3).then(dataUrl => ({ ratio: '4x3', dataUrl }))
+        ];
+        
+        const croppedResults = await Promise.all(cropPromises);
+        
+        // 4. SEO 파일명으로 업로드
+        const uploadPromises = [
+          // 1:1 업로드
+          uploadImageToFirebaseStorage(
+            croppedResults[0].dataUrl,
+            `thumbnails/${userId}/${permalink}-1x1.png`,
+            userId
+          ),
+          // 4:3 업로드
+          uploadImageToFirebaseStorage(
+            croppedResults[1].dataUrl,
+            `thumbnails/${userId}/${permalink}-4x3.png`,
+            userId
+          ),
+          // 16:9 업로드 (합성된 이미지)
+          uploadImageToFirebaseStorage(
+            composedDataUrl,
+            `thumbnails/${userId}/${permalink}-16x9.png`,
+            userId
+          )
+        ];
+        
+        const [url_1x1, url_4x3, url_16x9] = await Promise.all(uploadPromises);
+        
+        thumbnailUrls = {
+          url_1x1,
+          url_4x3,
+          url_16x9,
+          altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`
+        };
+        
+        Logger.info('[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:', {
+          url_1x1: url_1x1.substring(0, 50) + '...',
+          url_4x3: url_4x3.substring(0, 50) + '...',
+          url_16x9: url_16x9.substring(0, 50) + '...'
+        });
+        
+        // [신규] JSON-LD image 배열을 실제 Firebase URL로 교체
+        if (jsonLdSchema) {
+          jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
+          Logger.info('[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료');
+        }
+      } catch (error) {
+        Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
+        Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
+          errorMessage: error.message,
+          errorStack: error.stack,
+          permalink: permalink?.substring(0, 30),
+          hasThumbnailCandidates: thumbnailCandidates.length > 0
+        });
+        // 썸네일 생성 실패해도 초안 생성은 계속 진행
+      }
+    }
+    
+    // [신규] HTML 본문에 대표 이미지 삽입 및 alt 속성 추가
+    if (thumbnailUrls && thumbnailUrls.url_16x9) {
+      try {
+        // 본문의 첫 번째 이미지 태그를 찾아서 교체하거나, 없으면 삽입
+        const imgTagRegex = /<img[^>]*>/i;
+        const firstImgMatch = formattedDraft.match(imgTagRegex);
+        
+        if (firstImgMatch) {
+          // 첫 번째 이미지 태그를 교체
+          const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block; margin: 0; padding: 0; vertical-align: bottom; line-height: 0; border: none; outline: none; box-sizing: border-box;">`;
+          formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
+        } else {
+          // 이미지 태그가 없으면 제목 바로 아래에 삽입
+          const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+          if (h1Match) {
+            const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
+            const imgTag = `\n<div style="display: block; margin: 0; padding: 0; line-height: 0; font-size: 0;"><img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block; margin: 0; padding: 0; vertical-align: bottom; line-height: 0; border: none; outline: none; box-sizing: border-box;"></div>\n`;
+            formattedDraft = formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
+          }
+        }
+        
+        Logger.info('[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료');
+      } catch (error) {
+        Logger.warn('[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:', error);
+      }
     }
     
     return { 
@@ -915,6 +1056,7 @@ export async function generateDraftFromIdea(ideaData) {
       tags: tagsForPublish,
       seoTitle: seoTitle, // SEO 최적화된 제목
       thumbnailInfo: thumbnailCandidates, // 썸네일 정보 (배열 형태)
+      thumbnailUrls: thumbnailUrls, // [신규] 자동 생성된 썸네일 URL (3가지 비율)
       jsonLdSchema: jsonLdSchema // [신규] JSON-LD 구조화된 데이터
     };
 

@@ -161,10 +161,78 @@ export async function parseHtmlInOffscreen(html, baseUrl) {
       thumbnail: response.thumbnail || '',
       description: response.description || '',
       metrics: response.metrics || {},
-      cleanText: response.cleanText || ''
+      cleanText: response.cleanText || '',
+      metaTags: response.metaTags || null
     };
   } catch (error) {
     Logger.error('[OffscreenService] HTML 파싱 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 이미지 크롭 (중앙 기준 Center Crop)
+ * @param {string} imageDataUrl - DataURL 형식의 이미지
+ * @param {number} targetRatio - 목표 비율 (1 = 1:1, 1.33 = 4:3, 1.77 = 16:9)
+ * @returns {Promise<string>} 크롭된 이미지의 DataURL
+ */
+export async function cropImageInOffscreen(imageDataUrl, targetRatio) {
+  try {
+    const startTime = performance.now();
+    const response = await sendToOffscreen('crop_image_in_offscreen', { 
+      imageDataUrl, targetRatio 
+    }, 30000);
+    const elapsed = Math.round(performance.now() - startTime);
+    Logger.info(`⚡ [OffscreenService] 이미지 크롭 완료 (${elapsed}ms)`);
+    return response.dataUrl;
+  } catch (error) {
+    Logger.error('[OffscreenService] 이미지 크롭 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 썸네일 합성 (배경 이미지 + 텍스트)
+ * @param {string} imageUrl - AI가 만든 배경 이미지 URL
+ * @param {string} text - 삽입할 한글 문구
+ * @param {string} textPosition - 텍스트 위치 ("top", "center", "bottom", 기본값: "bottom")
+ * @returns {Promise<string>} 합성된 이미지 DataURL
+ */
+export async function composeThumbnailInOffscreen(imageUrl, text, textPosition = "bottom") {
+  try {
+    const startTime = performance.now();
+    
+    // Firebase Storage URL인 경우 CORS 문제를 피하기 위해 먼저 fetch로 가져와서 DataURL로 변환
+    let imageDataUrl = imageUrl;
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      Logger.debug('[OffscreenService] 이미지 URL을 DataURL로 변환 중:', imageUrl.substring(0, 50) + '...');
+      try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          throw new Error(`이미지 로드 실패: ${response.status} ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        imageDataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        Logger.debug('[OffscreenService] ✅ 이미지 DataURL 변환 완료');
+      } catch (fetchError) {
+        Logger.warn('[OffscreenService] 이미지 fetch 실패, 원본 URL 사용:', fetchError);
+        // fetch 실패 시 원본 URL 사용 (CORS 문제가 있을 수 있음)
+      }
+    }
+    
+    const response = await sendToOffscreen('compose_thumbnail_in_offscreen', { 
+      imageUrl: imageDataUrl, text, textPosition 
+    }, 60000); // 타임아웃 60초로 증가
+    const elapsed = Math.round(performance.now() - startTime);
+    Logger.info(`⚡ [OffscreenService] 썸네일 합성 완료 (${elapsed}ms)`);
+    return response.dataUrl;
+  } catch (error) {
+    Logger.error('[OffscreenService] 썸네일 합성 오류:', error);
     throw error;
   }
 }

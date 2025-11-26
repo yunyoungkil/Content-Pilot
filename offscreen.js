@@ -20,12 +20,22 @@ async function sanitizeAndFormatHtml(text) {
     // 1. 마크다운 감지 및 변환
     // (기존의 복잡한 정규식 대신 marked가 안전하게 처리하도록 함)
     let html = cleanedText;
-    const isMarkdownCandidate = /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\[.*\]\(.*\)/m.test(cleanedText);
+    // 마크다운 링크 패턴 개선: [텍스트](URL) 형식 감지 강화
+    const isMarkdownCandidate = /(^|\n)\s{0,3}(#{1,6}\s)|\*\s|\-\s|\d+\.\s|`{1,3}|\[[^\]]+\]\([^)]+\)/m.test(cleanedText);
     
     if (isMarkdownCandidate) {
         // marked 옵션 설정: 줄바꿈 처리 등
         marked.use({ breaks: true, gfm: true });
         html = await marked.parse(cleanedText);
+    } else {
+        // 마크다운 후보가 아니어도 마크다운 링크만 있는 경우 처리
+        // 예: "쿠진아트 에어프라이어를 사용하고 계신다면, [완벽 가이드] 쿠진아트 에어프라이어 그릴 오븐 청소 꿀팁 총정리!](https://...)"
+        const markdownLinkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+        if (markdownLinkPattern.test(cleanedText)) {
+            // marked로 마크다운 링크만 변환
+            marked.use({ breaks: true, gfm: true });
+            html = await marked.parse(cleanedText);
+        }
     }
 
     // 2. DOMPurify를 통한 강력한 XSS 방어 (Sanitization)
@@ -85,27 +95,74 @@ async function sanitizeAndFormatHtml(text) {
     }
 
     // 3.3 중요 문장 하이라이팅 (<mark> 태그가 없는 경우 자동 적용)
+    // 문단 전체가 아닌 중요한 문장만 하이라이팅
     if (!body.querySelector('mark')) {
-        const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수'];
+        const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수', '반드시', '꼭'];
         let markCount = 0;
         
-        // 텍스트 노드를 순회하며 키워드가 포함된 문장 찾기 (단순화된 로직)
-        // 실제로는 DOM 구조를 깨지 않기 위해 주의가 필요함. 
-        // 여기서는 안전하게 <p> 태그 내의 텍스트만 대상으로 함
+        // <p> 태그 내의 텍스트를 문장 단위로 하이라이팅
         body.querySelectorAll('p').forEach(p => {
             if (markCount >= 2) return;
-            const text = p.innerHTML; // innerHTML 사용 (태그 포함 유지)
             
             // 이미 다른 태그가 복잡하게 섞인 경우 건너뜀
-            if (text.includes('<hr') || text.includes('<img')) return;
+            const innerHTML = p.innerHTML;
+            if (innerHTML.includes('<hr') || innerHTML.includes('<img') || innerHTML.includes('<a') || innerHTML.includes('<mark')) return;
+            
+            const text = p.textContent || p.innerText || '';
+            if (text.length < 20 || text.length > 500) return;
 
             for (const keyword of importantKeywords) {
-                if (text.includes(keyword) && text.length > 20 && markCount < 2) {
-                    p.style.backgroundColor = 'rgba(255, 255, 204, 0.5)';
-                    p.style.padding = '4px';
-                    p.style.borderRadius = '4px';
-                    markCount++;
-                    break; 
+                if (markCount >= 2) break;
+                if (!text.includes(keyword)) continue;
+                
+                // 키워드가 포함된 문장 찾기 (마침표, 느낌표, 물음표로 구분)
+                // 정규식으로 문장 경계 찾기
+                const keywordIndex = text.indexOf(keyword);
+                if (keywordIndex === -1) continue;
+                
+                // 문장 시작 찾기 (키워드 앞의 마지막 마침표/느낌표/물음표)
+                let sentenceStart = 0;
+                for (let i = keywordIndex - 1; i >= 0; i--) {
+                    if (text[i] === '.' || text[i] === '!' || text[i] === '?') {
+                        sentenceStart = i + 1;
+                        break;
+                    }
+                }
+                
+                // 문장 끝 찾기 (키워드 뒤의 첫 번째 마침표/느낌표/물음표)
+                let sentenceEnd = text.length;
+                for (let i = keywordIndex + keyword.length; i < text.length; i++) {
+                    if (text[i] === '.' || text[i] === '!' || text[i] === '?') {
+                        sentenceEnd = i + 1;
+                        break;
+                    }
+                }
+                
+                const sentence = text.substring(sentenceStart, sentenceEnd).trim();
+                
+                if (sentence.length > 10 && sentence.length < 200) {
+                    // innerHTML에서 문장을 찾아 <mark> 태그로 감싸기
+                    const beforeText = text.substring(0, sentenceStart);
+                    const afterText = text.substring(sentenceEnd);
+                    
+                    // HTML 이스케이프 처리된 문장 찾기
+                    const escapedSentence = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const regex = new RegExp(`(${escapedSentence})`, 'g');
+                    
+                    // innerHTML에서 문장만 교체 (HTML 태그는 유지)
+                    const newHTML = innerHTML.replace(regex, (match) => {
+                        // 이미 태그로 감싸져 있지 않은 경우만
+                        if (!match.includes('<mark') && !match.includes('</mark>')) {
+                            return `<mark style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
+                        }
+                        return match;
+                    });
+                    
+                    if (newHTML !== innerHTML) {
+                        p.innerHTML = newHTML;
+                        markCount++;
+                        break;
+                    }
                 }
             }
         });
@@ -433,6 +490,203 @@ async function renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight
     }
 }
 
+/**
+ * 썸네일 합성 함수 (배경 이미지 + 텍스트)
+ * @param {string} imageUrl - AI가 만든 배경 이미지 URL
+ * @param {string} text - 삽입할 한글 문구
+ * @param {string} textPosition - 텍스트 위치 ("top", "center", "bottom", 기본값: "bottom")
+ * @returns {Promise<string>} 합성된 이미지 DataURL
+ */
+async function composeThumbnail(imageUrl, text, textPosition = "bottom") {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        
+        // DataURL인 경우 crossOrigin 불필요, HTTP/HTTPS URL인 경우에만 설정
+        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+            img.crossOrigin = "Anonymous"; // CORS 문제 방지
+        }
+        
+        // 타임아웃 설정 (30초)
+        const timeout = setTimeout(() => {
+            reject(new Error("이미지 로드 타임아웃 (30초)"));
+        }, 30000);
+        
+        img.onload = () => {
+            clearTimeout(timeout);
+            const canvas = document.createElement('canvas');
+            // 16:9 비율 표준 해상도 (1920x1080) 권장
+            const width = 1920; 
+            const height = 1080;
+            
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+
+            // 1. 배경 이미지 그리기 (꽉 차게 리사이징)
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // 2. 가독성을 위한 어두운 그라데이션 (텍스트 뒤 배경)
+            // 텍스트 위치에 따라 그라데이션 위치 조정
+            let gradientStart, gradientEnd, gradientRectY, gradientRectHeight;
+            switch (textPosition) {
+                case "top":
+                    gradientStart = 0;
+                    gradientEnd = height * 0.4;
+                    gradientRectY = 0;
+                    gradientRectHeight = height * 0.4;
+                    break;
+                case "center":
+                    gradientStart = height * 0.3;
+                    gradientEnd = height * 0.7;
+                    gradientRectY = height * 0.3;
+                    gradientRectHeight = height * 0.4;
+                    break;
+                case "bottom":
+                default:
+                    gradientStart = height * 0.6;
+                    gradientEnd = height;
+                    gradientRectY = height * 0.6;
+                    gradientRectHeight = height * 0.4;
+                    break;
+            }
+            const gradient = ctx.createLinearGradient(0, gradientStart, 0, gradientEnd);
+            gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+            gradient.addColorStop(1, "rgba(0, 0, 0, 0.7)");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, gradientRectY, width, gradientRectHeight);
+
+            // 3. 텍스트 설정
+            const fontSize = 120; // 폰트 크기
+            ctx.font = `900 ${fontSize}px "Noto Sans KR", "Malgun Gothic", sans-serif`; // 굵은 한글 폰트
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // 4. 텍스트 위치 결정 (1:1 가이드라인 안에 배치)
+            // 검색 노출 시 1:1 비율로 표시되므로, 텍스트를 중앙 1:1 영역 안에 배치
+            // 16:9 (1920x1080)에서 중앙 1:1 영역: 좌우 420px씩 잘라낸 1080x1080 영역
+            const squareSize = height; // 1080 (정사각형 크기)
+            const squareX = (width - squareSize) / 2; // 420 (좌측 여백)
+            const squareY = 0; // 상단부터 시작
+            
+            // 텍스트는 중앙 정렬이므로 x는 width/2 (전체 이미지 기준)
+            const x = width / 2;
+            let y;
+            switch (textPosition) {
+                case "top":
+                    // 1:1 영역의 상단 20% 지점 (전체 높이 기준 약 22%)
+                    y = height * 0.22;
+                    break;
+                case "center":
+                    // 1:1 영역의 정중앙 (전체 높이 기준 50%)
+                    y = height * 0.5;
+                    break;
+                case "bottom":
+                default:
+                    // 1:1 영역의 하단 20% 지점 (전체 높이 기준 약 78%)
+                    // 검색 노출 시 하단이 잘릴 수 있으므로 약간 위로 조정
+                    y = height * 0.78;
+                    break;
+            }
+            
+            // 1:1 영역 밖으로 나가지 않도록 제한
+            const minY = squareY + squareSize * 0.1; // 상단 10% 여유
+            const maxY = squareY + squareSize * 0.9; // 하단 10% 여유
+            y = Math.max(minY, Math.min(maxY, y));
+            
+            // 5. 텍스트 스타일 (유튜브 스타일: 흰색 글씨 + 검은 테두리 + 그림자)
+
+            // 그림자
+            ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 5;
+            ctx.shadowOffsetY = 5;
+
+            // 테두리 (Stroke)
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 12;
+            ctx.strokeText(text, x, y);
+
+            // 글자 (Fill) - 그림자 효과 제거 후 그림 (깔끔하게 하기 위해)
+            ctx.shadowColor = "transparent";
+            ctx.fillStyle = 'white';
+            ctx.fillText(text, x, y);
+
+            // 결과 반환
+            resolve(canvas.toDataURL('image/png'));
+        };
+
+        img.onerror = (e) => {
+            clearTimeout(timeout);
+            const errorMsg = e.message || img.error?.message || "알 수 없는 오류";
+            console.error('[Offscreen] 이미지 로드 실패:', {
+                imageUrl: imageUrl.substring(0, 100),
+                error: errorMsg,
+                isDataUrl: imageUrl.startsWith('data:')
+            });
+            reject(new Error("이미지 로드 실패: " + errorMsg));
+        };
+        img.src = imageUrl;
+    });
+}
+
+/**
+ * 이미지 크롭 함수 (중앙 기준 Center Crop)
+ * @param {string} imageDataUrl - DataURL 형식의 이미지
+ * @param {number} targetRatio - 목표 비율 (1 = 1:1, 1.33 = 4:3, 1.77 = 16:9)
+ * @returns {Promise<string>} 크롭된 이미지의 DataURL
+ */
+async function cropImage(imageDataUrl, targetRatio) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const originalWidth = img.width;
+            const originalHeight = img.height;
+            const originalRatio = originalWidth / originalHeight;
+            
+            let cropWidth, cropHeight, cropX, cropY;
+            
+            if (originalRatio > targetRatio) {
+                // 원본이 더 넓음 → 높이 기준으로 크롭
+                cropHeight = originalHeight;
+                cropWidth = originalHeight * targetRatio;
+                cropX = (originalWidth - cropWidth) / 2; // 중앙 정렬
+                cropY = 0;
+            } else {
+                // 원본이 더 높음 → 너비 기준으로 크롭
+                cropWidth = originalWidth;
+                cropHeight = originalWidth / targetRatio;
+                cropX = 0;
+                cropY = (originalHeight - cropHeight) / 2; // 중앙 정렬
+            }
+            
+            // Canvas 크기 설정
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
+            
+            // 이미지 크롭 및 그리기
+            ctx.drawImage(
+                img,
+                cropX, cropY, cropWidth, cropHeight, // 소스 영역
+                0, 0, cropWidth, cropHeight // 대상 영역
+            );
+            
+            // DataURL로 변환
+            const croppedDataUrl = canvas.toDataURL('image/png');
+            resolve(croppedDataUrl);
+        };
+        
+        img.onerror = (error) => {
+            reject(new Error('이미지 로드 실패: ' + error.message));
+        };
+        
+        img.src = imageDataUrl;
+    });
+}
+
 // --- 메시지 리스너 (background.js로부터 요청 처리) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // [신규] HTML 정제 및 포매팅 요청 처리
@@ -465,6 +719,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const thumbnail = doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
             const description = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
             
+            // 메타 태그에서 태그/키워드 추출
+            const metaTags = [];
+            
+            // 1. <meta name="keywords"> 태그 추출
+            const keywordsMeta = doc.querySelector('meta[name="keywords"]')?.getAttribute('content');
+            if (keywordsMeta) {
+                const keywords = keywordsMeta.split(/[,，、;；\s]+/).map(k => k.trim()).filter(k => k);
+                metaTags.push(...keywords);
+            }
+            
+            // 2. <meta property="article:tag"> 태그 추출 (Open Graph)
+            const articleTags = doc.querySelectorAll('meta[property^="article:tag"]');
+            articleTags.forEach(tag => {
+                const content = tag.getAttribute('content');
+                if (content && !metaTags.includes(content)) {
+                    metaTags.push(content);
+                }
+            });
+            
+            // 3. 카테고리/태그 링크에서 추출
+            // 카테고리 링크: <a href="/category/...">, <a href="/c/...">
+            const categoryLinks = doc.querySelectorAll('a[href*="/category/"], a[href*="/c/"], a[href*="/tag/"], a[href*="/tags/"]');
+            categoryLinks.forEach(link => {
+                const href = link.getAttribute('href');
+                const text = link.textContent?.trim();
+                if (text && text.length > 0 && text.length < 50) {
+                    // URL에서 카테고리/태그명 추출 시도
+                    const match = href.match(/\/(?:category|c|tag|tags)\/([^\/\?]+)/);
+                    if (match && match[1]) {
+                        const tagName = decodeURIComponent(match[1]);
+                        if (tagName && !metaTags.includes(tagName)) {
+                            metaTags.push(tagName);
+                        }
+                    } else if (text && !metaTags.includes(text)) {
+                        // 링크 텍스트를 태그로 사용
+                        metaTags.push(text);
+                    }
+                }
+            });
+            
+            // 중복 제거 및 정리
+            const uniqueTags = [...new Set(metaTags.map(t => t.trim()).filter(t => t && t.length > 0))];
+            
             const { metrics, cleanText } = parseContentAndMetrics(doc, urlObj);
 
             sendResponse({ 
@@ -472,7 +769,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 thumbnail: thumbnail ? new URL(thumbnail, baseUrl).href : '', 
                 description, 
                 metrics,
-                cleanText
+                cleanText,
+                metaTags: uniqueTags.length > 0 ? uniqueTags : null
             });
 
         } catch (error) {
@@ -517,6 +815,70 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch(error => {
                 chrome.runtime.sendMessage({
                     action: 'render_template_in_offscreen_response',
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true; // 비동기 응답
+    }
+    
+    // [신규] 이미지 크롭 요청 처리
+    if (request.action === 'crop_image_in_offscreen') {
+        const { imageDataUrl, targetRatio } = request;
+        
+        if (!imageDataUrl || !targetRatio) {
+            chrome.runtime.sendMessage({
+                action: 'crop_image_in_offscreen_response',
+                success: false,
+                error: 'imageDataUrl과 targetRatio가 필요합니다.'
+            });
+            return false;
+        }
+        
+        cropImage(imageDataUrl, targetRatio)
+            .then(croppedDataUrl => {
+                chrome.runtime.sendMessage({
+                    action: 'crop_image_in_offscreen_response',
+                    success: true,
+                    dataUrl: croppedDataUrl
+                });
+            })
+            .catch(error => {
+                console.error('[Offscreen] 이미지 크롭 중 오류:', error);
+                chrome.runtime.sendMessage({
+                    action: 'crop_image_in_offscreen_response',
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true; // 비동기 응답
+    }
+    
+    // [신규] 썸네일 합성 요청 처리
+    if (request.action === 'compose_thumbnail_in_offscreen') {
+        const { imageUrl, text, textPosition } = request;
+        
+        if (!imageUrl || !text) {
+            chrome.runtime.sendMessage({
+                action: 'compose_thumbnail_in_offscreen_response',
+                success: false,
+                error: 'imageUrl과 text가 필요합니다.'
+            });
+            return false;
+        }
+        
+        composeThumbnail(imageUrl, text, textPosition || "bottom")
+            .then(dataUrl => {
+                chrome.runtime.sendMessage({
+                    action: 'compose_thumbnail_in_offscreen_response',
+                    success: true,
+                    dataUrl
+                });
+            })
+            .catch(error => {
+                console.error('[Offscreen] 썸네일 합성 중 오류:', error);
+                chrome.runtime.sendMessage({
+                    action: 'compose_thumbnail_in_offscreen_response',
                     success: false,
                     error: error.message
                 });

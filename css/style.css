@@ -1,3 +1,38 @@
+/* ============================================
+   Shadow DOM 스타일 격리 리셋
+   ============================================
+   외부 페이지의 스타일이 Shadow DOM 내부로 침투하는 것을 방지하기 위한 최소한의 리셋 스타일
+   Shadow DOM은 기본적으로 스타일을 격리하지만, 일부 상속 가능한 속성(font-family, color 등)은
+   여전히 침투할 수 있으므로 최소한의 리셋이 필요합니다.
+   주의: 기존 컴포넌트 스타일을 유지하기 위해 최소한의 리셋만 적용합니다.
+   ============================================ */
+
+/* Shadow DOM 루트 요소 리셋 - 외부 페이지 스타일 침투 방지 */
+:host {
+  /* 외부 페이지의 전역 스타일이 Shadow DOM에 영향을 주지 않도록 최소한의 리셋만 적용 */
+  font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #333;
+  /* box-sizing만 강제 적용 (레이아웃 안정성) */
+  box-sizing: border-box;
+  /* 외부 페이지의 전역 스타일 영향 차단 */
+  text-align: left;
+  direction: ltr;
+}
+
+/* Shadow DOM 내부 모든 요소에 box-sizing만 강제 적용 */
+:host *,
+:host *::before,
+:host *::after {
+  /* box-sizing만 강제 적용하여 레이아웃 안정성 확보 */
+  box-sizing: border-box;
+}
+
+/* ============================================
+   기존 스타일 시작
+   ============================================ */
+
 /* 스크랩 후보 하이라이트 효과 */
 @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
 

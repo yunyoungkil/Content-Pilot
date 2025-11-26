@@ -377,13 +377,27 @@ function attachScrapListEventListeners(listContainer, container, scraps) {
         button.addEventListener('click', (e) => {
             e.stopPropagation();
             const scrapIdToDelete = button.dataset.id;
+            if (!scrapIdToDelete) {
+                console.error('[Scrapbook] 스크랩 ID가 없습니다.');
+                return;
+            }
             showConfirmationToast("정말로 삭제하시겠습니까?", () => {
-              chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapIdToDelete }, response => {
+              chrome.runtime.sendMessage({ action: "delete_scrap", id: scrapIdToDelete }, (response) => {
+                  if (chrome.runtime.lastError) {
+                      console.error('[Scrapbook] 스크랩 삭제 오류:', chrome.runtime.lastError);
+                      showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+                      return;
+                  }
                   if (response && response.success) {
+                      showToast("✅ 스크랩이 삭제되었습니다.");
                       requestScrapsAndRender(container);
                       if (selectedScrapId === scrapIdToDelete) {
                           renderDetailView(null, container);
                       }
+                  } else {
+                      const errorMsg = response?.error || "알 수 없는 오류";
+                      console.error('[Scrapbook] 스크랩 삭제 실패:', errorMsg);
+                      showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
                   }
               });
             });

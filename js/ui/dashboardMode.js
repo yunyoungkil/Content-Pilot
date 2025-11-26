@@ -1155,6 +1155,7 @@ async function updateDashboardUIInternal(container) {
                         }
                     }
                     competitorMap[sourceId] = compName || '알 수 없는 경쟁사';
+                    console.log('[Dashboard] 경쟁 채널 파싱 - 이름:', compName, 'sourceId:', sourceId, 'URL:', compUrl);
                 }
             });
             
@@ -1365,11 +1366,22 @@ function addDashboardEventListeners(container) {
         showToast('RSS/채널 데이터 수집을 시작합니다...');
         
         try {
-            await chrome.runtime.sendMessage({ action: 'fetch_all_channel_data' });
-            showToast('✅ 데이터 수집이 시작되었습니다. 완료되면 자동으로 업데이트됩니다.');
+            chrome.runtime.sendMessage({ action: 'fetch_all_channel_data' }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('[Dashboard] 새로고침 요청 실패:', chrome.runtime.lastError);
+                    showToast(`❌ 데이터 수집 요청에 실패했습니다: ${chrome.runtime.lastError.message}`);
+                    return;
+                }
+                if (response && response.success !== false) {
+                    showToast('✅ 데이터 수집이 시작되었습니다. 완료되면 자동으로 업데이트됩니다.');
+                } else {
+                    console.error('[Dashboard] 새로고침 응답 실패:', response);
+                    showToast(`❌ 데이터 수집 요청에 실패했습니다: ${response?.error || '알 수 없는 오류'}`);
+                }
+            });
         } catch (error) {
             console.error('[Dashboard] 새로고침 요청 실패:', error);
-            showToast('❌ 데이터 수집 요청에 실패했습니다.');
+            showToast(`❌ 데이터 수집 요청에 실패했습니다: ${error.message}`);
         } finally {
             // 3초 후 버튼 상태 복원
             setTimeout(() => {
@@ -1417,6 +1429,27 @@ function addDashboardEventListeners(container) {
 
     container.addEventListener('click', e => {
         const target = e.target;
+        
+        // 새로고침 버튼 클릭 (이벤트 위임)
+        if (target.id === 'refresh-my-channels-btn' || target.closest('#refresh-my-channels-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = target.closest('#refresh-my-channels-btn') || target;
+            if (btn && !btn.disabled) {
+                handleRefreshChannels(btn);
+            }
+            return;
+        }
+        
+        if (target.id === 'refresh-competitor-channels-btn' || target.closest('#refresh-competitor-channels-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = target.closest('#refresh-competitor-channels-btn') || target;
+            if (btn && !btn.disabled) {
+                handleRefreshChannels(btn);
+            }
+            return;
+        }
         
         // URL 추가 버튼 클릭
         if (target.id === 'add-url-btn' || target.closest('#add-url-btn')) {
@@ -1595,7 +1628,23 @@ function addDashboardEventListeners(container) {
             const button = target.closest('.track-post-btn');
             const post = JSON.parse(button.dataset.postObject);
             const channelType = button.dataset.channelType;
-            const channelName = cachedData?.metas[post.sourceId]?.title || '알 수 없는 채널';
+            
+            // 채널 이름 추출: 메타데이터 우선, 없으면 도메인 사용
+            let channelName = null;
+            if (cachedData?.metas && cachedData.metas[post.sourceId] && cachedData.metas[post.sourceId].title) {
+                channelName = cachedData.metas[post.sourceId].title;
+            } else if (post.fullLink || post.link) {
+                try {
+                    const urlObj = new URL(post.fullLink || post.link);
+                    channelName = urlObj.hostname.replace('www.', '');
+                } catch (e) {
+                    channelName = '알 수 없는 채널';
+                }
+            } else {
+                channelName = '알 수 없는 채널';
+            }
+            
+            console.log('[Dashboard] 성과 추적 추가 - 채널 이름:', channelName, 'sourceId:', post.sourceId);
             
             const ideaForTracking = {
                 title: post.title, // [리뉴얼] 접두어 없이 원본 제목 그대로

@@ -325,4 +325,7 @@ export function enrichScrapWithHighlights(scrapData) {
   }
 }
 
-console.log('[System] scrapbook 모듈 로드 완료');
+// 디버그 모드에서만 로그 출력
+if (typeof Logger !== 'undefined' && Logger.isDebugMode()) {
+  Logger.debug('[System] scrapbook 모듈 로드 완료');
+}
