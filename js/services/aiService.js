@@ -524,7 +524,7 @@ export async function generateDraftFromIdea(ideaData) {
                   "thumbnailPromptKo": "한글 프롬프트 (호기심 자극, 강렬한 색상, 드라마틱한 조명)",
 
                   "thumbnailText": "호기심 문구 (12자 내)",
-                  "textPosition": "top",
+                  "textPosition": "bottom",
                   "altText": "이미지 대체 텍스트 (한글, SEO 최적화된 설명, 50자 내외)"
 
                 },
@@ -538,7 +538,7 @@ export async function generateDraftFromIdea(ideaData) {
                   "thumbnailPromptKo": "한글 프롬프트 (정보 강조, 깔끔한 레이아웃, 숫자 표시)",
 
                   "thumbnailText": "정보형 문구 (12자 내)",
-                  "textPosition": "center",
+                  "textPosition": "bottom",
                   "altText": "이미지 대체 텍스트 (한글, SEO 최적화된 설명, 50자 내외)"
 
                 },
@@ -1031,14 +1031,14 @@ export async function generateDraftFromIdea(ideaData) {
         
         if (firstImgMatch) {
           // 첫 번째 이미지 태그를 교체
-          const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block; margin: 0; padding: 0; vertical-align: bottom; line-height: 0; border: none; outline: none; box-sizing: border-box;">`;
+          const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block;">`;
           formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
         } else {
           // 이미지 태그가 없으면 제목 바로 아래에 삽입
           const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
           if (h1Match) {
             const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
-            const imgTag = `\n<div style="display: block; margin: 0; padding: 0; line-height: 0; font-size: 0;"><img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block; margin: 0; padding: 0; vertical-align: bottom; line-height: 0; border: none; outline: none; box-sizing: border-box;"></div>\n`;
+            const imgTag = `\n<img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block;">\n`;
             formattedDraft = formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
           }
         }

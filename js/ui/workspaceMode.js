@@ -2340,28 +2340,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                             draft: response.draft
                         });
                         
-                        // [수정] window.__cp_workspace_idea_data 업데이트 (최신 초안 데이터 반영)
-                        if (window.__cp_workspace_idea_data) {
-                            // 최신 초안 데이터 업데이트
-                            window.__cp_workspace_idea_data.workspace = window.__cp_workspace_idea_data.workspace || {};
-                            window.__cp_workspace_idea_data.workspace.draft = response.draft;
-                            window.__cp_workspace_idea_data.draftContent = response.draft;
-                            window.__cp_workspace_idea_data.draft = response.draft;
-                            
-                            // 발행 정보도 업데이트
-                            if (!window.__cp_workspace_idea_data.publishInfo) {
-                                window.__cp_workspace_idea_data.publishInfo = {};
-                            }
-                            if (response.permalink) window.__cp_workspace_idea_data.publishInfo.permalink = response.permalink;
-                            if (response.tags) window.__cp_workspace_idea_data.publishInfo.tags = response.tags;
-                            if (response.seoTitle) {
-                                window.__cp_workspace_idea_data.publishInfo.seoTitle = response.seoTitle;
-                                window.__cp_workspace_idea_data.seoTitle = response.seoTitle;
-                            }
-                            if (response.thumbnailInfo) window.__cp_workspace_idea_data.publishInfo.thumbnailInfo = response.thumbnailInfo;
-                            if (response.jsonLdSchema) window.__cp_workspace_idea_data.publishInfo.jsonLdSchema = response.jsonLdSchema;
-                        }
-                        
                         // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo, jsonLdSchema)
                         if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo || response.jsonLdSchema) {
                             const updates = {};
