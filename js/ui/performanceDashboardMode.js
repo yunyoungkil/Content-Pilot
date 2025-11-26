@@ -166,7 +166,7 @@ async function processPerformanceData(allCards, container) {
 }
 
 /**
- * 성과 목록 렌더링
+ * 성과 목록 렌더링 (수정됨: 발행 콘텐츠 카드 복원)
  */
 function renderPerformanceList(container, sortBy = "earnings-desc") {
   const contentEl = container.querySelector("#perf-dashboard-content");
@@ -228,6 +228,34 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
     0
   );
 
+  // [복원] 오늘 발행된 콘텐츠 수 계산 (목표 달성 체크용)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayPublishedCount = sortedData.filter((item) => {
+    const publishedDate = item.createdAt ? new Date(item.createdAt) : null;
+    if (!publishedDate) return false;
+    publishedDate.setHours(0, 0, 0, 0);
+    return publishedDate.getTime() === today.getTime();
+  }).length;
+
+  // 목표 달성 체크 (1일 1포)
+  const dailyGoal = 1;
+  const goalAchieved = todayPublishedCount >= dailyGoal;
+
+  // 목표 달성 시 축하 애니메이션
+  if (goalAchieved && !window.goalAchievedToday) {
+    window.goalAchievedToday = true;
+    setTimeout(() => {
+      // Confetti 함수가 있다면 실행 (하단에 함수 추가 필요)
+      if (typeof triggerConfettiAnimation === "function")
+        triggerConfettiAnimation();
+      showToast(
+        `🎉 축하합니다! 오늘 ${todayPublishedCount}개의 콘텐츠를 발행했습니다!`,
+        5000
+      );
+    }, 500);
+  }
+
   // 성장률 (간소화)
   const growthRates = calculateGrowthRates(
     totalEarnings,
@@ -249,6 +277,17 @@ function renderPerformanceList(container, sortBy = "earnings-desc") {
       <div class="perf-stat-card">
         <div class="stat-label">구글 총 노출</div>
         <div class="stat-value">${totalImpressions.toLocaleString()}</div>
+      </div>
+      <div class="perf-stat-card ${
+        goalAchieved ? "goal-achieved" : ""
+      }" id="perf-goal-card">
+        <div class="stat-label">발행 콘텐츠 ${goalAchieved ? "🎯" : ""}</div>
+        <div class="stat-value">${sortedData.length}개</div>
+        ${
+          goalAchieved
+            ? `<div class="goal-badge">오늘 ${todayPublishedCount}개 발행! 🎉</div>`
+            : ""
+        }
       </div>
     </div>
     <div class="perf-list-container">
