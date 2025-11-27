@@ -298,7 +298,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       fetchAndSaveSinglePost(msg.url, msg.channelId, msg.sourceId)
     );
   if (msg.action === "delete_channel")
-    return handleAsync(deleteChannelData(msg.url));
+    return handleAsync(deleteChannelDataCascade(msg.channelId, msg.userId));
   if (msg.action === "fetch_image_as_base64")
     return handleAsync(fetchImageAsBase64(msg.url));
 
@@ -2475,7 +2475,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  
   // 알 수 없는 액션
   Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });
@@ -2484,5 +2483,3 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // === [Migration Function] 데이터 마이그레이션 함수 ===
 // migrationService.js로 이동됨 - import로 사용
-
-
