@@ -1776,9 +1776,9 @@ export async function generateAiImage(prompt, count = 1) {
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
   const userId = CONSTANTS.USER_ID;
-  
+
   // 동시 요청 제한 설정 (API Rate Limit 고려)
-  const MAX_CONCURRENT = 3; 
+  const MAX_CONCURRENT = 3;
 
   // 단일 이미지 생성 함수
   const generateSingleImage = async (index) => {
@@ -1811,21 +1811,23 @@ export async function generateAiImage(prompt, count = 1) {
       // Inline Data 확인
       if (candidate.content?.parts) {
         for (const part of candidate.content.parts) {
-           if (part.inlineData?.data) {
-             base64 = part.inlineData.data;
-             mimeType = part.inlineData.mimeType || "image/png";
-             break;
-           }
-           // 텍스트 내 Base64 확인
-           if (part.text) {
-             const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
-             if (base64Match) {
-               base64 = base64Match[1];
-               const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
-               if (mimeMatch) mimeType = `image/${mimeMatch[1]}`;
-               break;
-             }
-           }
+          if (part.inlineData?.data) {
+            base64 = part.inlineData.data;
+            mimeType = part.inlineData.mimeType || "image/png";
+            break;
+          }
+          // 텍스트 내 Base64 확인
+          if (part.text) {
+            const base64Match = part.text.match(
+              /data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/
+            );
+            if (base64Match) {
+              base64 = base64Match[1];
+              const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
+              if (mimeMatch) mimeType = `image/${mimeMatch[1]}`;
+              break;
+            }
+          }
         }
       }
 
@@ -1836,19 +1838,27 @@ export async function generateAiImage(prompt, count = 1) {
           `thumbnails/${userId}/${Date.now()}_${index}.png`,
           userId
         );
-        Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`);
+        Logger.debug(
+          `[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`
+        );
         return url;
       } else {
         throw new Error("base64 데이터를 찾을 수 없습니다.");
       }
     } catch (e) {
-      Logger.error(`[generateAiImage] 이미지 ${index + 1}/${count} 생성 실패:`, e);
+      Logger.error(
+        `[generateAiImage] 이미지 ${index + 1}/${count} 생성 실패:`,
+        e
+      );
       return null; // 실패 시 null 반환
     }
   };
 
   // 작업 큐 생성
-  const tasks = Array.from({ length: count }, (_, i) => () => generateSingleImage(i));
+  const tasks = Array.from(
+    { length: count },
+    (_, i) => () => generateSingleImage(i)
+  );
 
   // 병렬 처리 로직 (Concurrency Control)
   const results = [];
@@ -1860,21 +1870,21 @@ export async function generateAiImage(prompt, count = 1) {
 
     // 실행 중인 작업 리스트 관리 (완료 시 제거)
     const e = p.then(() => {
-        executing.splice(executing.indexOf(e), 1);
+      executing.splice(executing.indexOf(e), 1);
     });
     executing.push(e);
 
     // 동시 실행 수가 제한에 도달하면 하나가 끝날 때까지 대기
     if (executing.length >= MAX_CONCURRENT) {
-        await Promise.race(executing);
+      await Promise.race(executing);
     }
   }
 
   // 모든 작업 완료 대기
   const allResults = await Promise.all(results);
-  
+
   // 성공한 이미지(URL)만 필터링
-  const successfulImages = allResults.filter(url => url !== null);
+  const successfulImages = allResults.filter((url) => url !== null);
 
   if (successfulImages.length === 0) {
     throw new Error("생성된 이미지가 없습니다. (모든 시도 실패)");

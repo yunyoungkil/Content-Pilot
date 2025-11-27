@@ -420,7 +420,10 @@ export function renderChannelMode(container) {
             );
 
             myChannelsData = blogs.map((blog) => {
-              Logger.debug("[ChannelMode] loadChannelData - 블로그 변환:", blog);
+              Logger.debug(
+                "[ChannelMode] loadChannelData - 블로그 변환:",
+                blog
+              );
               return {
                 inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
                 url: blog.url || blog.inputUrl, // 하위 호환성 유지
