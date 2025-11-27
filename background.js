@@ -265,6 +265,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 // 3. 메시지 라우터 (Message Router)
+/**
+ * 백그라운드 스크립트의 메인 메시지 핸들러입니다.
+ * 모든 content script와 popup의 메시지를 라우팅하고 처리합니다.
+ */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
   if (msg.action.endsWith("_in_offscreen_response")) {
@@ -297,8 +301,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       fetchAndSaveSinglePost(msg.url, msg.channelId, msg.sourceId)
     );
-  if (msg.action === "delete_channel")
-    return handleAsync(deleteChannelDataCascade(msg.channelId, msg.userId));
+  if (msg.action === "delete_channel") {
+    return handleAsync(
+      (async () => {
+        const { id: channelId, url: channelUrl } = msg;
+        console.log(
+          "[Background] delete_channel - channelId:",
+          channelId,
+          "channelUrl:",
+          channelUrl
+        );
+        const userId = await getCurrentUserId();
+        const result = await deleteChannelDataCascade(
+          channelId,
+          userId,
+          channelUrl
+        );
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+        return {
+          success: true,
+          count: result.deletedCount,
+          details: result.details,
+        };
+      })()
+    );
+  }
   if (msg.action === "fetch_image_as_base64")
     return handleAsync(fetchImageAsBase64(msg.url));
 
@@ -1398,214 +1427,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
         const userId = await getCurrentUserId();
 
-        // 기존 채널 데이터 불러오기 (병합을 위해)
-        let existingChannels = {};
-        try {
-          const existingSnap = await get(ref(getDb(), `channels/${userId}`));
-          existingChannels = existingSnap?.val() || {};
-        } catch (error) {
-          Logger.debug(
-            "[save_channels_and_key] 기존 채널 데이터 불러오기 실패 (신규 사용자일 수 있음):",
-            error.message
-          );
-        }
-
-        // 채널 ID 생성 헬퍼 함수
-        const generateChannelId = (channel) => {
-          if (channel.id) return channel.id;
-          // inputUrl 우선, 없으면 url 사용 (하위 호환성)
-          const urlToUse = channel.inputUrl || channel.url;
-          if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
-          if (urlToUse) return btoa(urlToUse).replace(/=/g, "");
-          return null;
+        // [핵심 수정] 빈 목록도 명확한 데이터로 인식하도록 강제
+        // Firebase에서 빈 배열([])은 null로 저장될 수 있으므로, 명시적으로 빈 배열을 유지
+        const safeChannels = channelsData || {
+          myChannels: { blogs: [], youtubes: [] },
         };
-
-        // 채널에 ID가 없으면 생성
-        const ensureChannelIds = (channels) => {
-          if (!channels || typeof channels !== "object") return channels;
-          if (channels.myChannels?.blogs) {
-            channels.myChannels.blogs = channels.myChannels.blogs.map((c) => {
-              if (!c.id) {
-                c.id = generateChannelId(c);
-              }
-              return c;
-            });
-          }
-          if (channels.myChannels?.youtubes) {
-            channels.myChannels.youtubes = channels.myChannels.youtubes.map(
-              (c) => {
-                if (!c.id) {
-                  c.id = generateChannelId(c);
-                }
-                return c;
-              }
-            );
-          }
-          return channels;
-        };
-
-        // channels가 없거나 빈 객체인 경우 기존 데이터 사용 또는 기본 구조 생성
-        let channelsToSave = channelsData;
-        if (
-          !channelsToSave ||
-          (typeof channelsToSave === "object" &&
-            Object.keys(channelsToSave).length === 0)
-        ) {
-          // 기존 데이터가 있으면 기존 데이터 사용
-          if (existingChannels && Object.keys(existingChannels).length > 0) {
-            Logger.debug(
-              "[save_channels_and_key] channels가 비어있지만 기존 데이터가 있음, 기존 데이터 유지"
-            );
-            channelsToSave = existingChannels;
-          } else {
-            // 기존 데이터도 없으면 기본 구조 생성
-            Logger.warn(
-              "[save_channels_and_key] channels가 비어있고 기존 데이터도 없음, 기본 구조 생성"
-            );
-            channelsToSave = {
-              myChannels: {
-                blogs: [],
-                youtubes: [],
-              },
-            };
-          }
-        } else {
-          // 새 channels 데이터가 있으면 기존 데이터와 병합 (myChannels 우선)
-          if (existingChannels?.myChannels && channelsToSave.myChannels) {
-            // 기존 채널 목록과 새 채널 목록 병합 (중복 제거)
-            const existingBlogs = existingChannels.myChannels.blogs || [];
-            const newBlogs = channelsToSave.myChannels.blogs || [];
-            const existingYoutubes = existingChannels.myChannels.youtubes || [];
-            const newYoutubes = channelsToSave.myChannels.youtubes || [];
-
-            // 중복 제거 및 업데이트를 위한 헬퍼 함수
-            const mergeChannels = (existing, newChannels) => {
-              const merged = [...existing];
-              newChannels.forEach((newChannel) => {
-                const newId = generateChannelId(newChannel);
-                if (!newId) {
-                  Logger.warn(
-                    "[save_channels_and_key] 새 채널의 ID를 생성할 수 없습니다:",
-                    newChannel
-                  );
-                  return;
-                }
-                // 기존 채널 중 같은 ID를 가진 채널 찾기
-                const existingIndex = merged.findIndex((existingChannel) => {
-                  const existingId = generateChannelId(existingChannel);
-                  return existingId && existingId === newId;
-                });
-
-                if (existingIndex >= 0) {
-                  // 기존 채널이 있으면 업데이트 (competitors 포함 모든 필드 병합)
-                  const existingChannel = merged[existingIndex];
-                  const oldCompetitors = existingChannel.competitors || [];
-                  const newCompetitors =
-                    newChannel.competitors !== undefined
-                      ? newChannel.competitors
-                      : oldCompetitors;
-
-                  Logger.debug(
-                    `[save_channels_and_key] 기존 채널 업데이트 (ID: ${newId})`,
-                    {
-                      existing: existingChannel,
-                      new: newChannel,
-                    }
-                  );
-
-                  // 삭제된 경쟁 채널 감지 및 데이터 삭제
-                  if (
-                    Array.isArray(oldCompetitors) &&
-                    oldCompetitors.length > 0 &&
-                    Array.isArray(newCompetitors)
-                  ) {
-                    const deletedUrls = findDeletedCompetitors(
-                      oldCompetitors,
-                      newCompetitors
-                    );
-                    if (deletedUrls.length > 0) {
-                      Logger.info(
-                        `[save_channels_and_key] 삭제된 경쟁 채널 감지: ${deletedUrls.length}개`,
-                        deletedUrls
-                      );
-                      // 비동기로 삭제 (저장은 계속 진행)
-                      Promise.all(
-                        deletedUrls.map((url) => {
-                          Logger.info(
-                            `[save_channels_and_key] 경쟁 채널 삭제 시작: ${url}`
-                          );
-                          return deleteCompetitorData(url, userId);
-                        })
-                      )
-                        .then((results) => {
-                          const totalDeleted = results.reduce(
-                            (sum, r) => sum + (r.deletedCount || 0),
-                            0
-                          );
-                          Logger.info(
-                            `[save_channels_and_key] ✅ 경쟁 채널 데이터 삭제 완료 - 총 ${totalDeleted}개 항목 삭제`
-                          );
-                          results.forEach((result, index) => {
-                            if (result.deletedCount > 0) {
-                              Logger.info(
-                                `[save_channels_and_key]   - ${deletedUrls[index]}: ${result.deletedCount}개 삭제`
-                              );
-                            }
-                          });
-                        })
-                        .catch((error) => {
-                          Logger.error(
-                            `[save_channels_and_key] 경쟁 채널 데이터 삭제 중 오류:`,
-                            error
-                          );
-                        });
-                    }
-                  }
-
-                  merged[existingIndex] = {
-                    ...existingChannel,
-                    ...newChannel,
-                    // competitors는 새 값으로 덮어쓰기 (명시적으로 설정된 경우)
-                    competitors: newCompetitors,
-                  };
-                } else {
-                  // 기존 채널이 없으면 추가
-                  merged.push(newChannel);
-                }
-              });
-              return merged;
-            };
-
-            channelsToSave.myChannels.blogs = mergeChannels(
-              existingBlogs,
-              newBlogs
-            );
-            channelsToSave.myChannels.youtubes = mergeChannels(
-              existingYoutubes,
-              newYoutubes
-            );
-          }
+        if (safeChannels.myChannels) {
+          if (!safeChannels.myChannels.blogs)
+            safeChannels.myChannels.blogs = [];
+          if (!safeChannels.myChannels.youtubes)
+            safeChannels.myChannels.youtubes = [];
         }
 
-        // 모든 채널에 ID가 있는지 확인하고 없으면 생성
-        channelsToSave = ensureChannelIds(channelsToSave);
+        // set()으로 덮어쓰기하여 빈 배열도 확실하게 저장
+        await set(ref(getDb(), `channels/${userId}`), safeChannels);
 
-        // undefined 값을 null로 변환하여 Firebase 저장 오류 방지
-        const cleanedChannels = cleanDataForFirebase(channelsToSave);
-
-        // 빈 객체 체크
-        if (
-          cleanedChannels &&
-          typeof cleanedChannels === "object" &&
-          Object.keys(cleanedChannels).length === 0
-        ) {
-          Logger.error(
-            "[save_channels_and_key] cleanedChannels가 빈 객체입니다."
-          );
-          throw new Error("저장할 채널 데이터가 없습니다.");
-        }
-
-        await set(ref(getDb(), `channels/${userId}`), cleanedChannels);
         // 데이터 수집 트리거
         await fetchAllChannelData();
         return { success: true, message: "채널 정보가 저장되었습니다." };

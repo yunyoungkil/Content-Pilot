@@ -1,85 +1,96 @@
 // js/services/cascadeDeleteService.js
-// 연쇄 삭제(Cascade Delete) 서비스 - 최종 개선판
+// 연쇄 삭제(Cascade Delete) 서비스 - 덤프 데이터 기반 정밀 수정
 
 import { getDb } from "./firebaseService.js";
 import { ref, get, remove } from "./firebaseService.js";
 import { Logger } from "../utils.js";
 
-// ==========================================
-// 1. 헬퍼 함수 (URL 처리)
-// ==========================================
-
 /**
- * URL 정규화 함수 (매칭 확률 높이기용)
- */
-function normalizeUrlForMatching(url) {
-  if (!url || typeof url !== "string") return "";
-  try {
-    const urlObj = new URL(url);
-    // 프로토콜(http/s)과 www를 통일하고, 끝의 슬래시 제거
-    let normalized = `${urlObj.protocol}//${urlObj.hostname.toLowerCase()}${
-      urlObj.pathname
-    }`;
-    normalized = normalized.replace(/\/$/, "");
-    return normalized;
-  } catch (e) {
-    return url.trim();
-  }
-}
-
-/**
- * 블로그 URL을 RSS URL로 변환 (경쟁사 삭제 시 캐시 찾기용)
- */
-function resolveBlogUrlToRss(url) {
-  if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
-  try {
-    const urlObj = new URL(url);
-    const host = urlObj.hostname.toLowerCase();
-    const origin = urlObj.origin;
-
-    if (host.includes("tistory.com")) return `${origin}/rss`;
-    if (host.includes("blog.naver.com")) {
-      const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
-      if (pathMatch && pathMatch[1] && pathMatch[1] !== "PostList.naver") {
-        return `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
-      }
-      return null;
-    }
-    // 워드프레스, 블로거 등 기타 플랫폼
-    return url.endsWith("/") ? `${url}feed` : `${url}/feed`;
-  } catch (e) {
-    return null;
-  }
-}
-
-/**
- * URL 인코딩 헬퍼 (url_index 키 생성용)
- * kanbanService/collectorService와 동일한 로직이어야 함
+ * [수정 1] URL 인덱스 키 생성기 (덤프 데이터 형식 반영)
+ * 실제 DB: costcatcher_DOT_k-posting_DOT_info_SLASH_...
  */
 function encodeUrlForIndex(url) {
   if (!url) return null;
   try {
-    // URL 정규화 (프로토콜, www 제거 등은 collectorService 로직 따름)
-    // 여기서는 안전하게 base64 변환만 수행 (실제 키와 일치해야 함)
-    return btoa(url.trim())
-      .replace(/=/g, "")
-      .replace(/\//g, "_")
-      .replace(/\+/g, "-");
+    let cleanUrl = url.trim();
+    // 프로토콜 제거
+    cleanUrl = cleanUrl.replace(/^https?:\/\//, "");
+    // 특수문자 치환 (collectorService 로직 추정)
+    return cleanUrl
+      .replace(/\./g, "_DOT_")
+      .replace(/\//g, "_SLASH_")
+      .replace(/#/g, "_HASH_")
+      .replace(/\?/g, "_QM_");
   } catch (e) {
     return null;
   }
 }
 
 /**
- * 채널 ID로 연결된 모든 데이터 안전하게 삭제 (Cascade Delete)
- * @param {string} channelId - 삭제할 채널의 UUID
- * @param {string} userId - 사용자 ID
- * @returns {Promise<{success: boolean, deletedCount: number, details: Object}>}
+ * [수정 2] Legacy Key 생성기 (가능한 모든 RSS 변형 생성)
+ * 커스텀 도메인을 위해 /rss, /feed 등을 무차별적으로 모두 생성하여 추적
  */
-export async function deleteChannelDataCascade(channelId, userId) {
+function generateLegacyKeys(url) {
+  const keys = new Set();
+  if (!url || typeof url !== "string") return keys;
+
+  try {
+    // 1. URL 정규화 및 객체 생성
+    const cleanUrl = url.trim().replace(/\/$/, ""); // 끝 슬래시 제거
+    let urlObj;
+    try {
+      urlObj = new URL(
+        cleanUrl.startsWith("http") ? cleanUrl : `https://${cleanUrl}`
+      );
+    } catch (e) {
+      return keys; // 유효하지 않은 URL
+    }
+
+    const origin = urlObj.origin; // https://ecodeviceit.tistory.com
+    const pathname = urlObj.pathname; // /rss 등
+
+    // 2. 추적할 후보 URL 리스트 (Priority List)
+    const candidates = [
+      cleanUrl, // 1. 입력된 원본
+      `${origin}/rss`, // 2. 티스토리 표준 (/rss)
+      `${origin}/feed`, // 3. 워드프레스/미디엄 표준 (/feed)
+      `${origin}/feeds/posts/default?alt=rss`, // 4. 구글 블로거 표준
+    ];
+
+    // 경로가 이미 있는 경우 (예: /rss가 포함된 경우)
+    if (!pathname || pathname === "/") {
+      // 이미 위에서 처리됨
+    } else {
+      candidates.push(`${origin}${pathname}`); // 경로 포함 원본
+    }
+
+    // 3. 모든 후보를 Base64 인코딩하여 키 생성
+    candidates.forEach((c) => {
+      keys.add(btoa(c).replace(/=/g, "")); // Standard Base64
+      // http/https 교차 검증
+      if (c.startsWith("https:")) {
+        keys.add(btoa(c.replace("https:", "http:")).replace(/=/g, ""));
+      } else if (c.startsWith("http:")) {
+        keys.add(btoa(c.replace("http:", "https:")).replace(/=/g, ""));
+      }
+    });
+  } catch (e) {
+    console.warn("Key gen error:", e);
+  }
+  return keys;
+}
+
+/**
+ * [채널 전체 삭제] 채널 ID(UUID)와 URL(Legacy Key)을 모두 사용하여 데이터 완전 삭제
+ */
+export async function deleteChannelDataCascade(
+  channelId,
+  userId,
+  channelUrl = null
+) {
   try {
     Logger.biz(
-      `🚨 [Cascade Delete] 채널 데이터 영구 삭제 시작 - ID: ${channelId}`
+      `🚨 [Cascade Delete] 정밀 삭제 시작 - ID: ${channelId}, URL: ${channelUrl}`
     );
 
     const stats = {
@@ -87,82 +98,34 @@ export async function deleteChannelDataCascade(channelId, userId) {
       scraps: 0,
       urlIndex: 0,
       contentCache: 0,
+      meta: 0,
     };
 
-    // 1. [Kanban & URL Index] 칸반 카드와 연결된 URL 인덱스 삭제 (가장 중요)
-    // ----------------------------------------------------------------
-    try {
-      const kanbanSnap = await get(ref(getDb(), `kanban/${userId}`));
-      const kanban = kanbanSnap?.val() || {};
+    // -------------------------------------------------------
+    // 1. Legacy Key 추적 (Source ID 계산)
+    // -------------------------------------------------------
+    const targetKeys = Array.from(generateLegacyKeys(channelUrl));
+    Logger.debug(
+      `[Cascade Delete] 추적할 Legacy Keys (${targetKeys.length}개):`,
+      targetKeys
+    );
 
-      // 모든 상태(ideas, in-progress, done) 순회
-      for (const status in kanban) {
-        for (const cardId in kanban[status]) {
-          const card = kanban[status][cardId];
+    // -------------------------------------------------------
+    // 2. [Channel Content & Meta] RSS 캐시 및 메타 삭제 (Legacy Key 사용)
+    // -------------------------------------------------------
 
-          // 해당 채널의 카드만 타겟팅
-          if (card.channelId === channelId) {
-            // 1-1. URL 인덱스 삭제 (중복 방지 해제)
-            // (A) origin.postUrl 인덱스 삭제
-            if (card.origin && card.origin.postUrl) {
-              const encodedKey = encodeUrlForIndex(card.origin.postUrl);
-              if (encodedKey) {
-                await remove(
-                  ref(
-                    getDb(),
-                    `url_index/${userId}/${encodedKey}/origin/${cardId}`
-                  )
-                );
-                stats.urlIndex++;
-              }
-            }
-            // (B) publishedUrl 인덱스 삭제
-            if (card.publishedUrl) {
-              const encodedKey = encodeUrlForIndex(card.publishedUrl);
-              if (encodedKey) {
-                await remove(
-                  ref(
-                    getDb(),
-                    `url_index/${userId}/${encodedKey}/published/${cardId}`
-                  )
-                );
-                stats.urlIndex++;
-              }
-            }
-
-            // 1-2. 칸반 카드 본체 삭제
-            await remove(ref(getDb(), `kanban/${userId}/${status}/${cardId}`));
-            stats.kanban++;
-          }
-        }
-      }
-      Logger.debug(
-        `[Cascade Delete] 칸반 카드 ${stats.kanban}개, 인덱스 ${stats.urlIndex}개 삭제 완료`
-      );
-    } catch (error) {
-      Logger.error(`[Cascade Delete] 칸반/인덱스 삭제 중 오류:`, error);
+    // (A) Channel Meta 삭제
+    for (const key of targetKeys) {
+      try {
+        await remove(ref(getDb(), `channel_meta/${userId}/${key}`));
+        stats.meta++;
+      } catch (e) {}
     }
+    // UUID 키 메타도 시도
+    if (channelId)
+      await remove(ref(getDb(), `channel_meta/${userId}/${channelId}`));
 
-    // 2. [Scraps] 스크랩 데이터 삭제
-    // ----------------------------------------------------------------
-    try {
-      const scrapsSnap = await get(ref(getDb(), `scraps/${userId}`));
-      const scraps = scrapsSnap?.val() || {};
-
-      for (const scrapId in scraps) {
-        const scrap = scraps[scrapId];
-        if (scrap.channelId === channelId) {
-          await remove(ref(getDb(), `scraps/${userId}/${scrapId}`));
-          stats.scraps++;
-        }
-      }
-      Logger.debug(`[Cascade Delete] 스크랩 ${stats.scraps}개 삭제 완료`);
-    } catch (error) {
-      Logger.warn(`[Cascade Delete] scraps 삭제 중 오류:`, error);
-    }
-
-    // 3. [Channel Content] RSS 파싱 캐시 데이터 삭제 (전단지 수거)
-    // ----------------------------------------------------------------
+    // (B) Channel Content 삭제
     try {
       // 블로그 캐시
       const blogsSnap = await get(
@@ -171,8 +134,11 @@ export async function deleteChannelDataCascade(channelId, userId) {
       const blogs = blogsSnap?.val() || {};
       for (const contentId in blogs) {
         const content = blogs[contentId];
-        // channelId가 일치하거나 sourceId(URL기반 ID)가 일치하면 삭제
-        if (content.channelId === channelId || content.sourceId === channelId) {
+        // UUID 일치 OR 소스ID(URL해시) 일치 시 삭제
+        if (
+          content.channelId === channelId ||
+          (content.sourceId && targetKeys.includes(content.sourceId))
+        ) {
           await remove(
             ref(getDb(), `channel_content/${userId}/blogs/${contentId}`)
           );
@@ -180,169 +146,161 @@ export async function deleteChannelDataCascade(channelId, userId) {
         }
       }
 
-      // 유튜브 캐시 (혹시 있다면)
+      // 유튜브 캐시
       const youtubesSnap = await get(
         ref(getDb(), `channel_content/${userId}/youtubes`)
       );
       const youtubes = youtubesSnap?.val() || {};
       for (const videoId in youtubes) {
         const video = youtubes[videoId];
-        if (video.channelId === channelId || video.sourceId === channelId) {
+        if (
+          video.channelId === channelId ||
+          (video.sourceId && targetKeys.includes(video.sourceId))
+        ) {
           await remove(
             ref(getDb(), `channel_content/${userId}/youtubes/${videoId}`)
           );
           stats.contentCache++;
         }
       }
-      Logger.debug(
-        `[Cascade Delete] 콘텐츠 캐시 ${stats.contentCache}개 삭제 완료`
-      );
-    } catch (error) {
-      Logger.warn(`[Cascade Delete] channel_content 삭제 중 오류:`, error);
+    } catch (e) {
+      Logger.warn("Content deletion error", e);
     }
 
-    // 4. [Channel Meta] 채널 메타데이터 삭제 (안전장치)
-    // myChannels 배열에서 이미 지웠겠지만, 혹시 channel_meta 경로를 쓴다면 여기서도 삭제
+    // -------------------------------------------------------
+    // 3. [Kanban & URL Index] 칸반 및 인덱스 삭제 (UUID 기반)
+    // -------------------------------------------------------
     try {
-      await remove(ref(getDb(), `channel_meta/${userId}/${channelId}`));
-    } catch (error) {
-      // 경로가 없으면 무시
+      const kanbanSnap = await get(ref(getDb(), `kanban/${userId}`));
+      const kanban = kanbanSnap?.val() || {};
+
+      for (const status in kanban) {
+        for (const cardId in kanban[status]) {
+          const card = kanban[status][cardId];
+
+          if (card.channelId === channelId) {
+            // (A) URL 인덱스 삭제 (수정된 키 생성기 사용)
+            if (card.origin?.postUrl) {
+              const k = encodeUrlForIndex(card.origin.postUrl);
+              // 로그로 키 확인
+              // Logger.debug(`Deleting Index Key: ${k}`);
+              if (k) {
+                await remove(
+                  ref(getDb(), `url_index/${userId}/${k}/origin/${cardId}`)
+                );
+                stats.urlIndex++;
+              }
+            }
+            if (card.publishedUrl) {
+              const k = encodeUrlForIndex(card.publishedUrl);
+              if (k) {
+                await remove(
+                  ref(getDb(), `url_index/${userId}/${k}/published/${cardId}`)
+                );
+                stats.urlIndex++;
+              }
+            }
+
+            // (B) 카드 삭제
+            await remove(ref(getDb(), `kanban/${userId}/${status}/${cardId}`));
+            stats.kanban++;
+          }
+        }
+      }
+    } catch (e) {
+      Logger.error("Kanban deletion error", e);
     }
 
-    // 5. [Preservation Check] 보존해야 할 자산은 건드리지 않음
-    // - thumbnail_templates (삭제 X)
-    // - affiliate_links (삭제 X)
-    // - images storage (삭제 X - 참조 무결성 위해 보존)
+    // -------------------------------------------------------
+    // 4. [Scraps] 스크랩 삭제 (UUID 기반)
+    // -------------------------------------------------------
+    try {
+      const scrapsSnap = await get(ref(getDb(), `scraps/${userId}`));
+      const scraps = scrapsSnap?.val() || {};
+      for (const scrapId in scraps) {
+        if (scraps[scrapId].channelId === channelId) {
+          await remove(ref(getDb(), `scraps/${userId}/${scrapId}`));
+          stats.scraps++;
+        }
+      }
+    } catch (e) {}
 
     Logger.biz(
-      `✅ [Cascade Delete] 채널 삭제 완료. 총 삭제: ${
-        stats.kanban + stats.scraps + stats.contentCache + stats.urlIndex
-      } 항목`
+      `✅ [Cascade Delete] 최종 완료: 카드(${stats.kanban}), 스크랩(${stats.scraps}), 메타(${stats.meta}), 캐시(${stats.contentCache}), 인덱스(${stats.urlIndex})`
     );
-    return {
-      success: true,
-      deletedCount: stats.kanban + stats.scraps,
-      details: stats,
-    };
+    return { success: true, deletedCount: stats.kanban + stats.scraps };
   } catch (error) {
-    Logger.error(`[Cascade Delete] 치명적 오류 발생:`, error);
+    Logger.error(`[Cascade Delete] 오류:`, error);
     return { success: false, error: error.message };
   }
 }
 
 /**
- * 삭제된 경쟁 채널 URL 목록 찾기
- * @param {Array} oldCompetitors - 기존 경쟁 채널 배열
- * @param {Array} newCompetitors - 새로운 경쟁 채널 배열
- * @returns {Array<string>} 삭제된 URL 목록
- */
-export function findDeletedCompetitors(oldCompetitors, newCompetitors) {
-  if (!Array.isArray(oldCompetitors) || oldCompetitors.length === 0) {
-    return [];
-  }
-
-  if (!Array.isArray(newCompetitors)) {
-    // newCompetitors가 없으면 모든 기존 competitors가 삭제된 것으로 간주
-    return oldCompetitors
-      .map((c) => (typeof c === "string" ? c : c.inputUrl || c.url || ""))
-      .filter(Boolean);
-  }
-
-  // URL 정규화 함수
-  const normalizeUrl = (url) => {
-    if (typeof url === "string") return url.trim();
-    if (typeof url === "object" && url !== null) {
-      return (url.inputUrl || url.url || "").trim();
-    }
-    return "";
-  };
-
-  const oldUrls = new Set(oldCompetitors.map(normalizeUrl).filter(Boolean));
-  const newUrls = new Set(newCompetitors.map(normalizeUrl).filter(Boolean));
-
-  // 기존에 있지만 새 배열에 없는 URL 찾기
-  const deletedUrls = [];
-  oldUrls.forEach((url) => {
-    if (!newUrls.has(url)) {
-      deletedUrls.push(url);
-    }
-  });
-
-  return deletedUrls;
-}
-
-/**
- * [경쟁사 개별 삭제] 경쟁 채널 URL로 수집된 캐시 데이터(channel_content)만 삭제
- * (주의: 사용자가 작성한 칸반 카드는 지우지 않음)
- * @param {string} competitorUrl - 삭제할 경쟁 채널 URL
- * @param {string} userId - 사용자 ID
+ * [경쟁사 개별 삭제] X 버튼 클릭 시 실행
+ * channel_content(캐시)와 channel_meta(정보)를 즉시 삭제합니다.
  */
 export async function deleteCompetitorData(competitorUrl, userId) {
   try {
     if (!competitorUrl) return { success: false, error: "URL이 없습니다." };
 
+    // 로그: 삭제 시작
     Logger.info(
-      `[Delete Competitor] 경쟁사 데이터 정리 시작 - URL: ${competitorUrl}`
+      `[Delete Competitor] 경쟁사 데이터 삭제 시작: ${competitorUrl}`
     );
 
-    // 1. 삭제할 캐시의 키(Source ID) 후보군 생성
-    const sourceIds = new Set();
-    const normalizedUrl = normalizeUrlForMatching(competitorUrl);
+    // 1. 삭제할 키(Source ID) 목록 생성
+    const targetKeys = Array.from(generateLegacyKeys(competitorUrl));
+    Logger.debug(`[Delete Competitor] 추적할 키 목록:`, targetKeys);
 
-    // (A) 원본 URL 해시
-    sourceIds.add(btoa(competitorUrl).replace(/=/g, ""));
-    // (B) 정규화된 URL 해시
-    sourceIds.add(btoa(normalizedUrl).replace(/=/g, ""));
-    // (C) RSS URL 해시 (RSS 주소로 저장된 경우 대비)
-    const rssUrl = resolveBlogUrlToRss(competitorUrl);
-    if (rssUrl) sourceIds.add(btoa(rssUrl).replace(/=/g, ""));
-
-    const sourceIdArray = Array.from(sourceIds);
     let deletedCount = 0;
 
-    // 2. channel_content에서 일치하는 캐시 데이터 삭제
+    // 2. [Channel Meta] 메타데이터 삭제 (중요: 이것이 남아있어서 문제였음)
+    for (const key of targetKeys) {
+      try {
+        const metaRef = ref(getDb(), `channel_meta/${userId}/${key}`);
+        // 데이터가 있는지 확인하고 삭제 (선택 사항)
+        await remove(metaRef);
+        // Logger.debug(`Deleted Meta: ${key}`);
+      } catch (e) {}
+    }
+
+    // 3. [Channel Content] RSS 캐시 삭제
     try {
-      // 블로그 콘텐츠 캐시 조회
       const blogsSnap = await get(
         ref(getDb(), `channel_content/${userId}/blogs`)
       );
       const blogs = blogsSnap?.val() || {};
 
       for (const contentId in blogs) {
-        const content = blogs[contentId];
-        // 캐시 데이터의 sourceId가 삭제 대상 목록에 포함되면 삭제
-        if (sourceIdArray.includes(content.sourceId)) {
+        // sourceId가 타겟 키 목록에 포함되면 삭제
+        if (targetKeys.includes(blogs[contentId].sourceId)) {
           await remove(
             ref(getDb(), `channel_content/${userId}/blogs/${contentId}`)
           );
           deletedCount++;
         }
       }
-
-      // 유튜브 콘텐츠 캐시가 있다면 동일하게 처리
-      const youtubesSnap = await get(
-        ref(getDb(), `channel_content/${userId}/youtubes`)
-      );
-      const youtubes = youtubesSnap?.val() || {};
-      for (const videoId in youtubes) {
-        const video = youtubes[videoId];
-        if (sourceIdArray.includes(video.sourceId)) {
-          await remove(
-            ref(getDb(), `channel_content/${userId}/youtubes/${videoId}`)
-          );
-          deletedCount++;
-        }
-      }
     } catch (error) {
-      Logger.error(`[Delete Competitor] 캐시 삭제 중 오류:`, error);
+      Logger.error(`Cache deletion error`, error);
     }
 
-    Logger.info(
-      `[Delete Competitor] 정리 완료 - 삭제된 캐시: ${deletedCount}개`
+    Logger.biz(
+      `✅ [Delete Competitor] 삭제 완료 (캐시 ${deletedCount}개 + 메타데이터)`
     );
     return { success: true, deletedCount };
   } catch (error) {
-    Logger.error(`[Delete Competitor] 치명적 오류:`, error);
+    Logger.error(`[Delete Competitor] 오류:`, error);
     return { success: false, error: error.message };
   }
+}
+
+export function findDeletedCompetitors(oldCompetitors, newCompetitors) {
+  if (!Array.isArray(oldCompetitors) || oldCompetitors.length === 0) return [];
+  if (!Array.isArray(newCompetitors)) return oldCompetitors;
+  const normalize = (url) =>
+    typeof url === "string" ? url.trim() : url?.inputUrl || url?.url || "";
+  const newUrls = new Set(newCompetitors.map(normalize).filter(Boolean));
+  return oldCompetitors
+    .map(normalize)
+    .filter((url) => url && !newUrls.has(url));
 }

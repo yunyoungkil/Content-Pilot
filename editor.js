@@ -1,14 +1,17 @@
+import { Logger } from "./js/utils.js";
+
 // 툴바 커스텀 버튼 렌더링 (Quill 초기화 후)
-  setTimeout(() => {
-    const toolbar = document.querySelector('.ql-toolbar');
-    if (toolbar) {
-      const tuiBtn = toolbar.querySelector('.ql-tui-edit');
-      if (tuiBtn) {
-        tuiBtn.innerHTML = '<span style="font-size:16px;vertical-align:middle;">🎨</span>';
-        tuiBtn.title = 'TUI 이미지 편집';
-      }
+setTimeout(() => {
+  const toolbar = document.querySelector(".ql-toolbar");
+  if (toolbar) {
+    const tuiBtn = toolbar.querySelector(".ql-tui-edit");
+    if (tuiBtn) {
+      tuiBtn.innerHTML =
+        '<span style="font-size:16px;vertical-align:middle;">🎨</span>';
+      tuiBtn.title = "TUI 이미지 편집";
     }
-  }, 100);
+  }
+}, 100);
 // W-17: 이미지 편집 툴팁 오버레이 생성/제거 및 액션 메시지
 let __cp_currentImageForControls = null; // 현재 오버레이가 붙은 이미지 참조
 let __cp_controlsScrollRoot = null; // 스크롤 이벤트를 구독하는 루트(.ql-editor)
@@ -57,278 +60,393 @@ function initializeEditor() {
             console.log("🎨 [Editor] ========================================");
             console.log("🎨 [Editor] 🖱️ tui-edit 버튼 클릭됨!");
             console.log("🎨 [Editor] ========================================");
-            
+
             // Quill 문서 내 모든 이미지와 Range 추출
             let allDocumentImages = [];
             const contents = quillEditor.getContents();
             let idx = 0;
-            contents.ops.forEach(op => {
+            contents.ops.forEach((op) => {
               if (op.insert && op.insert.image) {
                 allDocumentImages.push({
                   url: op.insert.image,
-                  range: { index: idx, length: 1 }
+                  range: { index: idx, length: 1 },
                 });
                 idx += 1;
-              } else if (typeof op.insert === 'string') {
+              } else if (typeof op.insert === "string") {
                 idx += op.insert.length;
               }
             });
-            
-            console.log(`📸 [Editor] 문서 내 이미지 개수: ${allDocumentImages.length}개`);
-            
+
+            console.log(
+              `📸 [Editor] 문서 내 이미지 개수: ${allDocumentImages.length}개`
+            );
+
             if (allDocumentImages.length === 0) {
               console.warn("⚠️ [Editor] ❌ 문서에 이미지가 없음");
               // [추가] 사용자 피드백 제공
               alert("편집할 이미지가 없습니다. 먼저 이미지를 삽입해주세요.");
               return;
             }
-            
+
             // 선택된 이미지가 있으면 그것을 사용, 없으면 첫 번째 이미지 사용
             let targetImage = null;
-            if (window.__cp_selectedImageUrl && window.__cp_selectedImageRange) {
+            if (
+              window.__cp_selectedImageUrl &&
+              window.__cp_selectedImageRange
+            ) {
               // 선택된 이미지가 allDocumentImages에 있는지 확인
-              targetImage = allDocumentImages.find(img => img.url === window.__cp_selectedImageUrl);
+              targetImage = allDocumentImages.find(
+                (img) => img.url === window.__cp_selectedImageUrl
+              );
               if (targetImage) {
-                console.log("✅ [Editor] 선택된 이미지 사용:", window.__cp_selectedImageUrl.substring(0, 50) + "...");
+                console.log(
+                  "✅ [Editor] 선택된 이미지 사용:",
+                  window.__cp_selectedImageUrl.substring(0, 50) + "..."
+                );
               }
             }
-            
+
             // 선택된 이미지가 없거나 찾을 수 없으면 첫 번째 이미지 사용
             if (!targetImage) {
               targetImage = allDocumentImages[0];
-              console.log("🔄 [Editor] 첫 번째 이미지 사용:", targetImage.url.substring(0, 50) + "...");
+              console.log(
+                "🔄 [Editor] 첫 번째 이미지 사용:",
+                targetImage.url.substring(0, 50) + "..."
+              );
             }
-            
+
             window.__cp_editingImageRange = targetImage.range;
             window.__cp_selectedImageRange = targetImage.range;
             window.__cp_selectedImageUrl = targetImage.url;
-            
+
             console.log("📤 [Editor] 워크스페이스로 메시지 전송 준비 중...");
             console.log("📤 [Editor] window.parent:", window.parent);
-            console.log("📤 [Editor] window.parent === window.top:", window.parent === window.top);
-            
+            console.log(
+              "📤 [Editor] window.parent === window.top:",
+              window.parent === window.top
+            );
+
             // Shadow DOM 호스트 window 찾기
             let shadowHostWindow = null;
             try {
-                const rootNode = document.getRootNode();
-                if (rootNode && rootNode.host) {
-                    const hostElement = rootNode.host;
-                    if (hostElement.ownerDocument) {
-                        shadowHostWindow = hostElement.ownerDocument.defaultView;
-                        console.log("🔍 [Editor] Shadow DOM 호스트 window 발견:", shadowHostWindow);
-                    }
+              const rootNode = document.getRootNode();
+              if (rootNode && rootNode.host) {
+                const hostElement = rootNode.host;
+                if (hostElement.ownerDocument) {
+                  shadowHostWindow = hostElement.ownerDocument.defaultView;
+                  console.log(
+                    "🔍 [Editor] Shadow DOM 호스트 window 발견:",
+                    shadowHostWindow
+                  );
                 }
+              }
             } catch (e) {
-                console.log("⚠️ [Editor] Shadow DOM 호스트 탐색 실패:", e.message);
+              console.log(
+                "⚠️ [Editor] Shadow DOM 호스트 탐색 실패:",
+                e.message
+              );
             }
-            
+
             // 메시지를 parent window로 전송
             const message = {
               action: "cp_open_tui_editor",
               currentImageUrl: targetImage.url, // 호환성을 위해 유지
               imageUrl: targetImage.url, // tui-editor.js가 찾는 필드명
-              allDocumentImages
+              allDocumentImages,
             };
-            
+
             console.log("📦 [Editor] 메시지 내용:", {
               action: message.action,
               imageUrl: message.imageUrl.substring(0, 50) + "...",
-              allDocumentImagesCount: message.allDocumentImages.length
+              allDocumentImagesCount: message.allDocumentImages.length,
             });
-            
+
             // 여러 window로 메시지 전송 (shadow DOM 호환)
             const sendToWindow = (targetWindow, name) => {
-                try {
-                    if (targetWindow && targetWindow.postMessage) {
-                        targetWindow.postMessage(message, "*");
-                        console.log(`✅ [Editor] ${name}로 메시지 전송 완료 ✨`);
-                        return true;
-                    } else {
-                        console.warn(`⚠️ [Editor] ${name}가 유효하지 않습니다`);
-                        return false;
-                    }
-                } catch (err) {
-                    console.error(`❌ [Editor] ${name}로 메시지 전송 실패:`, err);
-                    return false;
+              try {
+                if (targetWindow && targetWindow.postMessage) {
+                  targetWindow.postMessage(message, "*");
+                  console.log(`✅ [Editor] ${name}로 메시지 전송 완료 ✨`);
+                  return true;
+                } else {
+                  console.warn(`⚠️ [Editor] ${name}가 유효하지 않습니다`);
+                  return false;
                 }
+              } catch (err) {
+                console.error(`❌ [Editor] ${name}로 메시지 전송 실패:`, err);
+                return false;
+              }
             };
-            
+
             // Shadow DOM을 고려한 메시지 전송 전략
             // 1. parent window로 전송 (Shadow DOM 내부의 첫 번째 부모)
             console.log("📡 [Editor] 1️⃣ window.parent로 전송 시도...");
             sendToWindow(window.parent, "window.parent");
-            
+
             // 1-1. Shadow DOM 호스트 window로 직접 전송 (가장 중요!)
-            if (shadowHostWindow && shadowHostWindow !== window && shadowHostWindow !== window.parent) {
-                console.log("📡 [Editor] 1️⃣-1️⃣ Shadow DOM 호스트 window로 직접 전송 시도...");
-                sendToWindow(shadowHostWindow, "Shadow DOM 호스트 window (직접)");
+            if (
+              shadowHostWindow &&
+              shadowHostWindow !== window &&
+              shadowHostWindow !== window.parent
+            ) {
+              console.log(
+                "📡 [Editor] 1️⃣-1️⃣ Shadow DOM 호스트 window로 직접 전송 시도..."
+              );
+              sendToWindow(shadowHostWindow, "Shadow DOM 호스트 window (직접)");
             }
-            
+
             // 2. top window로 전송 (Shadow DOM을 통과하여 최상위 window로)
             if (window.top && window.top !== window) {
-                console.log("📡 [Editor] 2️⃣ window.top으로 전송 시도...");
-                console.log("🔍 [Editor] window.top === window.parent:", window.top === window.parent);
-                sendToWindow(window.top, "window.top");
+              console.log("📡 [Editor] 2️⃣ window.top으로 전송 시도...");
+              console.log(
+                "🔍 [Editor] window.top === window.parent:",
+                window.top === window.parent
+              );
+              sendToWindow(window.top, "window.top");
             } else {
-                console.warn("⚠️ [Editor] window.top이 없거나 현재 window와 같습니다!");
+              console.warn(
+                "⚠️ [Editor] window.top이 없거나 현재 window와 같습니다!"
+              );
             }
-            
+
             // 3. 모든 상위 window로 전송 시도 (Shadow DOM 경계 통과)
             try {
-                let currentWindow = window.parent;
-                let depth = 0;
-                const visitedWindows = new Set([window]);
-                
-                while (currentWindow && currentWindow !== window && depth < 10 && !visitedWindows.has(currentWindow)) {
-                    visitedWindows.add(currentWindow);
-                    console.log(`📡 [Editor] 상위 window[${depth}]로 전송 시도...`);
-                    sendToWindow(currentWindow, `상위 window[${depth}]`);
-                    
-                    // 다음 상위 window로 이동
-                    if (currentWindow.parent && currentWindow.parent !== currentWindow) {
-                        currentWindow = currentWindow.parent;
-                    } else {
-                        break;
-                    }
-                    depth++;
+              let currentWindow = window.parent;
+              let depth = 0;
+              const visitedWindows = new Set([window]);
+
+              while (
+                currentWindow &&
+                currentWindow !== window &&
+                depth < 10 &&
+                !visitedWindows.has(currentWindow)
+              ) {
+                visitedWindows.add(currentWindow);
+                console.log(`📡 [Editor] 상위 window[${depth}]로 전송 시도...`);
+                sendToWindow(currentWindow, `상위 window[${depth}]`);
+
+                // 다음 상위 window로 이동
+                if (
+                  currentWindow.parent &&
+                  currentWindow.parent !== currentWindow
+                ) {
+                  currentWindow = currentWindow.parent;
+                } else {
+                  break;
                 }
+                depth++;
+              }
             } catch (err) {
-                console.warn("⚠️ [Editor] 상위 window 탐색 실패:", err.message);
+              console.warn("⚠️ [Editor] 상위 window 탐색 실패:", err.message);
             }
-            
+
             // 4. frames를 통해서도 전송 시도
             try {
-                if (window.parent && window.parent.frames && window.parent.frames.length > 0) {
-                    console.log(`📡 [Editor] 4️⃣ window.parent.frames[${window.parent.frames.length}개]로 전송 시도...`);
-                    for (let i = 0; i < window.parent.frames.length; i++) {
-                        try {
-                            if (window.parent.frames[i] && window.parent.frames[i] !== window) {
-                                window.parent.frames[i].postMessage(message, "*");
-                                console.log(`✅ [Editor] window.parent.frames[${i}]로 메시지 전송 완료`);
-                            }
-                        } catch (e) {
-                            console.warn(`⚠️ [Editor] window.parent.frames[${i}]로 메시지 전송 실패:`, e.message);
-                        }
+              if (
+                window.parent &&
+                window.parent.frames &&
+                window.parent.frames.length > 0
+              ) {
+                console.log(
+                  `📡 [Editor] 4️⃣ window.parent.frames[${window.parent.frames.length}개]로 전송 시도...`
+                );
+                for (let i = 0; i < window.parent.frames.length; i++) {
+                  try {
+                    if (
+                      window.parent.frames[i] &&
+                      window.parent.frames[i] !== window
+                    ) {
+                      window.parent.frames[i].postMessage(message, "*");
+                      console.log(
+                        `✅ [Editor] window.parent.frames[${i}]로 메시지 전송 완료`
+                      );
                     }
+                  } catch (e) {
+                    console.warn(
+                      `⚠️ [Editor] window.parent.frames[${i}]로 메시지 전송 실패:`,
+                      e.message
+                    );
+                  }
                 }
+              }
             } catch (err) {
-                console.warn("⚠️ [Editor] frames를 통한 메시지 전송 실패:", err.message);
+              console.warn(
+                "⚠️ [Editor] frames를 통한 메시지 전송 실패:",
+                err.message
+              );
             }
-            
+
             // 5. window.top의 frames도 시도
-            if (window.top && window.top !== window && window.top !== window.parent) {
-                try {
-                    if (window.top.frames && window.top.frames.length > 0) {
-                        console.log(`📡 [Editor] 5️⃣ window.top.frames[${window.top.frames.length}개]로 전송 시도...`);
-                        for (let i = 0; i < window.top.frames.length; i++) {
-                            try {
-                                if (window.top.frames[i] && window.top.frames[i] !== window) {
-                                    window.top.frames[i].postMessage(message, "*");
-                                    console.log(`✅ [Editor] window.top.frames[${i}]로 메시지 전송 완료`);
-                                }
-                            } catch (e) {
-                                console.warn(`⚠️ [Editor] window.top.frames[${i}]로 메시지 전송 실패:`, e.message);
-                            }
-                        }
+            if (
+              window.top &&
+              window.top !== window &&
+              window.top !== window.parent
+            ) {
+              try {
+                if (window.top.frames && window.top.frames.length > 0) {
+                  console.log(
+                    `📡 [Editor] 5️⃣ window.top.frames[${window.top.frames.length}개]로 전송 시도...`
+                  );
+                  for (let i = 0; i < window.top.frames.length; i++) {
+                    try {
+                      if (
+                        window.top.frames[i] &&
+                        window.top.frames[i] !== window
+                      ) {
+                        window.top.frames[i].postMessage(message, "*");
+                        console.log(
+                          `✅ [Editor] window.top.frames[${i}]로 메시지 전송 완료`
+                        );
+                      }
+                    } catch (e) {
+                      console.warn(
+                        `⚠️ [Editor] window.top.frames[${i}]로 메시지 전송 실패:`,
+                        e.message
+                      );
                     }
-                } catch (err) {
-                    console.warn("⚠️ [Editor] window.top.frames를 통한 메시지 전송 실패:", err.message);
+                  }
                 }
+              } catch (err) {
+                console.warn(
+                  "⚠️ [Editor] window.top.frames를 통한 메시지 전송 실패:",
+                  err.message
+                );
+              }
             }
-            
+
             // 6. Shadow DOM 호스트를 통한 전송 시도
             try {
-                // 현재 window의 document가 Shadow DOM 내부에 있는지 확인
-                let currentDoc = document;
-                let depth = 0;
-                while (currentDoc && depth < 5) {
-                    const rootNode = currentDoc.getRootNode();
-                    if (rootNode && rootNode.host) {
-                        // Shadow DOM 호스트를 찾았음
-                        const hostElement = rootNode.host;
-                        // 호스트 요소의 ownerDocument를 통해 window 접근
-                        let hostWindow = null;
-                        try {
-                            if (hostElement.ownerDocument) {
-                                hostWindow = hostElement.ownerDocument.defaultView;
-                            } else if (hostElement.getRootNode) {
-                                const hostRoot = hostElement.getRootNode();
-                                if (hostRoot && hostRoot !== rootNode && hostRoot.nodeType === Node.DOCUMENT_NODE) {
-                                    hostWindow = hostRoot.defaultView;
-                                }
-                            }
-                        } catch (e) {
-                            // cross-origin 접근 시도 실패는 정상
-                            console.log("⚠️ [Editor] Shadow DOM 호스트 window 접근 실패 (cross-origin):", e.message);
-                        }
-                        
-                        if (hostWindow && hostWindow !== window && hostWindow.postMessage) {
-                            console.log("📡 [Editor] 6️⃣ Shadow DOM 호스트 window로 전송 시도...");
-                            sendToWindow(hostWindow, "Shadow DOM 호스트 window");
-                            
-                            // 호스트의 parent window도 시도
-                            if (hostWindow.parent && hostWindow.parent !== hostWindow) {
-                                console.log("📡 [Editor] 7️⃣ Shadow DOM 호스트의 parent window로 전송 시도...");
-                                sendToWindow(hostWindow.parent, "Shadow DOM 호스트 parent window");
-                            }
-                            
-                            // 호스트의 top window도 시도
-                            if (hostWindow.top && hostWindow.top !== hostWindow && hostWindow.top !== window) {
-                                console.log("📡 [Editor] 8️⃣ Shadow DOM 호스트의 top window로 전송 시도...");
-                                sendToWindow(hostWindow.top, "Shadow DOM 호스트 top window");
-                            }
-                        } else if (!hostWindow) {
-                            // Shadow DOM 호스트는 찾았지만 window 접근 실패
-                            // 대신 window.parent를 통해 시도 (이미 시도했지만 다시 한 번)
-                            console.log("📡 [Editor] 6️⃣ Shadow DOM 호스트 발견, window.parent로 재전송 시도...");
-                            if (window.parent && window.parent !== window) {
-                                sendToWindow(window.parent, "window.parent (Shadow DOM 재시도)");
-                            }
-                        }
-                        break;
+              // 현재 window의 document가 Shadow DOM 내부에 있는지 확인
+              let currentDoc = document;
+              let depth = 0;
+              while (currentDoc && depth < 5) {
+                const rootNode = currentDoc.getRootNode();
+                if (rootNode && rootNode.host) {
+                  // Shadow DOM 호스트를 찾았음
+                  const hostElement = rootNode.host;
+                  // 호스트 요소의 ownerDocument를 통해 window 접근
+                  let hostWindow = null;
+                  try {
+                    if (hostElement.ownerDocument) {
+                      hostWindow = hostElement.ownerDocument.defaultView;
+                    } else if (hostElement.getRootNode) {
+                      const hostRoot = hostElement.getRootNode();
+                      if (
+                        hostRoot &&
+                        hostRoot !== rootNode &&
+                        hostRoot.nodeType === Node.DOCUMENT_NODE
+                      ) {
+                        hostWindow = hostRoot.defaultView;
+                      }
                     }
-                    // 상위 document로 이동
-                    if (currentDoc.defaultView && currentDoc.defaultView.parent) {
-                        currentDoc = currentDoc.defaultView.parent.document;
-                    } else {
-                        break;
+                  } catch (e) {
+                    // cross-origin 접근 시도 실패는 정상
+                    console.log(
+                      "⚠️ [Editor] Shadow DOM 호스트 window 접근 실패 (cross-origin):",
+                      e.message
+                    );
+                  }
+
+                  if (
+                    hostWindow &&
+                    hostWindow !== window &&
+                    hostWindow.postMessage
+                  ) {
+                    console.log(
+                      "📡 [Editor] 6️⃣ Shadow DOM 호스트 window로 전송 시도..."
+                    );
+                    sendToWindow(hostWindow, "Shadow DOM 호스트 window");
+
+                    // 호스트의 parent window도 시도
+                    if (hostWindow.parent && hostWindow.parent !== hostWindow) {
+                      console.log(
+                        "📡 [Editor] 7️⃣ Shadow DOM 호스트의 parent window로 전송 시도..."
+                      );
+                      sendToWindow(
+                        hostWindow.parent,
+                        "Shadow DOM 호스트 parent window"
+                      );
                     }
-                    depth++;
+
+                    // 호스트의 top window도 시도
+                    if (
+                      hostWindow.top &&
+                      hostWindow.top !== hostWindow &&
+                      hostWindow.top !== window
+                    ) {
+                      console.log(
+                        "📡 [Editor] 8️⃣ Shadow DOM 호스트의 top window로 전송 시도..."
+                      );
+                      sendToWindow(
+                        hostWindow.top,
+                        "Shadow DOM 호스트 top window"
+                      );
+                    }
+                  } else if (!hostWindow) {
+                    // Shadow DOM 호스트는 찾았지만 window 접근 실패
+                    // 대신 window.parent를 통해 시도 (이미 시도했지만 다시 한 번)
+                    console.log(
+                      "📡 [Editor] 6️⃣ Shadow DOM 호스트 발견, window.parent로 재전송 시도..."
+                    );
+                    if (window.parent && window.parent !== window) {
+                      sendToWindow(
+                        window.parent,
+                        "window.parent (Shadow DOM 재시도)"
+                      );
+                    }
+                  }
+                  break;
                 }
+                // 상위 document로 이동
+                if (currentDoc.defaultView && currentDoc.defaultView.parent) {
+                  currentDoc = currentDoc.defaultView.parent.document;
+                } else {
+                  break;
+                }
+                depth++;
+              }
             } catch (err) {
-                console.warn("⚠️ [Editor] Shadow DOM 호스트 탐색 실패:", err.message);
+              console.warn(
+                "⚠️ [Editor] Shadow DOM 호스트 탐색 실패:",
+                err.message
+              );
             }
-            
+
             // 7. 모든 가능한 window에 브로드캐스트 (최후의 수단)
             try {
-                // window.top부터 시작하여 모든 하위 window에 브로드캐스트
-                if (window.top && window.top !== window) {
-                    console.log("📡 [Editor] 9️⃣ window.top에 브로드캐스트 시도...");
-                    // window.top 자체에도 전송
-                    sendToWindow(window.top, "window.top (브로드캐스트)");
-                    
-                    // window.top의 모든 frames에도 전송
-                    if (window.top.frames) {
-                        for (let i = 0; i < window.top.frames.length; i++) {
-                            try {
-                                if (window.top.frames[i] && window.top.frames[i] !== window) {
-                                    window.top.frames[i].postMessage(message, "*");
-                                    console.log(`✅ [Editor] window.top.frames[${i}]로 브로드캐스트 완료`);
-                                }
-                            } catch (e) {
-                                // 조용히 실패
-                            }
-                        }
+              // window.top부터 시작하여 모든 하위 window에 브로드캐스트
+              if (window.top && window.top !== window) {
+                console.log("📡 [Editor] 9️⃣ window.top에 브로드캐스트 시도...");
+                // window.top 자체에도 전송
+                sendToWindow(window.top, "window.top (브로드캐스트)");
+
+                // window.top의 모든 frames에도 전송
+                if (window.top.frames) {
+                  for (let i = 0; i < window.top.frames.length; i++) {
+                    try {
+                      if (
+                        window.top.frames[i] &&
+                        window.top.frames[i] !== window
+                      ) {
+                        window.top.frames[i].postMessage(message, "*");
+                        console.log(
+                          `✅ [Editor] window.top.frames[${i}]로 브로드캐스트 완료`
+                        );
+                      }
+                    } catch (e) {
+                      // 조용히 실패
                     }
+                  }
                 }
+              }
             } catch (err) {
-                console.warn("⚠️ [Editor] 브로드캐스트 실패:", err.message);
+              console.warn("⚠️ [Editor] 브로드캐스트 실패:", err.message);
             }
-            
+
             console.log("🎨 [Editor] ========================================");
             console.log("🎨 [Editor] 메시지 전송 프로세스 완료");
             console.log("🎨 [Editor] ========================================");
-          }
+          },
         },
       },
       imageResize: {},
@@ -352,7 +470,7 @@ function initializeEditor() {
             break;
           }
           idx += 1;
-        } else if (typeof op.insert === 'string') {
+        } else if (typeof op.insert === "string") {
           idx += op.insert.length;
         }
       }
@@ -493,12 +611,22 @@ function initializeEditor() {
         try {
           const range = window.__cp_editingImageRange;
           if (!range || !data || !data.dataUrl) {
-            console.error("❌ [Editor] 이미지 교체 실패: Range 또는 Data URL 누락", { range, hasDataUrl: !!(data && data.dataUrl) });
+            console.error(
+              "❌ [Editor] 이미지 교체 실패: Range 또는 Data URL 누락",
+              { range, hasDataUrl: !!(data && data.dataUrl) }
+            );
             break;
           }
           console.log("✅ [Editor] Range 및 Data URL 확인 완료");
-          console.log("📊 [Editor] Data URL 길이:", data.dataUrl.length, "bytes");
-          const length = typeof range.length === "number" && range.length > 0 ? range.length : 1;
+          console.log(
+            "📊 [Editor] Data URL 길이:",
+            data.dataUrl.length,
+            "bytes"
+          );
+          const length =
+            typeof range.length === "number" && range.length > 0
+              ? range.length
+              : 1;
           // 우선 포맷에서 이미지 여부 확인
           let isImageAtRange = false;
           let prevImgNode = null;
@@ -527,24 +655,35 @@ function initializeEditor() {
             } catch (e) {}
           }
           if (!isImageAtRange) {
-            console.error("❌ [Editor] 이미지 교체 실패: Range 위치가 이미지가 아닙니다.", range);
+            console.error(
+              "❌ [Editor] 이미지 교체 실패: Range 위치가 이미지가 아닙니다.",
+              range
+            );
             window.__cp_editingImageRange = null;
             break;
           }
           console.log("✅ [Editor] Range 위치 이미지 확인 완료");
-          
+
           // 기존 이미지의 크기 스타일 추출
-          let prevWidth = null, prevHeight = null;
+          let prevWidth = null,
+            prevHeight = null;
           if (prevImgNode) {
             // style 우선, 없으면 getBoundingClientRect로 픽셀값
-            prevWidth = prevImgNode.style.width || prevImgNode.getAttribute('width');
-            prevHeight = prevImgNode.style.height || prevImgNode.getAttribute('height');
+            prevWidth =
+              prevImgNode.style.width || prevImgNode.getAttribute("width");
+            prevHeight =
+              prevImgNode.style.height || prevImgNode.getAttribute("height");
             const rect = prevImgNode.getBoundingClientRect();
-            if ((!prevWidth || prevWidth === 'auto') && rect.width) prevWidth = rect.width + 'px';
-            if ((!prevHeight || prevHeight === 'auto') && rect.height) prevHeight = rect.height + 'px';
-            console.log("📏 [Editor] 기존 이미지 크기:", { width: prevWidth, height: prevHeight });
+            if ((!prevWidth || prevWidth === "auto") && rect.width)
+              prevWidth = rect.width + "px";
+            if ((!prevHeight || prevHeight === "auto") && rect.height)
+              prevHeight = rect.height + "px";
+            console.log("📏 [Editor] 기존 이미지 크기:", {
+              width: prevWidth,
+              height: prevHeight,
+            });
           }
-          
+
           // 기존 이미지 삭제 및 새 이미지 삽입
           console.log("🗑️ [Editor] 기존 이미지 삭제 중...");
           quillEditor.deleteText(range.index, length);
@@ -557,18 +696,21 @@ function initializeEditor() {
             if (leaf && leaf.domNode && leaf.domNode.tagName === "IMG") {
               if (prevWidth) {
                 leaf.domNode.style.width = prevWidth;
-                leaf.domNode.setAttribute('width', prevWidth.replace('px',''));
+                leaf.domNode.setAttribute("width", prevWidth.replace("px", ""));
               }
               if (prevHeight) {
                 leaf.domNode.style.height = prevHeight;
-                leaf.domNode.setAttribute('height', prevHeight.replace('px',''));
+                leaf.domNode.setAttribute(
+                  "height",
+                  prevHeight.replace("px", "")
+                );
               }
             }
           }, 0);
           quillEditor.setSelection(range.index + 1, 0);
           window.__cp_editingImageRange = null;
           console.log("✅ [Editor] 이미지 교체 완료!");
-          
+
           // 저장 트리거 (선택) - 부모에 저장 요청 전달
           console.log("💾 [Editor] 드래프트 저장 요청 전송 중...");
           window.parent.postMessage(
@@ -597,7 +739,7 @@ function initializeEditor() {
                   break;
                 }
                 idx += 1;
-              } else if (typeof op.insert === 'string') {
+              } else if (typeof op.insert === "string") {
                 idx += op.insert.length;
               }
             }
@@ -605,29 +747,45 @@ function initializeEditor() {
         }
         break;
       case "set-content":
-        console.log('[Editor] set-content 메시지 수신:', { hasDelta: !!data.delta, hasHtml: data.html !== undefined, hasText: data.text !== undefined, html: data.html });
+        console.log("[Editor] set-content 메시지 수신:", {
+          hasDelta: !!data.delta,
+          hasHtml: data.html !== undefined,
+          hasText: data.text !== undefined,
+          html: data.html,
+        });
         if (data.delta) {
           quillEditor.setContents(data.delta);
-          console.log('[Editor] Delta로 콘텐츠 설정 완료');
+          console.log("[Editor] Delta로 콘텐츠 설정 완료");
         } else if (data.html !== undefined) {
           // 빈 문자열이거나 빈 HTML인 경우 완전히 초기화
-          if (!data.html || data.html.trim() === "" || data.html === "<p><br></p>" || data.html === "<p></p>") {
-            console.log('[Editor] 빈 HTML 감지, 에디터 완전 초기화');
+          if (
+            !data.html ||
+            data.html.trim() === "" ||
+            data.html === "<p><br></p>" ||
+            data.html === "<p></p>"
+          ) {
+            console.log("[Editor] 빈 HTML 감지, 에디터 완전 초기화");
             quillEditor.setContents([]);
             quillEditor.setText("");
-            console.log('[Editor] 에디터 초기화 완료, 현재 길이:', quillEditor.getLength());
+            console.log(
+              "[Editor] 에디터 초기화 완료, 현재 길이:",
+              quillEditor.getLength()
+            );
           } else {
-            console.log('[Editor] HTML 콘텐츠 설정:', data.html.substring(0, 50) + '...');
+            console.log(
+              "[Editor] HTML 콘텐츠 설정:",
+              data.html.substring(0, 50) + "..."
+            );
             quillEditor.setContents([]);
             quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
             quillEditor.setSelection(quillEditor.getLength(), 0);
           }
         } else if (data.text !== undefined) {
-          console.log('[Editor] 텍스트 콘텐츠 설정:', data.text || "");
+          console.log("[Editor] 텍스트 콘텐츠 설정:", data.text || "");
           quillEditor.setText(data.text || "");
         } else {
           // data가 없거나 모든 필드가 undefined인 경우 초기화
-          console.log('[Editor] 모든 필드가 undefined, 에디터 초기화');
+          console.log("[Editor] 모든 필드가 undefined, 에디터 초기화");
           quillEditor.setContents([]);
           quillEditor.setText("");
         }
@@ -639,7 +797,7 @@ function initializeEditor() {
             {
               action: "content-response",
               requestId: data.requestId,
-              data: { html: quillEditor.root.innerHTML }
+              data: { html: quillEditor.root.innerHTML },
             },
             "*"
           );
@@ -676,7 +834,10 @@ function initializeEditor() {
       case "insert-text":
         // ▼▼▼ [오류 수정] data가 undefined일 수 있으므로 방어 코드 추가 ▼▼▼
         if (!data || !data.text) {
-          console.error("insert-text: data 또는 data.text가 없습니다.", { action, data });
+          console.error("insert-text: data 또는 data.text가 없습니다.", {
+            action,
+            data,
+          });
           break;
         }
         const currentRange = quillEditor.getSelection() || {
@@ -700,23 +861,25 @@ function initializeEditor() {
           quillEditor.insertEmbed(imageRange.index, "image", data.url);
           quillEditor.setSelection(imageRange.index + 1);
           console.log("✅ [Editor] 이미지 삽입 완료");
-          
+
           // 이미지 속성 설정 (비동기 처리)
           setTimeout(() => {
             try {
               // 방금 삽입된 이미지를 찾음 (src가 일치하는)
-              const insertedImg = quillEditor.root.querySelector(`img[src="${data.url}"]`);
+              const insertedImg = quillEditor.root.querySelector(
+                `img[src="${data.url}"]`
+              );
               if (insertedImg) {
                 // 1. [SEO 핵심] Alt 텍스트 및 Title 설정
                 if (data.alt) {
-                    insertedImg.setAttribute("alt", data.alt);
-                    insertedImg.setAttribute("title", data.alt); // 툴팁용
+                  insertedImg.setAttribute("alt", data.alt);
+                  insertedImg.setAttribute("title", data.alt); // 툴팁용
                 }
 
                 // 2. (기존 코드) 외부 이미지 정책 설정
                 insertedImg.setAttribute("referrerpolicy", "no-referrer");
                 insertedImg.setAttribute("crossorigin", "anonymous");
-                
+
                 // 3. (기존 코드) 네이버 블로그 호환 처리
                 if (data.url.includes("postfiles.pstatic.net")) {
                   // type=w966 같은 파라미터 제거하여 원본 URL 시도
@@ -725,9 +888,12 @@ function initializeEditor() {
                     insertedImg.src = originalUrl;
                   }
                 }
-                
+
                 // [디버깅] 설정 확인
-                console.log("[Editor] 이미지 삽입 완료:", { src: data.url, alt: insertedImg.getAttribute('alt') });
+                console.log("[Editor] 이미지 삽입 완료:", {
+                  src: data.url,
+                  alt: insertedImg.getAttribute("alt"),
+                });
               }
             } catch (e) {
               console.log("이미지 속성 설정 실패:", e);
@@ -800,17 +966,23 @@ function initializeEditor() {
         console.log("🌉 [Editor] ========================================");
         if (data && data.url) {
           console.log("📤 [Editor] 부모 창에 cp_open_tui_editor 메시지 전송");
-          console.log("📸 [Editor] 이미지 URL:", data.url.substring(0, 50) + "...");
+          console.log(
+            "📸 [Editor] 이미지 URL:",
+            data.url.substring(0, 50) + "..."
+          );
           // 부모 창(Main)에게 TUI 에디터 열기 요청 전송
           try {
-            window.parent.postMessage({
-              action: "cp_open_tui_editor",
-              currentImageUrl: data.url, // 호환성을 위해 유지
-              imageUrl: data.url, // tui-editor.js가 찾는 필드명
-              source: "thumbnail_maker",
-              // TUI 에디터 사이드바에 표시할 단일 이미지 목록 구성
-              allDocumentImages: [{ url: data.url, range: null }]
-            }, "*");
+            window.parent.postMessage(
+              {
+                action: "cp_open_tui_editor",
+                currentImageUrl: data.url, // 호환성을 위해 유지
+                imageUrl: data.url, // tui-editor.js가 찾는 필드명
+                source: "thumbnail_maker",
+                // TUI 에디터 사이드바에 표시할 단일 이미지 목록 구성
+                allDocumentImages: [{ url: data.url, range: null }],
+              },
+              "*"
+            );
             console.log("✅ [Editor] cp_open_tui_editor 메시지 전송 완료");
             console.log("🌉 [Editor] ========================================");
           } catch (err) {
@@ -836,15 +1008,21 @@ function initializeEditor() {
         break;
       case "edit-image": {
         // TUI 에디터 iframe에 이미지 전달
-        tuiEditorIframe.contentWindow.postMessage({
-          action: "set-image",
-          data: { dataUrl: imageUrl }
-        }, "*");
+        tuiEditorIframe.contentWindow.postMessage(
+          {
+            action: "set-image",
+            data: { dataUrl: imageUrl },
+          },
+          "*"
+        );
         // 이미지 set 후 undo/redo 스택에 첫 상태 강제 push
         setTimeout(() => {
-          tuiEditorIframe.contentWindow.postMessage({
-            action: "add-undo-stack"
-          }, "*");
+          tuiEditorIframe.contentWindow.postMessage(
+            {
+              action: "add-undo-stack",
+            },
+            "*"
+          );
         }, 300);
         break;
       }

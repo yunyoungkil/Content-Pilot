@@ -30,6 +30,12 @@ import {
 import { AI_MODELS, COLLECTIONS } from "../constants.js";
 
 // 1. Gemini API 호출 (Core)
+/**
+ * Gemini API를 호출하여 텍스트 생성을 수행합니다.
+ * @param {string} prompt - AI에게 전달할 프롬프트 텍스트
+ * @returns {Promise<string>} 생성된 텍스트 응답
+ * @throws {Error} API 키가 없거나 API 호출 실패 시 에러 발생
+ */
 export async function callGeminiAPI(prompt) {
   const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
   if (!geminiApiKey) {
@@ -158,6 +164,16 @@ async function getRelevantAffiliateLinks(userId, contextText) {
 // [삭제] function formatDraftForReadability(draftText) { ... }
 // 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
 
+/**
+ * 아이디어 데이터를 기반으로 AI 초안을 생성합니다.
+ * @param {Object} ideaData - 초안 생성에 필요한 데이터
+ * @param {string} ideaData.title - 콘텐츠 제목
+ * @param {string} ideaData.description - 콘텐츠 설명
+ * @param {string} ideaData.keywords - 키워드
+ * @param {string} ideaData.persona - 페르소나 키
+ * @param {string} ideaData.tone - 톤앤매너
+ * @returns {Promise<Object>} 생성된 초안 데이터
+ */
 export async function generateDraftFromIdea(ideaData) {
   try {
     // 1. 페르소나 결정 (사용자 설정 > 자동 감지)

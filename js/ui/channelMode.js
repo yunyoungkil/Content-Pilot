@@ -1,6 +1,6 @@
 // js/ui/channelMode.js (채널 중심 아키텍처 적용 버전)
 
-import { showToast } from "../utils.js";
+import { showToast, Logger } from "../utils.js";
 import { deleteCompetitorData } from "../services/cascadeDeleteService.js";
 import { getCurrentUserId } from "../services/firebaseService.js";
 
@@ -245,7 +245,7 @@ export function renderChannelMode(container) {
 
   // 채널 데이터 응답 처리 함수 (공통)
   function processChannelDataResponse(response) {
-    console.log("[ChannelMode] processChannelDataResponse - 응답 처리 시작:", {
+    Logger.debug("[ChannelMode] processChannelDataResponse - 응답 처리 시작:", {
       hasResponse: !!response,
       success: response?.success,
       hasData: !!response?.data,
@@ -263,8 +263,18 @@ export function renderChannelMode(container) {
         geminiApiKeyEl.value = response.data.geminiApiKey || "";
 
       // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
-      const blogs = response.data.myChannels?.blogs || [];
-      console.log(
+      // [수정] - 안전한 빈 배열 처리
+      let blogs = [];
+      if (
+        response.data.myChannels &&
+        Array.isArray(response.data.myChannels.blogs)
+      ) {
+        blogs = response.data.myChannels.blogs;
+      } else {
+        // 데이터가 없거나 null이면 빈 배열로 확정 (기본값 로딩 방지)
+        blogs = [];
+      }
+      Logger.debug(
         "[ChannelMode] processChannelDataResponse - 블로그 데이터 변환 시작, 개수:",
         blogs.length
       );
@@ -272,7 +282,7 @@ export function renderChannelMode(container) {
       let needSave = false; // 데이터 마이그레이션 필요 여부 플래그
 
       myChannelsData = blogs.map((blog) => {
-        console.log(
+        Logger.debug(
           "[ChannelMode] processChannelDataResponse - 블로그 변환:",
           blog
         );
@@ -301,13 +311,13 @@ export function renderChannelMode(container) {
 
       // 마이그레이션된 ID가 있다면 Firebase에 즉시 저장 (동기화)
       if (needSave) {
-        console.log(
+        Logger.debug(
           "[ChannelMode] 🛠️ 레거시 채널에 UUID를 부여하고 저장합니다."
         );
         saveChannelsToFirebase();
       }
 
-      console.log(
+      Logger.debug(
         "[ChannelMode] processChannelDataResponse - 채널 데이터 로드 완료:",
         myChannelsData.length,
         "개",
@@ -316,18 +326,18 @@ export function renderChannelMode(container) {
 
       // UI 업데이트
       const listEl = container.querySelector("#my-channel-list");
-      console.log(
+      Logger.debug(
         "[ChannelMode] processChannelDataResponse - 목록 요소 확인:",
         !!listEl
       );
 
       renderMyChannels();
 
-      console.log(
+      Logger.debug(
         "[ChannelMode] processChannelDataResponse - renderMyChannels 호출 완료"
       );
     } else {
-      console.error(
+      Logger.error(
         "[ChannelMode] processChannelDataResponse - 채널 데이터 로드 실패:",
         response
       );
@@ -347,14 +357,14 @@ export function renderChannelMode(container) {
       if (!authResult.googleUserEmail) {
         if (loadRetryCount < MAX_RETRY_COUNT) {
           loadRetryCount++;
-          console.log(
+          Logger.debug(
             `[ChannelMode] 인증 대기 중... (${loadRetryCount}/${MAX_RETRY_COUNT}) 1초 후 재시도`
           );
           setTimeout(() => {
             loadChannelData();
           }, 1000);
         } else {
-          console.warn(
+          Logger.warn(
             "[ChannelMode] 인증 대기 시간 초과. 로그인이 필요할 수 있습니다."
           );
           // 재시도 횟수 초기화
@@ -367,7 +377,7 @@ export function renderChannelMode(container) {
       loadRetryCount = 0;
 
       // 인증 완료 후 데이터 로드
-      console.log(
+      Logger.debug(
         "[ChannelMode] loadChannelData - 인증 확인 완료, 데이터 요청 시작"
       );
 
@@ -385,7 +395,7 @@ export function renderChannelMode(container) {
         );
       })
         .then((response) => {
-          console.log("[ChannelMode] loadChannelData - 응답 받음:", {
+          Logger.debug("[ChannelMode] loadChannelData - 응답 받음:", {
             hasResponse: !!response,
             success: response?.success,
             hasData: !!response?.data,
@@ -404,13 +414,13 @@ export function renderChannelMode(container) {
 
             // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
             const blogs = response.data.myChannels?.blogs || [];
-            console.log(
+            Logger.debug(
               "[ChannelMode] loadChannelData - 블로그 데이터 변환 시작, 개수:",
               blogs.length
             );
 
             myChannelsData = blogs.map((blog) => {
-              console.log("[ChannelMode] loadChannelData - 블로그 변환:", blog);
+              Logger.debug("[ChannelMode] loadChannelData - 블로그 변환:", blog);
               return {
                 inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
                 url: blog.url || blog.inputUrl, // 하위 호환성 유지
@@ -426,7 +436,7 @@ export function renderChannelMode(container) {
               };
             });
 
-            console.log(
+            Logger.debug(
               "[ChannelMode] loadChannelData - 채널 데이터 로드 완료:",
               myChannelsData.length,
               "개",
@@ -435,18 +445,18 @@ export function renderChannelMode(container) {
 
             // UI 업데이트
             const listEl = container.querySelector("#my-channel-list");
-            console.log(
+            Logger.debug(
               "[ChannelMode] loadChannelData - 목록 요소 확인:",
               !!listEl
             );
 
             renderMyChannels();
 
-            console.log(
+            Logger.debug(
               "[ChannelMode] loadChannelData - renderMyChannels 호출 완료"
             );
           } else {
-            console.error(
+            Logger.error(
               "[ChannelMode] loadChannelData - 채널 데이터 로드 실패:",
               response
             );
@@ -478,7 +488,7 @@ export function renderChannelMode(container) {
       // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
       const listEl = container.querySelector("#my-channel-list");
       if (!listEl) {
-        console.log(
+        Logger.debug(
           "[ChannelMode] 채널 모드가 아닌 상태에서 메시지 수신, 무시"
         );
         return false;
@@ -508,12 +518,12 @@ export function renderChannelMode(container) {
 
       if (newValue && !oldValue) {
         // 로그인: 새로 로그인한 경우 데이터 로드
-        console.log("[ChannelMode] 로그인 감지, 데이터 로드");
+        Logger.debug("[ChannelMode] 로그인 감지, 데이터 로드");
         loadRetryCount = 0;
         loadChannelData();
       } else if (!newValue && oldValue) {
         // 로그아웃: 로그아웃한 경우 데이터 초기화
-        console.log("[ChannelMode] 로그아웃 감지, 데이터 초기화");
+        Logger.debug("[ChannelMode] 로그아웃 감지, 데이터 초기화");
         myChannelsData = [];
         renderMyChannels();
 
@@ -536,7 +546,7 @@ export function renderChannelMode(container) {
         }
       } else if (newValue && oldValue && newValue !== oldValue) {
         // 사용자 변경: 다른 계정으로 로그인한 경우 데이터 재로드
-        console.log("[ChannelMode] 사용자 변경 감지, 데이터 재로드");
+        Logger.debug("[ChannelMode] 사용자 변경 감지, 데이터 재로드");
         loadRetryCount = 0;
         loadChannelData();
       }
@@ -546,7 +556,7 @@ export function renderChannelMode(container) {
   // 내 채널 목록 렌더링
   function renderMyChannels() {
     const listEl = container.querySelector("#my-channel-list");
-    console.log("[ChannelMode] renderMyChannels 호출:", {
+    Logger.debug("[ChannelMode] renderMyChannels 호출:", {
       hasListEl: !!listEl,
       channelsCount: myChannelsData.length,
       channelsData: myChannelsData,
@@ -587,71 +597,117 @@ export function renderChannelMode(container) {
         .addEventListener("click", () => openDetailModal(index));
 
       // 삭제 버튼
-      card.querySelector(".delete-btn").addEventListener("click", () => {
-        if (confirm("이 채널을 삭제하시겠습니까?")) {
-          // 삭제할 채널 정보 저장 (삭제 후 Firebase에서도 삭제하기 위해)
+      card.querySelector(".delete-btn").addEventListener("click", async () => {
+        if (
+          confirm(
+            "이 채널을 삭제하시겠습니까? \n(작성한 모든 카드와 데이터가 영구 삭제됩니다)"
+          )
+        ) {
           const channelToDelete = myChannelsData[index];
-          const channelUrl = channelToDelete.inputUrl || channelToDelete.url;
+          const targetId = channelToDelete.id;
+          const targetUrl = channelToDelete.inputUrl || channelToDelete.url;
 
-          // 로컬에서 삭제
-          myChannelsData.splice(index, 1);
-          renderMyChannels();
+          try {
+            // 1. [Storage] 크롬 로컬 스토리지 청소 (동기화 보장)
+            // activeChannelId와 로컬 캐시 데이터를 찾아서 지웁니다.
+            await new Promise((resolve) => {
+              chrome.storage.local.get(null, (items) => {
+                const keysToRemove = [];
 
-          // Firebase에서도 삭제 및 저장
-          if (channelToDelete.channelId) {
-            console.log(
-              "[ChannelMode] Firebase에서 채널 삭제:",
-              channelToDelete.channelId
-            );
-            chrome.runtime.sendMessage(
-              {
-                action: "delete_channel",
-                channelId: channelToDelete.channelId,
-                userId: getCurrentUserId(),
-              },
-              (response) => {
-                if (response && response.success) {
-                  console.log("[ChannelMode] 채널 삭제 완료");
-                  showToast("✅ 채널이 삭제되었습니다.");
+                // (A) 활성 채널 ID 삭제
+                if (items.activeChannelId === targetId) {
+                  keysToRemove.push("activeChannelId");
+                  Logger.debug("🧹 [Storage] 활성 채널 ID 삭제 예약");
+                }
 
-                  // 삭제 후 나머지 채널들도 Firebase에 저장 (동기화)
-                  saveChannelsToFirebase((saveResponse) => {
-                    if (saveResponse && saveResponse.success) {
-                      console.log("[ChannelMode] 삭제 후 채널 목록 저장 완료");
-                    } else {
-                      console.warn(
-                        "[ChannelMode] 삭제 후 채널 목록 저장 실패:",
-                        saveResponse
-                      );
+                // (B) 로컬 분석 캐시 삭제 (analysisCache_URL...)
+                // URL이 포함된 캐시 키를 찾아냅니다.
+                if (targetUrl) {
+                  const encodedUrl = btoa(targetUrl).replace(/=/g, ""); // 혹시 base64로 저장된 경우
+                  Object.keys(items).forEach((key) => {
+                    // 키에 URL이나 인코딩된 URL이 포함되어 있다면 삭제
+                    if (
+                      key.includes(targetUrl) ||
+                      (encodedUrl && key.includes(encodedUrl))
+                    ) {
+                      keysToRemove.push(key);
                     }
                   });
-                } else {
-                  console.error("[ChannelMode] 채널 삭제 실패:", response);
-                  showToast(
-                    "❌ 채널 삭제 실패: " +
-                      (response?.error || "알 수 없는 오류")
-                  );
-                  // 실패 시 로컬 데이터 복구
-                  myChannelsData.splice(index, 0, channelToDelete);
-                  renderMyChannels();
                 }
-              }
-            );
-          } else {
-            // URL이 없으면 로컬에서만 삭제하고 Firebase 저장
-            saveChannelsToFirebase((saveResponse) => {
-              if (saveResponse && saveResponse.success) {
-                showToast("✅ 채널이 삭제되었습니다.");
-              } else {
-                showToast(
-                  "❌ 채널 삭제 실패: " +
-                    (saveResponse?.error || "알 수 없는 오류")
-                );
-                // 실패 시 로컬 데이터 복구
-                myChannelsData.splice(index, 0, channelToDelete);
-                renderMyChannels();
-              }
+
+                if (keysToRemove.length > 0) {
+                  chrome.storage.local.remove(keysToRemove, () => {
+                    Logger.debug(
+                      "🧹 [Storage] 로컬 데이터 청소 완료:",
+                      keysToRemove
+                    );
+                    resolve();
+                  });
+                } else {
+                  resolve();
+                }
+              });
             });
+
+            // 2. [UI] 목록에서 즉시 제거 (반응성)
+            myChannelsData.splice(index, 1);
+            renderMyChannels();
+
+            // 3. [Background] Firebase 데이터 연쇄 삭제 요청 (Cascade Delete)
+            if (targetId) {
+              Logger.debug("[ChannelMode] Firebase에서 채널 삭제:", targetId);
+              chrome.runtime.sendMessage(
+                {
+                  action: "delete_channel",
+                  id: targetId,
+                  url: targetUrl,
+                },
+                (response) => {
+                  if (response && response.success) {
+                    console.log("[ChannelMode] 채널 삭제 완료");
+                    showToast(
+                      `✅ 채널 삭제 완료 (삭제된 항목: ${
+                        response.count || 0
+                      }개)`
+                    );
+
+                    // 4. [Sync] 변경된 채널 목록(myChannels)을 Firebase & Storage에 저장
+                    saveChannelsToFirebase((saveResponse) => {
+                      if (saveResponse && saveResponse.success) {
+                        console.log(
+                          "[ChannelMode] 삭제 후 채널 목록 저장 완료"
+                        );
+                      } else {
+                        console.warn(
+                          "[ChannelMode] 삭제 후 채널 목록 저장 실패:",
+                          saveResponse
+                        );
+                      }
+                    });
+                  } else {
+                    console.error("[ChannelMode] 채널 삭제 실패:", response);
+                    showToast(
+                      "❌ 삭제 실패: " + (response?.error || "알 수 없는 오류")
+                    );
+
+                    // 실패 시 로컬 데이터 복구
+                    myChannelsData.splice(index, 0, channelToDelete);
+                    renderMyChannels();
+                  }
+                }
+              );
+            } else {
+              showToast("❌ 삭제 실패: 채널 ID가 없습니다.");
+              // ID 없는 경우도 복구
+              myChannelsData.splice(index, 0, channelToDelete);
+              renderMyChannels();
+            }
+          } catch (err) {
+            console.error("채널 삭제 중 오류:", err);
+            showToast("❌ 삭제 중 오류가 발생했습니다.");
+            // 오류 시 복구
+            myChannelsData.splice(index, 0, channelToDelete);
+            renderMyChannels();
           }
         }
       });
