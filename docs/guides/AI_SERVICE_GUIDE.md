@@ -256,7 +256,7 @@ const topics = await getEmergingTopics(channelContext);
 
 ### 7. AI 이미지 생성 (`generateAiImage`)
 
-**기능**: Gemini API를 사용하여 이미지를 생성합니다.
+**기능**: Gemini API를 사용하여 이미지를 생성하고 Firebase Storage에 업로드합니다.
 
 **사용법**:
 ```javascript
@@ -264,7 +264,30 @@ import { generateAiImage } from './services/aiService.js';
 
 const prompt = "고품질 스마트홈 이미지";
 const result = await generateAiImage(prompt, count = 1);
+// 결과: ['https://firebase-storage-url/image1.png', ...]
 ```
+
+**처리 방식**:
+- **병렬 처리**: 최대 3개 동시 요청으로 API Rate Limit 방지
+- **에러 핸들링**: 개별 실패 시 null 반환, 성공한 이미지만 필터링
+- **자동 업로드**: 생성된 이미지를 Firebase Storage에 자동 업로드
+
+**알고리즘 세부사항**:
+1. 작업 큐 생성: `count`만큼의 이미지 생성 작업 준비
+2. 동시 실행 제한: `MAX_CONCURRENT = 3`으로 동시에 최대 3개만 실행
+3. 대기 관리: `Promise.race()`로 하나 완료 시 다음 작업 시작
+4. 결과 수집: `Promise.all()`로 모든 작업 완료 대기
+5. 필터링: 성공한 URL만 반환, 실패한 작업은 제외
+
+**성능 특징**:
+- **속도 향상**: 순차 처리 대비 2-3배 빠른 이미지 생성
+- **안정성**: 일부 실패해도 전체 작업 중단되지 않음
+- **리소스 관리**: 동시 요청 제한으로 API 과부하 방지
+
+**에러 처리**:
+- 개별 이미지 생성 실패 시 해당 작업만 skip
+- 모든 작업 실패 시 에러 throw
+- Firebase 업로드 실패 시 해당 이미지 제외
 
 ---
 

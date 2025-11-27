@@ -1751,6 +1751,7 @@ export async function generateIdeaBriefing(
 }
 
 // 7. 이미지 생성
+// 7. 이미지 생성 (병렬 처리 적용)
 export async function generateAiImage(prompt, count = 1) {
   const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
   if (!geminiApiKey) {
@@ -1758,11 +1759,13 @@ export async function generateAiImage(prompt, count = 1) {
   }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
-
-  const images = [];
   const userId = CONSTANTS.USER_ID;
+  
+  // 동시 요청 제한 설정 (API Rate Limit 고려)
+  const MAX_CONCURRENT = 3; 
 
-  for (let i = 0; i < count; i++) {
+  // 단일 이미지 생성 함수
+  const generateSingleImage = async (index) => {
     try {
       const res = await fetch(API_URL, {
         method: "POST",
@@ -1772,81 +1775,41 @@ export async function generateAiImage(prompt, count = 1) {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        const errorMessage =
-          errorData.error?.message || `API 오류: ${res.status}`;
-        Logger.error(
-          `[generateAiImage] API 오류 (${res.status}):`,
-          errorMessage
-        );
-        throw new Error(errorMessage);
+        throw new Error(errorData.error?.message || `API 오류: ${res.status}`);
       }
 
       const data = await res.json();
 
-      // [수정] 응답 구조 디버깅 및 다양한 경로 확인
-      Logger.debug(`[generateAiImage] 응답 ${i + 1}/${count}:`, {
-        hasCandidates: !!data.candidates,
-        candidatesLength: data.candidates?.length,
-        hasError: !!data.error,
-        error: data.error,
-      });
-
       if (data.error) {
-        Logger.error(`[generateAiImage] API 에러 응답:`, data.error);
         throw new Error(data.error.message || "이미지 생성 실패");
       }
 
       if (!data.candidates || data.candidates.length === 0) {
-        Logger.warn(
-          `[generateAiImage] candidates가 없음. 전체 응답:`,
-          JSON.stringify(data, null, 2)
-        );
         throw new Error("이미지 생성 응답에 candidates가 없습니다.");
       }
 
       const candidate = data.candidates[0];
-      if (!candidate || !candidate.content || !candidate.content.parts) {
-        Logger.warn(
-          `[generateAiImage] candidate 구조가 예상과 다름:`,
-          candidate
-        );
-        throw new Error("이미지 생성 응답 구조가 올바르지 않습니다.");
-      }
-
-      // [수정] 모든 parts를 순회하며 inlineData 찾기
       let base64 = null;
-      let mimeType = "image/png"; // 기본값
+      let mimeType = "image/png";
 
-      for (const part of candidate.content.parts) {
-        Logger.debug(`[generateAiImage] Part 확인:`, {
-          hasInlineData: !!part.inlineData,
-          hasText: !!part.text,
-          inlineDataKeys: part.inlineData ? Object.keys(part.inlineData) : [],
-        });
-
-        if (part.inlineData && part.inlineData.data) {
-          base64 = part.inlineData.data;
-          mimeType = part.inlineData.mimeType || "image/png";
-          Logger.debug(`[generateAiImage] ✅ Base64 데이터 발견 (${mimeType})`);
-          break;
-        }
-
-        // [추가] 텍스트 응답에 Base64가 포함된 경우 (일부 모델)
-        if (part.text) {
-          const base64Match = part.text.match(
-            /data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/
-          );
-          if (base64Match) {
-            base64 = base64Match[1];
-            const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
-            if (mimeMatch) {
-              mimeType = `image/${mimeMatch[1]}`;
-            }
-            Logger.debug(
-              `[generateAiImage] ✅ 텍스트에서 Base64 발견 (${mimeType})`
-            );
-            break;
-          }
+      // Inline Data 확인
+      if (candidate.content?.parts) {
+        for (const part of candidate.content.parts) {
+           if (part.inlineData?.data) {
+             base64 = part.inlineData.data;
+             mimeType = part.inlineData.mimeType || "image/png";
+             break;
+           }
+           // 텍스트 내 Base64 확인
+           if (part.text) {
+             const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+             if (base64Match) {
+               base64 = base64Match[1];
+               const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
+               if (mimeMatch) mimeType = `image/${mimeMatch[1]}`;
+               break;
+             }
+           }
         }
       }
 
@@ -1854,43 +1817,54 @@ export async function generateAiImage(prompt, count = 1) {
         const dataUrl = `data:${mimeType};base64,${base64}`;
         const url = await uploadImageToFirebaseStorage(
           dataUrl,
-          `thumbnails/${userId}/${Date.now()}_${i}.png`,
+          `thumbnails/${userId}/${Date.now()}_${index}.png`,
           userId
         );
-        images.push(url);
-        Logger.debug(
-          `[generateAiImage] ✅ 이미지 ${i + 1}/${count} 업로드 완료:`,
-          url.substring(0, 80) + "..."
-        );
+        Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`);
+        return url;
       } else {
-        Logger.error(
-          `[generateAiImage] 이미지 ${
-            i + 1
-          }/${count} 생성 실패: base64 데이터 없음`
-        );
-        Logger.error(
-          `[generateAiImage] 전체 응답 구조:`,
-          JSON.stringify(data, null, 2)
-        );
-        throw new Error(
-          "이미지 생성 응답에서 base64 데이터를 찾을 수 없습니다."
-        );
+        throw new Error("base64 데이터를 찾을 수 없습니다.");
       }
     } catch (e) {
-      Logger.error(`[generateAiImage] 이미지 ${i + 1}/${count} 생성 실패:`, e);
-      // 에러가 발생해도 다음 이미지 생성 시도는 계속
-      if (i === count - 1 && images.length === 0) {
-        // 모든 이미지 생성이 실패한 경우에만 에러 throw
-        throw new Error(`이미지 생성 실패: ${e.message}`);
-      }
+      Logger.error(`[generateAiImage] 이미지 ${index + 1}/${count} 생성 실패:`, e);
+      return null; // 실패 시 null 반환
+    }
+  };
+
+  // 작업 큐 생성
+  const tasks = Array.from({ length: count }, (_, i) => () => generateSingleImage(i));
+
+  // 병렬 처리 로직 (Concurrency Control)
+  const results = [];
+  const executing = [];
+
+  for (const task of tasks) {
+    const p = task(); // 작업 시작
+    results.push(p); // 결과 추적
+
+    // 실행 중인 작업 리스트 관리 (완료 시 제거)
+    const e = p.then(() => {
+        executing.splice(executing.indexOf(e), 1);
+    });
+    executing.push(e);
+
+    // 동시 실행 수가 제한에 도달하면 하나가 끝날 때까지 대기
+    if (executing.length >= MAX_CONCURRENT) {
+        await Promise.race(executing);
     }
   }
 
-  if (images.length === 0) {
-    throw new Error("생성된 이미지가 없습니다.");
+  // 모든 작업 완료 대기
+  const allResults = await Promise.all(results);
+  
+  // 성공한 이미지(URL)만 필터링
+  const successfulImages = allResults.filter(url => url !== null);
+
+  if (successfulImages.length === 0) {
+    throw new Error("생성된 이미지가 없습니다. (모든 시도 실패)");
   }
 
-  return images;
+  return successfulImages;
 }
 
 // 8. 템플릿 분석

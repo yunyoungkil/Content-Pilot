@@ -1262,13 +1262,13 @@ async function updateDashboardUIInternal(container) {
             );
             if (normalizedUrl) {
               // [수정] performanceTracked 체크 추가: 데이터가 아직 없어도 추적 설정되어 있으면 '추적 중' 표시
-              const hasPerformance = !!(
+              const isTracking = !!(
                 cardData.publishedUrl &&
                 (cardData.performanceTracked || cardData.performance)
               );
               trackedUrls.set(normalizedUrl, {
                 status: status,
-                hasPerformance: hasPerformance,
+                hasPerformance: isTracking, // 변수명은 hasPerformance 유지 (createContentCard 호환성)
                 publishedUrl: cardData.publishedUrl || null,
               });
             }
@@ -1280,7 +1280,7 @@ async function updateDashboardUIInternal(container) {
             );
             if (normalizedUrl) {
               // [수정] performanceTracked 체크 추가
-              const hasPerformance = !!(
+              const isTracking = !!(
                 cardData.performanceTracked || cardData.performance
               );
               // publishedUrl이 이미 있으면 업데이트, 없으면 추가
@@ -1288,7 +1288,7 @@ async function updateDashboardUIInternal(container) {
               if (!existing || status === "done") {
                 trackedUrls.set(normalizedUrl, {
                   status: status,
-                  hasPerformance: hasPerformance,
+                  hasPerformance: isTracking,
                   publishedUrl: cardData.publishedUrl,
                 });
               }

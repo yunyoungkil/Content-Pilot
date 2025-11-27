@@ -2475,6 +2475,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  
   // 알 수 없는 액션
   Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });
@@ -2483,3 +2484,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // === [Migration Function] 데이터 마이그레이션 함수 ===
 // migrationService.js로 이동됨 - import로 사용
+
+
