@@ -179,9 +179,14 @@ async function getRelevantAffiliateLinks(userId, contextText) {
  * @param {Object} options - { maxLinks: number }
  * @returns {string} modified HTML
  */
-export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options = {}) {
+export function postProcessAffiliateHtml(
+  html = "",
+  affiliateLinks = [],
+  options = {}
+) {
   const { maxLinks = 3 } = options || {};
-  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0) return html;
+  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0)
+    return html;
 
   try {
     const parser = new DOMParser();
@@ -198,7 +203,9 @@ export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options
     const findAffiliateByHref = (href) => {
       if (!href) return null;
       const hrefNorm = href.trim();
-      return normalized.find((a) => hrefNorm === a.url || hrefNorm.startsWith(a.url));
+      return normalized.find(
+        (a) => hrefNorm === a.url || hrefNorm.startsWith(a.url)
+      );
     };
 
     // 1) Ensure existing anchors that match affiliate links are wrapped/styled
@@ -209,7 +216,11 @@ export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options
       if (match && insertedCount < maxLinks) {
         // Wrap with span color style if not already
         const parent = a.parentElement;
-        if (!parent || parent.tagName.toLowerCase() !== "span" || !parent.getAttribute("style")?.includes("#2e7d32")) {
+        if (
+          !parent ||
+          parent.tagName.toLowerCase() !== "span" ||
+          !parent.getAttribute("style")?.includes("#2e7d32")
+        ) {
           const span = doc.createElement("span");
           span.setAttribute("style", "color: #2e7d32;");
           a.replaceWith(span);
@@ -227,16 +238,24 @@ export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options
     // 2) If we need more, attempt deterministic insertion: find keywords/productName matches in text nodes
     if (insertedCount < maxLinks) {
       const usedUrls = new Set(
-        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map((el) => el.getAttribute("href"))
+        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map(
+          (el) => el.getAttribute("href")
+        )
       );
 
       const textNodes = [];
-      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
+      const walker = doc.createTreeWalker(
+        doc.body,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
       let node;
       while ((node = walker.nextNode())) {
         const parentTag = node.parentElement?.tagName?.toLowerCase();
         // skip inside code/pre/a/script/style
-        if (["a", "code", "pre", "script", "style"].includes(parentTag)) continue;
+        if (["a", "code", "pre", "script", "style"].includes(parentTag))
+          continue;
         if (node.textContent && node.textContent.trim()) textNodes.push(node);
       }
 
@@ -248,7 +267,9 @@ export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options
         const targetUrl = link.url;
         if (!targetUrl || usedUrls.has(targetUrl)) continue;
 
-        const candidates = [...(link.keywords || []), link.productName].filter(Boolean);
+        const candidates = [...(link.keywords || []), link.productName].filter(
+          Boolean
+        );
         if (candidates.length === 0) continue;
 
         // try to find first occurrence among text nodes
@@ -269,7 +290,9 @@ export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options
               a.setAttribute("target", "_blank");
               a.setAttribute("rel", "noopener noreferrer");
               // CTA text - prefer short CTA using productName when available
-              const cta = link.productName ? `${link.productName} 최저가 확인하기` : "상품 상세보기";
+              const cta = link.productName
+                ? `${link.productName} 최저가 확인하기`
+                : "상품 상세보기";
               a.textContent = cta;
               span.appendChild(a);
 
@@ -1427,19 +1450,32 @@ export async function generateDraftFromIdea(ideaData) {
 
     // POST-PROCESS: validate and optionally auto-insert affiliate links
     try {
-      const storageRes = await chrome.storage.local.get("autoInsertAffiliateLinks");
+      const storageRes = await chrome.storage.local.get(
+        "autoInsertAffiliateLinks"
+      );
       const userAutoInsert = storageRes?.autoInsertAffiliateLinks;
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
       const shouldAutoInsert =
         typeof ideaOptIn === "boolean" ? ideaOptIn : !!userAutoInsert;
 
-      if (shouldAutoInsert && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+      if (
+        shouldAutoInsert &&
+        Array.isArray(affiliateLinks) &&
+        affiliateLinks.length > 0
+      ) {
         try {
-          formattedDraft = postProcessAffiliateHtml(formattedDraft, affiliateLinks, {
-            maxLinks: 3,
-          });
+          formattedDraft = postProcessAffiliateHtml(
+            formattedDraft,
+            affiliateLinks,
+            {
+              maxLinks: 3,
+            }
+          );
         } catch (e) {
-          Logger.warn("[generateDraftFromIdea] postProcessAffiliateHtml failed:", e);
+          Logger.warn(
+            "[generateDraftFromIdea] postProcessAffiliateHtml failed:",
+            e
+          );
         }
       }
     } catch (e) {

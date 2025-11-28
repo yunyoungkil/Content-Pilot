@@ -157,12 +157,16 @@ export function addHeaderEventListeners(shadowRoot) {
             e.stopPropagation();
             const isVisible = menuEl.style.display !== "none";
             menuEl.style.display = isVisible ? "none" : "block";
-            console.log("[DEBUG] settingsMenu display set to:", menuEl.style.display);
+            console.log(
+              "[DEBUG] settingsMenu display set to:",
+              menuEl.style.display
+            );
             return;
           }
 
           // 메뉴 아이템 클릭
-          const item = target.closest && target.closest(".cp-settings-menu-item");
+          const item =
+            target.closest && target.closest(".cp-settings-menu-item");
           if (item) {
             console.log(
               "[DEBUG] Menu item clicked (delegated):",
@@ -223,7 +227,10 @@ export function addHeaderEventListeners(shadowRoot) {
   // Try to run on next animation frame but also schedule a micro fallback
   // so environments (like Jest/jsdom) which don't reliably run RAF in tests
   // still execute the initialization quickly.
-  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.requestAnimationFrame === "function"
+  ) {
     window.requestAnimationFrame(initHandler);
     // micro-fallback
     setTimeout(initHandler, 0);
