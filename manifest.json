@@ -59,6 +59,7 @@
         "css/style.css",
         "css/workspace.css",
         "css/kanban.css",
+        "css/affiliate-modal.css",
         "editor.html",
         "editor.js",
         "lib/quill.js",
@@ -71,7 +72,9 @@
         "lib/tui-code-snippet.js",
         "tui-editor.html",
         "tui-editor.js",
-        "dist/*.bundle.js"
+        "dist/*.bundle.js",
+        "dist/276-*.bundle.js",
+        "dist/997-*.bundle.js"
       ],
       "matches": ["<all_urls>"]
     }

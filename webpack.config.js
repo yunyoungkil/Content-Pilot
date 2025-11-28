@@ -13,12 +13,11 @@ module.exports = {
     path: path.resolve(__dirname, "dist"),
     filename: "[name].bundle.js",
     publicPath: "", // Chrome Extension에서는 상대 경로 사용
-    chunkFilename: "[name].bundle.js", // 청크 파일명 명시
+    chunkFilename: "[id]-[name].bundle.js", // 청크 파일명에 ID와 이름을 포함하여 디버깅 용이하게
   },
   optimization: {
     splitChunks: {
-      chunks: "async", // 동기 import는 스플리팅하지 않음
-      minSize: 20000, // 최소 크기를 크게 설정하여 스플리팅 방지
+      chunks: () => false, // 모든 청크 스플리팅 완전 비활성화
     },
   },
   devtool: "cheap-module-source-map",

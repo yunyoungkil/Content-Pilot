@@ -7,7 +7,8 @@
     "lib": "lib"
   },
   "scripts": {
-    "build": "webpack --mode=production",
+    "build": "webpack --mode=production && npm run copy-assets",
+    "copy-assets": "powershell -Command \"Copy-Item -Path 'css\\*' -Destination 'dist\\' -Recurse -Force\"",
     "watch": "webpack --mode=development --watch",
     "test": "jest"
   },

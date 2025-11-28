@@ -6,29 +6,57 @@ global.chrome = {
     getURL: jest.fn((path) => `chrome-extension://test-id/${path}`),
     connect: jest.fn(() => ({
       onDisconnect: { addListener: jest.fn() },
-      disconnect: jest.fn()
+      disconnect: jest.fn(),
     })),
     sendMessage: jest.fn(),
-    onMessage: { addListener: jest.fn() }
+    onMessage: { addListener: jest.fn() },
   },
   storage: {
     local: {
       get: jest.fn(),
-      set: jest.fn()
-    }
+      set: jest.fn(),
+    },
   },
   tabs: {
     query: jest.fn(),
-    create: jest.fn()
+    create: jest.fn(),
   },
   windows: {
-    create: jest.fn()
+    create: jest.fn(),
   },
   identity: {
     getAuthToken: jest.fn(),
-    removeCachedAuthToken: jest.fn()
+    removeCachedAuthToken: jest.fn(),
+  },
+};
+
+// Fetch API 모킹
+global.fetch = jest.fn();
+
+// Response 객체 모킹 (Firebase에서 사용)
+global.Response = class {
+  constructor(body, options = {}) {
+    this.body = body;
+    this.status = options.status || 200;
+    this.statusText = options.statusText || "";
+    this.headers = options.headers || new Map();
+  }
+
+  json() {
+    return Promise.resolve(JSON.parse(this.body));
+  }
+
+  text() {
+    return Promise.resolve(this.body);
   }
 };
+
+// Marked 라이브러리 모킹
+jest.mock("marked", () => ({
+  marked: {
+    parse: jest.fn((text) => `<p>${text}</p>`),
+  },
+}));
 
 // Firebase 모킹
 global.firebase = {
@@ -42,16 +70,16 @@ global.firebase = {
         remove: jest.fn(),
         push: jest.fn(),
         onValue: jest.fn(),
-        off: jest.fn()
-      }))
-    }))
-  }))
+        off: jest.fn(),
+      })),
+    })),
+  })),
 };
 
 // DOM API 모킹 (jsdom에서 제공되지 않는 부분)
-Object.defineProperty(window, 'self', {
+Object.defineProperty(window, "self", {
   value: window,
-  writable: false
+  writable: false,
 });
 
 // Service Worker 환경 모킹
@@ -63,7 +91,7 @@ global.testHelpers = {
   mockFirebaseResponse: (data) => ({
     val: () => data,
     exists: () => !!data,
-    key: 'test-key'
+    key: "test-key",
   }),
 
   mockFirebaseRef: (initialData = {}) => {
@@ -73,17 +101,19 @@ global.testHelpers = {
         Object.assign(data, newData);
         return Promise.resolve();
       }),
-      get: jest.fn(() => Promise.resolve({
-        val: () => data,
-        exists: () => !!data,
-        key: 'test-key'
-      })),
+      get: jest.fn(() =>
+        Promise.resolve({
+          val: () => data,
+          exists: () => !!data,
+          key: "test-key",
+        })
+      ),
       update: jest.fn((updates) => {
         Object.assign(data, updates);
         return Promise.resolve();
       }),
       remove: jest.fn(() => {
-        Object.keys(data).forEach(key => delete data[key]);
+        Object.keys(data).forEach((key) => delete data[key]);
         return Promise.resolve();
       }),
       push: jest.fn((newData) => {
@@ -91,11 +121,11 @@ global.testHelpers = {
         data[newKey] = newData;
         return {
           key: newKey,
-          set: jest.fn(() => Promise.resolve())
+          set: jest.fn(() => Promise.resolve()),
         };
       }),
       onValue: jest.fn(),
-      off: jest.fn()
+      off: jest.fn(),
     };
   },
 
@@ -105,11 +135,11 @@ global.testHelpers = {
     Object.assign(storage, initialData);
 
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-      if (typeof keys === 'string') {
+      if (typeof keys === "string") {
         callback({ [keys]: storage[keys] });
       } else if (Array.isArray(keys)) {
         const result = {};
-        keys.forEach(key => {
+        keys.forEach((key) => {
           result[key] = storage[key];
         });
         callback(result);
@@ -131,7 +161,7 @@ global.testHelpers = {
     const listeners = [];
     chrome.runtime.sendMessage.mockImplementation((message, callback) => {
       // 메시지 리스너들에게 브로드캐스트
-      listeners.forEach(listener => {
+      listeners.forEach((listener) => {
         try {
           listener(message, {}, () => {});
         } catch (e) {
@@ -149,17 +179,17 @@ global.testHelpers = {
       listeners,
       sendMessage: chrome.runtime.sendMessage,
       triggerMessage: (message) => {
-        listeners.forEach(listener => {
+        listeners.forEach((listener) => {
           listener(message, {}, () => {});
         });
-      }
+      },
     };
   },
 
   // 비동기 작업 완료 대기
-  waitForNextTick: () => new Promise(resolve => setTimeout(resolve, 0)),
+  waitForNextTick: () => new Promise((resolve) => setTimeout(resolve, 0)),
 
-  waitForMs: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+  waitForMs: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 
   // DOM 이벤트 시뮬레이션
   simulateEvent: (element, eventType, options = {}) => {
@@ -168,23 +198,23 @@ global.testHelpers = {
   },
 
   simulateClick: (element) => {
-    const event = new MouseEvent('click', { bubbles: true });
+    const event = new MouseEvent("click", { bubbles: true });
     element.dispatchEvent(event);
   },
 
   simulateInput: (element, value) => {
     element.value = value;
-    const event = new Event('input', { bubbles: true });
+    const event = new Event("input", { bubbles: true });
     element.dispatchEvent(event);
   },
 
   // DOM 요소 생성 헬퍼
-  createTestElement: (tag = 'div', attributes = {}) => {
+  createTestElement: (tag = "div", attributes = {}) => {
     const element = document.createElement(tag);
-    Object.keys(attributes).forEach(attr => {
-      if (attr === 'textContent') {
+    Object.keys(attributes).forEach((attr) => {
+      if (attr === "textContent") {
         element.textContent = attributes[attr];
-      } else if (attr === 'innerHTML') {
+      } else if (attr === "innerHTML") {
         element.innerHTML = attributes[attr];
       } else {
         element.setAttribute(attr, attributes[attr]);
@@ -198,7 +228,7 @@ global.testHelpers = {
     const originalConsole = { ...console };
     const logs = { log: [], warn: [], error: [] };
 
-    ['log', 'warn', 'error'].forEach(method => {
+    ["log", "warn", "error"].forEach((method) => {
       console[method] = (...args) => {
         logs[method].push(args);
         originalConsole[method](...args);
@@ -209,7 +239,7 @@ global.testHelpers = {
       logs,
       restore: () => {
         Object.assign(console, originalConsole);
-      }
+      },
     };
   },
 
@@ -220,14 +250,14 @@ global.testHelpers = {
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(JSON.stringify(data)),
     headers: {
-      get: (name) => headers[name]
-    }
+      get: (name) => headers[name],
+    },
   }),
 
   // 네트워크 에러 모킹
-  mockNetworkError: (message = 'Network Error') => {
+  mockNetworkError: (message = "Network Error") => {
     const error = new Error(message);
-    error.name = 'NetworkError';
+    error.name = "NetworkError";
     return error;
   },
 
@@ -247,7 +277,7 @@ global.testHelpers = {
       delete storage[key];
     });
     Storage.prototype.clear = jest.fn(() => {
-      Object.keys(storage).forEach(key => delete storage[key]);
+      Object.keys(storage).forEach((key) => delete storage[key]);
     });
 
     return {
@@ -257,9 +287,9 @@ global.testHelpers = {
         Storage.prototype.setItem = originalSetItem;
         Storage.prototype.removeItem = originalRemoveItem;
         Storage.prototype.clear = originalClear;
-      }
+      },
     };
-  }
+  },
 };
 
 // 테스트 전후 정리
@@ -268,14 +298,14 @@ beforeEach(() => {
   jest.clearAllTimers();
 
   // 각 테스트마다 로컬 스토리지 초기화
-  Object.defineProperty(window, 'localStorage', {
+  Object.defineProperty(window, "localStorage", {
     value: {
       getItem: jest.fn(),
       setItem: jest.fn(),
       removeItem: jest.fn(),
-      clear: jest.fn()
+      clear: jest.fn(),
     },
-    writable: true
+    writable: true,
   });
 });
 

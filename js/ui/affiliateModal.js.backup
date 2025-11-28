@@ -1,0 +1,560 @@
+// js/ui/affiliateModal.js
+import { addAffiliateLink, getAffiliateLinks, deleteAffiliateLink, updateAffiliateLink } from '../services/affiliateService.js';
+import { showToast } from '../utils.js';
+
+let currentLinks = [];
+
+// js/ui/affiliateModal.js
+import { addAffiliateLink, getAffiliateLinks, deleteAffiliateLink, updateAffiliateLink } from '../services/affiliateService.js';
+import { showToast } from '../utils.js';
+
+let currentLinks = [];
+
+export function renderAffiliateModal(container) {
+  // 모달 HTML 주입 - 개선된 UI
+  const modalHTML = `
+    <div id="affiliate-modal" class="cp-modal-wrap" style="display: none;">
+      <div class="cp-modal-backdrop"></div>
+      <div class="cp-modal affiliate-modal-large">
+        <div class="cp-modal-header affiliate-modal-header">
+          <div class="cp-modal-title affiliate-modal-title">
+            <span class="affiliate-icon">💰</span>
+            제휴 링크 관리 (Money Pipeline)
+          </div>
+          <div class="affiliate-modal-actions">
+            <button class="cp-btn cp-btn-secondary affiliate-search-toggle" title="검색">
+              <span class="search-icon">🔍</span>
+            </button>
+            <button class="cp-modal-close affiliate-close-btn" title="닫기">×</button>
+          </div>
+        </div>
+
+        <div class="affiliate-search-bar" style="display: none;">
+          <input type="text" class="affiliate-search-input" placeholder="링크명, 플랫폼, 키워드로 검색..." />
+          <button class="affiliate-search-clear" title="검색 초기화">×</button>
+        </div>
+
+        <div class="cp-modal-body affiliate-modal-body">
+          <div class="affiliate-content-wrapper">
+            <!-- 링크 목록 섹션 -->
+            <div class="affiliate-list-section">
+              <div class="affiliate-list-header">
+                <div class="affiliate-list-title-section">
+                  <h3 class="affiliate-section-title">등록된 링크</h3>
+                  <span class="affiliate-link-count" id="affiliate-link-count">(0개)</span>
+                </div>
+                <div class="affiliate-list-actions">
+                  <button class="cp-btn cp-btn-secondary affiliate-refresh-btn" title="새로고침">
+                    <span class="refresh-icon">🔄</span>
+                  </button>
+                  <button id="btn-show-add-form" class="cp-btn cp-btn-primary affiliate-add-btn">
+                    <span class="add-icon">+</span>
+                    새 링크 추가
+                  </button>
+                </div>
+              </div>
+
+              <div class="affiliate-link-stats" id="affiliate-link-stats" style="display: none;">
+                <div class="stat-item">
+                  <span class="stat-label">총 클릭수:</span>
+                  <span class="stat-value" id="total-clicks">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">활성 링크:</span>
+                  <span class="stat-value" id="active-links">0</span>
+                </div>
+              </div>
+
+              <div id="affiliate-link-list" class="affiliate-link-list">
+                <div class="affiliate-loading-state">
+                  <div class="loading-spinner"></div>
+                  <div class="loading-text">링크를 불러오는 중...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 링크 폼 섹션 -->
+            <div class="affiliate-form-section" id="affiliate-form-container" style="display: none;">
+              <div class="affiliate-form-header">
+                <h3 id="form-title" class="affiliate-form-title">새 링크 등록</h3>
+                <button class="affiliate-form-close" title="폼 닫기">×</button>
+              </div>
+
+              <div class="affiliate-form-body">
+                <input type="hidden" id="edit-link-id">
+
+                <div class="affiliate-form-group">
+                  <label for="aff-platform" class="affiliate-form-label required">플랫폼</label>
+                  <select id="aff-platform" class="affiliate-form-select">
+                    <option value="Coupang">🚀 쿠팡 파트너스</option>
+                    <option value="AliExpress">🛍️ 알리익스프레스</option>
+                    <option value="Amazon">📦 아마존 어소시에이트</option>
+                    <option value="General">🔗 일반 제휴 링크</option>
+                  </select>
+                </div>
+
+                <div class="affiliate-form-group">
+                  <label for="aff-name" class="affiliate-form-label required">상품명 (표시 이름)</label>
+                  <input type="text" id="aff-name" class="affiliate-form-input" placeholder="예: 아이폰 15 프로 자급제 256GB">
+                  <div class="form-help-text">사용자에게 표시될 상품 이름입니다.</div>
+                </div>
+
+                <div class="affiliate-form-group">
+                  <label for="aff-url" class="affiliate-form-label required">제휴 링크 URL</label>
+                  <input type="url" id="aff-url" class="affiliate-form-input" placeholder="https://link.coupang.com/...">
+                  <div class="form-help-text">제휴 프로그램에서 제공받은 추적 링크를 입력하세요.</div>
+                </div>
+
+                <div class="affiliate-form-group">
+                  <label class="affiliate-form-label">자동 매칭 키워드</label>
+                  <div class="affiliate-keyword-container">
+                    <div id="keyword-tags-container" class="affiliate-keyword-tags">
+                      <input type="text" id="affiliate-keyword-input" class="affiliate-keyword-input"
+                             placeholder="키워드 입력 후 Enter (또는 붙여넣기)">
+                    </div>
+                    <div class="keyword-suggestions" style="display: none;">
+                      <div class="suggestion-title">💡 추천 키워드:</div>
+                      <div class="suggestion-tags" id="keyword-suggestions"></div>
+                    </div>
+                  </div>
+                  <div class="form-help-text">
+                    이 단어들이 콘텐츠에 나오면 자동으로 링크가 연결됩니다.
+                    <br>쉼표, 줄바꿈, 공백으로 구분된 텍스트를 붙여넣으면 자동으로 분리됩니다.
+                  </div>
+                </div>
+
+                <div class="affiliate-form-preview" id="affiliate-link-preview" style="display: none;">
+                  <div class="preview-title">링크 미리보기</div>
+                  <div class="preview-content" id="preview-content"></div>
+                </div>
+              </div>
+
+              <div class="affiliate-form-footer">
+                <div class="form-footer-left">
+                  <button id="btn-preview-link" class="cp-btn cp-btn-secondary affiliate-preview-btn">
+                    <span class="preview-icon">👁️</span>
+                    미리보기
+                  </button>
+                </div>
+                <div class="form-footer-right">
+                  <button id="btn-cancel-form" class="cp-btn cp-btn-secondary">취소</button>
+                  <button id="btn-save-link" class="cp-btn cp-btn-primary affiliate-save-btn">
+                    <span class="save-icon">💾</span>
+                    저장하기
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 이미 모달이 있으면 제거 후 다시 생성 (재렌더링 방지)
+  const existing = container.querySelector('#affiliate-modal');
+  if (existing) existing.remove();
+
+  container.insertAdjacentHTML('beforeend', modalHTML);
+
+  // 이벤트 바인딩
+  bindEvents(container);
+
+  // 데이터 로드
+  loadLinks(container);
+}
+
+// 키워드 태그 관리용 배열
+let tempKeywords = [];
+
+// 텍스트에서 키워드를 파싱하는 헬퍼 함수
+function parseKeywordsFromText(text) {
+  if (!text || typeof text !== 'string') return [];
+
+  // 여러 구분자로 분리: 줄바꿈, 쉼표, 탭, 연속된 공백
+  let keywords = text.split(/[\n,\t]+/);
+
+  // 각 부분을 다시 공백으로 분리 (하지만 단일 키워드 유지)
+  keywords = keywords.flatMap(part => part.trim().split(/\s+/));
+
+  // 빈 값 제거 및 트림, 중복 제거
+  return keywords
+    .map(keyword => keyword.trim())
+    .filter(keyword => keyword.length > 0)
+    .filter((keyword, index, arr) => arr.indexOf(keyword) === index);
+}
+
+function bindEvents(container) {
+  if (!container) {
+    console.error('[AffiliateModal] Container is null');
+    return;
+  }
+
+  const modal = container.querySelector('#affiliate-modal');
+  const formContainer = container.querySelector('#affiliate-form-container');
+  const keywordInput = container.querySelector('#affiliate-keyword-input');
+
+  if (!modal) {
+    console.error('[AffiliateModal] Modal element not found');
+    return;
+  }
+
+  // 모달 닫기
+  const closeBtn = container.querySelector('.cp-modal-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+  }
+
+  // 폼 닫기 버튼
+  const formCloseBtn = container.querySelector('.affiliate-form-close');
+  if (formCloseBtn) {
+    formCloseBtn.addEventListener('click', () => {
+      if (formContainer) formContainer.style.display = 'none';
+    });
+  }
+
+  // 검색 토글
+  const searchToggle = container.querySelector('.affiliate-search-toggle');
+  const searchBar = container.querySelector('.affiliate-search-bar');
+  const searchInput = container.querySelector('.affiliate-search-input');
+  const searchClear = container.querySelector('.affiliate-search-clear');
+
+  if (searchToggle && searchBar) {
+    searchToggle.addEventListener('click', () => {
+      const isVisible = searchBar.style.display !== 'none';
+      searchBar.style.display = isVisible ? 'none' : 'flex';
+      if (!isVisible && searchInput) {
+        searchInput.focus();
+      }
+    });
+  }
+
+  // 검색 기능
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      filterLinks(container, e.target.value);
+    });
+  }
+
+  // 검색 초기화
+  if (searchClear) {
+    searchClear.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      filterLinks(container, '');
+    });
+  }
+
+  // 새로고침 버튼
+  const refreshBtn = container.querySelector('.affiliate-refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadLinks(container);
+    });
+  }
+
+  // 폼 열기 (추가 모드)
+  const showFormBtn = container.querySelector('#btn-show-add-form');
+  if (showFormBtn) {
+    showFormBtn.addEventListener('click', () => {
+      resetForm(container);
+      if (formContainer) formContainer.style.display = 'block';
+      // 폼이 열리면 상품명 입력창에 포커스
+      const nameInput = container.querySelector('#aff-name');
+      if (nameInput) setTimeout(() => nameInput.focus(), 100);
+    });
+  }
+
+  // 폼 취소
+  const cancelBtn = container.querySelector('#btn-cancel-form');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      if (formContainer) formContainer.style.display = 'none';
+    });
+  }
+
+  // 미리보기 버튼
+  const previewBtn = container.querySelector('#btn-preview-link');
+  if (previewBtn) {
+    previewBtn.addEventListener('click', () => {
+      showLinkPreview(container);
+    });
+  }
+
+  // 키워드 태그 입력 (Enter 감지 및 붙여넣기 자동 분리)
+  if (keywordInput) {
+    // 붙여넣기 이벤트 처리 - 자동으로 키워드 분리
+    keywordInput.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const pastedText = e.clipboardData.getData('text');
+      const keywords = parseKeywordsFromText(pastedText);
+
+      let addedCount = 0;
+      keywords.forEach(keyword => {
+        const trimmed = keyword.trim();
+        if (trimmed && !tempKeywords.includes(trimmed)) {
+          tempKeywords.push(trimmed);
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) {
+        renderTags(container);
+        updateKeywordSuggestions(container);
+        e.target.value = '';
+        showToast(`✅ ${addedCount}개의 키워드가 추가되었습니다.`);
+      } else if (keywords.length > 0) {
+        showToast('ℹ️ 모든 키워드가 이미 존재하거나 비어있습니다.');
+      }
+    });
+
+    // Enter 키 입력 처리
+    keywordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = e.target.value.trim();
+        if (val && !tempKeywords.includes(val)) {
+          tempKeywords.push(val);
+          renderTags(container);
+          updateKeywordSuggestions(container);
+          e.target.value = '';
+        }
+      }
+    });
+
+    // 입력 중 실시간 힌트 표시
+    keywordInput.addEventListener('input', (e) => {
+      const value = e.target.value.trim();
+      if (value.length > 0) {
+        // 잠시 후 힌트 표시
+        setTimeout(() => {
+          if (e.target.value.trim() === value) { // 값이 변경되지 않았을 때만
+            const keywords = parseKeywordsFromText(value);
+            if (keywords.length > 1) {
+              showToast('💡 붙여넣기나 Enter로 키워드를 추가하세요. 공백/줄바꿈/쉼표로 구분된 텍스트는 자동으로 분리됩니다.');
+            } else if (value.includes(' ') || value.includes('\n') || value.includes(',')) {
+              showToast('💡 붙여넣기나 Enter로 키워드를 추가하세요.');
+            }
+          }
+        }, 1500);
+      }
+    });
+  }
+
+  // 저장 버튼
+  const saveBtn = container.querySelector('#btn-save-link');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const id = container.querySelector('#edit-link-id')?.value;
+      const name = container.querySelector('#aff-name')?.value?.trim();
+      const url = container.querySelector('#aff-url')?.value?.trim();
+      const platform = container.querySelector('#aff-platform')?.value;
+
+      if (!name || !url) {
+        showToast('❌ 상품명과 링크 URL은 필수입니다.');
+        // 필수 필드 하이라이트
+        const nameInput = container.querySelector('#aff-name');
+        const urlInput = container.querySelector('#aff-url');
+        if (!name && nameInput) nameInput.classList.add('error');
+        if (!url && urlInput) urlInput.classList.add('error');
+        return;
+      }
+
+      // 로딩 상태 표시
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<div class="loading-spinner small"></div> 저장 중...';
+
+      const payload = {
+        name,
+        url,
+        platform,
+        keywords: tempKeywords // 배열로 저장
+      };
+
+      try {
+        if (id) {
+          await updateAffiliateLink(id, payload);
+          showToast('✅ 링크가 수정되었습니다.');
+        } else {
+          await addAffiliateLink(payload);
+          showToast('✅ 새 링크가 등록되었습니다.');
+        }
+
+        resetForm(container);
+        if (formContainer) formContainer.style.display = 'none';
+        loadLinks(container); // 목록 갱신
+      } catch (error) {
+        console.error('[AffiliateModal] Save error:', error);
+        showToast('❌ 저장 중 오류가 발생했습니다.');
+      } finally {
+        // 로딩 상태 해제
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span class="save-icon">💾</span> 저장하기';
+      }
+    });
+  }
+
+  // ESC 키로 모달 닫기
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (formContainer && formContainer.style.display !== 'none') {
+        formContainer.style.display = 'none';
+      } else if (modal.style.display !== 'none') {
+        modal.style.display = 'none';
+      }
+    }
+  });
+}
+
+function renderTags(container) {
+  if (!container) return;
+
+  const tagContainer = container.querySelector('#keyword-tags-container');
+  const input = container.querySelector('#aff-keyword-input');
+
+  if (!tagContainer || !input) return;
+
+  // 기존 태그 지우기 (input 제외)
+  Array.from(tagContainer.children).forEach(child => {
+    if (child !== input) child.remove();
+  });
+
+  // 태그 다시 그리기
+  tempKeywords.forEach((tag, index) => {
+    const tagEl = document.createElement('span');
+    tagEl.className = 'keyword-tag';
+    tagEl.style.cssText = 'background: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 4px;';
+    tagEl.innerHTML = `${tag} <span style="cursor: pointer; font-weight: bold;">×</span>`;
+
+    // 태그 삭제 이벤트
+    const deleteSpan = tagEl.querySelector('span');
+    if (deleteSpan) {
+      deleteSpan.addEventListener('click', () => {
+        tempKeywords.splice(index, 1);
+        renderTags(container);
+      });
+    }
+
+    tagContainer.insertBefore(tagEl, input);
+  });
+}
+
+function resetForm(container) {
+  if (!container) return;
+
+  const editIdInput = container.querySelector('#edit-link-id');
+  const nameInput = container.querySelector('#aff-name');
+  const urlInput = container.querySelector('#aff-url');
+  const platformSelect = container.querySelector('#aff-platform');
+  const formTitle = container.querySelector('#form-title');
+
+  if (editIdInput) editIdInput.value = '';
+  if (nameInput) nameInput.value = '';
+  if (urlInput) urlInput.value = '';
+  if (platformSelect) platformSelect.value = 'Coupang';
+
+  tempKeywords = [];
+  renderTags(container);
+
+  if (formTitle) formTitle.textContent = '새 링크 등록';
+}
+
+async function loadLinks(container) {
+  if (!container) return;
+
+  const listEl = container.querySelector('#affiliate-link-list');
+  if (!listEl) return;
+
+  listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">로딩 중...</div>';
+
+  try {
+    currentLinks = await getAffiliateLinks();
+
+    if (currentLinks.length === 0) {
+      listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">등록된 링크가 없습니다.<br>새 링크를 추가해보세요!</div>';
+      return;
+    }
+
+    listEl.innerHTML = '';
+    currentLinks.forEach(link => {
+      const item = document.createElement('div');
+      item.style.cssText = 'border: 1px solid #eee; padding: 10px; margin-bottom: 8px; border-radius: 6px; background: #fff; cursor: pointer; transition: 0.2s;';
+      item.onmouseover = () => item.style.background = '#f8f9fa';
+      item.onmouseout = () => item.style.background = '#fff';
+
+      // 아이콘 결정
+      let icon = '🔗';
+      if (link.platform === 'Coupang') icon = '🚀';
+      if (link.platform === 'AliExpress') icon = '🛍️';
+
+      // 키워드 표시
+      const keywordsHtml = (link.keywords || []).map(k => `<span style="font-size: 10px; background: #f1f3f5; padding: 2px 5px; border-radius: 4px; margin-right: 4px; color: #555;">#${k}</span>`).join('');
+
+      item.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-weight: bold; font-size: 14px;">${icon} ${link.name}</div>
+          <button class="btn-delete-link" style="border: none; background: none; color: #ff5252; cursor: pointer;">×</button>
+        </div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${link.url}</div>
+        <div style="margin-top: 6px;">${keywordsHtml}</div>
+      `;
+
+      // 수정 모드 진입
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-delete-link')) return; // 삭제 버튼 클릭 시 무시
+
+        const formContainer = container.querySelector('#affiliate-form-container');
+        resetForm(container);
+
+        const editIdInput = container.querySelector('#edit-link-id');
+        const nameInput = container.querySelector('#aff-name');
+        const urlInput = container.querySelector('#aff-url');
+        const platformSelect = container.querySelector('#aff-platform');
+        const formTitle = container.querySelector('#form-title');
+
+        if (editIdInput) editIdInput.value = link.id;
+        if (nameInput) nameInput.value = link.name;
+        if (urlInput) urlInput.value = link.url;
+        if (platformSelect) platformSelect.value = link.platform || 'General';
+
+        tempKeywords = [...(link.keywords || [])];
+        renderTags(container);
+
+        if (formTitle) formTitle.textContent = '링크 수정';
+        if (formContainer) formContainer.style.display = 'block';
+      });
+
+      // 삭제 버튼
+      const deleteBtn = item.querySelector('.btn-delete-link');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm('정말 이 링크를 삭제하시겠습니까?')) {
+            try {
+              await deleteAffiliateLink(link.id);
+              loadLinks(container);
+              showToast('🗑️ 링크가 삭제되었습니다.');
+              // 만약 수정 중이던 링크라면 폼 닫기
+              const editingId = container.querySelector('#edit-link-id')?.value;
+              if (editingId === link.id) {
+                const formContainer = container.querySelector('#affiliate-form-container');
+                if (formContainer) formContainer.style.display = 'none';
+              }
+            } catch (error) {
+              console.error('[AffiliateModal] Delete error:', error);
+              showToast('❌ 삭제 중 오류가 발생했습니다.');
+            }
+          }
+        });
+      }
+
+      listEl.appendChild(item);
+    });
+  } catch (error) {
+    console.error('[AffiliateModal] Load links error:', error);
+    if (listEl) {
+      listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #ff5252;">링크 로드 중 오류가 발생했습니다.</div>';
+    }
+  }
+}

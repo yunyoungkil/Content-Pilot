@@ -1,20 +1,23 @@
 // js/ui/header.js
 
+// 정적 import로 affiliateModal을 미리 로드하여 청크 로딩 문제 해결
+import { renderAffiliateModal } from "./affiliateModal.js";
+
 // 공통 헤더 렌더링 함수
 export function renderPanelHeader() {
   const iconUrl = chrome.runtime.getURL("images/icon-32.png");
   const activeMode = window.__cp_active_mode || "scrapbook";
-  const isWorkspaceMode = activeMode === 'workspace';
+  const isWorkspaceMode = activeMode === "workspace";
   const isLayoutMode = !!window.__cp_layout_mode_active;
 
   const tabs = [
-     { key: "dashboard", label: "대시보드", color: "#1a73e8" }, 
-     { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
-     { key: "kanban", label: "기획 보드", color: "#34A853" },
-     { key: "performance", label: "성과 대시보드", color: "#9C27B0" },
-     { key: "report", label: "성과 리포트", color: "#FF6B6B" },
-     { key: "draft", label: "초안 작성", color: "#FBBC05" },
-     // 채널 연동 탭 제거됨 - 헤더의 글로벌 선택기로 대체
+    { key: "dashboard", label: "대시보드", color: "#1a73e8" },
+    { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
+    { key: "kanban", label: "기획 보드", color: "#34A853" },
+    { key: "performance", label: "성과 대시보드", color: "#9C27B0" },
+    { key: "report", label: "성과 리포트", color: "#FF6B6B" },
+    { key: "draft", label: "초안 작성", color: "#FBBC05" },
+    // 채널 연동 탭 제거됨 - 헤더의 글로벌 선택기로 대체
   ];
 
   return `
@@ -57,8 +60,12 @@ export function renderPanelHeader() {
           <button id="cp-settings-btn" class="cp-panel-icon-btn" title="설정">
             <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M480-160q-33 0-56.5-23.5T400-240q0-33 23.5-56.5T480-320q33 0 56.5 23.5T560-240q0 33-23.5 56.5T480-160Zm0-240q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm0-240q-33 0-56.5-23.5T400-720q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720q0 33-23.5 56.5T480-640Z"/></svg>
           </button>
-          <div id="cp-settings-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:#fff;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:200px;z-index:1000;overflow:hidden;">
-            <button class="cp-settings-menu-item" data-action="diagnosis" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#333;display:flex;align-items:center;gap:8px;transition:background 0.2s;">
+          <div id="cp-settings-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:#fff;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:200px;z-index:2147483647;overflow:hidden;">
+            <button class="cp-settings-menu-item" data-action="affiliate" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#333;display:flex;align-items:center;gap:8px;transition:background 0.2s;pointer-events:auto;">
+              <span>💰</span>
+              <span>제휴 링크 관리</span>
+            </button>
+            <button class="cp-settings-menu-item" data-action="diagnosis" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#333;display:flex;align-items:center;gap:8px;transition:background 0.2s;pointer-events:auto;">
               <span>🛠️</span>
               <span>시스템 진단</span>
             </button>
@@ -70,43 +77,134 @@ export function renderPanelHeader() {
       </div>
     </div>
     
-    ${/* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */''}
-    ${isWorkspaceMode ? `
+    ${
+      /* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */ ""
+    }
+    ${
+      isWorkspaceMode
+        ? `
     <div id="cp-navigation-bar" style="display:flex; align-items:center; padding: 0 18px 8px 18px; border-bottom: 1.5px solid #f0f0f0; margin-bottom: 8px;">
       <button id="cp-back-to-dashboard" style="background:none; border:none; cursor:pointer; display:flex; align-items:center; gap: 4px; font-size: 15px; font-weight: 600; color: #555;">
         <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="#555"><path d="M400-80 0-480l400-400 56 56-344 344 344 344-56 56Z"/></svg>
         <span>대시보드로 돌아가기</span>
       </button>
     </div>
-    ` : `
+    `
+        : `
     <div id="cp-mode-tabs" style="display:flex;gap:8px;margin-bottom:8px;padding:0 18px 0 18px;">
-      ${tabs.map(tab => `
-        <div class="cp-mode-tab ${activeMode === tab.key ? " active" : ""}" data-key="${tab.key}" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${activeMode === tab.key ? tab.color : "#888"};background:${activeMode === tab.key ? "#f2f3f7" : "transparent"};border:2px solid ${activeMode === tab.key ? tab.color : "transparent"};transition:all 0.2s;">
+      ${tabs
+        .map(
+          (tab) => `
+        <div class="cp-mode-tab ${
+          activeMode === tab.key ? " active" : ""
+        }" data-key="${
+            tab.key
+          }" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${
+            activeMode === tab.key ? tab.color : "#888"
+          };background:${
+            activeMode === tab.key ? "#f2f3f7" : "transparent"
+          };border:2px solid ${
+            activeMode === tab.key ? tab.color : "transparent"
+          };transition:all 0.2s;">
           ${tab.label}
         </div>
-      `).join("")}
+      `
+        )
+        .join("")}
     </div>
-    `}
+    `
+    }
   `;
 }
 
 // 헤더 이벤트 리스너 추가 함수
 export function addHeaderEventListeners(shadowRoot) {
-  // 글로벌 채널 선택기 초기화
-  initGlobalChannelSelector(shadowRoot);
-  
-  // 시스템 진단 버튼
-  const diagBtn = shadowRoot.querySelector("#open-diagnostics-btn");
-  if (diagBtn) {
-    diagBtn.addEventListener("click", () => {
-      const mainArea = shadowRoot.querySelector("#cp-main-area");
-      if (mainArea) {
-        window.__cp_active_mode = 'admin';
-        renderHeaderAndTabs(shadowRoot);
-        import("./adminMode.js").then(module => module.renderAdminMode(mainArea));
+  console.log('[DEBUG] addHeaderEventListeners called');
+
+  // DOM이 완전히 렌더링된 후 이벤트 리스너 추가
+  requestAnimationFrame(() => {
+    console.log('[DEBUG] requestAnimationFrame callback executed');
+
+    // 글로벌 채널 선택기 초기화
+    initGlobalChannelSelector(shadowRoot);
+
+    // 설정 메뉴 토글
+    const settingsBtn = shadowRoot.querySelector("#cp-settings-btn");
+    const settingsMenu = shadowRoot.querySelector("#cp-settings-menu");
+
+    console.log('[DEBUG] settingsBtn found:', !!settingsBtn);
+    console.log('[DEBUG] settingsMenu found:', !!settingsMenu);
+
+    if (settingsBtn && settingsMenu) {
+      // 이벤트 위임을 shadowRoot에서 한 번만 등록하도록 보호합니다.
+      if (shadowRoot.__cpHeaderHandlersAttached) {
+        console.log('[DEBUG] header handlers already attached for this root');
+      } else {
+        console.log('[DEBUG] Attaching delegated header handlers');
+
+        // 클릭 위임: settings 버튼과 메뉴 항목 처리를 하나의 핸들러에서 담당
+        const shadowClickHandler = (e) => {
+          const target = e.target;
+
+          // 설정 버튼 토글
+          if (target.closest && target.closest('#cp-settings-btn')) {
+            console.log('[DEBUG] settingsBtn clicked (delegated)');
+            e.stopPropagation();
+            const isVisible = settingsMenu.style.display !== 'none';
+            settingsMenu.style.display = isVisible ? 'none' : 'block';
+            console.log('[DEBUG] settingsMenu display set to:', settingsMenu.style.display);
+            return;
+          }
+
+          // 메뉴 아이템 클릭
+          const item = target.closest && target.closest('.cp-settings-menu-item');
+          if (item) {
+            console.log('[DEBUG] Menu item clicked (delegated):', item.dataset.action);
+            e.stopPropagation();
+            const action = item.dataset.action;
+            settingsMenu.style.display = 'none';
+
+            if (action === 'affiliate') {
+              const mainArea = shadowRoot.querySelector('#cp-main-area');
+              if (mainArea) {
+                renderAffiliateModal(mainArea);
+                const modal = mainArea.querySelector('#affiliate-modal');
+                if (modal) modal.style.display = 'flex';
+              }
+            } else if (action === 'diagnosis') {
+              const mainArea = shadowRoot.querySelector('#cp-main-area');
+              if (mainArea) {
+                window.__cp_active_mode = 'admin';
+                renderHeaderAndTabs(shadowRoot);
+                import('./adminMode.js').then((module) => module.renderAdminMode(mainArea));
+              }
+            }
+            return;
+          }
+        };
+
+        // 외부 클릭 감지: document 클릭 중 패널 바깥을 클릭하면 메뉴 닫기
+        const documentClickHandler = (e) => {
+          // e.composedPath()를 사용하여 shadow host 포함 여부를 확인
+          const path = e.composedPath ? e.composedPath() : [];
+          if (path.includes(shadowRoot.host)) {
+            return; // shadow 내부 클릭이면 무시
+          }
+          const menu = shadowRoot.querySelector('#cp-settings-menu');
+          if (menu) menu.style.display = 'none';
+        };
+
+        shadowRoot.addEventListener('click', shadowClickHandler);
+        document.addEventListener('click', documentClickHandler);
+
+        // 상태 표시 및 핸들러 레퍼런스 저장
+        shadowRoot.__cpHeaderHandlersAttached = true;
+        shadowRoot.__cpHeaderHandlers = { shadowClickHandler, documentClickHandler };
       }
-    });
-  }
+    } else {
+      console.error('[ERROR] settingsBtn or settingsMenu not found');
+    }
+  });
 }
 
 // 글로벌 채널 선택기 초기화
@@ -121,7 +219,7 @@ async function initGlobalChannelSelector(shadowRoot) {
   chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
     if (response && response.success) {
       const myBlogs = response.data.myChannels?.blogs || [];
-      
+
       // 옵션 초기화
       selector.innerHTML = "";
 
@@ -144,8 +242,8 @@ async function initGlobalChannelSelector(shadowRoot) {
           if (channel.url) return btoa(channel.url).replace(/=/g, "");
           return null;
         };
-        
-        myBlogs.forEach(blog => {
+
+        myBlogs.forEach((blog) => {
           const option = document.createElement("option");
           // ID 생성 (id > apiUrl > url 순서)
           const id = generateChannelId(blog);
@@ -154,7 +252,9 @@ async function initGlobalChannelSelector(shadowRoot) {
             return;
           }
           option.value = id;
-          option.textContent = `📺 ${blog.inputUrl || blog.url || blog.apiUrl || '알 수 없음'}`;
+          option.textContent = `📺 ${
+            blog.inputUrl || blog.url || blog.apiUrl || "알 수 없음"
+          }`;
           selector.appendChild(option);
 
           if (id === activeChannelId) foundActive = true;
@@ -190,12 +290,14 @@ async function initGlobalChannelSelector(shadowRoot) {
     if (selectedValue === "__MANAGE__") {
       // '채널 관리' 선택 시
       openChannelManager(shadowRoot);
-      
+
       // UI 상으로는 다시 원래 채널(또는 첫번째)로 돌려놓기 (UX)
       chrome.storage.local.get("activeChannelId", (res) => {
         if (res.activeChannelId) {
           // 목록에 해당 ID가 있는지 확인 후 복구
-          const exists = Array.from(selector.options).some(opt => opt.value === res.activeChannelId);
+          const exists = Array.from(selector.options).some(
+            (opt) => opt.value === res.activeChannelId
+          );
           if (exists) selector.value = res.activeChannelId;
         }
       });
@@ -203,11 +305,11 @@ async function initGlobalChannelSelector(shadowRoot) {
       // 일반 채널 선택 시 -> 상태 저장 및 새로고침
       chrome.storage.local.set({ activeChannelId: selectedValue }, () => {
         console.log(`[Global] 활성 채널 변경됨: ${selectedValue}`);
-        
+
         // [체크리스트 4-1] 헤더 반응성: 로딩 표시 추가
         const mainArea = shadowRoot.querySelector("#cp-main-area");
         if (!mainArea) return;
-        
+
         // 로딩 오버레이 표시
         const loadingOverlay = document.createElement("div");
         loadingOverlay.id = "channel-switch-loading";
@@ -228,33 +330,45 @@ async function initGlobalChannelSelector(shadowRoot) {
         loadingOverlay.innerHTML = `<div style="text-align: center;"><div style="margin-bottom: 8px;">⏳ 채널 데이터 로딩 중...</div></div>`;
         mainArea.style.position = "relative";
         mainArea.appendChild(loadingOverlay);
-        
+
         const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
         if (activeTab) {
           const tabName = activeTab.dataset.key;
-          
+
           // 약간의 지연 후 리로드 (storage 저장 보장)
           setTimeout(() => {
             // 탭별 새로고침 로직
-            Promise.all([
-              tabName === "dashboard" ? import("./dashboardMode.js").then(module => {
-                module.renderDashboard(mainArea);
-                module.addDashboardEventListeners(mainArea);
-              }) : null,
-              tabName === "scrapbook" ? import("./scrapbookMode.js").then(module => {
-                module.renderScrapbook(mainArea);
-              }) : null,
-              tabName === "kanban" ? import("./kanbanMode.js").then(module => {
-                module.renderKanban(mainArea);
-                module.addKanbanEventListeners(mainArea);
-              }) : null,
-              tabName === "performance" ? import("./performanceDashboardMode.js").then(module => {
-                module.renderPerformanceDashboard(mainArea);
-              }) : null,
-              tabName === "report" ? import("./performanceReportMode.js").then(module => {
-                module.renderPerformanceReport(mainArea);
-              }) : null
-            ].filter(Boolean)).then(() => {
+            Promise.all(
+              [
+                tabName === "dashboard"
+                  ? import("./dashboardMode.js").then((module) => {
+                      module.renderDashboard(mainArea);
+                      module.addDashboardEventListeners(mainArea);
+                    })
+                  : null,
+                tabName === "scrapbook"
+                  ? import("./scrapbookMode.js").then((module) => {
+                      module.renderScrapbook(mainArea);
+                    })
+                  : null,
+                tabName === "kanban"
+                  ? import("./kanbanMode.js").then((module) => {
+                      module.renderKanban(mainArea);
+                      module.addKanbanEventListeners(mainArea);
+                    })
+                  : null,
+                tabName === "performance"
+                  ? import("./performanceDashboardMode.js").then((module) => {
+                      module.renderPerformanceDashboard(mainArea);
+                    })
+                  : null,
+                tabName === "report"
+                  ? import("./performanceReportMode.js").then((module) => {
+                      module.renderPerformanceReport(mainArea);
+                    })
+                  : null,
+              ].filter(Boolean)
+            ).then(() => {
               // 로딩 오버레이 제거
               const loading = mainArea.querySelector("#channel-switch-loading");
               if (loading) loading.remove();
@@ -277,11 +391,13 @@ function openChannelManager(shadowRoot) {
   const mainArea = shadowRoot.querySelector("#cp-main-area");
   if (mainArea) {
     // 탭 스타일 초기화
-    shadowRoot.querySelectorAll(".cp-mode-tab").forEach(btn => btn.classList.remove("active"));
-    
+    shadowRoot
+      .querySelectorAll(".cp-mode-tab")
+      .forEach((btn) => btn.classList.remove("active"));
+
     // 채널 관리 UI 렌더링
-    window.__cp_active_mode = 'channel';
-    import("./channelMode.js").then(module => {
+    window.__cp_active_mode = "channel";
+    import("./channelMode.js").then((module) => {
       module.renderChannelMode(mainArea);
       renderHeaderAndTabs(shadowRoot);
     });
