@@ -54,4 +54,39 @@ describe("affiliateModal close behavior", () => {
         form.style.display === "none" || form.style.display === ""
       ).toBeTruthy();
   });
+
+  test("renders card preview element when link has cardData", async () => {
+    const { getAffiliateLinks } = require("../js/services/affiliateService.js");
+
+    // prepare a link item with cardData
+    const cardLink = {
+      id: "test-1",
+      platform: "Coupang",
+      name: "테스트 상품",
+      url: "https://example.com/item/1",
+      createdAt: Date.now(),
+      cardData: {
+        productName: "테스트 상품 긴 이름",
+        imageUrl: "https://example.com/img.jpg",
+        salePrice: 12345,
+      },
+    };
+
+    // make the mock return a single link for this test
+    getAffiliateLinks.mockResolvedValueOnce([cardLink]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // wait for the async loadLinks to complete
+    await new Promise((r) => setTimeout(r, 0));
+
+    const preview = container.querySelector(".link-card-preview");
+    expect(preview).toBeTruthy();
+    const img = preview.querySelector("img");
+    expect(img).toBeTruthy();
+    expect(img.src).toContain("example.com/img.jpg");
+  });
 });

@@ -1557,19 +1557,13 @@ async function loadLinks(container) {
       const cardData = link.cardData || null;
       const cardPreviewHtml = cardData
         ? `
-          <div class="link-card-preview" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <div style="width:52px;height:52px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#fafbfc;display:flex;align-items:center;justify-content:center;border:1px solid #eee;">
-              <img src="${
-                cardData.imageUrl || ""
-              }" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
+          <div class="link-card-preview">
+            <div class="link-card-preview__img">
+              <img src="${cardData.imageUrl || ""}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
             </div>
-            <div style="font-size:13px;color:#333;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(
-              cardData.productName || ""
-            ).slice(0, 60)}</div>
-            <div style="font-weight:700;color:#ae0000">${
-              cardData.salePrice
-                ? cardData.salePrice.toLocaleString() + "원"
-                : ""
+            <div class="link-card-preview__meta">${(cardData.productName || "").slice(0, 60)}</div>
+            <div class="link-card-preview__price">${
+              cardData.salePrice ? cardData.salePrice.toLocaleString() + "원" : ""
             }</div>
           </div>
         `

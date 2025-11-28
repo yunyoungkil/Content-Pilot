@@ -220,10 +220,11 @@
 .affiliate-link-card {
   background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
   border-radius: 12px;
-  padding: 20px;
+  /* make cards more compact */
+  padding: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   border: 1px solid #e9ecef;
   position: relative;
   overflow: hidden;
@@ -312,7 +313,42 @@
 }
 
 .link-content {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+/* Compact card preview (thumbnail + meta) */
+.link-card-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.link-card-preview__img {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #fafbfc;
+  border: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.link-card-preview__meta {
+  flex: 1;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.link-card-preview__price {
+  font-weight: 700;
+  color: #ae0000;
 }
 
 .link-title {
@@ -1226,6 +1262,30 @@
   .form-footer-right {
     width: 100%;
     justify-content: center;
+  }
+
+  /* Mobile-specific preview layout: stack image above meta, larger image */
+  .link-card-preview {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .link-card-preview__img {
+    width: 100%;
+    height: 140px;
+    border-radius: 8px;
+  }
+
+  .link-card-preview__meta {
+    white-space: normal; /* allow multiple lines on mobile */
+    font-size: 14px;
+  }
+
+  /* Slightly more compact cards on small screens */
+  .affiliate-link-card {
+    padding: 10px;
+    border-radius: 10px;
   }
 }
 
