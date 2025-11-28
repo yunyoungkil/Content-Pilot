@@ -15,9 +15,12 @@ export function renderAffiliateModal(container) {
   // CSS 로드 (한 번만) — Shadow DOM에서 렌더링될 수 있으므로
   // 루트 노드(문서 또는 쉐도우 루트)에 스타일 시트를 삽입합니다.
   try {
-    const rootNode = container?.getRootNode ? container.getRootNode() : document;
+    const rootNode = container?.getRootNode
+      ? container.getRootNode()
+      : document;
     const alreadyLinked =
-      (rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
+      (rootNode.querySelector &&
+        rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
       document.querySelector('link[href*="affiliate-modal.css"]');
 
     if (!alreadyLinked) {
@@ -28,10 +31,16 @@ export function renderAffiliateModal(container) {
       // ShadowRoot에서도 append 가능 (open mode인 경우)
       if (rootNode instanceof ShadowRoot) {
         rootNode.appendChild(link);
-        console.info("[AffiliateModal] stylesheet injected into ShadowRoot:", link.href);
+        console.info(
+          "[AffiliateModal] stylesheet injected into ShadowRoot:",
+          link.href
+        );
       } else if (document.head) {
         document.head.appendChild(link);
-        console.info("[AffiliateModal] stylesheet injected into document.head:", link.href);
+        console.info(
+          "[AffiliateModal] stylesheet injected into document.head:",
+          link.href
+        );
       }
     }
   } catch (err) {
@@ -42,10 +51,13 @@ export function renderAffiliateModal(container) {
   // [Fallback] 외부 스타일 로드에 실패했을 때도 최소한의 기본 스타일을 적용하기 위해
   // 쉐도우 루트(또는 container)에 인라인 스타일 블록을 추가합니다. 이는 시각 확인용 최소 스타일입니다.
   try {
-    const rootNode = container?.getRootNode ? container.getRootNode() : document;
+    const rootNode = container?.getRootNode
+      ? container.getRootNode()
+      : document;
     const inlineId = "affiliate-inline-style";
-    const hasInline = (rootNode.querySelector && rootNode.querySelector(`#${inlineId}`)) ||
-                      document.querySelector(`#${inlineId}`);
+    const hasInline =
+      (rootNode.querySelector && rootNode.querySelector(`#${inlineId}`)) ||
+      document.querySelector(`#${inlineId}`);
     if (!hasInline) {
       const styleEl = document.createElement("style");
       styleEl.id = inlineId;

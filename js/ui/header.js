@@ -119,11 +119,11 @@ export function renderPanelHeader() {
 
 // 헤더 이벤트 리스너 추가 함수
 export function addHeaderEventListeners(shadowRoot) {
-  console.log('[DEBUG] addHeaderEventListeners called');
+  console.log("[DEBUG] addHeaderEventListeners called");
 
   // DOM이 완전히 렌더링된 후 이벤트 리스너 추가
   requestAnimationFrame(() => {
-    console.log('[DEBUG] requestAnimationFrame callback executed');
+    console.log("[DEBUG] requestAnimationFrame callback executed");
 
     // 글로벌 채널 선택기 초기화
     initGlobalChannelSelector(shadowRoot);
@@ -132,51 +132,60 @@ export function addHeaderEventListeners(shadowRoot) {
     const settingsBtn = shadowRoot.querySelector("#cp-settings-btn");
     const settingsMenu = shadowRoot.querySelector("#cp-settings-menu");
 
-    console.log('[DEBUG] settingsBtn found:', !!settingsBtn);
-    console.log('[DEBUG] settingsMenu found:', !!settingsMenu);
+    console.log("[DEBUG] settingsBtn found:", !!settingsBtn);
+    console.log("[DEBUG] settingsMenu found:", !!settingsMenu);
 
     if (settingsBtn && settingsMenu) {
       // 이벤트 위임을 shadowRoot에서 한 번만 등록하도록 보호합니다.
       if (shadowRoot.__cpHeaderHandlersAttached) {
-        console.log('[DEBUG] header handlers already attached for this root');
+        console.log("[DEBUG] header handlers already attached for this root");
       } else {
-        console.log('[DEBUG] Attaching delegated header handlers');
+        console.log("[DEBUG] Attaching delegated header handlers");
 
         // 클릭 위임: settings 버튼과 메뉴 항목 처리를 하나의 핸들러에서 담당
         const shadowClickHandler = (e) => {
           const target = e.target;
 
           // 설정 버튼 토글
-          if (target.closest && target.closest('#cp-settings-btn')) {
-            console.log('[DEBUG] settingsBtn clicked (delegated)');
+          if (target.closest && target.closest("#cp-settings-btn")) {
+            console.log("[DEBUG] settingsBtn clicked (delegated)");
             e.stopPropagation();
-            const isVisible = settingsMenu.style.display !== 'none';
-            settingsMenu.style.display = isVisible ? 'none' : 'block';
-            console.log('[DEBUG] settingsMenu display set to:', settingsMenu.style.display);
+            const isVisible = settingsMenu.style.display !== "none";
+            settingsMenu.style.display = isVisible ? "none" : "block";
+            console.log(
+              "[DEBUG] settingsMenu display set to:",
+              settingsMenu.style.display
+            );
             return;
           }
 
           // 메뉴 아이템 클릭
-          const item = target.closest && target.closest('.cp-settings-menu-item');
+          const item =
+            target.closest && target.closest(".cp-settings-menu-item");
           if (item) {
-            console.log('[DEBUG] Menu item clicked (delegated):', item.dataset.action);
+            console.log(
+              "[DEBUG] Menu item clicked (delegated):",
+              item.dataset.action
+            );
             e.stopPropagation();
             const action = item.dataset.action;
-            settingsMenu.style.display = 'none';
+            settingsMenu.style.display = "none";
 
-            if (action === 'affiliate') {
-              const mainArea = shadowRoot.querySelector('#cp-main-area');
+            if (action === "affiliate") {
+              const mainArea = shadowRoot.querySelector("#cp-main-area");
               if (mainArea) {
                 renderAffiliateModal(mainArea);
-                const modal = mainArea.querySelector('#affiliate-modal');
-                if (modal) modal.style.display = 'flex';
+                const modal = mainArea.querySelector("#affiliate-modal");
+                if (modal) modal.style.display = "flex";
               }
-            } else if (action === 'diagnosis') {
-              const mainArea = shadowRoot.querySelector('#cp-main-area');
+            } else if (action === "diagnosis") {
+              const mainArea = shadowRoot.querySelector("#cp-main-area");
               if (mainArea) {
-                window.__cp_active_mode = 'admin';
+                window.__cp_active_mode = "admin";
                 renderHeaderAndTabs(shadowRoot);
-                import('./adminMode.js').then((module) => module.renderAdminMode(mainArea));
+                import("./adminMode.js").then((module) =>
+                  module.renderAdminMode(mainArea)
+                );
               }
             }
             return;
@@ -190,19 +199,22 @@ export function addHeaderEventListeners(shadowRoot) {
           if (path.includes(shadowRoot.host)) {
             return; // shadow 내부 클릭이면 무시
           }
-          const menu = shadowRoot.querySelector('#cp-settings-menu');
-          if (menu) menu.style.display = 'none';
+          const menu = shadowRoot.querySelector("#cp-settings-menu");
+          if (menu) menu.style.display = "none";
         };
 
-        shadowRoot.addEventListener('click', shadowClickHandler);
-        document.addEventListener('click', documentClickHandler);
+        shadowRoot.addEventListener("click", shadowClickHandler);
+        document.addEventListener("click", documentClickHandler);
 
         // 상태 표시 및 핸들러 레퍼런스 저장
         shadowRoot.__cpHeaderHandlersAttached = true;
-        shadowRoot.__cpHeaderHandlers = { shadowClickHandler, documentClickHandler };
+        shadowRoot.__cpHeaderHandlers = {
+          shadowClickHandler,
+          documentClickHandler,
+        };
       }
     } else {
-      console.error('[ERROR] settingsBtn or settingsMenu not found');
+      console.error("[ERROR] settingsBtn or settingsMenu not found");
     }
   });
 }

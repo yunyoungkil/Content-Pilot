@@ -333,7 +333,7 @@
 }
 .scrapbook-detail-image-item:hover {
   transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 .scrapbook-detail-title {
   font-size: 22px;

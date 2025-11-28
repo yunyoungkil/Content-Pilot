@@ -121,7 +121,12 @@ async function getRelevantAffiliateLinks(userId, contextText) {
     // 키워드가 없거나, 키워드가 문맥에 포함된 경우 선택
     const contextLower = contextText.toLowerCase();
     const relevantLinks = links.filter((link) => {
-      if (!link.keywords || !Array.isArray(link.keywords) || link.keywords.length === 0 || !link.url) {
+      if (
+        !link.keywords ||
+        !Array.isArray(link.keywords) ||
+        link.keywords.length === 0 ||
+        !link.url
+      ) {
         Logger.debug(
           `[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`,
           link
@@ -130,22 +135,23 @@ async function getRelevantAffiliateLinks(userId, contextText) {
       }
 
       // keywords 배열에서 하나라도 contextText에 포함되는 키워드가 있는지 확인
-      const hasRelevantKeyword = link.keywords.some(keyword => {
+      const hasRelevantKeyword = link.keywords.some((keyword) => {
         const keywordLower = keyword.toLowerCase();
         return contextLower.includes(keywordLower);
       });
 
       const productNameLower = (link.productName || "").toLowerCase();
-      const hasRelevantProductName = productNameLower && contextLower.includes(productNameLower);
+      const hasRelevantProductName =
+        productNameLower && contextLower.includes(productNameLower);
 
       // 키워드나 상품명이 문맥에 포함된 경우 선택
       const isRelevant = hasRelevantKeyword || hasRelevantProductName;
 
       if (isRelevant) {
         Logger.debug(
-          `[getRelevantAffiliateLinks] 관련 링크 발견: ${
-            link.keywords.join(", ")
-          } (${link.url.substring(0, 50)}...)`
+          `[getRelevantAffiliateLinks] 관련 링크 발견: ${link.keywords.join(
+            ", "
+          )} (${link.url.substring(0, 50)}...)`
         );
       }
 
