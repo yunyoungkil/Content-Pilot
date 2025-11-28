@@ -170,6 +170,137 @@ async function getRelevantAffiliateLinks(userId, contextText) {
   }
 }
 
+/**
+ * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
+ * - Ensures anchor tags matching known affiliate URLs are marked/styled consistently
+ * - Optionally inserts affiliate links (max limit) by finding keyword/productName matches
+ * @param {string} html - sanitized HTML
+ * @param {Array<Object>} affiliateLinks - array of affiliate link objects (must include url, keywords[], productName)
+ * @param {Object} options - { maxLinks: number }
+ * @returns {string} modified HTML
+ */
+export function postProcessAffiliateHtml(html = "", affiliateLinks = [], options = {}) {
+  const { maxLinks = 3 } = options || {};
+  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0) return html;
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    // Normalize affiliate urls for quick lookup
+    const normalized = affiliateLinks.map((l) => ({
+      url: (l.url || "").trim(),
+      productName: l.productName || "",
+      keywords: Array.isArray(l.keywords) ? l.keywords : [],
+    }));
+
+    // Helper: check if href matches any affiliate URL (startsWith or exact)
+    const findAffiliateByHref = (href) => {
+      if (!href) return null;
+      const hrefNorm = href.trim();
+      return normalized.find((a) => hrefNorm === a.url || hrefNorm.startsWith(a.url));
+    };
+
+    // 1) Ensure existing anchors that match affiliate links are wrapped/styled
+    const anchors = Array.from(doc.querySelectorAll("a[href]") || []);
+    let insertedCount = 0;
+    anchors.forEach((a) => {
+      const match = findAffiliateByHref(a.getAttribute("href"));
+      if (match && insertedCount < maxLinks) {
+        // Wrap with span color style if not already
+        const parent = a.parentElement;
+        if (!parent || parent.tagName.toLowerCase() !== "span" || !parent.getAttribute("style")?.includes("#2e7d32")) {
+          const span = doc.createElement("span");
+          span.setAttribute("style", "color: #2e7d32;");
+          a.replaceWith(span);
+          span.appendChild(a);
+        }
+        // ensure target and rel are safe
+        try {
+          a.setAttribute("target", "_blank");
+          a.setAttribute("rel", "noopener noreferrer");
+        } catch (e) {}
+        insertedCount += 1;
+      }
+    });
+
+    // 2) If we need more, attempt deterministic insertion: find keywords/productName matches in text nodes
+    if (insertedCount < maxLinks) {
+      const usedUrls = new Set(
+        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map((el) => el.getAttribute("href"))
+      );
+
+      const textNodes = [];
+      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
+      let node;
+      while ((node = walker.nextNode())) {
+        const parentTag = node.parentElement?.tagName?.toLowerCase();
+        // skip inside code/pre/a/script/style
+        if (["a", "code", "pre", "script", "style"].includes(parentTag)) continue;
+        if (node.textContent && node.textContent.trim()) textNodes.push(node);
+      }
+
+      // Helper to escape regex
+      const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      for (const link of normalized) {
+        if (insertedCount >= maxLinks) break;
+        const targetUrl = link.url;
+        if (!targetUrl || usedUrls.has(targetUrl)) continue;
+
+        const candidates = [...(link.keywords || []), link.productName].filter(Boolean);
+        if (candidates.length === 0) continue;
+
+        // try to find first occurrence among text nodes
+        let matched = false;
+        // Use plain substring match (case-insensitive) for keywords and product names
+        const patterns = candidates.map((c) => new RegExp(escapeReg(c), "i"));
+
+        for (const tnode of textNodes) {
+          const txt = tnode.textContent;
+          for (const pattern of patterns) {
+            const m = txt.match(pattern);
+            if (m) {
+              // Create replacement span > a
+              const span = doc.createElement("span");
+              span.setAttribute("style", "color: #2e7d32;");
+              const a = doc.createElement("a");
+              a.setAttribute("href", targetUrl);
+              a.setAttribute("target", "_blank");
+              a.setAttribute("rel", "noopener noreferrer");
+              // CTA text - prefer short CTA using productName when available
+              const cta = link.productName ? `${link.productName} 최저가 확인하기` : "상품 상세보기";
+              a.textContent = cta;
+              span.appendChild(a);
+
+              // Replace only the first match occurrence inside this text node
+              const before = txt.slice(0, m.index);
+              const after = txt.slice(m.index + m[0].length);
+              const frag = doc.createDocumentFragment();
+              if (before) frag.appendChild(doc.createTextNode(before));
+              frag.appendChild(span);
+              if (after) frag.appendChild(doc.createTextNode(after));
+
+              tnode.parentNode.replaceChild(frag, tnode);
+              insertedCount += 1;
+              usedUrls.add(targetUrl);
+              matched = true;
+              break;
+            }
+          }
+          if (matched) break;
+        }
+      }
+    }
+
+    return doc.body.innerHTML || html;
+  } catch (e) {
+    // If anything fails, return original HTML and log
+    Logger.warn("[postProcessAffiliateHtml] 처리 실패, 원본 HTML 반환:", e);
+    return html;
+  }
+}
+
 // 5. 초안 생성 (메인 로직)
 // [삭제] function formatDraftForReadability(draftText) { ... }
 // 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
@@ -1292,6 +1423,27 @@ export async function generateDraftFromIdea(ideaData) {
           error
         );
       }
+    }
+
+    // POST-PROCESS: validate and optionally auto-insert affiliate links
+    try {
+      const storageRes = await chrome.storage.local.get("autoInsertAffiliateLinks");
+      const userAutoInsert = storageRes?.autoInsertAffiliateLinks;
+      const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
+      const shouldAutoInsert =
+        typeof ideaOptIn === "boolean" ? ideaOptIn : !!userAutoInsert;
+
+      if (shouldAutoInsert && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+        try {
+          formattedDraft = postProcessAffiliateHtml(formattedDraft, affiliateLinks, {
+            maxLinks: 3,
+          });
+        } catch (e) {
+          Logger.warn("[generateDraftFromIdea] postProcessAffiliateHtml failed:", e);
+        }
+      }
+    } catch (e) {
+      Logger.warn("[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:", e);
     }
 
     return {

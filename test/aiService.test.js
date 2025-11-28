@@ -283,4 +283,62 @@ describe("AI Service", () => {
       mockFetchResponse.status = 200;
     });
   });
+
+  describe("postProcessAffiliateHtml", () => {
+    test("wraps existing affiliate anchors and styles them", () => {
+      const html = '<p>테스트 문장 <a href="https://shop.example/aff1">구매하기</a> 끝</p>';
+      const links = [
+        { url: "https://shop.example/aff1", productName: "상품A", keywords: ["상품A"] },
+      ];
+
+      const result = require("../js/services/aiService.js").postProcessAffiliateHtml(
+        html,
+        links,
+        { maxLinks: 3 }
+      );
+
+      expect(result).toContain('style="color: #2e7d32;' );
+      expect(result).toContain('href="https://shop.example/aff1"');
+    });
+
+    test("inserts affiliate link when keyword is present and no anchor exists", () => {
+      const html = '<p>이 글은 최신 상품A 리뷰입니다. 많은 정보를 담았습니다.</p>';
+      const links = [
+        { url: "https://shop.example/aff1", productName: "상품A", keywords: ["상품A"] },
+      ];
+
+      const result = require("../js/services/aiService.js").postProcessAffiliateHtml(
+        html,
+        links,
+        { maxLinks: 2 }
+      );
+
+      // Should have inserted an anchor for 상품A
+      expect(result).toMatch(/<a [^>]*href="https:\/\/shop.example\/aff1"/);
+      // Should contain CTA text (상품명 기반)
+      expect(result).toContain("상품A 최저가 확인하기");
+    });
+
+    test("does not insert more than maxLinks", () => {
+      const html = '<p>상품A와 상품B, 상품C 및 상품D가 소개됩니다.</p>';
+      const links = [
+        { url: "https://s/affA", productName: "상품A", keywords: ["상품A"] },
+        { url: "https://s/affB", productName: "상품B", keywords: ["상품B"] },
+        { url: "https://s/affC", productName: "상품C", keywords: ["상품C"] },
+        { url: "https://s/affD", productName: "상품D", keywords: ["상품D"] },
+      ];
+
+      const result = require("../js/services/aiService.js").postProcessAffiliateHtml(
+        html,
+        links,
+        { maxLinks: 3 }
+      );
+
+      // should include exactly 3 affiliate anchors
+      const matches = result.match(/<a [^>]*href="https?:\/\/[^"]+"/g) || [];
+      // allow other anchors, but ensure affiliate insertions <= 3 by counting our link urls
+      const affCount = (result.match(/상품[A-D] 최저가 확인하기/g) || []).length;
+      expect(affCount).toBeLessThanOrEqual(3);
+    });
+  });
 });

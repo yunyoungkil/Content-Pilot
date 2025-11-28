@@ -122,15 +122,18 @@ export function addHeaderEventListeners(shadowRoot) {
   console.log("[DEBUG] addHeaderEventListeners called");
 
   // DOM이 완전히 렌더링된 후 이벤트 리스너 추가
-  requestAnimationFrame(() => {
+  const initHandler = () => {
     console.log("[DEBUG] requestAnimationFrame callback executed");
 
     // 글로벌 채널 선택기 초기화
     initGlobalChannelSelector(shadowRoot);
 
     // 설정 메뉴 토글
-    const settingsBtn = shadowRoot.querySelector("#cp-settings-btn");
-    const settingsMenu = shadowRoot.querySelector("#cp-settings-menu");
+    // we intentionally avoid capturing elements here because the header
+    // may be re-rendered. Resolve them on each click so the delegated
+    // handler will work even after header DOM replacement.
+    const settingsBtn = () => shadowRoot.querySelector("#cp-settings-btn");
+    const settingsMenu = () => shadowRoot.querySelector("#cp-settings-menu");
 
     console.log("[DEBUG] settingsBtn found:", !!settingsBtn);
     console.log("[DEBUG] settingsMenu found:", !!settingsMenu);
@@ -146,22 +149,20 @@ export function addHeaderEventListeners(shadowRoot) {
         const shadowClickHandler = (e) => {
           const target = e.target;
 
-          // 설정 버튼 토글
+          // 설정 버튼 토글 - resolve menu dynamically so re-renders work
           if (target.closest && target.closest("#cp-settings-btn")) {
+            const menuEl = settingsMenu();
+            if (!menuEl) return;
             console.log("[DEBUG] settingsBtn clicked (delegated)");
             e.stopPropagation();
-            const isVisible = settingsMenu.style.display !== "none";
-            settingsMenu.style.display = isVisible ? "none" : "block";
-            console.log(
-              "[DEBUG] settingsMenu display set to:",
-              settingsMenu.style.display
-            );
+            const isVisible = menuEl.style.display !== "none";
+            menuEl.style.display = isVisible ? "none" : "block";
+            console.log("[DEBUG] settingsMenu display set to:", menuEl.style.display);
             return;
           }
 
           // 메뉴 아이템 클릭
-          const item =
-            target.closest && target.closest(".cp-settings-menu-item");
+          const item = target.closest && target.closest(".cp-settings-menu-item");
           if (item) {
             console.log(
               "[DEBUG] Menu item clicked (delegated):",
@@ -169,7 +170,8 @@ export function addHeaderEventListeners(shadowRoot) {
             );
             e.stopPropagation();
             const action = item.dataset.action;
-            settingsMenu.style.display = "none";
+            const menuEl = settingsMenu();
+            if (menuEl) menuEl.style.display = "none";
 
             if (action === "affiliate") {
               const mainArea = shadowRoot.querySelector("#cp-main-area");
@@ -216,7 +218,18 @@ export function addHeaderEventListeners(shadowRoot) {
     } else {
       console.error("[ERROR] settingsBtn or settingsMenu not found");
     }
-  });
+  };
+
+  // Try to run on next animation frame but also schedule a micro fallback
+  // so environments (like Jest/jsdom) which don't reliably run RAF in tests
+  // still execute the initialization quickly.
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(initHandler);
+    // micro-fallback
+    setTimeout(initHandler, 0);
+  } else {
+    setTimeout(initHandler, 0);
+  }
 }
 
 // 글로벌 채널 선택기 초기화

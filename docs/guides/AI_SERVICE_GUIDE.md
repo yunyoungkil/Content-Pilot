@@ -336,6 +336,14 @@ affiliate_links/{userId}/{linkKey}
 
 **초안 생성 시 자동 삽입**:
 - `generateDraftFromIdea` 함수가 자동으로 관련 제휴 링크를 조회합니다.
+
+Auto-insertion note:
+- The service will now optionally post-process generated drafts and insert affiliate links from the user's saved `affiliate_links` automatically.
+- This behavior is controlled by a user-level setting `autoInsertAffiliateLinks` (chrome.storage.local) and can be overridden per request by passing `ideaData.autoInsertAffiliateLinks` boolean to `generateDraftFromIdea`.
+- Insert rules enforced:
+  - At most 3 affiliate links are inserted automatically.
+  - The system prefers existing affiliate anchors and styles them consistently.
+  - If there are no existing affiliate anchors, the service will deterministically look for a keyword/product name match and insert a CTA link in the most relevant location.
 - 글의 제목, 태그, 설명과 관련된 링크만 선별합니다.
 - AI가 문맥을 이해하고 자연스럽게 링크를 삽입합니다.
 

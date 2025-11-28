@@ -848,6 +848,27 @@ function initializeEditor() {
         quillEditor.setSelection(currentRange.index + data.text.length);
         // ▲▲▲ [수정 완료] ▲▲▲
         break;
+      case "insert-html":
+        // 외부에서 HTML 조각을 삽입할 때 사용합니다.
+        if (!data || typeof data.html !== 'string') {
+          console.error('insert-html: data 또는 data.html이 없습니다.', { action, data });
+          break;
+        }
+        try {
+          const sel = quillEditor.getSelection() || { index: quillEditor.getLength(), length: 0 };
+          // Quill clipboard API를 이용해 안전하게 HTML을 삽입
+          quillEditor.clipboard.dangerouslyPasteHTML(sel.index, data.html);
+          // 삽입 후 커서를 콘텐츠 끝으로 이동시킴
+          setTimeout(() => {
+            try {
+              quillEditor.setSelection(quillEditor.getLength(), 0);
+            } catch (err) {}
+          }, 0);
+          console.log('✅ [Editor] insert-html 처리 완료');
+        } catch (err) {
+          console.error('❌ [Editor] insert-html 처리 중 오류:', err);
+        }
+        break;
       case "insert-image":
         console.log("➕ [Editor] ========================================");
         console.log("➕ [Editor] 📨 insert-image 메시지 수신!");

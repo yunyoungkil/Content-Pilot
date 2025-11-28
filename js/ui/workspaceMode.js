@@ -1,4 +1,5 @@
 import { shortenLink, showToast, Logger } from "../utils.js";
+import { getAffiliateLinks } from "../services/affiliateService.js";
 import { marked } from "marked";
 import { openThumbnailMaker } from "./thumbnailMaker.js";
 
@@ -1286,6 +1287,7 @@ export function renderWorkspace(container, ideaData) {
             <button class="resource-tab-btn" data-tab="recommended-keywords" title="추천 검색어">🔍</button>
             <button class="resource-tab-btn" data-tab="all-scraps" title="모든 스크랩">📖</button>
             <button class="resource-tab-btn" data-tab="image-gallery" title="이미지 갤러리">🖼️</button>
+            <button class="resource-tab-btn" data-tab="affiliate" title="제휴 카드">💰</button>
         </div>
         
         <div class="resource-content-area publish-info-area" id="publish-info-area" style="display:block;"><div id="publish-info-content"></div></div>
@@ -1315,6 +1317,11 @@ export function renderWorkspace(container, ideaData) {
         </div>
         <div class="resource-content-area image-gallery-area" id="image-gallery-list-container" style="display:none;">
             <div class="image-gallery-grid"></div>
+        </div>
+        <div class="resource-content-area affiliate-area" id="affiliate-area" style="display:none; padding: 12px; overflow-y:auto;">
+          <div id="affiliate-list" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="color:#888;font-size:13px;">제휴 링크 로드 중...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1609,7 +1616,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     }
 
     tabBtns.forEach(btn => {
-        btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
             tabBtns.forEach(b => b.classList.remove("active"));
             btn.classList.add("active");
             workspaceEl.querySelectorAll(".resource-content-area").forEach(el => el.style.display = "none");
@@ -1686,6 +1693,99 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                          showPublishInfo(workspaceEl, publishInfo.permalink, publishInfo.tags, ideaData.seoTitle, ideaData);
                      }
                  });
+            }
+            else if (tab === "affiliate") {
+              const listContainer = workspaceEl.querySelector('#affiliate-list');
+              if (!listContainer) return;
+              listContainer.innerHTML = '<div style="color:#888;font-size:13px;">제휴 링크 불러오는 중...</div>';
+
+              try {
+                const links = await getAffiliateLinks();
+                if (!links || links.length === 0) {
+                  listContainer.innerHTML = '<div style="color:#666;font-size:13px;">등록된 제휴 링크가 없습니다.</div>';
+                  return;
+                }
+
+                listContainer.innerHTML = links.map(link => {
+                  const short = shortenLink(link.url || '');
+                  const hasCard = link.cardData ? true : false;
+                  return `
+                    <div class="affiliate-list-item" data-id="${link.id}" style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;border:1px solid #eee;background:#fff;">
+                      <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+                        <div style="width:44px;height:44px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${link.cardData && link.cardData.imageUrl ? `<img src="${link.cardData.imageUrl}" style="width:100%;height:100%;object-fit:cover;"/>` : '💰'}</div>
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-weight:700;font-size:13px;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${link.name}</div>
+                          <div style="font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${short}</div>
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:8px;margin-left:12px;">
+                        <button class="cp-btn cp-btn-secondary insert-affiliate-text" data-id="${link.id}">텍스트 삽입</button>
+                        <button class="cp-btn cp-btn-primary insert-affiliate-card" data-id="${link.id}" ${hasCard?"":"disabled"}>카드 삽입</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('');
+
+                // attach click handlers
+                listContainer.querySelectorAll('.insert-affiliate-text').forEach(btn => {
+                  btn.addEventListener('click', (e) => {
+                    const id = btn.dataset.id;
+                    const link = links.find(l => l.id === id);
+                    if (!link) return;
+                    const html = `<a href="${link.url}" target="_blank" rel="nofollow noopener">${link.name}</a>`;
+                    if (editorIframe && editorIframe.contentWindow) {
+                      editorIframe.contentWindow.postMessage({ action: 'insert-html', data: { html } }, '*');
+                      showToast('✅ 텍스트 링크를 에디터에 삽입했습니다.');
+                    } else {
+                      navigator.clipboard?.writeText?.(html);
+                      showToast('ℹ️ 에디터 감지 실패 — 카드 HTML을 클립보드에 복사했습니다. 붙여넣기 해주세요.');
+                    }
+                  });
+                });
+
+                listContainer.querySelectorAll('.insert-affiliate-card').forEach(btn => {
+                  btn.addEventListener('click', (e) => {
+                    const id = btn.dataset.id;
+                    const link = links.find(l => l.id === id);
+                    if (!link || !link.cardData) return;
+
+                    const cd = link.cardData;
+                    const payload = `
+                      <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
+                        <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
+                        ${cd.imageUrl ? `<img src="${cd.imageUrl}" style="width:100%;height:100%;object-fit:cover;"/>` : '<div style="color:#999;">이미지 없음</div>'}
+                        </div>
+                        <div style="flex:1;">
+                        <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${cd.productName || link.name}</div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                          <div style="font-weight:900;color:#ae0000;font-size:18px;">${cd.salePrice ? Number(cd.salePrice).toLocaleString() + '원' : ''}</div>
+                          ${cd.originalPrice && cd.originalPrice > cd.salePrice ? `<div style="text-decoration:line-through;color:#999;">${Number(cd.originalPrice).toLocaleString()}원</div>` : ''}
+                          ${cd.discountRate ? `<div style="color:#ae0000;font-weight:700;">${cd.discountRate}%</div>` : ''}
+                        </div>
+                        ${cd.badges && cd.badges.length? `<div style="font-size:12px;color:#666;">${cd.badges.join(', ')}</div>` : ''}
+                        <div style="margin-top:12px;"><a href="${link.url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
+                        </div>
+                      </div>
+                    `;
+
+                    if (editorIframe && editorIframe.contentWindow) {
+                      editorIframe.contentWindow.postMessage({ action: 'insert-html', data: { html: payload } }, '*');
+                      showToast('✅ 카드 HTML을 에디터에 삽입 요청했습니다.');
+                    } else {
+                      // fallback
+                      if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(payload).then(() => showToast('ℹ️ 에디터가 감지되지 않아 카드 HTML을 클립보드에 복사했습니다. 붙여넣기 해주세요.'));
+                      } else {
+                        window.prompt('에디터가 감지되지 않습니다. 아래 HTML을 복사하세요:', payload);
+                      }
+                    }
+                  });
+                });
+
+              } catch (err) {
+                console.error('[Workspace] affiliate tab load error', err);
+                listContainer.innerHTML = '<div style="color:#e33;font-size:13px;">제휴 링크를 불러오는 중 오류가 발생했습니다.</div>';
+              }
             }
         });
     });
