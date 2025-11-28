@@ -6,7 +6,8 @@ module.exports = {
   entry: {
     content: './content.js',
     background: './background.js',
-    offscreen: './offscreen.js'
+    offscreen: './offscreen.js',
+    editor: './editor.js'
   },
   output: {
     path: path.resolve(__dirname, "dist"),
