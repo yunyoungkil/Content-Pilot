@@ -542,7 +542,9 @@ function createContentCard(
             ${
               sourceName
                 ? `<span>${type === "competitorChannels" ? "⚔️" : "🚀"}</span>
-            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;">${sourceName}</span>`
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;">${(
+              sourceName || ""
+            ).replace(/&amp;/g, "&")}</span>`
                 : ""
             }
             ${statusBadgeHtml}
@@ -568,7 +570,7 @@ function createContentCard(
     tagsContent = `<span class="tag-placeholder error">태그 분석 실패 (API 오류)</span>`;
   } else if (Array.isArray(item.tags) && item.tags.length > 0) {
     tagsContent = item.tags
-      .map((tag) => `<span class="tag">#${tag}</span>`)
+      .map((tag) => `<span class="tag">#${tag.replace(/&amp;/g, "&")}</span>`)
       .join("");
   } else {
     tagsContent = `<span class="tag-placeholder">관련 태그 없음</span>`;
@@ -1333,9 +1335,12 @@ async function updateDashboardUIInternal(container) {
       // 헤더에 현재 채널명 표시
       const headerEl = myCol.querySelector(".dashboard-col-header h2");
       if (headerEl) {
-        headerEl.textContent = `🚀 ${
-          currentChannel.inputUrl || currentChannel.url || "내 채널"
-        }`;
+        const channelName = (
+          currentChannel.inputUrl ||
+          currentChannel.url ||
+          "내 채널"
+        ).replace(/&amp;/g, "&");
+        headerEl.innerHTML = `🚀 ${channelName}`;
       }
 
       // sourceId 생성: 실제 저장된 콘텐츠의 sourceId를 찾기

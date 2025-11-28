@@ -312,6 +312,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           channelUrl
         );
         const userId = await getCurrentUserId();
+
+        // 1. Firebase에서 채널 목록에서 직접 제거
+        const channelsRef = ref(getDb(), `channels/${userId}`);
+        const channelsSnap = await get(channelsRef);
+        const channelsData = channelsSnap?.val() || {
+          myChannels: { blogs: [], youtubes: [] },
+        };
+
+        let channelRemoved = false;
+        if (channelsData.myChannels) {
+          // blogs에서 제거
+          if (channelsData.myChannels.blogs) {
+            const originalLength = channelsData.myChannels.blogs.length;
+            channelsData.myChannels.blogs =
+              channelsData.myChannels.blogs.filter((ch) => {
+                const chId =
+                  ch.id ||
+                  (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, "") : null);
+                return chId !== channelId;
+              });
+            if (channelsData.myChannels.blogs.length < originalLength) {
+              channelRemoved = true;
+            }
+          }
+          // youtubes에서 제거
+          if (channelsData.myChannels.youtubes) {
+            const originalLength = channelsData.myChannels.youtubes.length;
+            channelsData.myChannels.youtubes =
+              channelsData.myChannels.youtubes.filter((ch) => {
+                const chId =
+                  ch.id ||
+                  (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, "") : null);
+                return chId !== channelId;
+              });
+            if (channelsData.myChannels.youtubes.length < originalLength) {
+              channelRemoved = true;
+            }
+          }
+        }
+
+        if (channelRemoved) {
+          await set(channelsRef, channelsData);
+          console.log("[Background] 채널 목록에서 제거 완료");
+        }
+
+        // 2. 연쇄 삭제 실행
         const result = await deleteChannelDataCascade(
           channelId,
           userId,

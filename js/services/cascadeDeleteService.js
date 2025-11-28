@@ -106,9 +106,21 @@ export async function deleteChannelDataCascade(
     // -------------------------------------------------------
     const targetKeys = Array.from(generateLegacyKeys(channelUrl));
     Logger.debug(
+      `[Cascade Delete] 삭제할 채널 ID: ${channelId}, URL: ${channelUrl}`
+    );
+    Logger.debug(
       `[Cascade Delete] 추적할 Legacy Keys (${targetKeys.length}개):`,
       targetKeys
     );
+
+    // -------------------------------------------------------
+    // 1.5. Competitor Channels 가져오기
+    // -------------------------------------------------------
+    const channelMetaRef = ref(getDb(), `channel_meta/${userId}/${channelId}`);
+    const channelMetaSnap = await get(channelMetaRef);
+    const channelMeta = channelMetaSnap.val();
+    const competitorChannels = channelMeta?.competitorChannels || [];
+    Logger.debug(`[Cascade Delete] Competitor Channels:`, competitorChannels);
 
     // -------------------------------------------------------
     // 2. [Channel Content & Meta] RSS 캐시 및 메타 삭제 (Legacy Key 사용)
@@ -124,6 +136,15 @@ export async function deleteChannelDataCascade(
     // UUID 키 메타도 시도
     if (channelId)
       await remove(ref(getDb(), `channel_meta/${userId}/${channelId}`));
+    // Competitor Channels 메타 삭제
+    for (const competitorChannelId of competitorChannels) {
+      try {
+        await remove(
+          ref(getDb(), `channel_meta/${userId}/${competitorChannelId}`)
+        );
+        stats.meta++;
+      } catch (e) {}
+    }
 
     // (B) Channel Content 삭제
     try {
@@ -132,13 +153,24 @@ export async function deleteChannelDataCascade(
         ref(getDb(), `channel_content/${userId}/blogs`)
       );
       const blogs = blogsSnap?.val() || {};
+      Logger.debug(
+        `[Cascade Delete] blogs 데이터 개수: ${Object.keys(blogs).length}`
+      );
       for (const contentId in blogs) {
         const content = blogs[contentId];
-        // UUID 일치 OR 소스ID(URL해시) 일치 시 삭제
-        if (
-          content.channelId === channelId ||
-          (content.sourceId && targetKeys.includes(content.sourceId))
-        ) {
+        let shouldDelete = false;
+        if (content.channelType === "competitorChannels") {
+          shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
+        } else {
+          shouldDelete =
+            content.channelId === channelId ||
+            competitorChannels.includes(content.channelId) ||
+            (content.sourceId && targetKeys.includes(content.sourceId));
+        }
+        Logger.debug(
+          `[Cascade Delete] blogs/${contentId} - channelId: ${content.channelId}, sourceId: ${content.sourceId}, shouldDelete: ${shouldDelete}`
+        );
+        if (shouldDelete) {
           await remove(
             ref(getDb(), `channel_content/${userId}/blogs/${contentId}`)
           );
@@ -151,14 +183,95 @@ export async function deleteChannelDataCascade(
         ref(getDb(), `channel_content/${userId}/youtubes`)
       );
       const youtubes = youtubesSnap?.val() || {};
+      Logger.debug(
+        `[Cascade Delete] youtubes 데이터 개수: ${Object.keys(youtubes).length}`
+      );
       for (const videoId in youtubes) {
         const video = youtubes[videoId];
-        if (
-          video.channelId === channelId ||
-          (video.sourceId && targetKeys.includes(video.sourceId))
-        ) {
+        let shouldDelete = false;
+        if (video.channelType === "competitorChannels") {
+          shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
+        } else {
+          shouldDelete =
+            video.channelId === channelId ||
+            competitorChannels.includes(video.channelId) ||
+            (video.sourceId && targetKeys.includes(video.sourceId));
+        }
+        Logger.debug(
+          `[Cascade Delete] youtubes/${videoId} - channelId: ${video.channelId}, sourceId: ${video.sourceId}, shouldDelete: ${shouldDelete}`
+        );
+        if (shouldDelete) {
           await remove(
             ref(getDb(), `channel_content/${userId}/youtubes/${videoId}`)
+          );
+          stats.contentCache++;
+        }
+      }
+
+      // 경쟁사 채널 캐시 (legacy 지원)
+      const competitorBlogsSnap = await get(
+        ref(getDb(), `channel_content/${userId}/competitorChannels/blogs`)
+      );
+      const competitorBlogs = competitorBlogsSnap?.val() || {};
+      Logger.debug(
+        `[Cascade Delete] competitorBlogs 데이터 개수: ${
+          Object.keys(competitorBlogs).length
+        }`
+      );
+      for (const contentId in competitorBlogs) {
+        const content = competitorBlogs[contentId];
+        let shouldDelete = false;
+        if (content.channelType === "competitorChannels") {
+          shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
+        } else {
+          shouldDelete =
+            content.channelId === channelId ||
+            competitorChannels.includes(content.channelId) ||
+            (content.sourceId && targetKeys.includes(content.sourceId));
+        }
+        Logger.debug(
+          `[Cascade Delete] competitorBlogs/${contentId} - channelId: ${content.channelId}, sourceId: ${content.sourceId}, shouldDelete: ${shouldDelete}`
+        );
+        if (shouldDelete) {
+          await remove(
+            ref(
+              getDb(),
+              `channel_content/${userId}/competitorChannels/blogs/${contentId}`
+            )
+          );
+          stats.contentCache++;
+        }
+      }
+
+      const competitorYoutubesSnap = await get(
+        ref(getDb(), `channel_content/${userId}/competitorChannels/youtubes`)
+      );
+      const competitorYoutubes = competitorYoutubesSnap?.val() || {};
+      Logger.debug(
+        `[Cascade Delete] competitorYoutubes 데이터 개수: ${
+          Object.keys(competitorYoutubes).length
+        }`
+      );
+      for (const videoId in competitorYoutubes) {
+        const video = competitorYoutubes[videoId];
+        let shouldDelete = false;
+        if (video.channelType === "competitorChannels") {
+          shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
+        } else {
+          shouldDelete =
+            video.channelId === channelId ||
+            competitorChannels.includes(video.channelId) ||
+            (video.sourceId && targetKeys.includes(video.sourceId));
+        }
+        Logger.debug(
+          `[Cascade Delete] competitorYoutubes/${videoId} - channelId: ${video.channelId}, sourceId: ${video.sourceId}, shouldDelete: ${shouldDelete}`
+        );
+        if (shouldDelete) {
+          await remove(
+            ref(
+              getDb(),
+              `channel_content/${userId}/competitorChannels/youtubes/${videoId}`
+            )
           );
           stats.contentCache++;
         }
@@ -178,7 +291,10 @@ export async function deleteChannelDataCascade(
         for (const cardId in kanban[status]) {
           const card = kanban[status][cardId];
 
-          if (card.channelId === channelId) {
+          if (
+            card.channelId === channelId ||
+            competitorChannels.includes(card.channelId)
+          ) {
             // (A) URL 인덱스 삭제 (수정된 키 생성기 사용)
             if (card.origin?.postUrl) {
               const k = encodeUrlForIndex(card.origin.postUrl);
@@ -218,7 +334,10 @@ export async function deleteChannelDataCascade(
       const scrapsSnap = await get(ref(getDb(), `scraps/${userId}`));
       const scraps = scrapsSnap?.val() || {};
       for (const scrapId in scraps) {
-        if (scraps[scrapId].channelId === channelId) {
+        if (
+          scraps[scrapId].channelId === channelId ||
+          competitorChannels.includes(scraps[scrapId].channelId)
+        ) {
           await remove(ref(getDb(), `scraps/${userId}/${scrapId}`));
           stats.scraps++;
         }
