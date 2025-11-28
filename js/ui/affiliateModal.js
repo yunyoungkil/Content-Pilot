@@ -1559,11 +1559,17 @@ async function loadLinks(container) {
         ? `
           <div class="link-card-preview">
             <div class="link-card-preview__img">
-              <img src="${cardData.imageUrl || ""}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
+              <img src="${
+                cardData.imageUrl || ""
+              }" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
             </div>
-            <div class="link-card-preview__meta">${(cardData.productName || "").slice(0, 60)}</div>
+            <div class="link-card-preview__meta">${(
+              cardData.productName || ""
+            ).slice(0, 60)}</div>
             <div class="link-card-preview__price">${
-              cardData.salePrice ? cardData.salePrice.toLocaleString() + "원" : ""
+              cardData.salePrice
+                ? cardData.salePrice.toLocaleString() + "원"
+                : ""
             }</div>
           </div>
         `
