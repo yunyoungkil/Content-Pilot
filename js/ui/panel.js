@@ -6,7 +6,7 @@ import {
   renderDashboard,
   destroyDashboardMode,
 } from './dashboardMode.js';
-import { renderPanelHeader, renderHeaderAndTabs, addHeaderEventListeners } from './header.js';
+import { renderHeaderAndTabs, addHeaderEventListeners } from './header.js';
 import { renderScrapbook, destroyScrapbookMode } from './scrapbookMode.js';
 import { renderChannelMode } from './channelMode.js';
 import { renderKanban, addKanbanEventListeners, destroyKanbanMode } from './kanbanMode.js';

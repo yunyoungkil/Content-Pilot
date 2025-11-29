@@ -817,7 +817,7 @@ export async function deleteChannelData(urlToDelete) {
 
     let channelIdToDelete = null;
     let sourceIdToDelete = null;
-    let _platformToDelete = null;
+    // platformToDelete is not used directly; retain channelId & sourceId for deletion
     let channelFound = false;
     let channelInfo = null;
 
@@ -841,7 +841,7 @@ export async function deleteChannelData(urlToDelete) {
                   ''
                 )
               : channelInfo.apiUrl || channelInfo.inputUrl || channelInfo.url;
-          _platformToDelete = platform;
+          // platformToDelete not used; platform is available if needed
           list.splice(idx, 1); // 배열에서 제거
           channelFound = true;
           break;

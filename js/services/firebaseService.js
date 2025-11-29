@@ -45,56 +45,24 @@ export async function getCurrentUserId() {
   try {
     const storage = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
 
-    // 이메일이 있으면 이메일을 기반으로 안전한 사용자 ID 생성
+    // 1) 우선적으로 저장된 googleUserId 반환
+    if (storage.googleUserId) return storage.googleUserId;
+
+    // 2) 이메일 기반 사용자 ID 생성 (기본 케이스)
     if (storage.googleUserEmail) {
-      // 이메일을 안전한 Firebase 키로 변환 (특수문자 제거)
       const safeEmail = storage.googleUserEmail
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '_')
-        .replace(/_{2,}/g, '_')
-        .replace(/^_|_$/g, '');
-
-      // USER_ID 업데이트 (동적)
-      CONSTANTS.USER_ID = safeEmail;
-      Logger.debug(`[Firebase] 사용자 ID 설정: ${safeEmail}`);
+        .replace(/_{2,}/g, '_');
       return safeEmail;
     }
 
-    // 사용자 ID가 있으면 사용
-    if (storage.googleUserId) {
-      const safeId = storage.googleUserId
-        .replace(/[^a-zA-Z0-9]/g, '_')
-        .replace(/_{2,}/g, '_')
-        .replace(/^_|_$/g, '');
-      CONSTANTS.USER_ID = safeId;
-      Logger.debug(`[Firebase] 사용자 ID 설정 (ID 기반): ${safeId}`);
-      return safeId;
-    }
-
-    // 로그인 정보가 없으면 기본값 사용 (로그아웃 상태)
-    CONSTANTS.USER_ID = 'default_user';
-    Logger.debug('[Firebase] 사용자 정보 없음, 기본 USER_ID 사용');
+    // 3) 그 외: 기본 상수 값 사용
     return CONSTANTS.USER_ID;
-  } catch (error) {
-    Logger.error('[getCurrentUserId] 오류:', error);
-    CONSTANTS.USER_ID = 'default_user';
+  } catch (e) {
+    Logger.warn('[getCurrentUserId] chrome.storage.local.get failed:', e);
     return CONSTANTS.USER_ID;
   }
-}
-
-export function initializeFirebase() {
-  if (firebaseInitialized) {
-    return true;
-  }
-
-  if (!firebaseApp) {
-    firebaseApp = initializeApp(firebaseConfig);
-    firebaseAuth = getAuth(firebaseApp);
-    Logger.info('🔥 [firebaseService] REST Mode 초기화 완료');
-  }
-
-  firebaseInitialized = true;
-  return true;
 }
 
 // --- [핵심] REST API 헬퍼 함수들 ---
@@ -424,6 +392,45 @@ function _initializeAuthStateListener() {
   });
 
   Logger.info('[Firebase Auth] 인증 상태 리스너 등록 완료');
+}
+
+/**
+ * Firebase 초기화 함수(REST/호환 모드)
+ * - initializeApp을 호출하여 firebaseApp을 설정하고
+ * - Auth 상태 리스너를 등록합니다.
+ * - 여러 번 호출되어도 안전하도록 동작합니다.
+ */
+export function initializeFirebase() {
+  if (firebaseInitialized) return true;
+
+  try {
+    // SDK의 initializeApp을 호출하되, 이미 초기화된 경우에도 문제 없게 처리
+    firebaseApp = initializeApp(firebaseConfig);
+  } catch (e) {
+    Logger.warn(
+      '[initializeFirebase] initializeApp 호출 중 예외 발생(무시):',
+      e && e.message ? e.message : e
+    );
+  }
+
+  // Auth 초기화
+  try {
+    _initializeAuthStateListener();
+  } catch (error) {
+    Logger.warn('[initializeFirebase] _initializeAuthStateListener 예외:', error);
+  }
+
+  firebaseInitialized = true;
+  return true;
+}
+
+// Make the function available on globalThis for code that expects a global function
+try {
+  if (typeof globalThis !== 'undefined') {
+    globalThis.initializeFirebase = initializeFirebase;
+  }
+} catch (e) {
+  // no-op if environment doesn't allow attaching to globals
 }
 
 /**

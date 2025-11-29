@@ -1,8 +1,8 @@
 // js/services/thumbnailService.js
 // 썸네일 템플릿 관리 서비스
 
-import { getDb, cleanDataForFirebase } from './firebaseService.js';
-import { ref, get, remove, push } from './firebaseService.js';
+import { getDb } from './firebaseService.js';
+import { ref, get, remove } from './firebaseService.js';
 import { callGeminiAPI } from './aiService.js';
 import { Logger } from '../utils.js';
 

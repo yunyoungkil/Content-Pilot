@@ -55,9 +55,9 @@ export async function saveScrapElement(data, channelId = null) {
       scrapId: scrapId,
       scrapData: scrapPayload,
     };
-  } catch (error) {
-    Logger.error('[saveScrapElement] 저장 실패:', error);
-    return { success: false, error: error.message };
+  } catch (_error) {
+    Logger.error('[saveScrapElement] 저장 실패:', _error);
+    return { success: false, error: _error.message };
   }
 }
 
@@ -121,7 +121,7 @@ export async function getFirebaseScraps(targetChannelId = null) {
               action: 'scraps_data_updated',
               scraps: sortedScraps,
             })
-            .catch((err) => {
+            .catch((_err) => {
               // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
               // 조용히 무시
             });
@@ -130,8 +130,8 @@ export async function getFirebaseScraps(targetChannelId = null) {
     });
 
     return { data: sortedScraps };
-  } catch (error) {
-    Logger.error('[getFirebaseScraps] Firebase 로드 오류:', error);
+  } catch (_error) {
+    Logger.error('[getFirebaseScraps] Firebase 로드 오류:', _error);
     return { data: [] };
   }
 }
@@ -179,9 +179,9 @@ export async function getScrapDetail(scrapId, channelId = null) {
         timestamp: scrapData.timestamp || 0,
       },
     };
-  } catch (error) {
-    Logger.error('[getScrapDetail] 오류:', error);
-    return { success: false, error: error.message };
+  } catch (_error) {
+    Logger.error('[getScrapDetail] 오류:', _error);
+    return { success: false, error: _error.message };
   }
 }
 
@@ -218,9 +218,9 @@ export async function saveEntireAnalysis(analysisContent) {
 
     Logger.info('AI 분석 리포트가 스크랩북에 저장되었습니다.');
     return { success: true, message: 'AI 분석 리포트가 저장되었습니다.' };
-  } catch (error) {
-    Logger.error('[saveEntireAnalysis] 오류:', error);
-    return { success: false, error: error.message };
+  } catch (_error) {
+    Logger.error('[saveEntireAnalysis] 오류:', _error);
+    return { success: false, error: _error.message };
   }
 }
 
@@ -241,8 +241,8 @@ export async function deleteScrap(scrapId) {
 
     Logger.info(`[deleteScrap] 스크랩 삭제 완료 - scrapId: ${scrapId}`);
     return { success: true };
-  } catch (error) {
-    Logger.error('[deleteScrap] 오류:', error);
-    return { success: false, error: error.message };
+  } catch (_error) {
+    Logger.error('[deleteScrap] 오류:', _error);
+    return { success: false, error: _error.message };
   }
 }

@@ -366,7 +366,7 @@ export function parseCoupangText(rawText) {
   let discountMatch = null;
   if (doc) {
     try {
-      const _percEl = doc.querySelector("*[class*='percent'], *[class*='discount'], div, span");
+      // const percEl = doc.querySelector("*[class*='percent'], *[class*='discount'], div, span"); // not used
       // fallback: search for any % in body text
       const pct =
         doc.body && doc.body.textContent ? doc.body.textContent.match(/(\d{1,3})%/) || null : null;

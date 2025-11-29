@@ -891,7 +891,7 @@ const renderHelpers = {
  * @param {number} canvasHeight - 캔버스 높이
  * @returns {Object} 황금비율 좌표 { x, y, width, height }
  */
-function calculateGoldenRatio(canvasWidth, canvasHeight) {
+function _calculateGoldenRatio(canvasWidth, canvasHeight) {
   const goldenRatio = 1.618;
   const centerX = canvasWidth / 2;
   const centerY = canvasHeight / goldenRatio; // 황금비율 지점

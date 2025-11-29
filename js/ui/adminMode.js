@@ -207,7 +207,7 @@ function addAdminEventListeners(container) {
   }
 
   function handleDiagnosticLog(logEntry) {
-    const { id, status, message, timestamp } = logEntry;
+    const { id, status, message, timestamp: _timestamp } = logEntry;
 
     // 체크리스트 업데이트
     const checkItem = container.querySelector(`#check-item-${id}`);
@@ -480,7 +480,7 @@ function addAdminEventListeners(container) {
             });
             // 탭 활성화
             const adminTab = shadowRoot.querySelector('[data-key="admin"]');
-            const channelTab = shadowRoot.querySelector('[data-key="channel"]');
+            const _channelTab = shadowRoot.querySelector('[data-key="channel"]');
             if (adminTab) adminTab.classList.remove('active');
             // 채널 관리 탭이 없으면 대시보드 탭을 비활성화하고 채널 모드 표시
             window.__cp_active_mode = 'channel';

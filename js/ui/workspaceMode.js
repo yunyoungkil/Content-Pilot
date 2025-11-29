@@ -7,7 +7,7 @@ import { openThumbnailMaker } from './thumbnailMaker.js';
 // 1. 이미지 갤러리 관련 함수들
 // -----------------------------------------------------------------------------
 
-function updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
+function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
   const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
   if (!imageGalleryGrid) return;
   const imageUrls = renderImageGallery(linkedScrapsData);

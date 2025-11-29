@@ -2,7 +2,7 @@
 
 import { renderWorkspace } from './workspaceMode.js';
 import { showToast, Logger } from '../utils.js';
-import { renderPanelHeader, renderHeaderAndTabs } from './header.js';
+import { renderHeaderAndTabs } from './header.js';
 
 let allKanbanData = {};
 let currentlyDragging = { cardId: null, originalStatus: null };
