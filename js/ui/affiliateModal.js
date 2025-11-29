@@ -7,7 +7,7 @@ import {
   deleteAffiliateLink,
 } from '../services/affiliateService.js';
 
-import { showToast, Logger } from '../utils.js';
+import { showToast, Logger, debounce } from '../utils.js';
 
 let currentLinks = [];
 
@@ -73,7 +73,7 @@ export function renderAffiliateModal(container) {
 
   // 모달 HTML 주입 - 개선된 UI
   const modalHTML = `
-    <div id="affiliate-modal" class="cp-modal-wrap" style="display: none;">
+    <div id="affiliate-modal" class="cp-modal-wrap">
       <div class="cp-modal-backdrop"></div>
       <div class="cp-modal affiliate-modal-large">
         <div class="cp-modal-header affiliate-modal-header">
@@ -539,10 +539,14 @@ function bindEvents(container) {
     });
   }
 
-  // 검색 기능
+  // 검색 기능 (디바운싱 적용으로 성능 최적화)
   if (searchInput) {
+    const debouncedSearch = debounce((value) => {
+      filterLinks(container, value);
+    }, 300);
+
     searchInput.addEventListener('input', (e) => {
-      filterLinks(container, e.target.value);
+      debouncedSearch(e.target.value);
     });
   }
 
@@ -583,10 +587,14 @@ function bindEvents(container) {
   }
 
   // 모달 닫기 버튼 (헤더 우측 X)
-  const closeModalBtn = container.querySelector('.cp-modal-close, .affiliate-close-btn');
+  const closeModalBtn =
+    container.querySelector('.cp-modal-close.affiliate-close-btn') ||
+    container.querySelector('.affiliate-close-btn') ||
+    container.querySelector('.cp-modal-close');
   if (closeModalBtn) {
     closeModalBtn.addEventListener('click', (e) => {
       e.preventDefault();
+      console.log('[AffiliateModal] Close button clicked');
       // 먼저 폼이 열려있다면 폼 숨김
       if (formContainer && formContainer.style.display !== 'none') {
         formContainer.style.display = 'none';
@@ -594,6 +602,8 @@ function bindEvents(container) {
       // 모달 숨김
       modal.style.display = 'none';
     });
+  } else {
+    console.warn('[AffiliateModal] Close button not found');
   }
 
   // 모달 백드롭 클릭으로 닫기
@@ -601,11 +611,14 @@ function bindEvents(container) {
   if (backdrop) {
     backdrop.addEventListener('click', (e) => {
       e.preventDefault();
+      console.log('[AffiliateModal] Backdrop clicked');
       if (formContainer && formContainer.style.display !== 'none') {
         formContainer.style.display = 'none';
       }
       modal.style.display = 'none';
     });
+  } else {
+    console.warn('[AffiliateModal] Backdrop not found');
   }
 
   // 미리보기 버튼
@@ -941,25 +954,23 @@ function bindEvents(container) {
       }
     });
 
-    // 입력 중 실시간 힌트 표시
-    keywordInput.addEventListener('input', (e) => {
-      const value = e.target.value.trim();
+    // 입력 중 실시간 힌트 표시 (디바운싱 적용으로 성능 최적화)
+    const debouncedHint = debounce((value) => {
       if (value.length > 0) {
-        // 잠시 후 힌트 표시
-        setTimeout(() => {
-          if (e.target.value.trim() === value) {
-            // 값이 변경되지 않았을 때만
-            const keywords = parseKeywordsFromText(value);
-            if (keywords.length > 1) {
-              showToast(
-                '💡 붙여넣기나 Enter로 키워드를 추가하세요. 공백/줄바꿈/쉼표로 구분된 텍스트는 자동으로 분리됩니다.'
-              );
-            } else if (value.includes(' ') || value.includes('\n') || value.includes(',')) {
-              showToast('💡 붙여넣기나 Enter로 키워드를 추가하세요.');
-            }
-          }
-        }, 1500);
+        // 값이 변경되지 않았을 때만
+        const keywords = parseKeywordsFromText(value);
+        if (keywords.length > 1) {
+          showToast(
+            '💡 붙여넣기나 Enter로 키워드를 추가하세요. 공백/줄바꿈/쉼표로 구분된 텍스트는 자동으로 분리됩니다.'
+          );
+        } else if (value.includes(' ') || value.includes('\n') || value.includes(',')) {
+          showToast('💡 붙여넣기나 Enter로 키워드를 추가하세요.');
+        }
       }
+    }, 500);
+
+    keywordInput.addEventListener('input', (e) => {
+      debouncedHint(e.target.value.trim());
     });
   }
 
