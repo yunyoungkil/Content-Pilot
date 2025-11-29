@@ -425,13 +425,7 @@ export function initializeFirebase() {
 }
 
 // Make the function available on globalThis for code that expects a global function
-try {
-  if (typeof globalThis !== 'undefined') {
-    globalThis.initializeFirebase = initializeFirebase;
-  }
-} catch (e) {
-  // no-op if environment doesn't allow attaching to globals
-}
+// NOTE: Global alias removed — callers should `import { initializeFirebase }` from this module.
 
 /**
  * Firebase 인증 상태 확인

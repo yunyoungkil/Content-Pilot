@@ -4,7 +4,7 @@ Summary:
 - Root cause: Parse error in `js/ui/affiliateModal.js` plus missing `initializeFirebase` export/implementation caused runtime errors.
 - Fixes:
   - Implemented `initializeFirebase()` in `js/services/firebaseService.js` and exported it.
-  - Added `globalThis.initializeFirebase = initializeFirebase` as a temporary alias for callers that still call `initializeFirebase()` as a global function.
+  - Removed temporary `globalThis.initializeFirebase` alias and enforced importing `initializeFirebase()` from the module.
   - Fixed parse/exception issues (`parseCoupangText`), undefined error references in `scrapService.js`, and reduced several lint warnings.
   - Removed/cleaned unused imports in `migrationService.js`, `thumbnailService.js`, etc.
 
