@@ -422,12 +422,82 @@ export async function updateSinglePerformanceMetric(contentInfo) {
 
     // 채널 정보 로드
     const channelsSnap = await get(ref(db, `channels/${userId}`));
-    const channels = channelsSnap.val() || {};
+    let channels = channelsSnap.val() || {};
     let gaId = null;
     let siteUrl = null; // GSC용 URL
 
-    const blogs = channels.myChannels?.blogs || [];
-    const blog = blogs.find((b) => contentInfo.url.includes(b.inputUrl || b.url));
+    let blogs = channels.myChannels?.blogs || [];
+
+    // If there are no blogs found under the current userId, try fallbacks.
+    // This handles cases where channels were saved under a different user identifier
+    // (e.g. email-derived safe id vs. googleUserId) and prevents GA4 being reported
+    // as missing when the channel actually exists under another key.
+    if ((!blogs || blogs.length === 0) && userId) {
+      try {
+        const storage = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+        const altIds = [];
+
+        // build email-derived safe id
+        if (storage.googleUserEmail) {
+          const safeEmail = storage.googleUserEmail
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '_')
+            .replace(/_{2,}/g, '_');
+          if (safeEmail && safeEmail !== userId) altIds.push(safeEmail);
+        }
+
+        // include googleUserId if different
+        if (storage.googleUserId && storage.googleUserId !== userId) {
+          altIds.push(storage.googleUserId);
+        }
+
+        // also check default placeholder as last resort
+        if (CONSTANTS && CONSTANTS.USER_ID && !altIds.includes(CONSTANTS.USER_ID) && CONSTANTS.USER_ID !== userId) {
+          altIds.push(CONSTANTS.USER_ID);
+        }
+
+        for (const alt of altIds) {
+          try {
+            const snap = await get(ref(db, `channels/${alt}`));
+            const val = snap?.val();
+            const candidateBlogs = val?.myChannels?.blogs || [];
+            if (candidateBlogs && candidateBlogs.length > 0) {
+              Logger.info('[updateSinglePerformanceMetric] 채널이 다른 사용자 키에서 발견되어 대체 사용:', alt);
+              channels = val;
+              blogs = candidateBlogs;
+              break;
+            }
+          } catch (err) {
+            // ignore per-candidate errors and try next
+            Logger.debug('[updateSinglePerformanceMetric] 대체 채널 조회 실패 (무시):', alt, err?.message || err);
+          }
+        }
+      } catch (err) {
+        Logger.warn('[updateSinglePerformanceMetric] 채널 대체 키 조회 중 에러:', err && err.message);
+      }
+    }
+    // Try exact include match first, then fallback to hostname-based matching for
+    // cases where inputUrl might be a blog root or variations (avoids false misses).
+    let blog = blogs.find((b) => contentInfo.url.includes(b.inputUrl || b.url));
+    if (!blog) {
+      try {
+        const contentHost = new URL(contentInfo.url).hostname.toLowerCase();
+        blog = blogs.find((b) => {
+          const candidate = (b.inputUrl || b.url || '').toString();
+          if (!candidate) return false;
+          try {
+            const candHost = new URL(candidate).hostname.toLowerCase();
+            return contentHost === candHost || contentHost.endsWith('.' + candHost) || candHost.endsWith('.' + contentHost);
+          } catch (e) {
+            // if candidate is not a well-formed URL, try substring match
+            return contentInfo.url.includes(candidate);
+          }
+        });
+        if (blog) Logger.info('[updateSinglePerformanceMetric] hostname fallback matched blog for content URL', { contentUrl: contentInfo.url, matched: blog.inputUrl || blog.url });
+      } catch (err) {
+        Logger.warn('[updateSinglePerformanceMetric] hostname fallback failed to parse URL:', contentInfo.url, err && err.message);
+      }
+    }
     if (blog) {
       gaId = blog.gaPropertyId;
       // GSC 사이트 URL이 별도로 없으면 기본 URL 사용
@@ -444,7 +514,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     }
 
     if (!gaId) {
-      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — 스킵:', { path });
+      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — 스킵:', { path, userId, channelsCount: Object.keys(blogs).length });
       await update(ref(db, `${path}/performance`), {
         collecting: false,
         error: 'GA4 속성 ID 없음',
