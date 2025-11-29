@@ -105,6 +105,46 @@ export function renderChannelMode(container) {
             <div id="modal-competitor-list" class="competitor-list">
             </div>
           </div>
+          <div class="content-limit-section">
+            <div class="section-header">
+              <h4>📊 콘텐츠 수집 설정</h4>
+            </div>
+            <!-- improved layout: two-column responsive grid for quick comparison -->
+            <div class="content-limit-grid" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+              <div class="input-group" style="flex: 1; min-width:220px;">
+                <label style="display:flex; gap:8px; align-items:center;">내 채널 최대 수집
+                  <span style="color:#888; font-weight:400; font-size:12px; margin-left:6px;">(RSS / YouTube 별도)</span>
+                </label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <select id="modal-content-limit" style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px;">
+                    <option value="5">5개</option>
+                    <option value="10" selected>10개</option>
+                    <option value="15">15개</option>
+                    <option value="20">20개</option>
+                    <option value="30">30개</option>
+                    <option value="50">50개</option>
+                  </select>
+                  <div title="수집 개수가 많을수록 최신 콘텐츠 외의 항목도 가져옵니다. 성능과 필요에 따라 조절하세요." style="font-size:12px; color:#777;">ⓘ</div>
+                </div>
+                <p class="settings-desc" style="margin-top:6px;">내 채널에서 수집할 최대 콘텐츠 개수(피드별). 기본값은 <strong>10개</strong>입니다.</p>
+              </div>
+
+              <div class="input-group" style="flex: 1; min-width:220px;">
+                <label style="display:flex; gap:8px; align-items:center;">경쟁 채널 최대 수집
+                  <span style="color:#888; font-weight:400; font-size:12px; margin-left:6px;">(경쟁 채널 별도)</span>
+                </label>
+                <select id="modal-competitor-content-limit" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px;">
+                  <option value="5">5개</option>
+                  <option value="10" selected>10개</option>
+                  <option value="15">15개</option>
+                  <option value="20">20개</option>
+                  <option value="30">30개</option>
+                  <option value="50">50개</option>
+                </select>
+                <p class="settings-desc" style="margin-top:6px;">경쟁 채널은 모니터링 목적이므로 작은 값(5~15)을 권장합니다. 필요한 경우 확대하세요.</p>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="cp-modal-footer">
           <button class="cp-btn cp-btn-secondary" id="modal-cancel-btn">취소</button>
@@ -156,12 +196,36 @@ export function renderChannelMode(container) {
     .competitor-delete-btn:hover { color: #d32f2f; }
     
     /* 채널 상세 설정 모달 좌우 여백 추가 */
-    #channel-detail-modal .cp-modal-body {
-      padding: 24px;
-    }
     #channel-detail-modal .cp-modal {
       max-width: min(90vw, 700px);
       margin: 0 auto;
+      /* column layout so footer sits below body */
+      display: flex;
+      flex-direction: column;
+      max-height: 90vh; /* keep modal within viewport */
+    }
+    .content-limit-grid { display:flex; gap:12px; flex-wrap:wrap; }
+    .content-limit-grid .input-group { margin-bottom: 8px; }
+    .content-limit-grid .settings-desc { margin-top: 6px; color: #666; font-size: 12px; }
+    .content-limit-grid [title] { cursor: help; }
+    #channel-detail-modal .cp-modal-body {
+      padding: 24px;
+      /* allow the modal body to scroll if content overflows */
+      overflow-y: auto;
+      flex: 1 1 auto;
+      box-sizing: border-box;
+      /* give bottom padding so controls are not hidden behind footer */
+      padding-bottom: 96px;
+    }
+    #channel-detail-modal .cp-modal-footer {
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+      padding:12px 20px;
+      border-top:1px solid #eee;
+      background: linear-gradient(180deg, rgba(255,255,255,0.7), #fff);
+      z-index: 10;
+      flex: 0 0 auto;
     }
   `;
   container.appendChild(style);
@@ -292,6 +356,8 @@ export function renderChannelMode(container) {
             // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
             return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
           }),
+          contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+          competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
         };
       });
 
@@ -398,6 +464,8 @@ export function renderChannelMode(container) {
                   // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
                   return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
                 }),
+                contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+                competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
               };
             });
 
@@ -726,21 +794,21 @@ export function renderChannelMode(container) {
         // 인증 완료 후 최신 데이터 로드
         chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
           if (response && response.success) {
-            // 최신 데이터로 myChannelsData 업데이트
-            const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
-              inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
-              url: blog.url || blog.inputUrl, // 하위 호환성
-              apiUrl: blog.apiUrl || null, // RSS URL
-              platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
-              gaPropertyId: blog.gaPropertyId || '',
-              adSenseAccountId: blog.adSenseAccountId || '',
-              competitors: (blog.competitors || []).map((c) => {
-                // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
-                return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
-              }),
-            }));
-
-            // myChannelsData 업데이트
+        // 최신 데이터로 myChannelsData 업데이트
+        const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
+          inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
+          url: blog.url || blog.inputUrl, // 하위 호환성
+          apiUrl: blog.apiUrl || null, // RSS URL
+          platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
+          gaPropertyId: blog.gaPropertyId || '',
+          adSenseAccountId: blog.adSenseAccountId || '',
+          competitors: (blog.competitors || []).map((c) => {
+            // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+            return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
+          }),
+          contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+          competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
+        }));            // myChannelsData 업데이트
             myChannelsData = latestChannels;
 
             // 인덱스가 유효한지 확인
@@ -791,11 +859,15 @@ export function renderChannelMode(container) {
     const platformSelectEl = container.querySelector('#modal-platform-select');
     const gaIdEl = container.querySelector('#modal-ga-id');
     const adsenseIdEl = container.querySelector('#modal-adsense-id');
+    const contentLimitEl = container.querySelector('#modal-content-limit');
+    const competitorContentLimitEl = container.querySelector('#modal-competitor-content-limit');
     // inputUrl 우선, 없으면 url 사용 (하위 호환성)
     if (blogUrlEl) blogUrlEl.value = data.inputUrl || data.url || '';
     if (platformSelectEl) platformSelectEl.value = data.platformType || 'naver';
     if (gaIdEl) gaIdEl.value = data.gaPropertyId || '';
     if (adsenseIdEl) adsenseIdEl.value = data.adSenseAccountId || '';
+    if (contentLimitEl) contentLimitEl.value = data.contentLimit || 10;
+    if (competitorContentLimitEl) competitorContentLimitEl.value = data.competitorContentLimit || 10;
 
     // Google 로그인 상태 확인 (GA4 목록도 함께 로드)
     checkGoogleAuthStatus();
@@ -1154,6 +1226,8 @@ export function renderChannelMode(container) {
             competitors: (blog.competitors || []).map((c) => {
               return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
             }),
+            contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+            competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
           };
         });
 
@@ -1403,6 +1477,8 @@ export function renderChannelMode(container) {
       const platformSelect = container.querySelector('#modal-platform-select');
       const gaIdEl = container.querySelector('#modal-ga-id');
       const adsenseIdEl = container.querySelector('#modal-adsense-id');
+      const contentLimitEl = container.querySelector('#modal-content-limit');
+      const competitorContentLimitEl = container.querySelector('#modal-competitor-content-limit');
 
       if (!blogUrlEl) return;
       const url = blogUrlEl.value.trim();
@@ -1445,6 +1521,10 @@ export function renderChannelMode(container) {
         }
       }
 
+      // 콘텐츠 수집 제한 설정
+      const contentLimit = parseInt(contentLimitEl ? contentLimitEl.value : '10') || 10;
+      const competitorContentLimit = parseInt(competitorContentLimitEl ? competitorContentLimitEl.value : '10') || 10;
+
       // 경쟁사 목록 수집
       const competitorInputs = container.querySelectorAll('.competitor-input');
       const competitors = Array.from(competitorInputs)
@@ -1469,6 +1549,8 @@ export function renderChannelMode(container) {
         platformType: platformType, // (선택사항) 나중에 수정 시 UI 복원용으로 저장해두면 좋음
         gaPropertyId: gaId,
         adSenseAccountId: adsenseId,
+        contentLimit: contentLimit,
+        competitorContentLimit: competitorContentLimit,
         competitors: competitors,
       };
 

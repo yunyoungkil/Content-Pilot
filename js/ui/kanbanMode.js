@@ -513,6 +513,31 @@ function createKanbanCard(id, data, status) {
         originIcon = '✏️';
         originText = '수동 입력';
         break;
+      case 'tracking_only':
+        originIcon = '📊';
+        // tracking_only인 경우 채널 정보를 가져와서 블로그 이름 표시
+        chrome.storage.local.get('activeChannelId', (res) => {
+          const activeChannelId = res.activeChannelId;
+          if (activeChannelId) {
+            chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
+              if (response && response.channels && response.channels[activeChannelId]) {
+                const channelData = response.channels[activeChannelId];
+                const blogName = channelData.name || channelData.blogName || '블로그';
+                // DOM 요소를 찾아서 텍스트 업데이트
+                const cardElement = document.querySelector(`[data-id="${id}"]`);
+                if (cardElement) {
+                  const originTag = cardElement.querySelector('.kanban-card-meta.origin-tag.tracking_only');
+                  if (originTag) {
+                    originTag.innerHTML = `📊 ${blogName}`;
+                    originTag.title = `성과 추적 전용: ${blogName}`;
+                  }
+                }
+              }
+            });
+          }
+        });
+        originText = '성과 추적 전용'; // 기본값
+        break;
       default:
         // 알 수 없는 타입
         originIcon = '📌';

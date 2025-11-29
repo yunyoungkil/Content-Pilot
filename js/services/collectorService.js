@@ -248,7 +248,7 @@ async function processRssItem(itemText, sourceId, channelType) {
   await set(ref(db, path), cleanDataForFirebase(data));
 }
 
-export async function fetchRssFeed(url, channelType) {
+export async function fetchRssFeed(url, channelType, limit = 10) {
   // URL 유효성 검사
   if (!url || typeof url !== 'string' || url.trim() === '') {
     Logger.warn(`[RSS] 유효하지 않은 URL: ${url}`);
@@ -343,7 +343,7 @@ export async function fetchRssFeed(url, channelType) {
     }
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
-    await limitConcurrency(items.slice(0, 10), (item) =>
+    await limitConcurrency(items.slice(0, limit), (item) =>
       processRssItem(item, sourceId, channelType)
     );
   } catch (e) {
@@ -352,12 +352,12 @@ export async function fetchRssFeed(url, channelType) {
 }
 
 // 3. 유튜브 수집
-export async function fetchYoutubeChannel(channelId, channelType) {
+export async function fetchYoutubeChannel(channelId, channelType, limit = 10) {
   const { youtubeApiKey } = await chrome.storage.local.get('youtubeApiKey');
   if (!youtubeApiKey) return;
 
   const res = await fetch(
-    `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=id&order=date&maxResults=10`
+    `https://www.googleapis.com/youtube/v3/search?key=${youtubeApiKey}&channelId=${channelId}&part=id&order=date&maxResults=${limit}`
   );
   const data = await res.json();
   if (!data.items) return;
@@ -480,8 +480,9 @@ export async function fetchAllChannelData() {
       }
 
       if (rssUrl) {
+        const contentLimit = parseInt(c.contentLimit) || 10;
         promises.push(
-          fetchRssFeed(rssUrl, 'myChannels').catch((err) => {
+          fetchRssFeed(rssUrl, 'myChannels', contentLimit).catch((err) => {
             Logger.error(`[fetchAllChannelData] RSS 피드 수집 실패 (${rssUrl}):`, err);
             return null; // 하나 실패해도 다른 채널은 계속 수집
           })
@@ -495,8 +496,9 @@ export async function fetchAllChannelData() {
     channels.myChannels.youtubes.forEach((c, index) => {
       if (c.apiUrl && typeof c.apiUrl === 'string' && c.apiUrl.trim() !== '') {
         Logger.info(`[fetchAllChannelData] YouTube ${index + 1}: ${c.apiUrl}`);
+        const contentLimit = parseInt(c.contentLimit) || 10;
         promises.push(
-          fetchYoutubeChannel(c.apiUrl, 'myChannels').catch((err) => {
+          fetchYoutubeChannel(c.apiUrl, 'myChannels', contentLimit).catch((err) => {
             Logger.error(`[fetchAllChannelData] YouTube 채널 수집 실패 (${c.apiUrl}):`, err);
             return null;
           })
@@ -523,6 +525,7 @@ export async function fetchAllChannelData() {
         Logger.info(
           `[fetchAllChannelData] 블로그 ${index + 1}의 경쟁 채널 ${c.competitors.length}개 수집 시작`
         );
+        const competitorContentLimit = parseInt(c.competitorContentLimit) || 10;
         c.competitors.forEach((compUrl, compIndex) => {
           if (!compUrl || typeof compUrl !== 'string' || compUrl.trim() === '') {
             Logger.warn(
@@ -538,7 +541,7 @@ export async function fetchAllChannelData() {
               `[fetchAllChannelData] 경쟁 채널 ${compIndex + 1}: URL 변환 성공 - ${compUrl} -> ${rssUrl}`
             );
             promises.push(
-              fetchRssFeed(rssUrl, 'competitorChannels').catch((err) => {
+              fetchRssFeed(rssUrl, 'competitorChannels', competitorContentLimit).catch((err) => {
                 Logger.error(
                   `[fetchAllChannelData] 경쟁 채널 RSS 피드 수집 실패 (${rssUrl}):`,
                   err

@@ -1124,46 +1124,17 @@
 
 .perf-stat-card .stat-label .growth-rate.positive {
   color: #4CAF50;
-  animation: growth-blink 1s ease-in-out 3;
 }
 
 .perf-stat-card .stat-label .growth-rate.negative {
   color: #F44336;
 }
 
-.perf-stat-card .stat-value.growth-positive {
-  animation: growth-blink 1s ease-in-out 3;
-  color: #4CAF50;
-}
-
-@keyframes growth-blink {
-  0%, 100% { 
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% { 
-    opacity: 0.7;
-    transform: scale(1.05);
-  }
-}
-
 /* 목표 달성 스타일 */
 .perf-stat-card.goal-achieved {
   border: 2px solid #FFD700 !important;
   box-shadow: 0 0 20px rgba(255, 215, 0, 0.5) !important;
-  animation: goal-pulse 2s ease-in-out infinite;
   background: linear-gradient(135deg, #fff 0%, #fff9e6 100%);
-}
-
-@keyframes goal-pulse {
-  0%, 100% { 
-    transform: scale(1);
-    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
-  }
-  50% { 
-    transform: scale(1.02);
-    box-shadow: 0 0 30px rgba(255, 215, 0, 0.7);
-  }
 }
 
 .perf-stat-card .goal-badge {
@@ -1175,23 +1146,7 @@
   font-size: 12px;
   font-weight: 600;
   text-align: center;
-  animation: badge-bounce 0.5s ease-out;
   box-shadow: 0 2px 8px rgba(255, 215, 0, 0.4);
-}
-
-@keyframes badge-bounce {
-  0% { 
-    transform: scale(0);
-    opacity: 0;
-  }
-  50% { 
-    transform: scale(1.2);
-    opacity: 1;
-  }
-  100% { 
-    transform: scale(1);
-    opacity: 1;
-  }
 }
 
 .perf-charts-section {

@@ -7,6 +7,28 @@
   height: min(90vh, 800px);
 }
 
+/* Make affiliate modal top-most so page elements (e.g. + buttons) don't show above it */
+#affiliate-modal.cp-modal-wrap {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 2147483648 !important; /* highest visible overlay */
+}
+
+#affiliate-modal.cp-modal-wrap .cp-modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  z-index: 2147483647 !important;
+}
+
+#affiliate-modal.cp-modal-wrap .cp-modal {
+  position: relative !important;
+  z-index: 2147483648 !important;
+}
+
 .affiliate-modal-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;

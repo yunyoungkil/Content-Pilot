@@ -722,6 +722,8 @@
   display: flex;
   flex-direction: column;
   background: #f7f8fa;
+  /* prevent transient horizontal scrollbars caused by child transforms/animations */
+  overflow-x: hidden;
 }
 .dashboard-grid {
   flex: 1;
@@ -729,7 +731,9 @@
   grid-template-columns: 1fr 1fr;
   gap: 20px;
   padding: 24px;
+  /* vertical scrolling only; avoid horizontal scrolling when child elements animate */
   overflow-y: auto;
+  overflow-x: hidden;
   align-content: start;
 }
 .dashboard-col-header {
@@ -827,6 +831,8 @@
   overflow: hidden;
   height: auto;
   min-height: 110px;
+  /* hint to browser that transforms will be used; avoids layout shifts that can trigger scrollbars */
+  will-change: transform;
 }
 .content-card:hover .comment-analyze-btn,
 .content-card:hover .add-post-to-kanban-btn {
