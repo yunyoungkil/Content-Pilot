@@ -43,10 +43,29 @@ let authStateUnsubscribe = null;
  */
 export async function getCurrentUserId() {
   try {
-    const storage = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+    const storage = await chrome.storage.local.get([
+      'contentPilotUserId',
+      'googleUserEmail',
+      'googleUserId',
+    ]);
 
-    // 1) 우선적으로 저장된 googleUserId 반환
-    if (storage.googleUserId) return storage.googleUserId;
+    // 1) 먼저 명시적 contentPilotUserId가 있으면 우선 반환
+    if (storage.contentPilotUserId) {
+      Logger.info(`[getCurrentUserId] using stored contentPilotUserId: ${storage.contentPilotUserId}`);
+      return storage.contentPilotUserId;
+    }
+
+    // 2) 우선적으로 저장된 googleUserId 반환
+    if (storage.googleUserId) {
+      // 안전: contentPilotUserId가 없으면 초기화하여 고정화
+      try {
+        await chrome.storage.local.set({ contentPilotUserId: storage.googleUserId });
+        Logger.info(`[getCurrentUserId] saved contentPilotUserId from googleUserId: ${storage.googleUserId}`);
+      } catch (e) {
+        Logger.warn('[getCurrentUserId] contentPilotUserId 저장 실패:', e);
+      }
+      return storage.googleUserId;
+    }
 
     // 2) 이메일 기반 사용자 ID 생성 (기본 케이스)
     if (storage.googleUserEmail) {
@@ -54,6 +73,13 @@ export async function getCurrentUserId() {
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '_')
         .replace(/_{2,}/g, '_');
+      // contentPilotUserId 저장 (미존재한 경우)
+      try {
+        await chrome.storage.local.set({ contentPilotUserId: safeEmail });
+        Logger.info(`[getCurrentUserId] saved contentPilotUserId from googleUserEmail: ${safeEmail}`);
+      } catch (e) {
+        Logger.warn('[getCurrentUserId] contentPilotUserId 저장 실패 (email-based):', e);
+      }
       return safeEmail;
     }
 
@@ -250,8 +276,9 @@ export function serverTimestamp() {
   return Date.now();
 }
 
-export function getUserRef(path) {
-  return `${path}/${CONSTANTS.USER_ID}`;
+export async function getUserRef(path) {
+  const userId = await getCurrentUserId();
+  return `${path}/${userId}`;
 }
 
 export function cleanDataForFirebase(data) {

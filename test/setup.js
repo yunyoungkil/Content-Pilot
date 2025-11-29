@@ -16,6 +16,10 @@ global.chrome = {
       get: jest.fn(),
       set: jest.fn(),
     },
+    onChanged: {
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+    },
   },
   tabs: {
     query: jest.fn(),
@@ -25,10 +29,25 @@ global.chrome = {
     create: jest.fn(),
   },
   identity: {
-    getAuthToken: jest.fn(),
-    removeCachedAuthToken: jest.fn(),
+    getAuthToken: jest.fn((options, callback) => {
+      // support both (callback) and (options, callback)
+      if (typeof options === "function") {
+        callback = options;
+      }
+      if (typeof callback === "function") callback("test-token");
+      return;
+    }),
+    removeCachedAuthToken: jest.fn((details, cb) => {
+      if (typeof details === "function") {
+        cb = details;
+      }
+      if (typeof cb === "function") cb();
+      return;
+    }),
   },
 };
+
+// export named helper for tests that import { testHelpers } from './setup.js' (export declared after _testHelpers)
 
 // Fetch API 모킹
 global.fetch = jest.fn();
@@ -86,7 +105,7 @@ Object.defineProperty(window, "self", {
 global.ServiceWorkerGlobalScope = class {};
 
 // 공통 테스트 헬퍼 함수들
-global.testHelpers = {
+const _testHelpers = {
   // Firebase 모킹 헬퍼
   mockFirebaseResponse: (data) => ({
     val: () => data,
@@ -108,10 +127,6 @@ global.testHelpers = {
           key: "test-key",
         })
       ),
-      update: jest.fn((updates) => {
-        Object.assign(data, updates);
-        return Promise.resolve();
-      }),
       remove: jest.fn(() => {
         Object.keys(data).forEach((key) => delete data[key]);
         return Promise.resolve();

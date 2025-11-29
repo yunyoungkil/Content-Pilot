@@ -8,6 +8,7 @@ import {
   cleanDataForFirebase,
   getCurrentUserId,
 } from "./js/services/firebaseService.js";
+// getValidToken is imported later with other auth service functions
 import { Logger } from "./js/utils.js";
 // [추가] 상수 임포트
 import { COLLECTIONS, KANBAN_STATUS } from "./js/constants.js";
@@ -304,6 +305,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "delete_channel") {
     return handleAsync(
       (async () => {
+        const token = await getValidToken(false);
+        if (!token) {
+          return { success: false, error: 'Authentication required. Please sign in again.' };
+        }
         const { id: channelId, url: channelUrl } = msg;
         console.log(
           "[Background] delete_channel - channelId:",
@@ -1408,7 +1413,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_channels_and_key") {
     return handleAsync(
       (async () => {
+        const token = await getValidToken(false);
+        if (!token) {
+          return { success: false, error: 'Authentication required. Please sign in again.' };
+        }
         const userId = await getCurrentUserId();
+        // Legacy compatibility: compute an email-derived key and use as fallback
+        const storageUser = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+        const googleUserId = storageUser.googleUserId || null;
+        const emailUserId = storageUser.googleUserEmail
+          ? storageUser.googleUserEmail.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_{2,}/g, '_')
+          : null;
         Logger.info(`[get_channels_and_key] 요청 수신 - userId: ${userId}`);
         const [storage, channelsSnap] = await Promise.all([
           chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
@@ -1416,7 +1431,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         ]);
 
         // channelsSnap은 { val: () => data, exists: () => boolean } 형태
-        const channelsData = channelsSnap?.val() || {};
+        let channelsData = channelsSnap?.val() || {};
+        // Backwards-compatibility: if no data under userId key, try googleUserId then email-based key
+        if ((!channelsData || Object.keys(channelsData).length === 0) && googleUserId && googleUserId !== userId) {
+          Logger.info(`[get_channels_and_key] no data for ${userId}, checking fallback googleUserId ${googleUserId}`);
+          const fallbackSnap = await get(ref(getDb(), `channels/${googleUserId}`));
+          const fallbackData = fallbackSnap?.val() || {};
+          if (fallbackData && Object.keys(fallbackData).length > 0) {
+            Logger.info(`[get_channels_and_key] Found legacy channel data for ${googleUserId}, migrating/copying to ${userId}`);
+            channelsData = fallbackData;
+            try {
+              await set(ref(getDb(), `channels/${userId}`), fallbackData);
+              Logger.info(`[get_channels_and_key] Migration copy complete: channels/${googleUserId} -> channels/${userId}`);
+            } catch (e) {
+              Logger.warn('[get_channels_and_key] Migration copy failed:', e);
+            }
+          }
+        }
+        if ((!channelsData || Object.keys(channelsData).length === 0) && emailUserId && emailUserId !== userId) {
+          Logger.info(`[get_channels_and_key] no data for ${userId}, checking fallback ${emailUserId}`);
+          const fallbackSnap = await get(ref(getDb(), `channels/${emailUserId}`));
+          const fallbackData = fallbackSnap?.val() || {};
+          if (fallbackData && Object.keys(fallbackData).length > 0) {
+            Logger.info(`[get_channels_and_key] Found legacy channel data for ${emailUserId}, migrating/copying to ${userId}`);
+            channelsData = fallbackData;
+            // Non-destructive copy to new userId so both old and new versions work
+            try {
+              await set(ref(getDb(), `channels/${userId}`), fallbackData);
+              Logger.info(`[get_channels_and_key] Migration copy complete: channels/${emailUserId} -> channels/${userId}`);
+            } catch (e) {
+              Logger.warn('[get_channels_and_key] Migration copy failed:', e);
+            }
+          }
+        }
+        Logger.info(`[get_channels_and_key] channelsData:`, channelsData);
         const blogsCount = channelsData.myChannels?.blogs?.length || 0;
         const youtubesCount = channelsData.myChannels?.youtubes?.length || 0;
         Logger.info(
@@ -1453,9 +1501,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "get_my_channels") {
     return handleAsync(
       (async () => {
+        // 인증 토큰 확인
+        const token = await getValidToken(false);
+        if (!token) {
+          return {
+            success: false,
+            error: 'Authentication required. Please sign in again.',
+          };
+        }
+
         const userId = await getCurrentUserId();
-        const snap = await get(ref(getDb(), `channels/${userId}`));
-        const channels = snap?.val() || {};
+        const storageUser = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+        const emailUserId = storageUser.googleUserEmail
+          ? storageUser.googleUserEmail.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_{2,}/g, '_')
+          : null;
+        let snap = await get(ref(getDb(), `channels/${userId}`));
+        let channels = snap?.val() || {};
+        if ((!channels || Object.keys(channels).length === 0) && emailUserId && emailUserId !== userId) {
+          // Fallback to legacy key
+          Logger.info(`[get_my_channels] no data for ${userId}, checking fallback ${emailUserId}`);
+          const fallbackSnap = await get(ref(getDb(), `channels/${emailUserId}`));
+          const fallbackData = fallbackSnap?.val() || {};
+          if (fallbackData && Object.keys(fallbackData).length > 0) {
+            channels = fallbackData;
+            // Copy the legacy data to the numeric ID to avoid repeated fallback
+            try {
+              await set(ref(getDb(), `channels/${userId}`), fallbackData);
+              Logger.info(`[get_my_channels] Copied legacy channels to new key: ${userId}`);
+            } catch (e) {
+              Logger.warn('[get_my_channels] Copy legacy channels failed:', e);
+            }
+          }
+        }
         return {
           success: true,
           channels: channels.myChannels || { blogs: [], youtubes: [] },
@@ -1467,11 +1544,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "save_channels_and_key") {
     return handleAsync(
       (async () => {
+        const token = await getValidToken(false);
+        if (!token) {
+          return { success: false, error: 'Authentication required. Please sign in again.' };
+        }
         const { youtubeApiKey, geminiApiKey, channels, myChannels } = msg.data;
         // myChannels가 있으면 channels로 변환 (하위 호환성)
         const channelsData = channels || (myChannels ? { myChannels } : null);
         await chrome.storage.local.set({ youtubeApiKey, geminiApiKey });
         const userId = await getCurrentUserId();
+        const storageUser = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+        const emailUserId = storageUser.googleUserEmail
+          ? storageUser.googleUserEmail.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_{2,}/g, '_')
+          : null;
 
         // [핵심 수정] 빈 목록도 명확한 데이터로 인식하도록 강제
         // Firebase에서 빈 배열([])은 null로 저장될 수 있으므로, 명시적으로 빈 배열을 유지
@@ -1487,6 +1572,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // set()으로 덮어쓰기하여 빈 배열도 확실하게 저장
         await set(ref(getDb(), `channels/${userId}`), safeChannels);
+        // Backwards compatibility: if we have a legacy email-based ID or googleUserId, also write there
+        if (emailUserId && emailUserId !== userId) {
+          try {
+            await set(ref(getDb(), `channels/${emailUserId}`), safeChannels);
+            Logger.info(`[save_channels_and_key] Also saved channels to legacy key channels/${emailUserId}`);
+          } catch (e) {
+            Logger.warn('[save_channels_and_key] Failed to write legacy channels key:', e);
+          }
+        }
+        if (googleUserId && googleUserId !== userId && googleUserId !== emailUserId) {
+          try {
+            await set(ref(getDb(), `channels/${googleUserId}`), safeChannels);
+            Logger.info(`[save_channels_and_key] Also saved channels to legacy key channels/${googleUserId}`);
+          } catch (e) {
+            Logger.warn('[save_channels_and_key] Failed to write legacy channels key (googleUserId):', e);
+          }
+        }
 
         // 데이터 수집 트리거
         await fetchAllChannelData();
@@ -1500,7 +1602,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { ideaId } = msg;
-        const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
+        const userId = await getCurrentUserId();
+        const snap = await get(ref(getDb(), `kanban/${userId}`));
         const allCards = snap?.val() || {};
         for (const status in allCards) {
           if (allCards[status][ideaId]) {
@@ -1516,7 +1619,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { cardId } = msg;
-        const snap = await get(ref(getDb(), `kanban/${CONSTANTS.USER_ID}`));
+        const userId = await getCurrentUserId();
+        const snap = await get(ref(getDb(), `kanban/${userId}`));
         const allCards = snap?.val() || {};
         for (const status in allCards) {
           if (allCards[status][cardId]) {
@@ -1701,7 +1805,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
+        const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
         const scrapSnap = await get(scrapRef);
         const scrap = scrapSnap?.val();
         if (scrap) {
@@ -1932,6 +2036,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "fix_active_channel_mismatch") {
     return handleAsync(
       (async () => {
+        const token = await getValidToken(false);
+        if (!token) {
+          return { success: false, error: 'Authentication required. Please sign in again.' };
+        }
         try {
           const { activeChannelId } = await chrome.storage.local.get(
             "activeChannelId"
@@ -2004,6 +2112,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "fix_channel_structure") {
     return handleAsync(
       (async () => {
+        const token = await getValidToken(false);
+        if (!token) {
+          return { success: false, error: 'Authentication required. Please sign in again.' };
+        }
         try {
           const userId = await getCurrentUserId();
           const channelsSnap = await get(ref(getDb(), `channels/${userId}`));

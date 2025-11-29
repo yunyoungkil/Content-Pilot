@@ -1,6 +1,8 @@
 // test/collectorService.test.js
 
 import { normalizeUrlForComparison, encodeUrlForFirebaseKey } from "../js/services/collectorService.js";
+import * as authService from "../js/services/authService.js";
+import { fetchAllChannelData } from "../js/services/collectorService.js";
 
 /**
  * Collector Service 유틸리티 함수들 테스트
@@ -66,6 +68,15 @@ describe("Collector Service Utilities", () => {
 
     test("should handle empty strings", () => {
       expect(encodeUrlForFirebaseKey("")).toBe("");
+    });
+  });
+
+  describe("fetchAllChannelData - auth check", () => {
+    test("should return early when getValidToken returns null", async () => {
+      jest.spyOn(authService, 'getValidToken').mockResolvedValue(null);
+      const result = await fetchAllChannelData();
+      expect(result).toBeUndefined();
+      authService.getValidToken.mockRestore();
     });
   });
 });

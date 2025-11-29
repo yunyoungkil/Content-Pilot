@@ -384,6 +384,11 @@ export function createAndShowPanel() {
         // 채널 목록을 확인하여 activeChannelId가 유효한지 검증
         chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
           console.log('[Panel] activeChannelId 검증, get_channels_and_key 응답:', response);
+          if (!response || response.success === false) {
+            console.error('[Panel] 채널 정보를 가져올 수 없음:', response?.error);
+            showOnboardingMessage(mainArea);
+            return;
+          }
           const myBlogs = response?.data?.myChannels?.blogs || [];
           console.log('[Panel] 채널 개수:', myBlogs.length);
 
@@ -433,6 +438,11 @@ export function createAndShowPanel() {
       // 2. 활성 채널 ID가 없으면 -> 채널 목록 확인 (비동기)
       chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
         console.log('[Panel] get_channels_and_key 응답:', response);
+        if (!response || response.success === false) {
+          console.error('[Panel] 채널 정보를 가져올 수 없음:', response?.error);
+          showOnboardingMessage(mainArea);
+          return;
+        }
         const myBlogs = response?.data?.myChannels?.blogs || [];
         console.log('[Panel] 채널 개수:', myBlogs.length, '채널 목록:', myBlogs);
 

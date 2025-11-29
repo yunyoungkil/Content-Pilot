@@ -4,6 +4,7 @@
 import { getDb } from './firebaseService.js';
 import { ref, get, update, set, remove } from './firebaseService.js';
 import { Logger } from '../utils.js';
+import { getValidToken } from './authService.js';
 
 /**
  * 데이터 마이그레이션 함수 (REST API 버전)
@@ -23,6 +24,11 @@ export async function runDataMigration(userId, targetChannelId = null) {
   let rollbackNeeded = false;
 
   try {
+    const token = await getValidToken(false);
+    if (!token) {
+      Logger.warn('[Migration] 인증 토큰이 없어 마이그레이션을 건너뜁니다.');
+      return { success: false, message: 'Authentication required', updatedCount: 0 };
+    }
     // 1-1. 내 채널 목록 확인
     const channelsSnap = await get(ref(getDb(), `channels/${userId}/myChannels/blogs`));
     const myBlogs = channelsSnap?.val() || [];
@@ -203,6 +209,11 @@ export async function runDataMigration(userId, targetChannelId = null) {
  */
 export async function checkMigrationNeeded(userId) {
   try {
+    const token = await getValidToken(false);
+    if (!token) {
+      Logger.warn('[checkMigrationNeeded] 인증 토큰이 없어 체크를 건너뜁니다.');
+      return { success: false, needsMigration: false, reason: 'auth_required', count: 0 };
+    }
     // 1. 채널 목록 확인
     const channelsSnap = await get(ref(getDb(), `channels/${userId}/myChannels/blogs`));
     const myBlogs = channelsSnap?.val() || [];

@@ -5,7 +5,7 @@
 // webpack이 이 변수를 인식하도록 파일 최상단에 배치
 if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL) {
   // eslint-disable-next-line no-undef
-  __webpack_public_path__ = chrome.runtime.getURL("dist/") + "/";
+  __webpack_public_path__ = chrome.runtime.getURL("dist") + "/";
 }
 
 // [Permissions Policy Fix] iframe 내부에서 web-share API 사용 방지
@@ -58,6 +58,33 @@ const RELOAD_PROMPT_TIMEOUT = 5 * 60 * 1000; // 5분
 
 // 1. 스크랩 기능은 항상 모든 프레임에서 활성화 준비
 setupHighlighter();
+
+// 전역 오류 감지: ChunkLoadError 처리 — 청크가 누락된 경우 사용자에게 알리고 페이지/확장 새로고침 권장
+window.addEventListener('unhandledrejection', (ev) => {
+  const reason = ev.reason;
+  if (!reason) return;
+  try {
+    const name = reason.name || '';
+    const message = reason.message || '';
+    if (name === 'ChunkLoadError' || message.includes('Loading chunk')) {
+      Logger.error('[ChunkLoadError] 청크 로드 실패 감지:', reason);
+      showToast(
+        '⚠️ 확장 프로그램 코드가 업데이트되었거나 일부 파일이 누락되어 로드에 실패했습니다. 확장 프로그램을 새로고침하고 페이지를 다시 로드하세요.'
+      );
+      // 짧은 지연 후 페이지 새로고침 시도 (사용자 경험 향상, 수동 새로고침 권장)
+      setTimeout(() => {
+        try {
+          // 강제 새로고침
+          window.location.reload(true);
+        } catch (e) {
+          // 무시
+        }
+      }, 1500);
+    }
+  } catch (e) {
+    // 무시
+  }
+});
 
 // 2. UI 및 상태 제어 관련 기능은 최상위 창(top frame)에서만 실행
 if (window.self === window.top) {

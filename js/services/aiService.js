@@ -12,6 +12,7 @@ import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 // analyzePerformanceData previously used to fetch performance data for prompts, no longer needed
 import { Logger } from '../utils.js';
+import { getValidToken } from './authService.js';
 import {
   sanitizeHtmlInOffscreen,
   cropImageInOffscreen,
@@ -365,17 +366,22 @@ export async function generateDraftFromIdea(ideaData) {
     // 4-B. 채널 정보 가져오기 (JSON-LD용)
     let channelInfo = null;
     try {
-      const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
-      if (activeChannelId) {
-        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
-        const channelsData = channelsSnap?.val() || {};
-        const myBlogs = channelsData.myChannels?.blogs || [];
-        const myYoutubes = channelsData.myChannels?.youtubes || [];
-        const allChannels = [...myBlogs, ...myYoutubes];
-        channelInfo = allChannels.find((ch) => {
-          const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
-          return chId === activeChannelId;
-        });
+      const token = await getValidToken(false);
+      if (!token) {
+        Logger.warn('[generateDraftFromIdea] 인증 토큰이 없어 채널 정보 조회를 건너뜁니다.');
+      } else {
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+        if (activeChannelId) {
+          const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+          const channelsData = channelsSnap?.val() || {};
+          const myBlogs = channelsData.myChannels?.blogs || [];
+          const myYoutubes = channelsData.myChannels?.youtubes || [];
+          const allChannels = [...myBlogs, ...myYoutubes];
+          channelInfo = allChannels.find((ch) => {
+            const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
+            return chId === activeChannelId;
+          });
+        }
       }
     } catch (error) {
       Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
@@ -1775,7 +1781,7 @@ export async function generateAiImage(prompt, count = 1) {
   }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
 
   // 동시 요청 제한 설정 (API Rate Limit 고려)
   const MAX_CONCURRENT = 3;

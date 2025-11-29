@@ -167,6 +167,15 @@ export async function refreshAuthToken(interactive = false) {
           googleUserId: userInfo.id,
           googleUserName: userInfo.name,
         });
+        // contentPilotUserId 초기화 (한 번만 설정 — 리팩토링/방식 변경 시 고정값 생성 목적)
+        try {
+          const existing = await chrome.storage.local.get('contentPilotUserId');
+          if (!existing.contentPilotUserId) {
+            await chrome.storage.local.set({ contentPilotUserId: userInfo.id || userInfo.email });
+          }
+        } catch (e) {
+          Logger.warn('[refreshAuthToken] contentPilotUserId 설정 실패:', e);
+        }
       } catch (e) {
         Logger.warn('[refreshAuthToken] 사용자 정보 업데이트 실패:', e);
       }
@@ -177,6 +186,17 @@ export async function refreshAuthToken(interactive = false) {
         const firebaseAuthResult = await signInToFirebaseWithGoogleToken(token);
         if (firebaseAuthResult.success) {
           Logger.info('[refreshAuthToken] Firebase Auth 갱신 성공');
+          // Firebase UID가 있으면 contentPilotUserId로 저장(우선순위)
+          if (firebaseAuthResult.user && firebaseAuthResult.user.uid) {
+            try {
+              const existing = await chrome.storage.local.get('contentPilotUserId');
+              if (!existing.contentPilotUserId) {
+                await chrome.storage.local.set({ contentPilotUserId: firebaseAuthResult.user.uid });
+              }
+            } catch (e) {
+              Logger.warn('[refreshAuthToken] contentPilotUserId 설정 실패 (firebase uid):', e);
+            }
+          }
         } else {
           Logger.warn('[refreshAuthToken] Firebase Auth 갱신 실패:', firebaseAuthResult.error);
         }
@@ -467,6 +487,15 @@ export async function startGoogleAuth() {
       adSenseAccountId: adSenseId,
       gaProperties: properties,
     });
+    // contentPilotUserId 초기화 (한 번만 설정 — 리팩토링/방식 변경 시 고정값 생성 목적)
+    try {
+      const existing = await chrome.storage.local.get('contentPilotUserId');
+      if (!existing.contentPilotUserId) {
+        await chrome.storage.local.set({ contentPilotUserId: userInfo.id || userInfo.email });
+      }
+    } catch (e) {
+      Logger.warn('[startGoogleAuth] contentPilotUserId 설정 실패:', e);
+    }
 
     // Firebase Auth에 로그인 (Google Access Token 사용)
     try {
@@ -489,6 +518,17 @@ export async function startGoogleAuth() {
           Logger.warn(
             '[Firebase Auth] 💡 Access Token만으로는 인증할 수 없을 수 있습니다. ID Token이 필요할 수 있습니다.'
           );
+        }
+      }
+      // Firebase UID가 있으면 contentPilotUserId로 저장(우선순위)
+      if (firebaseAuthResult.success && firebaseAuthResult.user && firebaseAuthResult.user.uid) {
+        try {
+          const existing = await chrome.storage.local.get('contentPilotUserId');
+          if (!existing.contentPilotUserId) {
+            await chrome.storage.local.set({ contentPilotUserId: firebaseAuthResult.user.uid });
+          }
+        } catch (e) {
+          Logger.warn('[startGoogleAuth] contentPilotUserId 설정 실패 (firebase uid):', e);
         }
       }
     } catch (e) {

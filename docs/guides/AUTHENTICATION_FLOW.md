@@ -139,6 +139,15 @@ if (msg.action === "save_channels_and_key") {
 - Firebase Database 보안 규칙이 `auth != null`을 요구하지만, Firebase Auth를 사용하지 않으므로 `auth`가 항상 `null`입니다.
 - 이로 인해 `permission_denied` 오류가 발생합니다.
 
+### 2.4 최근 변경: 백그라운드 핸들러에서 토큰 검증 추가
+
+프로덕션에서 `channels` 경로는 `auth != null` 규칙을 적용하므로, 모든 읽기/쓰기 작업 전에 토큰 검증이 수행되도록 코드가 업데이트되었습니다. 구체적으로, 다음과 같은 변경을 적용했습니다:
+
+- `background.js`: `get_channels_and_key`, `save_channels_and_key`, `get_my_channels`, `delete_channel`, `fix_active_channel_mismatch`, `fix_channel_structure` 핸들러에서 `authService.getValidToken(false)` 호출로 토큰 유효성을 확인합니다.
+- `collectorService.js`, `aiService.js`, `migrationService.js` 등의 서비스 함수에서도 `getValidToken(false)`를 사용하여 비인증 상태에서는 채널 관련 DB 작업을 건너뛰거나 에러를 반환하도록 수정했습니다.
+
+이 변경으로 보안 규칙과 코드가 일치하며, 비인증 상태에서 발생하는 `permission_denied` 오류를 사전에 방지할 수 있습니다.
+
 ---
 
 ## 3. Service Worker에서 Realtime Database `set` 작업 시작

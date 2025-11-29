@@ -1,5 +1,11 @@
 import { Logger } from "./js/utils.js";
 
+// Ensure webpack public path is set correctly when editor runs inside iframe context
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+  // eslint-disable-next-line no-undef
+  __webpack_public_path__ = chrome.runtime.getURL('dist') + '/';
+}
+
 // 툴바 커스텀 버튼 렌더링 (Quill 초기화 후)
 setTimeout(() => {
   const toolbar = document.querySelector(".ql-toolbar");

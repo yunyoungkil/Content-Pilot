@@ -4,6 +4,7 @@ import { getDb, CONSTANTS, cleanDataForFirebase, getCurrentUserId } from './fire
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, set, update, remove } from './firebaseService.js';
 import { Logger } from '../utils.js';
+import { getValidToken } from './authService.js';
 
 let creating;
 
@@ -61,12 +62,13 @@ export function encodeUrlForFirebaseKey(url) {
 export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
   // Firebase REST API는 다중 경로 업데이트를 지원하지 않으므로 각 경로를 개별적으로 업데이트
   const updatePromises = [];
+  const userId = await getCurrentUserId();
 
   if (originUrl) {
     const normalizedUrl = normalizeUrlForComparison(originUrl);
     if (normalizedUrl) {
       const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/origin/${cardId}`;
+      const path = `url_index/${userId}/${encodedKey}/origin/${cardId}`;
       updatePromises.push(
         update(path, { status, cardId }).catch((error) => {
           Logger.warn(`[updateUrlIndex] origin URL 인덱스 업데이트 실패 (${path}):`, error);
@@ -80,7 +82,7 @@ export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
     const normalizedUrl = normalizeUrlForComparison(publishedUrl);
     if (normalizedUrl) {
       const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/published/${cardId}`;
+      const path = `url_index/${userId}/${encodedKey}/published/${cardId}`;
       updatePromises.push(
         update(path, { status, cardId }).catch((error) => {
           Logger.warn(`[updateUrlIndex] published URL 인덱스 업데이트 실패 (${path}):`, error);
@@ -98,8 +100,9 @@ export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
 export async function checkDuplicateUrl(url) {
   if (!url) return { exists: false };
   try {
+    const userId = await getCurrentUserId();
     const key = encodeUrlForFirebaseKey(normalizeUrlForComparison(url));
-    const indexSnap = await get(ref(getDb(), `url_index/${CONSTANTS.USER_ID}/${key}`));
+    const indexSnap = await get(ref(getDb(), `url_index/${userId}/${key}`));
     if (indexSnap.exists()) {
       const indexData = indexSnap.val();
 
@@ -118,7 +121,7 @@ export async function checkDuplicateUrl(url) {
 
       // 각 매치에 대해 실제 카드 존재 여부 확인
       for (const match of matches) {
-        const cardPath = `kanban/${CONSTANTS.USER_ID}/${match.status}/${match.cardId}`;
+        const cardPath = `kanban/${userId}/${match.status}/${match.cardId}`;
         const cardSnap = await get(ref(getDb(), cardPath));
 
         if (cardSnap.exists()) {
@@ -138,7 +141,7 @@ export async function checkDuplicateUrl(url) {
           Logger.warn(
             `[checkDuplicateUrl] 고아 인덱스 발견 - cardId: ${match.cardId}, 인덱스에서 제거`
           );
-          const orphanIndexPath = `url_index/${CONSTANTS.USER_ID}/${key}/${match.type}/${match.cardId}`;
+          const orphanIndexPath = `url_index/${userId}/${key}/${match.type}/${match.cardId}`;
           try {
             await remove(ref(getDb(), orphanIndexPath));
           } catch (removeError) {
@@ -198,7 +201,8 @@ async function processRssItem(itemText, sourceId, channelType) {
 
   const contentId = btoa(fullLink.split('?')[0]).replace(/=/g, '');
   const db = getDb();
-  const path = `channel_content/${CONSTANTS.USER_ID}/blogs/${contentId}`;
+  const userId = await getCurrentUserId();
+  const path = `channel_content/${userId}/blogs/${contentId}`;
 
   // 이미 존재하는지 확인 (가벼운 체크)
   const existSnap = await get(ref(db, path));
@@ -254,7 +258,8 @@ export async function fetchRssFeed(url, channelType) {
   try {
     const db = getDb();
     const sourceId = btoa(url).replace(/=/g, '');
-    const metaRef = ref(db, `channel_meta/${CONSTANTS.USER_ID}/${sourceId}`);
+    const userId = await getCurrentUserId();
+    const metaRef = ref(db, `channel_meta/${userId}/${sourceId}`);
 
     const metaSnap = await get(metaRef);
     const meta = metaSnap?.val() || {};
@@ -264,13 +269,6 @@ export async function fetchRssFeed(url, channelType) {
     const res = await fetch(url, { headers });
     if (res.status === 304) return;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    await update(metaRef, {
-      lastEtag: res.headers.get('ETag'),
-      lastModified: res.headers.get('Last-Modified'),
-      fetchedAt: Date.now(),
-      source: url,
-    });
 
     const text = await res.text();
 
@@ -369,7 +367,7 @@ export async function fetchYoutubeChannel(channelId, channelType) {
   const details = await detailRes.json();
 
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
 
   for (const item of details.items || []) {
     const contentRef = ref(db, `channel_content/${userId}/youtubes/${item.id}`);
@@ -435,8 +433,15 @@ function resolveBlogUrlToRss(url) {
 export async function fetchAllChannelData() {
   Logger.info('[fetchAllChannelData] 채널 데이터 수집 시작');
 
+  const token = await getValidToken(false);
+  if (!token) {
+    Logger.warn('[fetchAllChannelData] 인증 토큰이 없어 채널 데이터 수집을 건너뜁니다.');
+    return;
+  }
+
   const db = getDb();
-  const snap = await get(ref(db, `channels/${CONSTANTS.USER_ID}`));
+  const userId = await getCurrentUserId();
+  const snap = await get(ref(db, `channels/${userId}`));
   const channels = snap?.val();
   if (!channels) {
     Logger.warn('[fetchAllChannelData] 채널 데이터가 없습니다.');
@@ -607,6 +612,9 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
   try {
     if (!url || typeof url !== 'string') throw new Error('유효한 URL이 필요합니다.');
 
+    const token = await getValidToken(false);
+    if (!token) throw new Error('인증이 필요합니다.');
+
     // 1. 중복 검사
     const duplicateCheck = await checkDuplicateUrl(url);
     if (duplicateCheck.exists) {
@@ -632,7 +640,7 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
     }
 
     // 3. 데이터 수집 및 저장
-    const userId = CONSTANTS.USER_ID;
+    const userId = await getCurrentUserId();
     const db = getDb();
 
     if (platform === 'youtube') {
@@ -808,6 +816,8 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
 
 export async function deleteChannelData(urlToDelete) {
   try {
+    const token = await getValidToken(false);
+    if (!token) throw new Error('인증이 필요합니다.');
     const userId = await getCurrentUserId();
     const db = getDb();
     const channelsRef = ref(db, `channels/${userId}`);

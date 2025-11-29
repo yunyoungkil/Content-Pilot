@@ -4,6 +4,12 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { Logger } from "./js/utils.js";
 
+// Ensure webpack public path is set for offscreen document context
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+  // eslint-disable-next-line no-undef
+  __webpack_public_path__ = chrome.runtime.getURL('dist') + '/';
+}
+
 // --- 유틸리티 함수 ---
 
 /**

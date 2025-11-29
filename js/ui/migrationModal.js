@@ -129,16 +129,22 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
           // 마이그레이션 완료 상태 저장
           chrome.storage.local.set({ migration_completed: true }, () => {
             modal.remove();
-            // [체크리스트 2-B 최적화] 완료 알림
-            showToast(
-              '✅ 데이터 구조가 업데이트되었습니다. 모든 데이터가 정상적으로 보존되었습니다.'
+            // [체크리스트 2-B 최적화] 완료 알림 (재확인 가능)
+            // showConfirmationToast로 사용자가 새로고침을 직접 선택할 수 있도록 변경
+            showConfirmationToast(
+              '✅ 데이터 구조가 업데이트되었습니다. 페이지를 새로고침 하시겠습니까?',
+              () => {
+                // 확인하면 탭 내 패널 새로고침(또는 페이지 새로고침)
+                const activeTab = shadowRoot.querySelector('.cp-mode-tab.active');
+                if (activeTab) {
+                  // 선택된 모드 탭을 다시 클릭하여 UI를 재렌더링
+                  setTimeout(() => activeTab.click(), 300);
+                } else {
+                  // fallback: 전체 페이지 리로드
+                  setTimeout(() => window.location.reload(), 300);
+                }
+              }
             );
-
-            // 현재 탭 새로고침
-            const activeTab = shadowRoot.querySelector('.cp-mode-tab.active');
-            if (activeTab) {
-              setTimeout(() => activeTab.click(), 500);
-            }
           });
         } else {
           confirmBtn.disabled = false;

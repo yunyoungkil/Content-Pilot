@@ -1027,9 +1027,41 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
   }
 
-  // 채널 정보 가져오기
-  chrome.runtime.sendMessage({ action: 'get_my_channels' }, (channelsResponse) => {
-    const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
+  // 채널 정보 가져오기 (Promise 기반 재시도 로직 포함)
+  async function fetchMyChannelsWithRetry(retries = 1) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'get_my_channels' }, async (channelsResponse) => {
+        if (!channelsResponse?.success) {
+          console.error('Failed to get channels:', channelsResponse?.error);
+          // 인증 관련 에러이면 재시도: 토큰 인터랙티브 요청 후 재시도
+          if (retries > 0 && channelsResponse?.error?.toLowerCase?.().includes('authentication')) {
+            // 트리거: background에 get_auth_token 요청하여 interactive 모드로 로그인 시도
+            chrome.runtime.sendMessage({ action: 'get_auth_token' }, (authResp) => {
+              if (authResp?.success) {
+                // 토큰을 얻었으니 채널 재요청
+                fetchMyChannelsWithRetry(retries - 1).then(resolve);
+              } else {
+                // 재시도 실패 시 사용자에게 알림 (non-blocking toast 사용)
+                  showToast('⚠️ 채널 정보를 가져올 수 없습니다. 다시 로그인해 주세요.');
+                resolve(null);
+              }
+            });
+            return;
+          }
+          // 인증 외 다른 오류는 알림
+          showToast('⚠️ 채널 정보를 가져올 수 없습니다. 다시 로그인해 주세요.');
+          resolve(null);
+          return;
+        }
+        resolve(channelsResponse.channels);
+      });
+    });
+  }
+
+  fetchMyChannelsWithRetry(1).then((channels) => {
+    if (!channels) return;
+
+    const myChannels = channels?.myChannels?.blogs || [];
     const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
     const channelUrl = firstChannel?.inputUrl || '';
 
@@ -1294,7 +1326,7 @@ ${contentHtml}
 // 3. 메인 렌더링 함수 (renderWorkspace)
 // -----------------------------------------------------------------------------
 
-export function renderWorkspace(container, ideaData) {
+export async function renderWorkspace(container, ideaData) {
   Logger.debug('[Workspace] renderWorkspace 함수 호출됨');
   Logger.debug('[Workspace] container:', container);
   Logger.debug('[Workspace] ideaData:', ideaData);
@@ -1345,21 +1377,27 @@ export function renderWorkspace(container, ideaData) {
   ) {
     Logger.debug(`[Workspace] 브리핑 요청 - cardId: ${ideaData.id}, title: ${ideaData.title}`);
     chrome.runtime
-      .sendMessage({
-        action: 'generate_idea_briefing',
-        data: {
-          cardId: ideaData.id,
-          title: ideaData.title,
-          description: ideaData.description || '',
-          generateMainKeywords: true,
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-        },
-      })
-      .catch((err) => {
+      try {
+        await new Promise((resolve) =>
+          chrome.runtime.sendMessage(
+            {
+              action: 'generate_idea_briefing',
+              data: {
+                cardId: ideaData.id,
+                title: ideaData.title,
+                description: ideaData.description || '',
+                generateMainKeywords: true,
+                generateOutline: true,
+                generateKeywords: true,
+                generateLongTail: true,
+              },
+            },
+            (r) => resolve(r)
+          )
+        );
+      } catch (err) {
         Logger.warn(`[Workspace] 브리핑 요청 실패:`, err);
-      });
+      }
   } else {
     if (isTrackingOnly) {
       Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - tracking_only 카드`);

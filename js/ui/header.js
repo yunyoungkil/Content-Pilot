@@ -69,6 +69,10 @@ export function renderPanelHeader() {
               <span>🛠️</span>
               <span>시스템 진단</span>
             </button>
+            <button class="cp-settings-menu-item" data-action="migration" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#333;display:flex;align-items:center;gap:8px;transition:background 0.2s;pointer-events:auto;">
+              <span>📦</span>
+              <span>데이터 마이그레이션</span>
+            </button>
           </div>
         </div>
         <button id="cp-panel-close" class="cp-panel-icon-btn">
@@ -177,6 +181,11 @@ export function addHeaderEventListeners(shadowRoot) {
                 window.__cp_active_mode = 'admin';
                 renderHeaderAndTabs(shadowRoot);
                 import('./adminMode.js').then((module) => module.renderAdminMode(mainArea));
+              }
+            } else if (action === 'migration') {
+              const mainArea = shadowRoot.querySelector('#cp-main-area');
+              if (mainArea) {
+                import('./migrationModal.js').then((module) => module.checkAndShowMigrationModal(shadowRoot));
               }
             }
             return;

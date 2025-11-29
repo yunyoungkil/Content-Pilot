@@ -379,7 +379,7 @@ export async function getSearchConsoleData(token, siteUrl, pageUrl, retryCount =
 export async function updateSinglePerformanceMetric(contentInfo) {
   if (!initializeFirebase()) return;
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
 
   let path = contentInfo.path;
   if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
@@ -485,7 +485,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
 export async function updateAllPerformanceMetrics() {
   if (!initializeFirebase()) return;
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -538,7 +538,7 @@ export async function runAutomatedRenewalChecks() {
 export async function analyzePerformanceData(targetChannelId = null) {
   if (!initializeFirebase()) return { analysis: null, decayContent: null };
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -744,7 +744,7 @@ export async function checkAdSenseRegistrationStatus(
 
     if (registeredUrls.size > 0) {
       const db = getDb();
-      const userId = CONSTANTS.USER_ID;
+      const userId = await getCurrentUserId();
       const snapshot = await get(ref(db, `kanban/${userId}`));
       const allCards = snapshot.val() || {};
       const updates = {};
