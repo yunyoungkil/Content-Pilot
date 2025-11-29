@@ -4,7 +4,7 @@
 import { showToast, Logger } from '../utils.js';
 
 let allPerformanceData = [];
-let previousDayStats = null;
+// previousDayStats was an unused leftover variable and has been removed.
 let isProcessingData = false;
 let processDataTimeout = null;
 
@@ -448,7 +448,7 @@ function renderDetails(perf) {
   `;
 }
 
-function calculateGrowthRates(currentEarnings, currentPageviews, currentImpressions, count) {
+function calculateGrowthRates(_currentEarnings, _currentPageviews, _currentImpressions, _count) {
   // 간단한 성장률 로직 (localStorage 비교 생략하고 현재 값만 리턴)
   return {
     earnings: { arrow: '', percent: 0 },

@@ -7,42 +7,9 @@ import { openThumbnailMaker } from './thumbnailMaker.js';
 // 1. 이미지 갤러리 관련 함수들
 // -----------------------------------------------------------------------------
 
-function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
-  const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
-  if (!imageGalleryGrid) return;
-  const imageUrls = renderImageGallery(linkedScrapsData);
-  if (imageUrls.length === 0) {
-    imageGalleryGrid.innerHTML =
-      '<p>이미지 자료가 없습니다.<br>스크랩 객체에 image/allImages 필드가 포함되어 있는지 확인하세요.</p>';
-    return;
-  }
-  imageGalleryGrid.innerHTML = imageUrls
-    .map(
-      (url) => `
-      <div class="gallery-thumb-wrap">
-        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
-      </div>
-    `
-    )
-    .join('');
-  imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
-    img.addEventListener('click', () => {
-      sendCommand('insert-image', { url: img.src });
-      sendCommand('focus');
-    });
-  });
-}
+// Previously defined _updateImageGallery helper removed — functionality consolidated into updateImageGalleryFromAllScraps
 
-function renderImageGallery(linkedScrapsData) {
-  const imageSet = new Set();
-  linkedScrapsData.forEach((scrap) => {
-    if (scrap.image) imageSet.add(scrap.image);
-    if (Array.isArray(scrap.allImages)) {
-      scrap.allImages.forEach((url) => imageSet.add(url));
-    }
-  });
-  return Array.from(imageSet);
-}
+// renderImageGallery helper removed — no longer used by codepaths after refactor
 
 function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand, ideaData = null) {
   const imageGalleryArea = resourceLibrary.querySelector('.image-gallery-area');
@@ -81,7 +48,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   const closePreview = imageGalleryArea.querySelector('#close-preview');
 
   let isDraftFilterActive = false;
-  let allImageData = [];
+  // Temporary image data collection removed; using local variables to avoid leaking module-level state.
   let draftContentText = '';
 
   imageGalleryGrid.innerHTML =
@@ -181,7 +148,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
     }
 
     const allImages = Array.from(imageDataMap.values());
-    allImageData = allImages;
+    // _allImageData assignment removed; allImages is used locally below.
 
     function extractTextFromDraft(html) {
       if (!html) return '';
@@ -551,7 +518,8 @@ function renderThumbnailButton(workspaceEl, ideaData) {
         const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
         if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
           // 선택된 컨셉의 정보만 업데이트 (selectedThumbnailIndex 제외)
-          const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
+          const infoToUpdate = Object.assign({}, newThumbnailInfo);
+          delete infoToUpdate.selectedThumbnailIndex;
           ideaData.publishInfo.thumbnailInfo[selectedIndex] = {
             ...ideaData.publishInfo.thumbnailInfo[selectedIndex],
             ...infoToUpdate,
@@ -2157,7 +2125,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
 
           // attach click handlers
           listContainer.querySelectorAll('.insert-affiliate-text').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', (_e) => {
               const id = btn.dataset.id;
               const link = links.find((l) => l.id === id);
               if (!link) return;
@@ -2178,7 +2146,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
           });
 
           listContainer.querySelectorAll('.insert-affiliate-card').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', (_e) => {
               const id = btn.dataset.id;
               const link = links.find((l) => l.id === id);
               if (!link || !link.cardData) return;
@@ -2351,7 +2319,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     }
 
     if (event.source === editorIframe?.contentWindow) {
-      const { action, data } = event.data;
+      const { action } = event.data;
       if (action === 'editor-ready') {
         if (ideaData.draftContent)
           sendCommand('set-content', {
@@ -2755,7 +2723,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
       if (!btn) return;
 
       const scrapId = btn.dataset.scrapId;
-      const currentChannelId = btn.dataset.currentChannelId;
 
       // 현재 활성 채널 ID 가져오기
       chrome.storage.local.get('activeChannelId', (res) => {

@@ -356,7 +356,6 @@ function attachScrapListEventListeners(listContainer, container, scraps) {
       e.stopPropagation();
 
       const scrapId = btn.dataset.scrapId;
-      const currentChannelId = btn.dataset.currentChannelId;
 
       // 현재 활성 채널 ID 가져오기
       chrome.storage.local.get('activeChannelId', (res) => {
