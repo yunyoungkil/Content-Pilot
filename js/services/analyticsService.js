@@ -434,6 +434,15 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       siteUrl = blog.gscSiteUrl || blog.inputUrl || blog.url;
     }
 
+    // If channel doesn't have GA4 id, try global selection (user-selected default)
+    if (!gaId) {
+      const storageSelection = await chrome.storage.local.get(['selectedGaPropertyId']);
+      if (storageSelection && storageSelection.selectedGaPropertyId) {
+        gaId = storageSelection.selectedGaPropertyId;
+        Logger.info('[updateSinglePerformanceMetric] 채널에 GA4 ID가 없어 storage.selectedGaPropertyId를 대체값으로 사용:', gaId);
+      }
+    }
+
     if (!gaId) {
       Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — 스킵:', { path });
       await update(ref(db, `${path}/performance`), {
