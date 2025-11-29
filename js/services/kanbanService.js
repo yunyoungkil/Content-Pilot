@@ -2,12 +2,11 @@
 // 칸반(기획 보드) 관련 서비스
 
 import { getDb, cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { ref, get, set, remove, update, push, serverTimestamp } from './firebaseService.js';
+import { ref, get, set, remove, push } from './firebaseService.js';
 import { generateIdeaBriefing } from './aiService.js';
 import {
   checkDuplicateUrl,
   updateUrlIndex,
-  removeUrlIndex,
   summarizeText,
   normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
@@ -15,7 +14,7 @@ import {
 import { updateSinglePerformanceMetric } from './analyticsService.js';
 import { Logger } from '../utils.js';
 // [추가] 상수 임포트
-import { COLLECTIONS, KANBAN_STATUS } from '../constants.js';
+import { COLLECTIONS } from '../constants.js';
 
 /**
  * 새로운 아이디어 카드 생성 및 저장

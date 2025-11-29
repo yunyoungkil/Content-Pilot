@@ -183,11 +183,11 @@ export function renderChannelMode(container) {
 
       // 호스트 기반 판별 (가장 정확한 방법)
       let rssUrl = null;
-      let detectedPlatform = null;
+      let _detectedPlatform = null;
 
       if (host.includes('tistory.com')) {
         rssUrl = `${origin}/rss`;
-        detectedPlatform = 'tistory';
+        _detectedPlatform = 'tistory';
       } else if (host.includes('blog.naver.com')) {
         const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
         if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
@@ -200,13 +200,13 @@ export function renderChannelMode(container) {
             rssUrl = `${origin}/rss`;
           }
         }
-        detectedPlatform = 'naver';
+        _detectedPlatform = 'naver';
       } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
         rssUrl = url.endsWith('/') ? `${url}feed` : `${url}/feed`;
-        detectedPlatform = 'wordpress';
+        _detectedPlatform = 'wordpress';
       } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
         rssUrl = `${origin}/feeds/posts/default?alt=rss`;
-        detectedPlatform = 'blogger';
+        _detectedPlatform = 'blogger';
       } else {
         // 알 수 없는 호스트의 경우 플랫폼 선택에 따라 처리
         if (selectedPlatform && selectedPlatform !== 'direct') {

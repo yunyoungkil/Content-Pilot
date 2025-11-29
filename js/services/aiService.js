@@ -10,7 +10,7 @@ import {
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
-import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
+// analyzePerformanceData previously used to fetch performance data for prompts, no longer needed
 import { Logger } from '../utils.js';
 import {
   sanitizeHtmlInOffscreen,
@@ -406,16 +406,12 @@ export async function generateDraftFromIdea(ideaData) {
       `Type: ${builder.getPersonaName()}, Custom Tone: ${ideaData.tone || builder.getToneName()}`
     );
 
-    // 데이터 준비 (analyticsService 활용)
-    const performanceData = await analyzePerformanceData(ideaData.channelId);
-    const _feedback = await getUserFeedbackPatterns();
+    // 데이터 준비: 필요 시 analytics data를 불러올 수 있지만 현재는 사용하지 않습니다.
+    // const performanceData = await analyzePerformanceData(ideaData.channelId);
 
     // 1. 모든 키워드를 수집하고 중복을 제거합니다.
-    const allKeywords = new Set([
-      ...(ideaData.tags || []).filter((t) => t !== '#AI-추천'),
-      ...(ideaData.longTailKeywords || []),
-    ]);
-    const _keywordsText = Array.from(allKeywords).join('\n- ');
+    // keywords (not directly used yet)
+    // Keywords prepared but not used directly in prompt at this time
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
     const linkedScrapsText = (ideaData.linkedScrapsContent || [])
@@ -483,10 +479,7 @@ export async function generateDraftFromIdea(ideaData) {
     const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
 
     // 6. 프롬프트 구성
-    const _performanceInfo =
-      performanceData.decayContent && performanceData.decayContent.length > 0
-        ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
-        : '';
+    // performanceInfo prepared but not used directly in prompt at this time
 
     // 백업 파일의 상세한 프롬프트 구성
     const prompt = `
@@ -1746,7 +1739,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
                   action: 'kanban_data_updated',
                   data: kanbanData,
                 })
-                .catch((err) => {
+                .catch(() => {
                   // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
                   // 조용히 무시
                 });
@@ -1891,19 +1884,19 @@ export async function generateAiImage(prompt, count = 1) {
 }
 
 // 8. 템플릿 분석
-export async function analyzeImageForTemplate(data) {
+export async function analyzeImageForTemplate(_data) {
   // ... (Vision API 호출 로직)
   return { success: true };
 }
 
 // 9. 채널 분석
-export async function analyzeMyChannel(data) {
+export async function analyzeMyChannel(_data) {
   // TODO: 채널 분석 로직 구현
   return { success: true, analysis: '' };
 }
 
 // 10. 콘텐츠 아이디어 생성
-export async function generateContentIdeas(data) {
+export async function generateContentIdeas(_data) {
   // TODO: 콘텐츠 아이디어 생성 로직 구현
   return { success: true, ideas: [] };
 }
@@ -1928,7 +1921,7 @@ export async function generateAndSendKeywords(data, sender) {
 }
 
 // 12. 비디오 댓글 분석
-export async function analyzeVideoComments(videoId) {
+export async function analyzeVideoComments(_videoId) {
   // TODO: 비디오 댓글 분석 로직 구현
   return { success: true, comments: [] };
 }

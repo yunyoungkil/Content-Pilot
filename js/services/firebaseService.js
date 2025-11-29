@@ -384,7 +384,7 @@ function dataURLtoBlob(dataUrl) {
 /**
  * Firebase Auth 상태 리스너 초기화
  */
-function initializeAuthStateListener() {
+function _initializeAuthStateListener() {
   if (!firebaseAuth) {
     firebaseAuth = getAuth(firebaseApp);
   }
