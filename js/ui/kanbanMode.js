@@ -1,7 +1,7 @@
 // js/ui/kanbanMode.js (수정 완료된 최종 버전)
 
 import { renderWorkspace } from './workspaceMode.js';
-import { showToast, Logger } from '../utils.js';
+import { showToast, Logger, debounce } from '../utils.js';
 import { renderHeaderAndTabs } from './header.js';
 
 let allKanbanData = {};
@@ -399,6 +399,8 @@ async function updateKanbanUI(allCards) {
 }
 
 function renderCardsInColumn(columnEl, status, cards) {
+  // 성능 최적화: DocumentFragment를 사용하여 DOM 조작 최소화
+  const fragment = document.createDocumentFragment();
   const sortedCards = Object.entries(cards).sort((a, b) => {
     const timeA = a[1].createdAt || 0;
     const timeB = b[1].createdAt || 0;
@@ -411,8 +413,11 @@ function renderCardsInColumn(columnEl, status, cards) {
 
   for (const [cardId, cardData] of sortedCards) {
     const cardEl = createKanbanCard(cardId, cardData, status);
-    columnEl.appendChild(cardEl);
+    fragment.appendChild(cardEl);
   }
+
+  // 한 번에 DOM에 추가하여 리플로우/리페인트 최소화
+  columnEl.appendChild(fragment);
 }
 
 function createKanbanCard(id, data, status) {
@@ -526,7 +531,9 @@ function createKanbanCard(id, data, status) {
                 // DOM 요소를 찾아서 텍스트 업데이트
                 const cardElement = document.querySelector(`[data-id="${id}"]`);
                 if (cardElement) {
-                  const originTag = cardElement.querySelector('.kanban-card-meta.origin-tag.tracking_only');
+                  const originTag = cardElement.querySelector(
+                    '.kanban-card-meta.origin-tag.tracking_only'
+                  );
                   if (originTag) {
                     originTag.innerHTML = `📊 ${blogName}`;
                     originTag.title = `성과 추적 전용: ${blogName}`;
@@ -1669,10 +1676,14 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
       });
     }
 
-    // 이벤트 리스너
-    urlInput.addEventListener('input', (e) => {
-      validateAndDetectPlatform(e.target.value);
+    // 이벤트 리스너 (디바운싱 적용으로 성능 최적화)
+    const debouncedUrlValidation = debounce((value) => {
+      validateAndDetectPlatform(value);
       showUrlHistory();
+    }, 300);
+
+    urlInput.addEventListener('input', (e) => {
+      debouncedUrlValidation(e.target.value);
     });
 
     urlInput.addEventListener('focus', () => {

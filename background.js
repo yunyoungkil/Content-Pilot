@@ -7,17 +7,17 @@ import {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
-} from "./js/services/firebaseService.js";
-import { Logger } from "./js/utils.js";
+} from './js/services/firebaseService.js';
+import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
-import { COLLECTIONS, KANBAN_STATUS } from "./js/constants.js";
+import { COLLECTIONS, KANBAN_STATUS } from './js/constants.js';
 
 import {
   updateAllPerformanceMetrics,
   updateSinglePerformanceMetric,
   checkAdSenseRegistrationStatus,
   runFullSystemDiagnosis,
-} from "./js/services/analyticsService.js";
+} from './js/services/analyticsService.js';
 
 import {
   fetchAllChannelData,
@@ -30,13 +30,13 @@ import {
   updateUrlIndex,
   normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
-} from "./js/services/collectorService.js";
+} from './js/services/collectorService.js';
 
 import {
   deleteCompetitorData,
   deleteChannelDataCascade,
   findDeletedCompetitors,
-} from "./js/services/cascadeDeleteService.js";
+} from './js/services/cascadeDeleteService.js';
 
 import {
   generateDraftFromIdea,
@@ -48,14 +48,14 @@ import {
   generateContentIdeas,
   generateAndSendKeywords,
   analyzeVideoComments,
-} from "./js/services/aiService.js";
+} from './js/services/aiService.js';
 
 import {
   startGoogleAuth,
   revokeGoogleAuth,
   getValidToken,
   restoreAuthSession,
-} from "./js/services/authService.js";
+} from './js/services/authService.js';
 
 // migrationService removed - migration features disabled/removed
 
@@ -64,14 +64,14 @@ import {
   getThumbnailTemplates,
   deleteTemplate,
   generateThumbnailTexts,
-} from "./js/services/thumbnailService.js";
+} from './js/services/thumbnailService.js';
 
 import {
   createAndSaveNewIdea,
   addIdeaToKanban,
   removeIdeaFromKanban,
   deleteKanbanCard,
-} from "./js/services/kanbanService.js";
+} from './js/services/kanbanService.js';
 
 import {
   saveScrapElement,
@@ -79,14 +79,14 @@ import {
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
-} from "./js/services/scrapService.js";
+} from './js/services/scrapService.js';
 
 import {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
   renderTemplateInOffscreen,
   parseHtmlInOffscreen,
-} from "./js/services/offscreenService.js";
+} from './js/services/offscreenService.js';
 
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 // import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
@@ -99,7 +99,7 @@ import {
   push,
   serverTimestamp,
   onValue,
-} from "./js/services/firebaseService.js";
+} from './js/services/firebaseService.js';
 
 // Firebase 초기화
 initializeFirebase();
@@ -112,11 +112,11 @@ let kanbanRealtimeListenerAttached = false;
   try {
     await restoreAuthSession();
   } catch (error) {
-    Logger.error("[System] 세션 복원 실패:", error);
+    Logger.error('[System] 세션 복원 실패:', error);
   }
 })();
 
-Logger.info("🚀 [System] Service Worker Started (Lightweight Router)");
+Logger.info('🚀 [System] Service Worker Started (Lightweight Router)');
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
 chrome.action.onClicked.addListener((tab) => {
@@ -124,21 +124,21 @@ chrome.action.onClicked.addListener((tab) => {
     chrome.tabs.sendMessage(
       tab.id,
       {
-        action: "open_content_pilot_panel",
+        action: 'open_content_pilot_panel',
       },
       () => {
         if (chrome.runtime.lastError) {
           // "message port closed"는 정상적인 상황 (탭이 닫히거나 content script가 없을 때)
           // 다른 에러만 경고로 표시
-          const errorMsg = chrome.runtime.lastError.message || "";
+          const errorMsg = chrome.runtime.lastError.message || '';
           if (
-            !errorMsg.includes("message port closed") &&
-            !errorMsg.includes("Could not establish connection")
+            !errorMsg.includes('message port closed') &&
+            !errorMsg.includes('Could not establish connection')
           ) {
-            Logger.warn("[sendMessage] 메시지 전송 실패:", errorMsg);
+            Logger.warn('[sendMessage] 메시지 전송 실패:', errorMsg);
           } else {
             // 정상적인 상황이므로 디버그 레벨로만 로깅
-            Logger.debug("[sendMessage] 메시지 포트 닫힘 (정상):", errorMsg);
+            Logger.debug('[sendMessage] 메시지 포트 닫힘 (정상):', errorMsg);
           }
         }
       }
@@ -148,28 +148,26 @@ chrome.action.onClicked.addListener((tab) => {
 
 // 1. 알람 리스너 (스케줄러)
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "fetch-channels") {
-    Logger.biz("⏰ [Alarm] 채널 데이터 수집 시작");
+  if (alarm.name === 'fetch-channels') {
+    Logger.biz('⏰ [Alarm] 채널 데이터 수집 시작');
     fetchAllChannelData();
-  } else if (alarm.name === "update-performance-metrics") {
-    Logger.biz("⏰ [Alarm] 성과 지표 업데이트 시작");
+  } else if (alarm.name === 'update-performance-metrics') {
+    Logger.biz('⏰ [Alarm] 성과 지표 업데이트 시작');
     updateAllPerformanceMetrics();
   }
 });
 
 // [최적화] 콘텐츠 스크립트와의 롱 런타임 연결(Keep-alive) 처리
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === "content-script-keepalive") {
-    Logger.debug(
-      `[Background] 콘텐츠 스크립트 연결됨: ${port.sender?.tab?.id}`
-    );
+  if (port.name === 'content-script-keepalive') {
+    Logger.debug(`[Background] 콘텐츠 스크립트 연결됨: ${port.sender?.tab?.id}`);
 
     // 포트가 끊어졌을 때의 처리 (선택 사항)
     port.onDisconnect.addListener(() => {
       const err = chrome.runtime.lastError;
       Logger.debug(
         `[Background] 콘텐츠 스크립트 연결 해제: ${port.sender?.tab?.id}`,
-        err ? `(Error: ${err.message})` : ""
+        err ? `(Error: ${err.message})` : ''
       );
     });
   }
@@ -177,24 +175,24 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // 2. 설치/업데이트 리스너
 chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install" || details.reason === "update") {
+  if (details.reason === 'install' || details.reason === 'update') {
     Logger.info(`[System] Extension ${details.reason}d. Registering alarms...`);
-    chrome.alarms.create("fetch-channels", {
+    chrome.alarms.create('fetch-channels', {
       delayInMinutes: 1,
       periodInMinutes: 240,
     });
-    chrome.alarms.create("update-performance-metrics", {
+    chrome.alarms.create('update-performance-metrics', {
       delayInMinutes: 5,
       periodInMinutes: 360,
     });
 
     // [실질적 원인 파악] 업데이트 플래그 설정 (content script에서 실제 업데이트 여부 확인용)
-    if (details.reason === "update") {
+    if (details.reason === 'update') {
       chrome.storage.local.set({
         extension_updated: true,
         extension_updated_time: Date.now(),
       });
-      Logger.info("[System] 확장 프로그램 업데이트 플래그 설정");
+      Logger.info('[System] 확장 프로그램 업데이트 플래그 설정');
     }
 
     // 기본 설정 초기화
@@ -220,7 +218,7 @@ chrome.runtime.onInstalled.addListener((details) => {
  */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
-  if (msg.action.endsWith("_in_offscreen_response")) {
+  if (msg.action.endsWith('_in_offscreen_response')) {
     return false; // 다른 리스너가 처리하도록 함
   }
 
@@ -236,37 +234,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   };
 
   // === [System] 연결 확인 ===
-  if (msg.action === "ping") {
-    sendResponse({ success: true, message: "pong" });
+  if (msg.action === 'ping') {
+    sendResponse({ success: true, message: 'pong' });
     return true;
   }
 
   // === [Collector Service] 데이터 수집 ===
-  if (msg.action === "fetch_all_channel_data")
-    return handleAsync(fetchAllChannelData());
-  if (msg.action === "refresh_channel_data")
+  if (msg.action === 'fetch_all_channel_data') return handleAsync(fetchAllChannelData());
+  if (msg.action === 'refresh_channel_data')
     return handleAsync(refreshChannelData(msg.sourceId, msg.platform));
-  if (msg.action === "fetch_and_save_single_post")
-    return handleAsync(
-      fetchAndSaveSinglePost(msg.url, msg.channelId, msg.sourceId)
-    );
-  if (msg.action === "delete_channel") {
+  if (msg.action === 'fetch_and_save_single_post')
+    return handleAsync(fetchAndSaveSinglePost(msg.url, msg.channelId, msg.sourceId));
+  if (msg.action === 'delete_channel') {
     return handleAsync(
       (async () => {
         const { id: channelId, url: channelUrl } = msg;
         console.log(
-          "[Background] delete_channel - channelId:",
+          '[Background] delete_channel - channelId:',
           channelId,
-          "channelUrl:",
+          'channelUrl:',
           channelUrl
         );
         const userId = await getCurrentUserId();
 
         // Guard: avoid writing to default_user when unauthenticated
         if (userId === CONSTANTS.USER_ID) {
-          Logger.warn('[link_published_url] No valid user ID (default_user) — aborting link_published_url to avoid creating default_user data');
+          Logger.warn(
+            '[link_published_url] No valid user ID (default_user) — aborting link_published_url to avoid creating default_user data'
+          );
           // Notify the UI to prompt login
-          chrome.runtime.sendMessage({ action: 'show_error_toast', errorType: 'UNAUTHORIZED', message: '로그인이 필요합니다. 퍼포먼스 추적을 시작하려면 로그인해주세요.' }).catch(() => {});
+          chrome.runtime
+            .sendMessage({
+              action: 'show_error_toast',
+              errorType: 'UNAUTHORIZED',
+              message: '로그인이 필요합니다. 퍼포먼스 추적을 시작하려면 로그인해주세요.',
+            })
+            .catch(() => {});
           return { success: false, error: '로그인이 필요합니다.' };
         }
 
@@ -282,13 +285,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // blogs에서 제거
           if (channelsData.myChannels.blogs) {
             const originalLength = channelsData.myChannels.blogs.length;
-            channelsData.myChannels.blogs =
-              channelsData.myChannels.blogs.filter((ch) => {
-                const chId =
-                  ch.id ||
-                  (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, "") : null);
-                return chId !== channelId;
-              });
+            channelsData.myChannels.blogs = channelsData.myChannels.blogs.filter((ch) => {
+              const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
+              return chId !== channelId;
+            });
             if (channelsData.myChannels.blogs.length < originalLength) {
               channelRemoved = true;
             }
@@ -296,13 +296,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // youtubes에서 제거
           if (channelsData.myChannels.youtubes) {
             const originalLength = channelsData.myChannels.youtubes.length;
-            channelsData.myChannels.youtubes =
-              channelsData.myChannels.youtubes.filter((ch) => {
-                const chId =
-                  ch.id ||
-                  (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, "") : null);
-                return chId !== channelId;
-              });
+            channelsData.myChannels.youtubes = channelsData.myChannels.youtubes.filter((ch) => {
+              const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
+              return chId !== channelId;
+            });
             if (channelsData.myChannels.youtubes.length < originalLength) {
               channelRemoved = true;
             }
@@ -311,15 +308,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         if (channelRemoved) {
           await set(channelsRef, channelsData);
-          console.log("[Background] 채널 목록에서 제거 완료");
+          console.log('[Background] 채널 목록에서 제거 완료');
         }
 
         // 2. 연쇄 삭제 실행
-        const result = await deleteChannelDataCascade(
-          channelId,
-          userId,
-          channelUrl
-        );
+        const result = await deleteChannelDataCascade(channelId, userId, channelUrl);
         if (!result.success) {
           throw new Error(result.error);
         }
@@ -331,40 +324,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })()
     );
   }
-  if (msg.action === "fetch_image_as_base64")
-    return handleAsync(fetchImageAsBase64(msg.url));
+  if (msg.action === 'fetch_image_as_base64') return handleAsync(fetchImageAsBase64(msg.url));
 
   // === [Analytics Service] 성과 분석 & 진단 ===
-  if (msg.action === "trigger_performance_refresh")
+  if (msg.action === 'trigger_performance_refresh')
     return handleAsync(updateAllPerformanceMetrics());
-  if (msg.action === "check_adsense_registration")
+  if (msg.action === 'check_adsense_registration')
     return handleAsync(checkAdSenseRegistrationStatus());
-  if (msg.action === "run_system_diagnosis")
-    return handleAsync(runFullSystemDiagnosis());
+  if (msg.action === 'run_system_diagnosis') return handleAsync(runFullSystemDiagnosis());
   // TODO: 아래 함수들은 아직 구현되지 않음
-  if (msg.action === "run_adsense_deep_diagnosis")
-    return handleAsync(
-      Promise.reject(new Error("runAdSenseDeepDiagnosis: 아직 구현되지 않음"))
-    );
-  if (msg.action === "test_blog_connection")
-    return handleAsync(
-      Promise.reject(new Error("testBlogConnection: 아직 구현되지 않음"))
-    );
-  if (msg.action === "test_adsense_ga4_access")
-    return handleAsync(
-      Promise.reject(new Error("testAdSenseGa4Access: 아직 구현되지 않음"))
-    );
+  if (msg.action === 'run_adsense_deep_diagnosis')
+    return handleAsync(Promise.reject(new Error('runAdSenseDeepDiagnosis: 아직 구현되지 않음')));
+  if (msg.action === 'test_blog_connection')
+    return handleAsync(Promise.reject(new Error('testBlogConnection: 아직 구현되지 않음')));
+  if (msg.action === 'test_adsense_ga4_access')
+    return handleAsync(Promise.reject(new Error('testAdSenseGa4Access: 아직 구현되지 않음')));
 
   // === [AI Service] 생성 및 분석 ===
-  if (msg.action === "generate_draft_from_idea")
+  if (msg.action === 'generate_draft_from_idea')
     return handleAsync(generateDraftFromIdea(msg.data));
-  if (msg.action === "generate_idea_briefing") {
+  if (msg.action === 'generate_idea_briefing') {
     const { cardId, title, description, ...opts } = msg.data;
     opts.onProgress = (p) => {
       if (sender.tab?.id) {
         chrome.tabs
           .sendMessage(sender.tab.id, {
-            action: "briefing_progress",
+            action: 'briefing_progress',
             cardId,
             progress: p,
           })
@@ -372,20 +357,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
             if (
               err?.message &&
-              !err.message.includes("message port closed") &&
-              !err.message.includes("Could not establish connection")
+              !err.message.includes('message port closed') &&
+              !err.message.includes('Could not establish connection')
             ) {
-              Logger.debug(
-                "[sendMessage] briefing_progress 전송 실패:",
-                err.message
-              );
+              Logger.debug('[sendMessage] briefing_progress 전송 실패:', err.message);
             }
           });
       }
     };
     return handleAsync(generateIdeaBriefing(cardId, title, description, opts));
   }
-  if (msg.action === "ai_generate_images") {
+  if (msg.action === 'ai_generate_images') {
     return handleAsync(
       generateAiImage(msg.data.prompt, msg.data.count).then((images) => ({
         success: true,
@@ -393,27 +375,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }))
     );
   }
-  if (msg.action === "analyze_image_for_template")
+  if (msg.action === 'analyze_image_for_template')
     return handleAsync(analyzeImageForTemplate(msg.data));
-  if (msg.action === "call_gemini")
-    return handleAsync(
-      callGeminiAPI(msg.prompt).then((text) => ({ success: true, text }))
-    );
-  if (msg.action === "analyze_my_channel")
-    return handleAsync(analyzeMyChannel(msg.data));
-  if (msg.action === "generate_content_ideas")
-    return handleAsync(generateContentIdeas(msg.data));
-  if (msg.action === "request_search_keywords")
+  if (msg.action === 'call_gemini')
+    return handleAsync(callGeminiAPI(msg.prompt).then((text) => ({ success: true, text })));
+  if (msg.action === 'analyze_my_channel') return handleAsync(analyzeMyChannel(msg.data));
+  if (msg.action === 'generate_content_ideas') return handleAsync(generateContentIdeas(msg.data));
+  if (msg.action === 'request_search_keywords')
     return handleAsync(generateAndSendKeywords(msg.data, sender));
-  if (msg.action === "analyze_video_comments")
+  if (msg.action === 'analyze_video_comments')
     return handleAsync(analyzeVideoComments(msg.videoId));
-  if (msg.action === "upload_thumbnail_to_storage") {
+  if (msg.action === 'upload_thumbnail_to_storage') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
         return uploadImageToFirebaseStorage(
           msg.data.dataUrl,
-          `thumbnails/${userId}/${msg.data.filename || Date.now() + ".png"}`,
+          `thumbnails/${userId}/${msg.data.filename || Date.now() + '.png'}`,
           userId
         ).then((url) => ({ success: true, url }));
       })()
@@ -421,7 +399,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Offscreen Image Processing] 이미지 처리 가속 ===
-  if (msg.action === "resize_image_in_offscreen") {
+  if (msg.action === 'resize_image_in_offscreen') {
     // [변경] OffscreenService의 함수 호출
     return handleAsync(
       resizeImageInOffscreen(
@@ -433,7 +411,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "render_template_in_offscreen") {
+  if (msg.action === 'render_template_in_offscreen') {
     // [변경] OffscreenService의 함수 호출
     return handleAsync(
       renderTemplateInOffscreen(
@@ -446,50 +424,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // [신규] 이미지 크롭 요청 라우팅 (offscreen.js로 전달)
-  if (msg.action === "crop_image_in_offscreen") {
+  if (msg.action === 'crop_image_in_offscreen') {
     // offscreen.js로 직접 전달 (응답은 offscreen.js에서 처리)
     chrome.runtime
       .sendMessage({
-        action: "crop_image_in_offscreen",
+        action: 'crop_image_in_offscreen',
         imageDataUrl: msg.imageDataUrl,
         targetRatio: msg.targetRatio,
       })
       .catch((err) => {
-        Logger.error("[Router] 이미지 크롭 요청 전송 실패:", err);
+        Logger.error('[Router] 이미지 크롭 요청 전송 실패:', err);
       });
     // 응답은 offscreen.js에서 직접 처리하므로 여기서는 true 반환
     return true;
   }
 
   // [신규] 외부(팝업 등)에서 HTML 정제를 요청할 경우를 대비한 라우트
-  if (msg.action === "sanitize_html") {
-    Logger.debug("[Router] sanitize_html 요청 수신");
+  if (msg.action === 'sanitize_html') {
+    Logger.debug('[Router] sanitize_html 요청 수신');
     return handleAsync(
-      sanitizeHtmlInOffscreen(msg.rawText || msg.data?.rawText || "")
+      sanitizeHtmlInOffscreen(msg.rawText || msg.data?.rawText || '')
         .then((cleanedHtml) => {
-          Logger.debug("[Router] sanitize_html 정제 완료");
+          Logger.debug('[Router] sanitize_html 정제 완료');
           return { success: true, cleanedHtml };
         })
         .catch((error) => {
-          Logger.error("[Router] sanitize_html 정제 실패:", error);
+          Logger.error('[Router] sanitize_html 정제 실패:', error);
           throw error;
         })
     );
   }
 
   // === [Auth Service] 인증 ===
-  if (msg.action === "start_google_auth") return handleAsync(startGoogleAuth());
-  if (msg.action === "revoke_google_auth")
-    return handleAsync(revokeGoogleAuth());
+  if (msg.action === 'start_google_auth') return handleAsync(startGoogleAuth());
+  if (msg.action === 'revoke_google_auth') return handleAsync(revokeGoogleAuth());
 
   // === [System] 인증 토큰 가져오기 (테스트 스크립트용) ===
-  if (msg.action === "get_auth_token") {
+  if (msg.action === 'get_auth_token') {
     return handleAsync(
       (async () => {
         try {
-          const { getValidToken } = await import(
-            "./js/services/authService.js"
-          );
+          const { getValidToken } = await import('./js/services/authService.js');
           const token = await getValidToken(false);
           if (token) {
             return { success: true, token };
@@ -501,11 +476,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
             return {
               success: false,
-              error: "토큰을 가져올 수 없습니다. 로그인이 필요합니다.",
+              error: '토큰을 가져올 수 없습니다. 로그인이 필요합니다.',
             };
           }
         } catch (error) {
-          Logger.error("[get_auth_token] 오류:", error);
+          Logger.error('[get_auth_token] 오류:', error);
           return { success: false, error: error.message };
         }
       })()
@@ -513,13 +488,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [System] 인증 토큰 갱신 (테스트 스크립트용) ===
-  if (msg.action === "refresh_auth_token") {
+  if (msg.action === 'refresh_auth_token') {
     return handleAsync(
       (async () => {
         try {
-          const { refreshAuthToken } = await import(
-            "./js/services/authService.js"
-          );
+          const { refreshAuthToken } = await import('./js/services/authService.js');
           const result = await refreshAuthToken(false);
           if (result.success) {
             return { success: true, token: result.token };
@@ -529,10 +502,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (interactiveResult.success) {
               return { success: true, token: interactiveResult.token };
             }
-            return { success: false, error: result.error || "토큰 갱신 실패" };
+            return { success: false, error: result.error || '토큰 갱신 실패' };
           }
         } catch (error) {
-          Logger.error("[refresh_auth_token] 오류:", error);
+          Logger.error('[refresh_auth_token] 오류:', error);
           return { success: false, error: error.message };
         }
       })()
@@ -540,29 +513,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [DB Operations] 단순 데이터 조작 (직접 처리) ===
-  if (msg.action === "add_idea_to_kanban") {
+  if (msg.action === 'add_idea_to_kanban') {
     return handleAsync(
       (async () => {
         const ideaData = JSON.parse(msg.data);
-        const status = msg.status || "ideas";
+        const status = msg.status || 'ideas';
         const channelId = msg.channelId || null;
         return await addIdeaToKanban(ideaData, status, channelId);
       })()
     );
   }
 
-  if (msg.action === "link_published_url") {
+  if (msg.action === 'link_published_url') {
     return handleAsync(
       (async () => {
         const { cardId, url, status } = msg.data || {};
 
         if (!cardId || !url || !status) {
-          Logger.error("[link_published_url] 필수 정보 부족:", {
+          Logger.error('[link_published_url] 필수 정보 부족:', {
             cardId,
             url,
             status,
           });
-          return { success: false, error: "필요한 정보가 부족합니다." };
+          return { success: false, error: '필요한 정보가 부족합니다.' };
         }
 
         const userId = await getCurrentUserId();
@@ -585,17 +558,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // URL 인덱스 업데이트
         try {
-          await updateUrlIndex(
-            cardId,
-            status,
-            existingCard.origin?.postUrl || null,
-            url
-          );
+          await updateUrlIndex(cardId, status, existingCard.origin?.postUrl || null, url);
         } catch (error) {
-          Logger.warn(
-            `[link_published_url] URL 인덱스 업데이트 실패 (${cardId}):`,
-            error
-          );
+          Logger.warn(`[link_published_url] URL 인덱스 업데이트 실패 (${cardId}):`, error);
           // 인덱스 업데이트 실패해도 연결은 성공으로 처리
         }
 
@@ -629,43 +594,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           chrome.runtime
             .sendMessage({
-              action: "kanban_data_updated",
+              action: 'kanban_data_updated',
               data: kanbanData,
             })
             .catch((err) => {
               if (
                 err?.message &&
-                !err.message.includes("message port closed") &&
-                !err.message.includes("Could not establish connection")
+                !err.message.includes('message port closed') &&
+                !err.message.includes('Could not establish connection')
               ) {
-                Logger.debug(
-                  "[sendMessage] kanban_data_updated 전송 실패:",
-                  err.message
-                );
+                Logger.debug('[sendMessage] kanban_data_updated 전송 실패:', err.message);
               }
             });
 
           if (sender.tab?.id) {
             chrome.tabs
               .sendMessage(sender.tab.id, {
-                action: "kanban_data_updated",
+                action: 'kanban_data_updated',
                 data: kanbanData,
               })
               .catch((err) => {
                 if (
                   err?.message &&
-                  !err.message.includes("message port closed") &&
-                  !err.message.includes("Could not establish connection")
+                  !err.message.includes('message port closed') &&
+                  !err.message.includes('Could not establish connection')
                 ) {
-                  Logger.debug(
-                    "[sendMessage] kanban_data_updated 전송 실패:",
-                    err.message
-                  );
+                  Logger.debug('[sendMessage] kanban_data_updated 전송 실패:', err.message);
                 }
               });
           }
         } catch (error) {
-          Logger.warn("[link_published_url] UI 갱신 메시지 전송 실패:", error);
+          Logger.warn('[link_published_url] UI 갱신 메시지 전송 실패:', error);
         }
 
         return { success: true };
@@ -673,7 +632,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "update_kanban_card") {
+  if (msg.action === 'update_kanban_card') {
     // msg.data가 객체인 경우와 직접 속성이 있는 경우 모두 처리
     const cardId = msg.data?.cardId || msg.cardId;
     const status = msg.data?.status || msg.status;
@@ -682,21 +641,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         if (!cardId || !status || !updates) {
-          Logger.error("[update_kanban_card] 필수 정보 부족:", {
+          Logger.error('[update_kanban_card] 필수 정보 부족:', {
             cardId,
             status,
             hasUpdates: !!updates,
           });
-          return { success: false, error: "필수 정보가 부족합니다." };
+          return { success: false, error: '필수 정보가 부족합니다.' };
         }
 
         const userId = await getCurrentUserId();
         const updatePath = `kanban/${userId}/${status}/${cardId}`;
 
-        Logger.debug(
-          `[update_kanban_card] 업데이트 시작 - path: ${updatePath}, updates:`,
-          updates
-        );
+        Logger.debug(`[update_kanban_card] 업데이트 시작 - path: ${updatePath}, updates:`, updates);
 
         // 데이터 정제 (undefined → null)
         const cleanedUpdates = cleanDataForFirebase(updates);
@@ -716,14 +672,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송
           chrome.runtime
             .sendMessage({
-              action: "kanban_data_updated",
+              action: 'kanban_data_updated',
               data: kanbanData,
             })
             .catch((err) => {
               if (
                 err?.message &&
-                !err.message.includes("message port closed") &&
-                !err.message.includes("Could not establish connection")
+                !err.message.includes('message port closed') &&
+                !err.message.includes('Could not establish connection')
               ) {
                 Logger.debug(
                   `[update_kanban_card] 확장 프로그램 UI 메시지 전송 실패:`,
@@ -738,13 +694,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               if (
                 tab.id &&
                 tab.url &&
-                !tab.url.startsWith("chrome://") &&
-                !tab.url.startsWith("edge://") &&
-                !tab.url.startsWith("about:")
+                !tab.url.startsWith('chrome://') &&
+                !tab.url.startsWith('edge://') &&
+                !tab.url.startsWith('about:')
               ) {
                 chrome.tabs
                   .sendMessage(tab.id, {
-                    action: "kanban_data_updated",
+                    action: 'kanban_data_updated',
                     data: kanbanData,
                   })
                   .catch((err) => {
@@ -755,10 +711,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
           Logger.debug(`[update_kanban_card] UI 갱신 메시지 전송 완료`);
         } catch (updateError) {
-          Logger.warn(
-            `[update_kanban_card] UI 갱신 메시지 전송 실패:`,
-            updateError
-          );
+          Logger.warn(`[update_kanban_card] UI 갱신 메시지 전송 실패:`, updateError);
         }
 
         return { success: true };
@@ -766,7 +719,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "delete_kanban_card") {
+  if (msg.action === 'delete_kanban_card') {
     return handleAsync(
       (async () => {
         const { cardId, status } = msg.data;
@@ -775,19 +728,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "move_kanban_card") {
+  if (msg.action === 'move_kanban_card') {
     return handleAsync(
       (async () => {
         const { cardId, originalStatus, newStatus } = msg.data;
         if (!cardId || !originalStatus || !newStatus) {
-          return { success: false, error: "필수 정보가 부족합니다." };
+          return { success: false, error: '필수 정보가 부족합니다.' };
         }
 
         const userId = await getCurrentUserId();
-        const originalRef = ref(
-          getDb(),
-          `kanban/${userId}/${originalStatus}/${cardId}`
-        );
+        const originalRef = ref(getDb(), `kanban/${userId}/${originalStatus}/${cardId}`);
         const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${cardId}`);
 
         try {
@@ -795,7 +745,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const cardSnap = await get(originalRef);
           const cardData = cardSnap?.val();
           if (!cardData) {
-            return { success: false, error: "이동할 카드를 찾을 수 없습니다." };
+            return { success: false, error: '이동할 카드를 찾을 수 없습니다.' };
           }
 
           // 새 위치에 카드 데이터 저장
@@ -804,9 +754,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // 원래 위치에서 카드 삭제
           await remove(originalRef);
 
-          Logger.biz(
-            `[Kanban] 카드 이동: ${cardId} (${originalStatus} → ${newStatus})`
-          );
+          Logger.biz(`[Kanban] 카드 이동: ${cardId} (${originalStatus} → ${newStatus})`);
 
           // UI 갱신 메시지 전송
           try {
@@ -816,14 +764,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             chrome.runtime
               .sendMessage({
-                action: "kanban_data_updated",
+                action: 'kanban_data_updated',
                 data: kanbanData,
               })
               .catch((err) => {
                 if (
                   err?.message &&
-                  !err.message.includes("message port closed") &&
-                  !err.message.includes("Could not establish connection")
+                  !err.message.includes('message port closed') &&
+                  !err.message.includes('Could not establish connection')
                 ) {
                   Logger.debug(
                     `[move_kanban_card] 확장 프로그램 UI 메시지 전송 실패:`,
@@ -837,13 +785,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (
                   tab.id &&
                   tab.url &&
-                  !tab.url.startsWith("chrome://") &&
-                  !tab.url.startsWith("edge://") &&
-                  !tab.url.startsWith("about:")
+                  !tab.url.startsWith('chrome://') &&
+                  !tab.url.startsWith('edge://') &&
+                  !tab.url.startsWith('about:')
                 ) {
                   chrome.tabs
                     .sendMessage(tab.id, {
-                      action: "kanban_data_updated",
+                      action: 'kanban_data_updated',
                       data: kanbanData,
                     })
                     .catch((err) => {
@@ -853,10 +801,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               });
             });
           } catch (updateError) {
-            Logger.warn(
-              `[move_kanban_card] UI 갱신 메시지 전송 실패:`,
-              updateError
-            );
+            Logger.warn(`[move_kanban_card] UI 갱신 메시지 전송 실패:`, updateError);
           }
 
           return { success: true };
@@ -868,12 +813,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "delete_draft_and_publish_info") {
+  if (msg.action === 'delete_draft_and_publish_info') {
     return handleAsync(
       (async () => {
         const { ideaId, status } = msg.data || msg;
         if (!ideaId || !status) {
-          return { success: false, error: "필수 정보가 부족합니다." };
+          return { success: false, error: '필수 정보가 부족합니다.' };
         }
 
         const userId = await getCurrentUserId();
@@ -885,7 +830,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const cardData = cardSnap?.val();
 
           if (!cardData) {
-            return { success: false, error: "카드를 찾을 수 없습니다." };
+            return { success: false, error: '카드를 찾을 수 없습니다.' };
           }
 
           // draftContent, publishInfo, seoTitle 제거
@@ -894,32 +839,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           Logger.debug(
             `[delete_draft_and_publish_info] 필드 제거 시작 - draftContent: ${
-              cardData.draftContent !== undefined ? "있음" : "없음"
-            }, publishInfo: ${
-              cardData.publishInfo !== undefined ? "있음" : "없음"
-            }, seoTitle: ${
-              cardData.seoTitle !== undefined ? "있음" : "없음"
-            }, workspace.draft: ${
-              cardData.workspace?.draft !== undefined ? "있음" : "없음"
-            }`
+              cardData.draftContent !== undefined ? '있음' : '없음'
+            }, publishInfo: ${cardData.publishInfo !== undefined ? '있음' : '없음'}, seoTitle: ${
+              cardData.seoTitle !== undefined ? '있음' : '없음'
+            }, workspace.draft: ${cardData.workspace?.draft !== undefined ? '있음' : '없음'}`
           );
 
           // 필드를 제외한 새 데이터 구성
-          const {
-            draftContent,
-            publishInfo,
-            seoTitle,
-            workspace,
-            ...restCardData
-          } = cardData;
+          const { draftContent, publishInfo, seoTitle, workspace, ...restCardData } = cardData;
 
           // workspace에서 draft만 제거한 새 객체 생성
           let cleanedWorkspace = workspace;
           if (workspace) {
             const { draft, ...restWorkspace } = workspace;
             // workspace에 다른 필드가 있으면 draft만 제거한 객체 사용, 없으면 undefined
-            cleanedWorkspace =
-              Object.keys(restWorkspace).length > 0 ? restWorkspace : undefined;
+            cleanedWorkspace = Object.keys(restWorkspace).length > 0 ? restWorkspace : undefined;
           }
 
           // 필드를 제외한 새 데이터 구성
@@ -928,12 +862,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ...(cleanedWorkspace ? { workspace: cleanedWorkspace } : {}),
           };
 
-          Logger.debug(
-            `[delete_draft_and_publish_info] 필드 제외한 데이터로 교체 시작`
-          );
+          Logger.debug(`[delete_draft_and_publish_info] 필드 제외한 데이터로 교체 시작`);
 
           // 초안 삭제 후 자동으로 아이디어 칸(ideas)으로 이동해야 하는지 확인
-          const shouldMoveToIdeas = status !== "ideas";
+          const shouldMoveToIdeas = status !== 'ideas';
 
           if (shouldMoveToIdeas) {
             // 이동이 필요한 경우: 필드 제거된 데이터를 바로 아이디어 칸에 저장하고 원래 위치에서 삭제
@@ -944,10 +876,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const ideasPath = `${COLLECTIONS.KANBAN}/${userId}/${KANBAN_STATUS.IDEAS}/${ideaId}`;
 
             // 필드 제거된 데이터를 아이디어 칸에 저장
-            await set(
-              ref(getDb(), ideasPath),
-              cleanDataForFirebase(cleanedCardData)
-            );
+            await set(ref(getDb(), ideasPath), cleanDataForFirebase(cleanedCardData));
 
             // 원래 위치에서 카드 삭제
             await remove(ref(getDb(), cardPath));
@@ -957,10 +886,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             );
           } else {
             // 이동이 필요 없는 경우: 현재 위치에서 필드만 제거
-            await set(
-              ref(getDb(), cardPath),
-              cleanDataForFirebase(cleanedCardData)
-            );
+            await set(ref(getDb(), cardPath), cleanDataForFirebase(cleanedCardData));
 
             Logger.biz(
               `✅ [delete_draft_and_publish_info] 초안 및 발행 정보 삭제 완료 - cardId: ${ideaId}`
@@ -978,8 +904,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               const hasDraftField = verifyData.draftContent !== undefined;
               const hasPublishInfoField = verifyData.publishInfo !== undefined;
               const hasSeoTitleField = verifyData.seoTitle !== undefined;
-              const hasWorkspaceDraftField =
-                verifyData.workspace?.draft !== undefined;
+              const hasWorkspaceDraftField = verifyData.workspace?.draft !== undefined;
 
               Logger.debug(
                 `[delete_draft_and_publish_info] 필드 존재 확인 - draftContent: ${hasDraftField}, publishInfo: ${hasPublishInfoField}, seoTitle: ${hasSeoTitleField}, workspace.draft: ${hasWorkspaceDraftField}`
@@ -991,9 +916,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 hasSeoTitleField ||
                 hasWorkspaceDraftField
               ) {
-                Logger.error(
-                  `[delete_draft_and_publish_info] ⚠️ 필드가 여전히 존재함 - 재시도...`
-                );
+                Logger.error(`[delete_draft_and_publish_info] ⚠️ 필드가 여전히 존재함 - 재시도...`);
 
                 // 재시도: 다시 한 번 필드 제거
                 const {
@@ -1007,36 +930,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (vWorkspace) {
                   const { draft: vDraftField, ...vRestWorkspace } = vWorkspace;
                   vCleanedWorkspace =
-                    Object.keys(vRestWorkspace).length > 0
-                      ? vRestWorkspace
-                      : undefined;
+                    Object.keys(vRestWorkspace).length > 0 ? vRestWorkspace : undefined;
                 }
 
                 const vCleanedCardData = {
                   ...vRest,
-                  ...(vCleanedWorkspace
-                    ? { workspace: vCleanedWorkspace }
-                    : {}),
+                  ...(vCleanedWorkspace ? { workspace: vCleanedWorkspace } : {}),
                 };
 
-                await set(
-                  ref(getDb(), cardPath),
-                  cleanDataForFirebase(vCleanedCardData)
-                );
+                await set(ref(getDb(), cardPath), cleanDataForFirebase(vCleanedCardData));
 
                 // 최종 확인
                 await new Promise((resolve) => setTimeout(resolve, 300));
                 const finalVerifySnap = await get(ref(getDb(), cardPath));
                 const finalVerifyData = finalVerifySnap?.val();
 
-                const finalHasDraft =
-                  finalVerifyData?.draftContent !== undefined;
-                const finalHasPublishInfo =
-                  finalVerifyData?.publishInfo !== undefined;
-                const finalHasSeoTitle =
-                  finalVerifyData?.seoTitle !== undefined;
-                const finalHasWorkspaceDraft =
-                  finalVerifyData?.workspace?.draft !== undefined;
+                const finalHasDraft = finalVerifyData?.draftContent !== undefined;
+                const finalHasPublishInfo = finalVerifyData?.publishInfo !== undefined;
+                const finalHasSeoTitle = finalVerifyData?.seoTitle !== undefined;
+                const finalHasWorkspaceDraft = finalVerifyData?.workspace?.draft !== undefined;
 
                 if (
                   finalHasDraft ||
@@ -1069,23 +981,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             Logger.debug(
               `[delete_draft_and_publish_info] UI 갱신 메시지 전송 - 카드 개수: ${Object.keys(
                 kanbanData
-              ).reduce(
-                (sum, status) =>
-                  sum + Object.keys(kanbanData[status] || {}).length,
-                0
-              )}`
+              ).reduce((sum, status) => sum + Object.keys(kanbanData[status] || {}).length, 0)}`
             );
 
             chrome.runtime
               .sendMessage({
-                action: "kanban_data_updated",
+                action: 'kanban_data_updated',
                 data: kanbanData,
               })
               .catch((err) => {
                 if (
                   err?.message &&
-                  !err.message.includes("message port closed") &&
-                  !err.message.includes("Could not establish connection")
+                  !err.message.includes('message port closed') &&
+                  !err.message.includes('Could not establish connection')
                 ) {
                   Logger.debug(
                     `[delete_draft_and_publish_info] 확장 프로그램 UI 메시지 전송 실패:`,
@@ -1099,13 +1007,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (
                   tab.id &&
                   tab.url &&
-                  !tab.url.startsWith("chrome://") &&
-                  !tab.url.startsWith("edge://") &&
-                  !tab.url.startsWith("about:")
+                  !tab.url.startsWith('chrome://') &&
+                  !tab.url.startsWith('edge://') &&
+                  !tab.url.startsWith('about:')
                 ) {
                   chrome.tabs
                     .sendMessage(tab.id, {
-                      action: "kanban_data_updated",
+                      action: 'kanban_data_updated',
                       data: kanbanData,
                     })
                     .catch((err) => {
@@ -1115,25 +1023,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               });
             });
           } catch (updateError) {
-            Logger.warn(
-              `[delete_draft_and_publish_info] UI 갱신 메시지 전송 실패:`,
-              updateError
-            );
+            Logger.warn(`[delete_draft_and_publish_info] UI 갱신 메시지 전송 실패:`, updateError);
           }
 
           return { success: true, moved: shouldMoveToIdeas };
         } catch (error) {
-          Logger.error("[delete_draft_and_publish_info] 삭제 실패:", error);
+          Logger.error('[delete_draft_and_publish_info] 삭제 실패:', error);
           return { success: false, error: error.message };
         }
       })()
     );
   }
 
-  if (
-    msg.action === "get_kanban_data" ||
-    msg.action === "get_all_kanban_data"
-  ) {
+  if (msg.action === 'get_kanban_data' || msg.action === 'get_all_kanban_data') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
@@ -1145,16 +1047,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           onValue(dbRef, (snapshot) => {
             const data = snapshot?.val() || {};
             const cardsCount = Object.keys(data).length;
-            Logger.debug(
-              `[get_kanban_data] 실시간 업데이트 - 카드 개수: ${cardsCount}`
-            );
+            Logger.debug(`[get_kanban_data] 실시간 업데이트 - 카드 개수: ${cardsCount}`);
             // 모든 탭에 업데이트 메시지 전송
             chrome.tabs.query({}, (tabs) => {
               tabs.forEach((tab) => {
                 if (tab.id) {
                   chrome.tabs
                     .sendMessage(tab.id, {
-                      action: "kanban_data_updated",
+                      action: 'kanban_data_updated',
                       data: data,
                     })
                     .catch((err) => {
@@ -1171,9 +1071,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const snap = await get(dbRef);
         const data = snap?.val() || {};
         const cardsCount = Object.keys(data).length;
-        Logger.info(
-          `[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`
-        );
+        Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };
 
@@ -1181,7 +1079,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (sender.tab?.id) {
           chrome.tabs
             .sendMessage(sender.tab.id, {
-              action: "kanban_data_updated",
+              action: 'kanban_data_updated',
               data: data,
             })
             .catch((err) => {
@@ -1195,14 +1093,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "get_all_scraps") {
+  if (msg.action === 'get_all_scraps') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
         Logger.info(
-          `[get_all_scraps] 요청 수신 - userId: ${userId}, channelId: ${
-            msg.channelId || "null"
-          }`
+          `[get_all_scraps] 요청 수신 - userId: ${userId}, channelId: ${msg.channelId || 'null'}`
         );
         const snap = await get(ref(getDb(), `${COLLECTIONS.SCRAPS}/${userId}`));
         const val = snap?.val() || {};
@@ -1226,8 +1122,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // URL의 origin이 일치하는 경우 포함 (칸반과 동일한 로직)
           if (scrap.channelId && targetChannelId) {
             try {
-              const scrapUrl = atob(scrap.channelId.replace(/=/g, ""));
-              const targetUrl = atob(targetChannelId.replace(/=/g, ""));
+              const scrapUrl = atob(scrap.channelId.replace(/=/g, ''));
+              const targetUrl = atob(targetChannelId.replace(/=/g, ''));
 
               const scrapUrlObj = new URL(scrapUrl);
               const targetUrlObj = new URL(targetUrl);
@@ -1245,9 +1141,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           return false;
         });
-        Logger.info(
-          `[get_all_scraps] 필터링 후 스크랩 개수: ${filtered.length}`
-        );
+        Logger.info(`[get_all_scraps] 필터링 후 스크랩 개수: ${filtered.length}`);
 
         const responseData = {
           success: true,
@@ -1261,7 +1155,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (tab.id) {
               chrome.tabs
                 .sendMessage(tab.id, {
-                  action: "scraps_data_updated",
+                  action: 'scraps_data_updated',
                   scraps: responseData.scraps,
                 })
                 .catch((err) => {
@@ -1277,7 +1171,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "cp_get_firebase_scraps") {
+  if (msg.action === 'cp_get_firebase_scraps') {
     return handleAsync(
       (async () => {
         const targetChannelId = msg.channelId || null;
@@ -1286,7 +1180,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "get_channel_content") {
+  if (msg.action === 'get_channel_content') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
@@ -1316,9 +1210,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
         );
 
-        const blogs = Object.values(blogsRaw).filter(
-          (item) => item !== null && item !== undefined
-        );
+        const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
         const youtubes = Object.values(youtubesRaw).filter(
           (item) => item !== null && item !== undefined
         );
@@ -1362,13 +1254,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Channel Management] 채널 관리 ===
-  if (msg.action === "get_channels_and_key") {
+  if (msg.action === 'get_channels_and_key') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
         Logger.info(`[get_channels_and_key] 요청 수신 - userId: ${userId}`);
         const [storage, channelsSnap] = await Promise.all([
-          chrome.storage.local.get(["youtubeApiKey", "geminiApiKey"]),
+          chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']),
           get(ref(getDb(), `channels/${userId}`)),
         ]);
 
@@ -1383,8 +1275,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const responseData = {
           success: true,
           data: {
-            youtubeApiKey: storage.youtubeApiKey || "",
-            geminiApiKey: storage.geminiApiKey || "",
+            youtubeApiKey: storage.youtubeApiKey || '',
+            geminiApiKey: storage.geminiApiKey || '',
             ...channelsData,
           },
         };
@@ -1393,7 +1285,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (sender.tab?.id) {
           chrome.tabs
             .sendMessage(sender.tab.id, {
-              action: "channels_data_updated",
+              action: 'channels_data_updated',
               data: responseData.data,
             })
             .catch((err) => {
@@ -1407,7 +1299,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "get_my_channels") {
+  if (msg.action === 'get_my_channels') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
@@ -1421,7 +1313,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "save_channels_and_key") {
+  if (msg.action === 'save_channels_and_key') {
     return handleAsync(
       (async () => {
         const { youtubeApiKey, geminiApiKey, channels, myChannels } = msg.data;
@@ -1436,10 +1328,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           myChannels: { blogs: [], youtubes: [] },
         };
         if (safeChannels.myChannels) {
-          if (!safeChannels.myChannels.blogs)
-            safeChannels.myChannels.blogs = [];
-          if (!safeChannels.myChannels.youtubes)
-            safeChannels.myChannels.youtubes = [];
+          if (!safeChannels.myChannels.blogs) safeChannels.myChannels.blogs = [];
+          if (!safeChannels.myChannels.youtubes) safeChannels.myChannels.youtubes = [];
         }
 
         // set()으로 덮어쓰기하여 빈 배열도 확실하게 저장
@@ -1447,13 +1337,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // 데이터 수집 트리거
         await fetchAllChannelData();
-        return { success: true, message: "채널 정보가 저장되었습니다." };
+        return { success: true, message: '채널 정보가 저장되었습니다.' };
       })()
     );
   }
 
   // === [Idea Management] 아이디어 관리 ===
-  if (msg.action === "get_idea_data") {
+  if (msg.action === 'get_idea_data') {
     return handleAsync(
       (async () => {
         const { ideaId } = msg;
@@ -1464,12 +1354,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return { success: true, data: allCards[status][ideaId], status };
           }
         }
-        return { success: false, error: "아이디어를 찾을 수 없습니다." };
+        return { success: false, error: '아이디어를 찾을 수 없습니다.' };
       })()
     );
   }
 
-  if (msg.action === "get_kanban_card_status") {
+  if (msg.action === 'get_kanban_card_status') {
     return handleAsync(
       (async () => {
         const { cardId } = msg;
@@ -1480,31 +1370,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return { success: true, status, data: allCards[status][cardId] };
           }
         }
-        return { success: false, error: "카드를 찾을 수 없습니다." };
+        return { success: false, error: '카드를 찾을 수 없습니다.' };
       })()
     );
   }
 
-  if (msg.action === "save_idea_draft") {
+  if (msg.action === 'save_idea_draft') {
     const { ideaId, draft } = msg;
     return handleAsync(
       (async () => {
         // 빈 내용 필터링 (초안 삭제 후 재생성 방지)
-        const content = draft || "";
+        const content = draft || '';
         const trimmedContent = content.trim();
         if (
           !trimmedContent ||
-          trimmedContent === "<p><br></p>" ||
-          trimmedContent === "<p></p>" ||
-          trimmedContent === "<br>"
+          trimmedContent === '<p><br></p>' ||
+          trimmedContent === '<p></p>' ||
+          trimmedContent === '<br>'
         ) {
-          Logger.debug(
-            `[save_idea_draft] 빈 내용 저장 차단 - ideaId: ${ideaId}`
-          );
+          Logger.debug(`[save_idea_draft] 빈 내용 저장 차단 - ideaId: ${ideaId}`);
           return {
             success: true,
             skipped: true,
-            message: "빈 내용은 저장하지 않습니다.",
+            message: '빈 내용은 저장하지 않습니다.',
           };
         }
 
@@ -1525,11 +1413,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         if (!foundStatus || !cardData) {
-          return { success: false, error: "아이디어를 찾을 수 없습니다." };
+          return { success: false, error: '아이디어를 찾을 수 없습니다.' };
         }
 
         // 초안 저장 및 자동 이동: 'ideas' 컬럼에 있으면 'in-progress'로 이동
-        if (foundStatus === "ideas") {
+        if (foundStatus === 'ideas') {
           Logger.debug(
             `[save_idea_draft] 초안 저장 및 자동 이동 - ideaId: ${ideaId} (ideas → in-progress)`
           );
@@ -1547,10 +1435,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           // 'in-progress' 컬럼에 저장
           const newPath = `kanban/${userId}/in-progress/${ideaId}`;
-          await set(
-            ref(getDb(), newPath),
-            cleanDataForFirebase(updatedCardData)
-          );
+          await set(ref(getDb(), newPath), cleanDataForFirebase(updatedCardData));
 
           // 원래 위치에서 삭제
           const oldPath = `kanban/${userId}/ideas/${ideaId}`;
@@ -1568,19 +1453,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             chrome.runtime
               .sendMessage({
-                action: "kanban_data_updated",
+                action: 'kanban_data_updated',
                 data: kanbanData,
               })
               .catch((err) => {
                 if (
                   err?.message &&
-                  !err.message.includes("message port closed") &&
-                  !err.message.includes("Could not establish connection")
+                  !err.message.includes('message port closed') &&
+                  !err.message.includes('Could not establish connection')
                 ) {
-                  Logger.debug(
-                    `[save_idea_draft] 확장 프로그램 UI 메시지 전송 실패:`,
-                    err.message
-                  );
+                  Logger.debug(`[save_idea_draft] 확장 프로그램 UI 메시지 전송 실패:`, err.message);
                 }
               });
 
@@ -1589,13 +1471,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (
                   tab.id &&
                   tab.url &&
-                  !tab.url.startsWith("chrome://") &&
-                  !tab.url.startsWith("edge://") &&
-                  !tab.url.startsWith("about:")
+                  !tab.url.startsWith('chrome://') &&
+                  !tab.url.startsWith('edge://') &&
+                  !tab.url.startsWith('about:')
                 ) {
                   chrome.tabs
                     .sendMessage(tab.id, {
-                      action: "kanban_data_updated",
+                      action: 'kanban_data_updated',
                       data: kanbanData,
                     })
                     .catch((err) => {
@@ -1605,26 +1487,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               });
             });
           } catch (updateError) {
-            Logger.warn(
-              `[save_idea_draft] UI 갱신 메시지 전송 실패:`,
-              updateError
-            );
+            Logger.warn(`[save_idea_draft] UI 갱신 메시지 전송 실패:`, updateError);
           }
 
-          return { success: true, moved: true, newStatus: "in-progress" };
+          return { success: true, moved: true, newStatus: 'in-progress' };
         } else {
           // 'ideas'가 아니면 현재 위치에서 초안만 업데이트
-          await update(
-            ref(getDb(), `kanban/${userId}/${foundStatus}/${ideaId}`),
-            {
-              draftContent: draft,
-              workspace: {
-                ...(cardData.workspace || {}),
-                draft: draft,
-              },
-              updatedAt: serverTimestamp(),
-            }
-          );
+          await update(ref(getDb(), `kanban/${userId}/${foundStatus}/${ideaId}`), {
+            draftContent: draft,
+            workspace: {
+              ...(cardData.workspace || {}),
+              draft: draft,
+            },
+            updatedAt: serverTimestamp(),
+          });
           Logger.debug(
             `[save_idea_draft] 초안 저장 완료 - ideaId: ${ideaId}, status: ${foundStatus}`
           );
@@ -1635,7 +1511,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Scrap Management] 스크랩 관리 ===
-  if (msg.action === "scrap_element" && msg.data) {
+  if (msg.action === 'scrap_element' && msg.data) {
     return handleAsync(
       (async () => {
         const { data } = msg;
@@ -1645,7 +1521,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "get_canvas_images") {
+  if (msg.action === 'get_canvas_images') {
     return handleAsync(
       (async () => {
         // TODO: 캔버스 이미지 가져오기 로직
@@ -1654,7 +1530,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "remove_scrap_image") {
+  if (msg.action === 'remove_scrap_image') {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
@@ -1672,7 +1548,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "delete_scrap") {
+  if (msg.action === 'delete_scrap') {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
@@ -1681,13 +1557,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "toggle_scrap_sharing") {
+  if (msg.action === 'toggle_scrap_sharing') {
     return handleAsync(
       (async () => {
         const { scrapId, currentChannelId } = msg;
 
         if (!scrapId) {
-          return { success: false, error: "스크랩 ID가 필요합니다." };
+          return { success: false, error: '스크랩 ID가 필요합니다.' };
         }
 
         const userId = await getCurrentUserId();
@@ -1696,7 +1572,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const scrapData = scrapSnap?.val();
 
         if (!scrapData) {
-          return { success: false, error: "스크랩을 찾을 수 없습니다." };
+          return { success: false, error: '스크랩을 찾을 수 없습니다.' };
         }
         const currentChannelIdValue = scrapData.channelId;
         const isCurrentlyPublic =
@@ -1709,7 +1585,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (isCurrentlyPublic && !currentChannelId) {
           return {
             success: false,
-            error: "활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다.",
+            error: '활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다.',
           };
         }
 
@@ -1721,14 +1597,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           newChannelId,
           message:
             newChannelId === null
-              ? "공용 스크랩으로 변경되었습니다."
-              : "전용 스크랩으로 변경되었습니다.",
+              ? '공용 스크랩으로 변경되었습니다.'
+              : '전용 스크랩으로 변경되었습니다.',
         };
       })()
     );
   }
 
-  if (msg.action === "link_scrap_to_idea") {
+  if (msg.action === 'link_scrap_to_idea') {
     return handleAsync(
       (async () => {
         const { ideaId, scrapId, status } = msg.data;
@@ -1738,12 +1614,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const idea = ideaSnap?.val();
         if (idea) {
           // linkedScraps를 배열로 정규화
-          let linkedScraps =
-            idea.linkedScraps || idea.workspace?.linkedScraps || [];
-          if (
-            !Array.isArray(linkedScraps) &&
-            typeof linkedScraps === "object"
-          ) {
+          let linkedScraps = idea.linkedScraps || idea.workspace?.linkedScraps || [];
+          if (!Array.isArray(linkedScraps) && typeof linkedScraps === 'object') {
             linkedScraps = Object.keys(linkedScraps);
           }
           if (!linkedScraps.includes(scrapId)) {
@@ -1770,12 +1642,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "unlink_scrap_from_idea") {
+  if (msg.action === 'unlink_scrap_from_idea') {
     return handleAsync(
       (async () => {
         const { ideaId, scrapId, status } = msg.data || msg;
         if (!ideaId || !scrapId || !status) {
-          return { success: false, error: "ID 또는 상태가 유효하지 않습니다." };
+          return { success: false, error: 'ID 또는 상태가 유효하지 않습니다.' };
         }
 
         const userId = await getCurrentUserId();
@@ -1784,7 +1656,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const cardData = cardSnap?.val();
 
         if (!cardData) {
-          return { success: false, error: "카드를 찾을 수 없습니다." };
+          return { success: false, error: '카드를 찾을 수 없습니다.' };
         }
 
         // linkedScraps 업데이트 (루트 레벨) - 배열과 객체 모두 처리
@@ -1797,7 +1669,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             linkedScrapsObj[id] = true;
           });
           linkedScraps = linkedScrapsObj;
-        } else if (linkedScraps && typeof linkedScraps === "object") {
+        } else if (linkedScraps && typeof linkedScraps === 'object') {
           linkedScraps = { ...linkedScraps };
           delete linkedScraps[scrapId];
         } else {
@@ -1808,19 +1680,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const workspace = cardData.workspace || {};
         let workspaceLinkedScraps = workspace.linkedScraps || {};
         if (Array.isArray(workspaceLinkedScraps)) {
-          workspaceLinkedScraps = workspaceLinkedScraps.filter(
-            (id) => id !== scrapId
-          );
+          workspaceLinkedScraps = workspaceLinkedScraps.filter((id) => id !== scrapId);
           // 배열을 객체로 변환
           const workspaceLinkedScrapsObj = {};
           workspaceLinkedScraps.forEach((id) => {
             workspaceLinkedScrapsObj[id] = true;
           });
           workspaceLinkedScraps = workspaceLinkedScrapsObj;
-        } else if (
-          workspaceLinkedScraps &&
-          typeof workspaceLinkedScraps === "object"
-        ) {
+        } else if (workspaceLinkedScraps && typeof workspaceLinkedScraps === 'object') {
           workspaceLinkedScraps = { ...workspaceLinkedScraps };
           delete workspaceLinkedScraps[scrapId];
         } else {
@@ -1848,11 +1715,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [AI Analysis] AI 분석 ===
-  if (msg.action === "generate_blog_ideas") {
+  if (msg.action === 'generate_blog_ideas') {
     return handleAsync(
       (async () => {
         // TODO: 블로그 아이디어 생성 로직
-        return { success: true, analysis: "", ideas: "", keywordGap: null };
+        return { success: true, analysis: '', ideas: '', keywordGap: null };
       })()
     );
   }
@@ -1860,15 +1727,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // === [Migration & System Fix] 데이터 마이그레이션 및 시스템 수정 ===
   // Migration message handlers removed: migration flow has been deleted
 
-  if (msg.action === "fix_active_channel_mismatch") {
+  if (msg.action === 'fix_active_channel_mismatch') {
     return handleAsync(
       (async () => {
         try {
-          const { activeChannelId } = await chrome.storage.local.get(
-            "activeChannelId"
-          );
+          const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
           if (!activeChannelId) {
-            throw new Error("활성 채널이 설정되지 않았습니다.");
+            throw new Error('활성 채널이 설정되지 않았습니다.');
           }
 
           const userId = await getCurrentUserId();
@@ -1878,23 +1743,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             blogs: [],
             youtubes: [],
           };
-          const allChannels = [
-            ...(myChannels.blogs || []),
-            ...(myChannels.youtubes || []),
-          ];
+          const allChannels = [...(myChannels.blogs || []), ...(myChannels.youtubes || [])];
 
           const channelExists = allChannels.some((ch) => {
             if (ch.id && ch.id === activeChannelId) return true;
             if (ch.channelId && ch.channelId === activeChannelId) return true;
             if (ch.apiUrl) {
-              const generatedId = btoa(ch.apiUrl).replace(/=/g, "");
+              const generatedId = btoa(ch.apiUrl).replace(/=/g, '');
               if (generatedId === activeChannelId) return true;
             }
             return false;
           });
 
           if (channelExists) {
-            return { success: true, message: "활성 채널이 정상입니다." };
+            return { success: true, message: '활성 채널이 정상입니다.' };
           }
 
           // 활성 채널이 목록에 없으면 첫 번째 채널로 변경
@@ -1902,9 +1764,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const firstChannel = allChannels[0];
             const newActiveChannelId =
               firstChannel.id ||
-              (firstChannel.apiUrl
-                ? btoa(firstChannel.apiUrl).replace(/=/g, "")
-                : null);
+              (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : null);
 
             if (newActiveChannelId) {
               await chrome.storage.local.set({
@@ -1915,24 +1775,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 message: `활성 채널을 첫 번째 채널로 변경했습니다. (${newActiveChannelId})`,
               };
             } else {
-              throw new Error("채널 ID를 생성할 수 없습니다.");
+              throw new Error('채널 ID를 생성할 수 없습니다.');
             }
           } else {
-            await chrome.storage.local.remove("activeChannelId");
+            await chrome.storage.local.remove('activeChannelId');
             return {
               success: true,
-              message: "등록된 채널이 없어 활성 채널을 제거했습니다.",
+              message: '등록된 채널이 없어 활성 채널을 제거했습니다.',
             };
           }
         } catch (error) {
-          Logger.error("[활성 채널 수정] 오류:", error);
+          Logger.error('[활성 채널 수정] 오류:', error);
           throw error;
         }
       })()
     );
   }
 
-  if (msg.action === "fix_channel_structure") {
+  if (msg.action === 'fix_channel_structure') {
     return handleAsync(
       (async () => {
         try {
@@ -1957,19 +1817,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const firstBlog = myBlogs[0];
                 const firstBlogIndex = myBlogs.findIndex(
                   (b) =>
-                    (b.id ||
-                      (b.apiUrl ? btoa(b.apiUrl).replace(/=/g, "") : null)) ===
+                    (b.id || (b.apiUrl ? btoa(b.apiUrl).replace(/=/g, '') : null)) ===
                     (firstBlog.id ||
-                      (firstBlog.apiUrl
-                        ? btoa(firstBlog.apiUrl).replace(/=/g, "")
-                        : null))
+                      (firstBlog.apiUrl ? btoa(firstBlog.apiUrl).replace(/=/g, '') : null))
                 );
 
                 if (firstBlogIndex >= 0) {
                   const existingCompetitors = firstBlog.competitors || [];
                   const newCompetitors = oldCompetitors.map((comp) => ({
-                    inputUrl: comp.inputUrl || comp.url || comp.apiUrl || "",
-                    apiUrl: comp.apiUrl || comp.inputUrl || comp.url || "",
+                    inputUrl: comp.inputUrl || comp.url || comp.apiUrl || '',
+                    apiUrl: comp.apiUrl || comp.inputUrl || comp.url || '',
                   }));
 
                   // 중복 제거
@@ -1977,15 +1834,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   newCompetitors.forEach((newComp) => {
                     const exists = mergedCompetitors.some(
                       (existing) =>
-                        existing.inputUrl === newComp.inputUrl ||
-                        existing.apiUrl === newComp.apiUrl
+                        existing.inputUrl === newComp.inputUrl || existing.apiUrl === newComp.apiUrl
                     );
                     if (!exists) mergedCompetitors.push(newComp);
                   });
 
-                  updates[
-                    `channels/${userId}/myChannels/blogs/${firstBlogIndex}/competitors`
-                  ] = mergedCompetitors;
+                  updates[`channels/${userId}/myChannels/blogs/${firstBlogIndex}/competitors`] =
+                    mergedCompetitors;
                   fixedCount++;
                 }
               }
@@ -1999,9 +1854,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const myBlogs = channelsData.myChannels?.blogs || [];
           myBlogs.forEach((blog, index) => {
             if (!blog.competitors || !Array.isArray(blog.competitors)) {
-              updates[
-                `channels/${userId}/myChannels/blogs/${index}/competitors`
-              ] = [];
+              updates[`channels/${userId}/myChannels/blogs/${index}/competitors`] = [];
               fixedCount++;
             }
           });
@@ -2025,11 +1878,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           } else {
             return {
               success: true,
-              message: "수정할 항목이 없습니다. 구조가 이미 정상입니다.",
+              message: '수정할 항목이 없습니다. 구조가 이미 정상입니다.',
             };
           }
         } catch (error) {
-          Logger.error("[채널 구조 수정] 오류:", error);
+          Logger.error('[채널 구조 수정] 오류:', error);
           throw error;
         }
       })()
@@ -2037,32 +1890,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Draft Management] 초안 관리 ===
-  if (msg.action === "save_draft_content") {
+  if (msg.action === 'save_draft_content') {
     return handleAsync(
       (async () => {
         const { ideaId, status, draft } = msg.data;
         if (!ideaId || !status) {
-          throw new Error("Idea ID or status is missing.");
+          throw new Error('Idea ID or status is missing.');
         }
 
         const userId = await getCurrentUserId();
         const currentRef = ref(getDb(), `kanban/${userId}/${status}/${ideaId}`);
-        const newStatus = "in-progress";
+        const newStatus = 'in-progress';
 
         const cardSnap = await get(currentRef);
         const cardData = cardSnap?.val();
         if (!cardData) {
-          throw new Error("Card data not found for move.");
+          throw new Error('Card data not found for move.');
         }
 
         const updates = { draftContent: draft };
 
         // 'ideas' 컬럼에 있을 때만 이동
-        if (status === "ideas") {
-          const newRef = ref(
-            getDb(),
-            `kanban/${userId}/${newStatus}/${ideaId}`
-          );
+        if (status === 'ideas') {
+          const newRef = ref(getDb(), `kanban/${userId}/${newStatus}/${ideaId}`);
           const dataToMove = { ...cardData, ...updates };
           await set(newRef, dataToMove);
           await remove(currentRef);
@@ -2083,12 +1933,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "delete_draft_content") {
+  if (msg.action === 'delete_draft_content') {
     return handleAsync(
       (async () => {
         const cardId = msg.data?.cardId;
         if (!cardId) {
-          throw new Error("Card ID is missing.");
+          throw new Error('Card ID is missing.');
         }
 
         try {
@@ -2105,17 +1955,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
 
           if (!foundStatus) {
-            throw new Error("Card not found.");
+            throw new Error('Card not found.');
           }
 
           // draftContent를 null로 업데이트
-          await update(
-            ref(getDb(), `kanban/${userId}/${foundStatus}/${cardId}`),
-            { draftContent: null }
-          );
+          await update(ref(getDb(), `kanban/${userId}/${foundStatus}/${cardId}`), {
+            draftContent: null,
+          });
           return { success: true };
         } catch (error) {
-          Logger.error("Error deleting draft content:", error);
+          Logger.error('Error deleting draft content:', error);
           throw error;
         }
       })()
@@ -2123,7 +1972,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Scrap Management] 스크랩 관리 ===
-  if (msg.action === "get_scrap_detail") {
+  if (msg.action === 'get_scrap_detail') {
     return handleAsync(
       (async () => {
         const { scrapId, channelId } = msg;
@@ -2132,7 +1981,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "scrap_entire_analysis") {
+  if (msg.action === 'scrap_entire_analysis') {
     return handleAsync(
       (async () => {
         const analysisContent = msg.data;
@@ -2142,38 +1991,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Keyword Management] 키워드 관리 ===
-  if (msg.action === "regenerate_search_keywords") {
+  if (msg.action === 'regenerate_search_keywords') {
     return handleAsync(generateAndSendKeywords(msg.data, sender));
   }
 
   // === [Content Management] 콘텐츠 관리 ===
-  if (msg.action === "clear_blog_content") {
+  if (msg.action === 'clear_blog_content') {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
         await remove(ref(getDb(), `channel_content/${userId}/blogs`));
         return {
           success: true,
-          message:
-            "블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.",
+          message: '블로그 콘텐츠 데이터가 성공적으로 삭제되었습니다. 새로고침 후 재수집해주세요.',
         };
       })()
     );
   }
 
   // === [Kanban Management] 칸반 관리 ===
-  if (msg.action === "remove_idea_from_kanban") {
+  if (msg.action === 'remove_idea_from_kanban') {
     return handleAsync(
       (async () => {
         const firebaseKey = msg.key;
-        const status = msg.status || "ideas";
+        const status = msg.status || 'ideas';
         return await removeIdeaFromKanban(firebaseKey, status);
       })()
     );
   }
 
   // === [Template Management] 템플릿 관리 ===
-  if (msg.action === "get_thumbnail_templates") {
+  if (msg.action === 'get_thumbnail_templates') {
     return handleAsync(
       (async () => {
         return await getThumbnailTemplates();
@@ -2181,7 +2029,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === "delete_template") {
+  if (msg.action === 'delete_template') {
     return handleAsync(
       (async () => {
         const templateId = msg.templateId;
@@ -2191,22 +2039,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Thumbnail Generation] 썸네일 생성 ===
-  if (msg.action === "gemini_generate_thumbnail_texts") {
+  if (msg.action === 'gemini_generate_thumbnail_texts') {
     return handleAsync(
       (async () => {
         if (!Array.isArray(msg.data?.outlines)) {
-          throw new Error("outlines 배열이 필요합니다.");
+          throw new Error('outlines 배열이 필요합니다.');
         }
 
         const outlines = msg.data.outlines;
-        const draft = msg.data.draft || "";
+        const draft = msg.data.draft || '';
         return await generateThumbnailTexts(outlines, draft);
       })()
     );
   }
 
   // === [Alarm Management] 알람 관리 ===
-  if (msg.action === "register_alarms") {
+  if (msg.action === 'register_alarms') {
     return handleAsync(
       (async () => {
         try {
@@ -2214,37 +2062,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           await chrome.alarms.clearAll();
 
           // 알람 재등록
-          chrome.alarms.create("fetch-channels", {
+          chrome.alarms.create('fetch-channels', {
             delayInMinutes: 1,
             periodInMinutes: 240,
           });
-          chrome.alarms.create("update-performance-metrics", {
+          chrome.alarms.create('update-performance-metrics', {
             delayInMinutes: 5,
             periodInMinutes: 360,
           });
 
           // 등록 확인
           const alarms = await chrome.alarms.getAll();
-          const hasFetch = alarms.some((a) => a.name === "fetch-channels");
-          const hasUpdate = alarms.some(
-            (a) => a.name === "update-performance-metrics"
-          );
+          const hasFetch = alarms.some((a) => a.name === 'fetch-channels');
+          const hasUpdate = alarms.some((a) => a.name === 'update-performance-metrics');
 
           if (hasFetch && hasUpdate) {
             return {
               success: true,
               message:
-                "알람이 성공적으로 재등록되었습니다. (fetch-channels, update-performance-metrics)",
+                '알람이 성공적으로 재등록되었습니다. (fetch-channels, update-performance-metrics)',
             };
           } else {
             throw new Error(
               `일부 알람 등록 실패 (fetch: ${
-                hasFetch ? "성공" : "실패"
-              }, update: ${hasUpdate ? "성공" : "실패"})`
+                hasFetch ? '성공' : '실패'
+              }, update: ${hasUpdate ? '성공' : '실패'})`
             );
           }
         } catch (error) {
-          Logger.error("[알람 재등록] 오류:", error);
+          Logger.error('[알람 재등록] 오류:', error);
           throw error;
         }
       })()
@@ -2252,20 +2098,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [AdSense Management] AdSense 관리 ===
-  if (msg.action === "get_adsense_accounts") {
+  if (msg.action === 'get_adsense_accounts') {
     return handleAsync(
       (async () => {
-        const { googleAuthToken } = await chrome.storage.local.get([
-          "googleAuthToken",
-        ]);
+        const { googleAuthToken } = await chrome.storage.local.get(['googleAuthToken']);
 
         if (!googleAuthToken) {
-          throw new Error("Google 계정이 연동되지 않았습니다.");
+          throw new Error('Google 계정이 연동되지 않았습니다.');
         }
 
-        const accountsListUrl = "https://adsense.googleapis.com/v2/accounts";
+        const accountsListUrl = 'https://adsense.googleapis.com/v2/accounts';
         const accountsListResponse = await fetch(accountsListUrl, {
-          method: "GET",
+          method: 'GET',
           headers: {
             Authorization: `Bearer ${googleAuthToken}`,
           },
@@ -2280,8 +2124,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } else {
           const errorData = await accountsListResponse.json().catch(() => ({}));
           throw new Error(
-            errorData.error?.message ||
-              `계정 목록 조회 실패 (${accountsListResponse.status})`
+            errorData.error?.message || `계정 목록 조회 실패 (${accountsListResponse.status})`
           );
         }
       })()

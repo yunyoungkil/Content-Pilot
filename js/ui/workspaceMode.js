@@ -1,4 +1,4 @@
-import { shortenLink, showToast, showConfirmationToast, Logger } from '../utils.js';
+import { shortenLink, showToast, showConfirmationToast, Logger, debounce } from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
@@ -262,43 +262,49 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           .replace(/'/g, '&#039;');
       };
 
-      imageGalleryGrid.innerHTML = images
-        .map((imgData) => {
-          const escapedUrl = escapeHtml(imgData.url);
-          const escapedTitle = escapeHtml(imgData.title || '이미지');
-          return `
-          <div class="gallery-thumb-wrap" draggable="true" data-image-url="${escapedUrl}" 
-            data-title="${escapedTitle}" data-source="${
-              imgData.source
-            }" data-url-source="${escapeHtml(imgData.url_source || '')}"
-            data-timestamp="${imgData.timestamp}" data-scrap-id="${imgData.scrapId || ''}"
-            style="position: relative; cursor: pointer;">
-            <img src="${escapedUrl}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;" alt="${escapedTitle}" loading="lazy" onerror="this.style.display='none';">
-            ${
-              imgData.source === '스크랩' && imgData.scrapId
-                ? `
-              <button class="gallery-image-delete-btn" data-scrap-id="${imgData.scrapId}" data-image-url="${escapedUrl}"
-                style="position: absolute; top: 4px; right: 4px; background: rgba(234,67,53,0.9); color: #fff; border: none; width: 24px; height: 24px; opacity: 0; transition: opacity 0.2s;" title="삭제">×</button>
-            `
-                : ''
-            }
-            <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); pointer-events: none; display: flex; align-items: center; justify-content: center;">
-              <span class="gallery-preview-icon" style="opacity: 0; color: #fff; font-size: 24px; pointer-events: auto; cursor: pointer;">🔍</span>
-            </div>
-          </div>`;
-        })
-        .join('');
+      // 성능 최적화: DocumentFragment를 사용하여 DOM 조작 최소화
+      const fragment = document.createDocumentFragment();
 
-      imageGalleryGrid.querySelectorAll('.gallery-thumb-wrap').forEach((wrap) => {
-        wrap.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/plain', wrap.dataset.imageUrl);
+      images.forEach((imgData) => {
+        const escapedUrl = escapeHtml(imgData.url);
+        const escapedTitle = escapeHtml(imgData.title || '이미지');
+
+        const div = document.createElement('div');
+        div.className = 'gallery-thumb-wrap';
+        div.draggable = true;
+        div.dataset.imageUrl = escapedUrl;
+        div.dataset.title = escapedTitle;
+        div.dataset.source = imgData.source;
+        div.dataset.urlSource = escapeHtml(imgData.url_source || '');
+        div.dataset.timestamp = imgData.timestamp;
+        div.dataset.scrapId = imgData.scrapId || '';
+        div.style.position = 'relative';
+        div.style.cursor = 'pointer';
+
+        div.innerHTML = `
+          <img src="${escapedUrl}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;" alt="${escapedTitle}" loading="lazy" onerror="this.style.display='none';">
+          ${
+            imgData.source === '스크랩' && imgData.scrapId
+              ? `
+            <button class="gallery-image-delete-btn" data-scrap-id="${imgData.scrapId}" data-image-url="${escapedUrl}"
+              style="position: absolute; top: 4px; right: 4px; background: rgba(234,67,53,0.9); color: #fff; border: none; width: 24px; height: 24px; opacity: 0; transition: opacity 0.2s;" title="삭제">×</button>
+          `
+              : ''
+          }
+          <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); pointer-events: none; display: flex; align-items: center; justify-content: center;">
+            <span class="gallery-preview-icon" style="opacity: 0; color: #fff; font-size: 24px; pointer-events: auto; cursor: pointer;">🔍</span>
+          </div>`;
+
+        // 이벤트 리스너들을 각 div 요소에 추가
+        div.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', div.dataset.imageUrl);
           e.dataTransfer.effectAllowed = 'copy';
         });
 
-        const deleteBtn = wrap.querySelector('.gallery-image-delete-btn');
+        const deleteBtn = div.querySelector('.gallery-image-delete-btn');
         if (deleteBtn) {
-          wrap.addEventListener('mouseenter', () => (deleteBtn.style.opacity = '1'));
-          wrap.addEventListener('mouseleave', () => (deleteBtn.style.opacity = '0'));
+          div.addEventListener('mouseenter', () => (deleteBtn.style.opacity = '1'));
+          div.addEventListener('mouseleave', () => (deleteBtn.style.opacity = '0'));
           deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (confirm('이미지를 삭제하시겠습니까?')) {
@@ -336,16 +342,16 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           });
         }
 
-        const img = wrap.querySelector('.gallery-thumb');
-        const icon = wrap.querySelector('.gallery-preview-icon');
-        const overlay = wrap.querySelector('.gallery-thumb-overlay');
+        const img = div.querySelector('.gallery-thumb');
+        const icon = div.querySelector('.gallery-preview-icon');
+        const overlay = div.querySelector('.gallery-thumb-overlay');
 
         if (overlay) {
-          wrap.addEventListener('mouseenter', () => {
+          div.addEventListener('mouseenter', () => {
             overlay.style.background = 'rgba(0,0,0,0.5)';
             if (icon) icon.style.opacity = '1';
           });
-          wrap.addEventListener('mouseleave', () => {
+          div.addEventListener('mouseleave', () => {
             overlay.style.background = 'rgba(0,0,0,0)';
             if (icon) icon.style.opacity = '0';
           });
@@ -354,7 +360,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         const insertImage = (e) => {
           e.preventDefault();
           e.stopPropagation();
-          sendCommand('insert-image', { url: wrap.dataset.imageUrl });
+          sendCommand('insert-image', { url: div.dataset.imageUrl });
           sendCommand('focus');
         };
 
@@ -364,14 +370,16 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
             e.preventDefault();
             e.stopPropagation();
             showImagePreview({
-              url: wrap.dataset.imageUrl,
-              title: wrap.dataset.title,
-              source: wrap.dataset.source,
-              url_source: wrap.dataset.urlSource,
-              timestamp: wrap.dataset.timestamp,
+              url: div.dataset.imageUrl,
+              title: div.dataset.title,
+              source: div.dataset.source,
+              url_source: div.dataset.urlSource,
+              timestamp: div.dataset.timestamp,
             });
           });
         }
+
+        fragment.appendChild(div);
       });
     }
 
@@ -453,22 +461,25 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 
     if (filterByDraftBtn) filterByDraftBtn.addEventListener('click', toggleDraftFilter);
 
-    searchInput.addEventListener('input', (e) => {
-      const term = e.target.value.toLowerCase().trim();
-      let targetImages = isDraftFilterActive
-        ? filterImagesByDraft(allImages, draftContentText)
-        : allImages;
-      if (term) {
-        // 검색어가 있으면 필터링 (초안 필터 결과 내에서 검색)
-        targetImages = targetImages.filter((img) => {
-          const title = (img.title || '').toLowerCase();
-          const source = (img.source || '').toLowerCase();
-          const url = (img.url || '').toLowerCase();
-          return title.includes(term) || source.includes(term) || url.includes(term);
-        });
-      }
-      renderImages(targetImages);
-    });
+    searchInput.addEventListener(
+      'input',
+      debounce((e) => {
+        const term = e.target.value.toLowerCase().trim();
+        let targetImages = isDraftFilterActive
+          ? filterImagesByDraft(allImages, draftContentText)
+          : allImages;
+        if (term) {
+          // 검색어가 있으면 필터링 (초안 필터 결과 내에서 검색)
+          targetImages = targetImages.filter((img) => {
+            const title = (img.title || '').toLowerCase();
+            const source = (img.source || '').toLowerCase();
+            const url = (img.url || '').toLowerCase();
+            return title.includes(term) || source.includes(term) || url.includes(term);
+          });
+        }
+        renderImages(targetImages);
+      }, 300)
+    );
 
     renderImages(allImages);
   });

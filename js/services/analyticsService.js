@@ -385,7 +385,9 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   // When userId is the default (unauthenticated state), abort to prevent creating
   // records under `default_user` — this should only run for authenticated users.
   if (userId === CONSTANTS.USER_ID) {
-    Logger.warn('[updateSinglePerformanceMetric] No valid user ID (default_user) — aborting performance update');
+    Logger.warn(
+      '[updateSinglePerformanceMetric] No valid user ID (default_user) — aborting performance update'
+    );
     // Let the UI know to prompt for login/auth instead of silently creating default_user data
     try {
       await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 추적은 로그인 후 가능합니다.');
@@ -452,7 +454,12 @@ export async function updateSinglePerformanceMetric(contentInfo) {
         }
 
         // also check default placeholder as last resort
-        if (CONSTANTS && CONSTANTS.USER_ID && !altIds.includes(CONSTANTS.USER_ID) && CONSTANTS.USER_ID !== userId) {
+        if (
+          CONSTANTS &&
+          CONSTANTS.USER_ID &&
+          !altIds.includes(CONSTANTS.USER_ID) &&
+          CONSTANTS.USER_ID !== userId
+        ) {
           altIds.push(CONSTANTS.USER_ID);
         }
 
@@ -462,18 +469,28 @@ export async function updateSinglePerformanceMetric(contentInfo) {
             const val = snap?.val();
             const candidateBlogs = val?.myChannels?.blogs || [];
             if (candidateBlogs && candidateBlogs.length > 0) {
-              Logger.info('[updateSinglePerformanceMetric] 채널이 다른 사용자 키에서 발견되어 대체 사용:', alt);
+              Logger.info(
+                '[updateSinglePerformanceMetric] 채널이 다른 사용자 키에서 발견되어 대체 사용:',
+                alt
+              );
               channels = val;
               blogs = candidateBlogs;
               break;
             }
           } catch (err) {
             // ignore per-candidate errors and try next
-            Logger.debug('[updateSinglePerformanceMetric] 대체 채널 조회 실패 (무시):', alt, err?.message || err);
+            Logger.debug(
+              '[updateSinglePerformanceMetric] 대체 채널 조회 실패 (무시):',
+              alt,
+              err?.message || err
+            );
           }
         }
       } catch (err) {
-        Logger.warn('[updateSinglePerformanceMetric] 채널 대체 키 조회 중 에러:', err && err.message);
+        Logger.warn(
+          '[updateSinglePerformanceMetric] 채널 대체 키 조회 중 에러:',
+          err && err.message
+        );
       }
     }
     // Try exact include match first, then fallback to hostname-based matching for
@@ -487,15 +504,27 @@ export async function updateSinglePerformanceMetric(contentInfo) {
           if (!candidate) return false;
           try {
             const candHost = new URL(candidate).hostname.toLowerCase();
-            return contentHost === candHost || contentHost.endsWith('.' + candHost) || candHost.endsWith('.' + contentHost);
+            return (
+              contentHost === candHost ||
+              contentHost.endsWith('.' + candHost) ||
+              candHost.endsWith('.' + contentHost)
+            );
           } catch (e) {
             // if candidate is not a well-formed URL, try substring match
             return contentInfo.url.includes(candidate);
           }
         });
-        if (blog) Logger.info('[updateSinglePerformanceMetric] hostname fallback matched blog for content URL', { contentUrl: contentInfo.url, matched: blog.inputUrl || blog.url });
+        if (blog)
+          Logger.info(
+            '[updateSinglePerformanceMetric] hostname fallback matched blog for content URL',
+            { contentUrl: contentInfo.url, matched: blog.inputUrl || blog.url }
+          );
       } catch (err) {
-        Logger.warn('[updateSinglePerformanceMetric] hostname fallback failed to parse URL:', contentInfo.url, err && err.message);
+        Logger.warn(
+          '[updateSinglePerformanceMetric] hostname fallback failed to parse URL:',
+          contentInfo.url,
+          err && err.message
+        );
       }
     }
     if (blog) {
@@ -509,18 +538,26 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       const storageSelection = await chrome.storage.local.get(['selectedGaPropertyId']);
       if (storageSelection && storageSelection.selectedGaPropertyId) {
         gaId = storageSelection.selectedGaPropertyId;
-        Logger.info('[updateSinglePerformanceMetric] 채널에 GA4 ID가 없어 storage.selectedGaPropertyId를 대체값으로 사용:', gaId);
+        Logger.info(
+          '[updateSinglePerformanceMetric] 채널에 GA4 ID가 없어 storage.selectedGaPropertyId를 대체값으로 사용:',
+          gaId
+        );
       }
     }
 
     if (!gaId) {
-      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — GA4 데이터 수집 스킵, AdSense/GSC만 수집:', { path, userId, channelsCount: Object.keys(blogs).length });
+      Logger.warn(
+        '[updateSinglePerformanceMetric] GA4 속성 ID 없음 — GA4 데이터 수집 스킵, AdSense/GSC만 수집:',
+        { path, userId, channelsCount: Object.keys(blogs).length }
+      );
       // GA4 ID가 없어도 AdSense와 GSC 데이터는 수집
     }
 
     // 병렬 호출 (GA4, AdSense, GSC) - GA4가 없어도 나머지 수집
     const [gaData, adData, gscData] = await Promise.allSettled([
-      gaId ? getAnalyticsData(token, gaId, contentInfo.url) : Promise.resolve({ pageviews: 0, gaEarnings: 0 }),
+      gaId
+        ? getAnalyticsData(token, gaId, contentInfo.url)
+        : Promise.resolve({ pageviews: 0, gaEarnings: 0 }),
       getAdsenseData(token, adSenseId, contentInfo.url),
       siteUrl ? getSearchConsoleData(token, siteUrl, contentInfo.url) : Promise.resolve({}),
     ]);
@@ -584,9 +621,14 @@ export async function updateAllPerformanceMetrics() {
   const userId = await getCurrentUserId();
 
   if (userId === CONSTANTS.USER_ID) {
-    Logger.warn('[updateAllPerformanceMetrics] No valid user ID (default_user) — aborting batch performance update');
+    Logger.warn(
+      '[updateAllPerformanceMetrics] No valid user ID (default_user) — aborting batch performance update'
+    );
     try {
-      await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 추적은 로그인 후에만 실행됩니다.');
+      await sendErrorToUI(
+        'UNAUTHORIZED',
+        '로그인이 필요합니다. 성과 추적은 로그인 후에만 실행됩니다.'
+      );
     } catch (e) {
       Logger.warn('[updateAllPerformanceMetrics] Failed to notify UI for login:', e);
     }
@@ -649,7 +691,10 @@ export async function analyzePerformanceData(targetChannelId = null) {
   if (userId === CONSTANTS.USER_ID) {
     Logger.warn('[analyzePerformanceData] No valid user ID (default_user) — aborting analysis');
     try {
-      await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 분석은 로그인 후에만 실행됩니다.');
+      await sendErrorToUI(
+        'UNAUTHORIZED',
+        '로그인이 필요합니다. 성과 분석은 로그인 후에만 실행됩니다.'
+      );
     } catch (e) {
       Logger.warn('[analyzePerformanceData] Failed to notify UI for login:', e);
     }

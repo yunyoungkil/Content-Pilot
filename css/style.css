@@ -10,7 +10,7 @@
 /* Shadow DOM 루트 요소 리셋 - 외부 페이지 스타일 침투 방지 */
 :host {
   /* 외부 페이지의 전역 스타일이 Shadow DOM에 영향을 주지 않도록 최소한의 리셋만 적용 */
-  font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+  font-family: 'Noto Sans KR', 'Roboto', Arial, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   color: #333;
@@ -34,7 +34,7 @@
    ============================================ */
 
 /* 스크랩 후보 하이라이트 효과 */
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
 
 /* 패널 헤더 아이콘 버튼 스타일 */
 .cp-panel-icon-btn {
@@ -66,7 +66,9 @@
 .pilot-highlight {
   outline: 2.5px solid #4285f4 !important;
   background-color: rgba(66, 133, 244, 0.1) !important;
-  transition: outline 0.18s, background-color 0.18s;
+  transition:
+    outline 0.18s,
+    background-color 0.18s;
   cursor: pointer !important;
   z-index: 2147483646 !important;
 }
@@ -78,7 +80,7 @@
   background: #f7f8fa;
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  font-family: "Noto Sans KR", "Roboto", Arial, sans-serif;
+  font-family: 'Noto Sans KR', 'Roboto', Arial, sans-serif;
   /* min-height와 overflow: hidden 제거 */
 }
 .scrapbook-list-section {
@@ -129,7 +131,10 @@
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, border 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border 0.2s;
 }
 .scrapbook-sort-btn.active,
 .scrapbook-sort-btn:hover {
@@ -165,7 +170,10 @@
   padding: 10px 12px 10px;
   gap: 12px;
   cursor: pointer;
-  transition: border 0.2s, box-shadow 0.2s, background 0.2s;
+  transition:
+    border 0.2s,
+    box-shadow 0.2s,
+    background 0.2s;
   position: relative;
 }
 /* 스크랩 카드 삭제 버튼 우상단 배치 */
@@ -329,7 +337,9 @@
 }
 .scrapbook-detail-image-item {
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 .scrapbook-detail-image-item:hover {
   transform: scale(1.02);
@@ -405,7 +415,7 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   z-index: 999999;
   padding: 24px 20px 20px 20px;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: 'Segoe UI', Arial, sans-serif;
   min-height: 120px;
 }
 #content-pilot-panel .cp-btn {
@@ -468,7 +478,9 @@
   box-shadow: 0 1px 4px rgba(66, 133, 244, 0.04);
   cursor: pointer;
   border: 2px solid transparent;
-  transition: border 0.2s, box-shadow 0.2s;
+  transition:
+    border 0.2s,
+    box-shadow 0.2s;
 }
 .cp-scrap-card:hover {
   border: 2px solid #4285f4;
@@ -1034,7 +1046,7 @@
   height: 100%;
   overflow-y: auto;
   background-color: #f7f8fa;
-  font-family: "Noto Sans KR", sans-serif;
+  font-family: 'Noto Sans KR', sans-serif;
   box-sizing: border-box;
 }
 .channel-section {
@@ -1595,7 +1607,9 @@
 /* 태그에 마우스 올렸을 때 클릭 가능함을 표시 */
 .card-tags .tag {
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .card-tags .tag:hover {
@@ -1769,7 +1783,9 @@
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s, box-shadow 0.2s;
+  transition:
+    background-color 0.2s,
+    box-shadow 0.2s;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 

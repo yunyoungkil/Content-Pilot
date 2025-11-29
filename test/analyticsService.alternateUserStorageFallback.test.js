@@ -7,11 +7,21 @@ jest.mock('../js/services/firebaseService.js', () => ({
       return { val: () => null };
     }
     if (path === 'channels/safe_user_example_com') {
-      return { val: () => ({ myChannels: { blogs: [{ inputUrl: 'https://costcatcher.k-posting.info', gaPropertyId: '464070489' }] } }) };
+      return {
+        val: () => ({
+          myChannels: {
+            blogs: [{ inputUrl: 'https://costcatcher.k-posting.info', gaPropertyId: '464070489' }],
+          },
+        }),
+      };
     }
     if (path.includes('kanban/google-uid-1')) {
       // simulate card performance structure
-      return { val: () => ({ ideas: { c1: { publishedUrl: 'https://costcatcher.k-posting.info/post/1' } } }) };
+      return {
+        val: () => ({
+          ideas: { c1: { publishedUrl: 'https://costcatcher.k-posting.info/post/1' } },
+        }),
+      };
     }
     return { val: () => null };
   }),
@@ -32,7 +42,9 @@ import * as firebaseService from '../js/services/firebaseService.js';
 describe('analyticsService alternate storage/userId fallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(require('../js/services/authService.js'), 'getValidToken').mockResolvedValue('fake-token');
+    jest
+      .spyOn(require('../js/services/authService.js'), 'getValidToken')
+      .mockResolvedValue('fake-token');
   });
 
   test('finds channels stored under email-based user key when current userId differs', async () => {
@@ -42,10 +54,18 @@ describe('analyticsService alternate storage/userId fallback', () => {
       return { googleUserEmail: 'safe.user@example.com', adSenseAccountId: 'pub-123' };
     });
 
-    jest.spyOn(analyticsService, 'getAnalyticsData').mockResolvedValue({ pageviews: 5, gaEarnings: 0.4 });
-    jest.spyOn(analyticsService, 'getAdsenseData').mockResolvedValue({ estimatedEarnings: 0.3, pageViews: 5 });
+    jest
+      .spyOn(analyticsService, 'getAnalyticsData')
+      .mockResolvedValue({ pageviews: 5, gaEarnings: 0.4 });
+    jest
+      .spyOn(analyticsService, 'getAdsenseData')
+      .mockResolvedValue({ estimatedEarnings: 0.3, pageViews: 5 });
 
-    await analyticsService.updateSinglePerformanceMetric({ id: 'c1', path: 'kanban/google-uid-1/ideas/c1', url: 'https://costcatcher.k-posting.info/post/1' });
+    await analyticsService.updateSinglePerformanceMetric({
+      id: 'c1',
+      path: 'kanban/google-uid-1/ideas/c1',
+      url: 'https://costcatcher.k-posting.info/post/1',
+    });
 
     expect(firebaseService.update).toHaveBeenCalled();
 

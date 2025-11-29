@@ -2,7 +2,7 @@
 // 스크랩 관련 서비스
 
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { get, remove, push } from './firebaseService.js';
+import { get, remove, push, writeBatch, getDb } from './firebaseService.js';
 import { Logger } from '../utils.js';
 
 /**
@@ -62,20 +62,101 @@ export async function saveScrapElement(data, channelId = null) {
 }
 
 /**
+ * 여러 스크랩 요소를 배치로 저장 (성능 최적화)
+ * @param {Array<Object>} scrapDataArray - 스크랩 데이터 배열
+ * @param {string|null} channelId - 채널 ID (기본값: null)
+ * @returns {Promise<{success: boolean, results?: Array<{scrapId: string, scrapData: Object}>, error?: string}>}
+ */
+export async function saveScrapElementsBatch(scrapDataArray, channelId = null) {
+  try {
+    if (!Array.isArray(scrapDataArray) || scrapDataArray.length === 0) {
+      return { success: false, error: '스크랩 데이터 배열이 비어있습니다.' };
+    }
+
+    const userId = await getCurrentUserId();
+    const scrapPath = `scraps/${userId}`;
+    const batch = writeBatch(getDb());
+    const results = [];
+
+    // 각 스크랩 데이터를 준비하고 배치에 추가
+    for (const data of scrapDataArray) {
+      const scrapPayload = {
+        text: data.text || '',
+        html: data.html || '',
+        tag: data.tag || 'UNKNOWN',
+        url: data.url || '',
+        image: data.image || null,
+        images: data.images || [],
+        allImages:
+          data.allImages ||
+          (data.images && data.images.length > 0 ? data.images : data.image ? [data.image] : null),
+        highlights: data.highlights || [],
+        hasHighlights: data.hasHighlights || false,
+        timestamp: Date.now(),
+        channelId: channelId,
+      };
+
+      // images 배열을 allImages로 변환
+      if (Array.isArray(data.images) && data.images.length > 0) {
+        const existingAllImages = scrapPayload.allImages || [];
+        const mergedImages = [...new Set([...existingAllImages, ...data.images])];
+        scrapPayload.allImages = mergedImages.length > 0 ? mergedImages : null;
+      }
+
+      if (scrapPayload.images) {
+        delete scrapPayload.images;
+      }
+
+      // 배치에 추가
+      const scrapRef = push(scrapPath);
+      batch.set(scrapRef, cleanDataForFirebase(scrapPayload));
+
+      results.push({
+        scrapId: scrapRef.key,
+        scrapData: scrapPayload,
+      });
+    }
+
+    // 배치 커밋
+    await batch.commit();
+
+    Logger.info(`[saveScrapElementsBatch] 배치 저장 완료 - ${scrapDataArray.length}개 스크랩`);
+    return {
+      success: true,
+      results: results,
+    };
+  } catch (_error) {
+    Logger.error('[saveScrapElementsBatch] 배치 저장 실패:', _error);
+    return { success: false, error: _error.message };
+  }
+}
+
+/**
  * Firebase에서 스크랩 목록 조회 (채널 필터링 포함)
  * @param {string|null} targetChannelId - 타겟 채널 ID (기본값: null)
- * @returns {Promise<{data: Array, success?: boolean, error?: string}>}
+ * @param {number} limit - 최대 조회 개수 (기본값: 100, 성능 최적화)
+ * @param {string|null} startAfter - 시작 키 (페이징용)
+ * @returns {Promise<{data: Array, success?: boolean, error?: string, hasMore?: boolean}>}
  */
-export async function getFirebaseScraps(targetChannelId = null) {
+export async function getFirebaseScraps(targetChannelId = null, limit = 100, startAfter = null) {
   try {
     const userId = await getCurrentUserId();
     const scrapPath = `scraps/${userId}`;
-    const snap = await get(scrapPath);
+
+    // Firebase 쿼리 구성 (페이징 지원)
+    let query = get(scrapPath);
+    if (startAfter) {
+      query = query.orderByKey().startAfter(startAfter).limitToFirst(limit);
+    } else {
+      query = query.orderByKey().limitToFirst(limit);
+    }
+
+    const snap = await query;
     const val = snap?.val() || {};
     const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
 
     Logger.debug(
-      `[getFirebaseScraps] 전체 스크랩 개수: ${arr.length}, targetChannelId: ${targetChannelId}`
+      `[getFirebaseScraps] 조회된 스크랩 개수: ${arr.length}, targetChannelId: ${targetChannelId}, limit: ${limit}, startAfter: ${startAfter}`
     );
 
     // 필터링: channelId가 없거나 null이거나 targetChannelId와 일치하는 경우
@@ -111,6 +192,9 @@ export async function getFirebaseScraps(targetChannelId = null) {
     Logger.info(`[getFirebaseScraps] 필터링 후 스크랩 개수: ${filtered.length}`);
     const sortedScraps = filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
+    // 페이징 지원: 더 많은 데이터가 있는지 확인
+    const hasMore = arr.length === limit;
+
     // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
     // 모든 탭에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
     chrome.tabs.query({}, (tabs) => {
@@ -129,10 +213,10 @@ export async function getFirebaseScraps(targetChannelId = null) {
       });
     });
 
-    return { data: sortedScraps };
+    return { data: sortedScraps, hasMore: hasMore };
   } catch (_error) {
     Logger.error('[getFirebaseScraps] Firebase 로드 오류:', _error);
-    return { data: [] };
+    return { data: [], hasMore: false };
   }
 }
 

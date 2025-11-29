@@ -189,6 +189,39 @@ export function shortenLink(url, maxLength = 40) {
   }
   return url.slice(0, 25) + '...' + url.slice(-10);
 }
+
+/**
+ * 디바운싱 함수 - 연속된 함수 호출을 제한하여 성능 최적화
+ * @param {Function} func - 디바운싱할 함수
+ * @param {number} delay - 지연 시간 (밀리초)
+ * @returns {Function} 디바운싱된 함수
+ */
+export function debounce(func, delay) {
+  let timeoutId;
+  return function (...args) {
+    const context = this;
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(context, args), delay);
+  };
+}
+
+/**
+ * 쓰로틀링 함수 - 함수 호출 빈도를 제한하여 성능 최적화
+ * @param {Function} func - 쓰로틀링할 함수
+ * @param {number} limit - 제한 시간 (밀리초)
+ * @returns {Function} 쓰로틀링된 함수
+ */
+export function throttle(func, limit) {
+  let inThrottle;
+  return function (...args) {
+    const context = this;
+    if (!inThrottle) {
+      func.apply(context, args);
+      inThrottle = true;
+      setTimeout(() => (inThrottle = false), limit);
+    }
+  };
+}
 export function showConfirmationToast(message, onConfirm) {
   // 혹시 이전에 떠 있던 확인 창이 있다면 제거
   const existingToast = document.getElementById('cp-confirm-toast');

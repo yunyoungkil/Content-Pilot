@@ -794,21 +794,21 @@ export function renderChannelMode(container) {
         // 인증 완료 후 최신 데이터 로드
         chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
           if (response && response.success) {
-        // 최신 데이터로 myChannelsData 업데이트
-        const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
-          inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
-          url: blog.url || blog.inputUrl, // 하위 호환성
-          apiUrl: blog.apiUrl || null, // RSS URL
-          platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
-          gaPropertyId: blog.gaPropertyId || '',
-          adSenseAccountId: blog.adSenseAccountId || '',
-          competitors: (blog.competitors || []).map((c) => {
-            // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
-            return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
-          }),
-          contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
-          competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
-        }));            // myChannelsData 업데이트
+            // 최신 데이터로 myChannelsData 업데이트
+            const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
+              inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
+              url: blog.url || blog.inputUrl, // 하위 호환성
+              apiUrl: blog.apiUrl || null, // RSS URL
+              platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
+              gaPropertyId: blog.gaPropertyId || '',
+              adSenseAccountId: blog.adSenseAccountId || '',
+              competitors: (blog.competitors || []).map((c) => {
+                // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+                return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
+              }),
+              contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+              competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
+            })); // myChannelsData 업데이트
             myChannelsData = latestChannels;
 
             // 인덱스가 유효한지 확인
@@ -867,7 +867,8 @@ export function renderChannelMode(container) {
     if (gaIdEl) gaIdEl.value = data.gaPropertyId || '';
     if (adsenseIdEl) adsenseIdEl.value = data.adSenseAccountId || '';
     if (contentLimitEl) contentLimitEl.value = data.contentLimit || 10;
-    if (competitorContentLimitEl) competitorContentLimitEl.value = data.competitorContentLimit || 10;
+    if (competitorContentLimitEl)
+      competitorContentLimitEl.value = data.competitorContentLimit || 10;
 
     // Google 로그인 상태 확인 (GA4 목록도 함께 로드)
     checkGoogleAuthStatus();
@@ -1523,7 +1524,8 @@ export function renderChannelMode(container) {
 
       // 콘텐츠 수집 제한 설정
       const contentLimit = parseInt(contentLimitEl ? contentLimitEl.value : '10') || 10;
-      const competitorContentLimit = parseInt(competitorContentLimitEl ? competitorContentLimitEl.value : '10') || 10;
+      const competitorContentLimit =
+        parseInt(competitorContentLimitEl ? competitorContentLimitEl.value : '10') || 10;
 
       // 경쟁사 목록 수집
       const competitorInputs = container.querySelectorAll('.competitor-input');
@@ -1586,7 +1588,8 @@ export function renderChannelMode(container) {
               if (!activeChannelId && myBlogs.length > 0) {
                 const firstChannel = myBlogs[0];
                 const firstChannelId =
-                  firstChannel.id || (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '');
+                  firstChannel.id ||
+                  (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '');
 
                 if (firstChannelId) {
                   chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {

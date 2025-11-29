@@ -372,7 +372,6 @@ export function createAndShowPanel() {
 
     // [수정] 초기 로드 로직 (온보딩 체크 + 마이그레이션 확인)
     chrome.storage.local.get(['activeChannelId'], (res) => {
-
       // 1. 활성 채널 ID가 있으면 -> 채널이 실제로 존재하는지 확인
       if (res.activeChannelId) {
         // 채널 목록을 확인하여 activeChannelId가 유효한지 검증
@@ -471,7 +470,7 @@ export function createAndShowPanel() {
     });
 
     // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지 처리
-      // migration_toast_message listener removed - migration feature has been deleted
+    // migration_toast_message listener removed - migration feature has been deleted
 
     // [체크리스트 1] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
     chrome.storage.onChanged.addListener((changes, namespace) => {

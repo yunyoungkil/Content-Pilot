@@ -9,6 +9,7 @@
 ## ✨ 주요 기능
 
 ### 1. 콘텐츠 수집 및 관리
+
 - **지능형 하이라이터**: `Alt` 키로 켜고 끄는 토글(Toggle) 모드를 통해, 스크랩할 요소를 명확하게 하이라이트합니다.
 - **원클릭 요소 스크랩**: 하이라이트된 웹페이지의 모든 요소를 클릭 한 번으로 손쉽게 스크랩할 수 있습니다.
 - **안정적인 데이터 수집**: Manifest V3의 **Offscreen Document**를 활용하여, 네이버 블로그의 아이프레임 구조나 지연 로딩(Lazy Loading) 이미지도 안정적으로 분석하고 수집합니다.
@@ -16,12 +17,14 @@
 - **이미지 갤러리**: 모든 스크랩에서 이미지를 자동으로 추출하여 갤러리로 관리하고, 에디터에 드래그앤드롭으로 삽입할 수 있습니다.
 
 ### 2. AI 기반 콘텐츠 기획
+
 - **칸반 보드 기반 아이디어 관리**: 아이디어를 상태별(아이디어 → 진행 중 → 완료)로 관리하고, 드래그앤드롭으로 상태를 변경할 수 있습니다.
 - **AI 아이디어 제안**: 성과 데이터와 사용자 피드백을 기반으로 맞춤형 아이디어를 제안합니다.
 - **AI 브리핑 자동 생성**: 아이디어 저장 시 추천 목차, 추천 검색어, 주요 키워드, 롱테일 키워드를 자동으로 생성합니다.
 - **콘텐츠 재활용 제안**: 기존 콘텐츠의 성과를 분석하여 업데이트가 필요한 콘텐츠를 제안합니다.
 
 ### 3. 통합 워크스페이스
+
 - **통합 에디터**: Rich Text Editor를 활용한 전문적인 콘텐츠 작성 환경
 - **AI 초안 자동 생성**: 브리핑 데이터를 기반으로 초안을 자동 생성합니다.
 - **AI 기반 제휴 링크 자동 삽입**: 사용자가 등록한 제휴 링크를 문맥에 맞게 자연스럽게 삽입하고, 매력적인 CTA 문구를 자동 생성합니다.
@@ -30,6 +33,7 @@
 - **실시간 동기화**: Firebase를 통한 실시간 데이터 동기화
 
 ### 4. 성과 추적 및 분석
+
 - **Google Analytics 4 (GA4) 연동**: 페이지뷰, 세션 수, 체류 시간, 이탈률, 유입 경로 등 상세한 분석 데이터 수집
 - **Google AdSense 연동**: 수익, RPM, 클릭률 등 수익화 데이터 수집
 - **자동 업데이트**: 6시간마다 자동으로 성과 데이터를 업데이트합니다.
@@ -38,6 +42,7 @@
 - **성과 리포트**: AI 기반 성과 분석 및 개선 제안을 제공합니다.
 
 ### 5. 채널 연동 및 관리
+
 - **채널 중심 아키텍처**: 경쟁 채널을 각 내 채널의 하위 속성으로 관리하여 더 체계적인 구조를 제공합니다.
 - **글로벌 채널 선택기**: 헤더에 위치한 채널 선택기를 통해 언제든지 작업할 채널을 전환할 수 있습니다.
 - **다중 채널 관리**: 여러 블로그/채널을 추가하고 각각 다른 GA4 속성과 AdSense 계정을 연결할 수 있습니다.
@@ -48,6 +53,7 @@
 - **채널 데이터 구조**: 각 채널은 `inputUrl`(원본 URL), `apiUrl`(RSS URL), `gaPropertyId`, `adSenseAccountId`, `competitors`(경쟁 채널 목록)를 포함합니다. 자세한 구조는 `FIREBASE_CHANNELS_STRUCTURE.md` 참조.
 
 ### 6. 시스템 진단
+
 - **종합 시스템 진단**: 5개 핵심 영역(API 연동, 데이터 구조, Firebase 연결, 성과 데이터 수집, 외부 API 연동)에 대한 20개 항목을 점검합니다.
 - **실시간 진단 리포트**: 각 항목의 상태를 실시간으로 확인하고 문제점을 즉시 파악할 수 있습니다.
 - **자동 문제 감지**: 시스템의 잠재적 문제를 사전에 감지하여 예방합니다.
@@ -206,7 +212,6 @@ Content-Pilot/
 #### 디렉토리
 
 - **`/js`**: 애플리케이션의 핵심 JavaScript 소스 코드들이 모여있는 곳입니다. `content.js`가 이 폴더의 모듈들을 가져와 사용합니다.
-
   - **`/js/core`**: 스크랩 하이라이터, 스크랩북 관리 등 핵심 비즈니스 로직을 담당하는 파일들이 위치합니다.
   - **`/js/ui`**: 메인 패널, 대시보드, 기획 보드, 워크스페이스, 성과 대시보드 등 사용자 인터페이스(UI)를 생성하고 제어하는 코드들이 위치합니다.
   - **`/js/services`**: AI 서비스, Firebase 연동, 인증, 데이터 수집, 칸반 보드 관리 등 각 기능을 독립적인 서비스로 분리한 파일들이 위치합니다.
@@ -217,10 +222,10 @@ Content-Pilot/
     - `collectorService.js`: RSS 및 YouTube 콘텐츠 수집
     - `firebaseService.js`: Firebase REST API 연동
     - `kanbanService.js`: 칸반 보드 관리
-   - (마이그레이션 서비스 제거됨)
-    - `offscreenService.js`: Offscreen Document 관리 및 HTML 정제
-    - `scrapService.js`: 스크랩 관리
-    - `thumbnailService.js`: 썸네일 생성
+  - (마이그레이션 서비스 제거됨)
+  - `offscreenService.js`: Offscreen Document 관리 및 HTML 정제
+  - `scrapService.js`: 스크랩 관리
+  - `thumbnailService.js`: 썸네일 생성
   - **`/js/utils`**: 에디터 변환, 마크다운 처리 등 유틸리티 함수들이 위치합니다.
 
 - **`/css`**: UI 스타일을 정의하는 CSS 파일들이 위치합니다.
@@ -229,7 +234,6 @@ Content-Pilot/
   - `workspace.css`: 워크스페이스 전용 스타일
 
 - **`/dist`**: Webpack이 소스 코드들을 하나로 합쳐서 만들어낸 **빌드 결과물**이 저장되는 폴더입니다.
-
   - `content.bundle.js`: `content.js`와 `js/` 폴더의 모든 JavaScript 파일이 합쳐지고 압축된 파일로, 실제 브라우저가 웹페이지에서 실행하는 최종 파일입니다.
   - `background.bundle.js`: `background.js`와 관련 서비스 파일들이 합쳐진 Service Worker 파일입니다.
   - `offscreen.bundle.js`: `offscreen.js`와 DOMPurify, Marked 등이 합쳐진 Offscreen Document 파일입니다.
@@ -251,18 +255,21 @@ Content-Pilot/
 Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 단계를 지원합니다:
 
 ### 1. 대시보드 (Dashboard)
+
 - 전체 아이디어 및 성과 개요
 - AI 아이디어 제안 기능
 - 내 채널 및 경쟁사 채널 관리
 - 빠른 아이디어 생성 및 관리
 
 ### 2. 스크랩북 (Scrapbook)
+
 - 웹에서 수집한 모든 스크랩 관리
 - 스크랩에서 아이디어로 전환 기능
 - 스크랩 검색 및 필터링
 - 이미지 자동 추출 및 관리
 
 ### 3. 기획 보드 (Kanban Board)
+
 - 칸반 보드 기반 아이디어 관리
 - 상태별 관리 (아이디어 → 진행 중 → 완료)
 - 드래그앤드롭으로 상태 변경
@@ -271,6 +278,7 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - 카드 클릭 시 워크스페이스로 이동
 
 ### 4. 워크스페이스 (Workspace)
+
 - 통합 콘텐츠 작성 환경
 - Rich Text Editor를 활용한 전문적인 에디터
 - AI 브리핑, 추천 목차, 추천 검색어 탭
@@ -279,18 +287,21 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - 실시간 자동 저장
 
 ### 5. 성과 대시보드 (Performance Dashboard)
+
 - 모든 발행 콘텐츠의 성과 한눈에 보기
 - 상위 5개 콘텐츠 비교 차트
 - 성과 순위 정렬 (수익, 페이지뷰, 최근 업데이트 순)
 - 통계 요약 (총 수익, 총 페이지뷰, 총 세션)
 
 ### 6. 성과 리포트 (Performance Report)
+
 - AI 기반 성과 분석 리포트
 - 성공 요인 및 개선점 제안
 - 상위/하위 성과 콘텐츠 분석
 - 성과 패턴 분석 및 인사이트 제공
 
 ### 7. 채널 연동 (Channel Integration)
+
 - 채널 중심 아키텍처 (경쟁 채널이 내 채널 하위로 관리)
 - 글로벌 채널 선택기 (헤더에서 언제든지 채널 전환)
 - Google 계정 OAuth 인증 (GA4 속성 및 AdSense 계정 자동 연동)
@@ -303,6 +314,7 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **채널 데이터 구조**: `inputUrl`(원본 URL), `apiUrl`(RSS URL 자동 생성), `gaPropertyId`, `adSenseAccountId`, `competitors`(경쟁 채널 배열) 포함
 
 ### 8. 시스템 진단 (System Diagnosis)
+
 - 종합 시스템 진단 (5개 영역, 20개 항목)
 - 실시간 진단 리포트
 - 자동 문제 감지 및 알림
@@ -312,6 +324,7 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 프로젝트의 상세한 기술 문서와 가이드는 `docs/` 폴더에 주제별로 정리되어 있습니다:
 
 ### 📖 가이드 문서 (`docs/guides/`)
+
 - **`AI_SERVICE_GUIDE.md`**: AI 서비스 사용 가이드 (Gemini API, 브리핑 생성, 초안 생성, HTML 정제, 제휴 링크 삽입)
 - **`AFFILIATE_LINKS_GUIDE.md`**: 제휴 마케팅 링크 가이드 (문맥 인식 자동 삽입, AI 기반 CTA 생성, 스마트 필터링)
 - **`PROMPT_BUILDER_TEST_GUIDE.md`**: 프롬프트 빌더 시스템 검증 및 테스트 가이드
@@ -322,11 +335,13 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **`성과-데이터-시각화-사용-패턴.md`**: 성과 데이터 시각화 기능 사용자 사용 패턴
 
 ### 🏗️ 아키텍처 문서 (`docs/architecture/`)
+
 - **`SERVICES_ARCHITECTURE.md`**: 서비스 아키텍처 개요 및 서비스 간 상호작용
 - **`ACTUAL_SAVE_STRUCTURE.md`**: 실제 저장되는 데이터 구조 및 수정 이력
 - **`CARD_ADDITION_LOGIC.md`**: 카드 추가 로직 설명
 
 ### 🔥 Firebase 문서 (`docs/firebase/`)
+
 - **`FIREBASE_CHANNELS_STRUCTURE.md`**: Firebase 채널 데이터 구조 상세 설명
   - 채널 데이터 저장 경로 및 구조
   - 필드 설명 (`inputUrl`, `apiUrl`, `url`, `gaPropertyId`, `adSenseAccountId`, `competitors`)
@@ -337,11 +352,13 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **`FIREBASE_SECURITY_RULES.md`**: Firebase Database 보안 규칙 설정 가이드
 
 ### 📊 Analytics 문서 (`docs/analytics/`)
+
 - **`GA4_PIPELINE_VALIDATION.md`**: GA4 데이터 파이프라인 검증
 - **`GA4_COLLECTED_METRICS.md`**: 수집되는 GA4 메트릭 목록
 - **`GA4_ADDITIONAL_METRICS_CHECK.md`**: GA4 추가 메트릭 체크
 
 ### 🔍 감사 및 검증 문서 (`docs/audits/`)
+
 - **`DASHBOARD_TAG_ANALYSIS_AUDIT.md`**: 대시보드 태그 분석 감사
 - **`FUNCTION_LISTENER_VALIDATION.md`**: 함수 리스너 검증
 - **`IDEA_CARD_ADDITION_AUDIT.md`**: 아이디어 카드 추가 감사
@@ -351,6 +368,7 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **`ZERO_METRICS_DEBUG_CHECKLIST.md`**: 제로 메트릭 디버그 체크리스트
 
 ### 📝 코드 리뷰 (`docs/reviews/`)
+
 - **`CODE_REVIEW.md`**: 코드 리뷰 체크리스트
 - **`CODE_REVIEW_content.js.md`**: content.js 코드 리뷰
 

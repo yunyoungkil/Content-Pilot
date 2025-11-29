@@ -103,6 +103,7 @@ npm run build
 ### 4. 변경사항 적용
 
 코드를 수정한 후:
+
 1. Webpack이 자동으로 빌드 (watch 모드)
 2. `chrome://extensions`에서 확장 프로그램 새로고침 버튼 클릭
 3. 테스트할 웹페이지 새로고침
@@ -206,12 +207,14 @@ const result = await parseHtmlInOffscreen(htmlContent, baseUrl);
 ```
 
 **Offscreen Service 주요 기능**:
+
 - `sanitizeHtmlInOffscreen()`: DOMPurify를 사용한 HTML 정제 및 포매팅
 - `resizeImageInOffscreen()`: 이미지 리사이징
 - `renderTemplateInOffscreen()`: 템플릿 렌더링
 - `parseHtmlInOffscreen()`: HTML 파싱 및 메타데이터 추출
 
 **보안 기능**:
+
 - DOMPurify를 통한 XSS 공격 방어
 - 위험한 태그/속성 자동 제거
 - Marked를 통한 안전한 마크다운 변환
@@ -229,14 +232,17 @@ const result = await parseHtmlInOffscreen(htmlContent, baseUrl);
 ### 디버깅
 
 **Service Worker 디버깅**:
+
 1. `chrome://extensions`에서 "서비스 워커" 링크 클릭
 2. Chrome DevTools에서 디버깅
 
 **Content Script 디버깅**:
+
 1. 확장 프로그램이 주입된 웹페이지에서 F12
 2. DevTools에서 디버깅
 
 **Logger 사용**:
+
 ```javascript
 import { Logger } from '../utils.js';
 
@@ -295,7 +301,7 @@ API 키는 `chrome.storage.local`에 저장됩니다:
 // 저장
 await chrome.storage.local.set({
   geminiApiKey: 'your-api-key',
-  youtubeApiKey: 'your-api-key'
+  youtubeApiKey: 'your-api-key',
 });
 
 // 읽기
@@ -353,7 +359,7 @@ await signInToFirebaseWithGoogleToken(token);
 
 - [서비스 아키텍처](../architecture/SERVICES_ARCHITECTURE.md)
 - [AI 서비스 가이드](./AI_SERVICE_GUIDE.md)
--- (마이그레이션 서비스 가이드: 제거됨)
+  -- (마이그레이션 서비스 가이드: 제거됨)
 - [Firebase 채널 구조](../firebase/FIREBASE_CHANNELS_STRUCTURE.md)
 
 ---
@@ -387,4 +393,3 @@ npm install
 - [README.md](../../README.md)
 - [서비스 아키텍처](./architecture/SERVICES_ARCHITECTURE.md)
 - [코드 리뷰 체크리스트](./reviews/CODE_REVIEW.md)
-

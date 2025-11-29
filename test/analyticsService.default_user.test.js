@@ -25,7 +25,11 @@ describe('analyticsService default_user guard', () => {
     // the resolved user ID is the placeholder 'default_user'. We don't assert
     // on sendErrorToUI directly here because of module-local references; the
     // important invariant is: no DB writes occur.
-    await analyticsService.updateSinglePerformanceMetric({ id: 'c1', path: 'kanban/default_user/ideas/c1', url: 'https://example.com' });
+    await analyticsService.updateSinglePerformanceMetric({
+      id: 'c1',
+      path: 'kanban/default_user/ideas/c1',
+      url: 'https://example.com',
+    });
     expect(firebaseService.update).not.toHaveBeenCalled();
   });
 });

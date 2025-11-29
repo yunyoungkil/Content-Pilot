@@ -10,7 +10,11 @@ describe('restoreAuthSession user info persistence', () => {
 
     // Provide stored token (validateStoredToken will check this and our global.fetch mock)
     jest.spyOn(global.chrome.storage.local, 'get').mockImplementation(async (keys) => {
-      return { googleAuthToken: 'valid-token', googleAuthTokenExpiry: Date.now() + 1000000, googleAuthTokenIssued: Date.now() };
+      return {
+        googleAuthToken: 'valid-token',
+        googleAuthTokenExpiry: Date.now() + 1000000,
+        googleAuthTokenIssued: Date.now(),
+      };
     });
 
     // mock fetch for userinfo endpoint
@@ -18,7 +22,12 @@ describe('restoreAuthSession user info persistence', () => {
       if (url.includes('oauth2.googleapis.com') || url.includes('/userinfo')) {
         return {
           ok: true,
-          json: async () => ({ email: 'test@example.com', sub: 'unique-id-123', id: 'unique-id-123', name: 'Test User' }),
+          json: async () => ({
+            email: 'test@example.com',
+            sub: 'unique-id-123',
+            id: 'unique-id-123',
+            name: 'Test User',
+          }),
         };
       }
       return { ok: false, status: 404 };
@@ -31,6 +40,11 @@ describe('restoreAuthSession user info persistence', () => {
     const res = await authService.restoreAuthSession();
 
     expect(res).toBe(true);
-    expect(setSpy).toHaveBeenCalledWith(expect.objectContaining({ googleUserEmail: 'test@example.com', googleUserId: 'unique-id-123' }));
+    expect(setSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        googleUserEmail: 'test@example.com',
+        googleUserId: 'unique-id-123',
+      })
+    );
   });
 });

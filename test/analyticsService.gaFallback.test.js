@@ -4,11 +4,17 @@ jest.mock('../js/services/firebaseService.js', () => ({
   ref: jest.fn((db, path) => path),
   get: jest.fn(async (path) => {
     if (path === 'channels/user-123') {
-      return { val: () => ({ myChannels: { blogs: [{ inputUrl: 'https://blog.example.com/user', gaPropertyId: '' }] } }) };
+      return {
+        val: () => ({
+          myChannels: { blogs: [{ inputUrl: 'https://blog.example.com/user', gaPropertyId: '' }] },
+        }),
+      };
     }
     if (path.includes('kanban/user-123')) {
       // simulate card performance structure
-      return { val: () => ({ ideas: { c1: { publishedUrl: 'https://blog.example.com/post/1' } } }) };
+      return {
+        val: () => ({ ideas: { c1: { publishedUrl: 'https://blog.example.com/post/1' } } }),
+      };
     }
     return { val: () => null };
   }),
@@ -32,7 +38,9 @@ describe('analyticsService GA4 fallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // mock token retrieval
-    jest.spyOn(require('../js/services/authService.js'), 'getValidToken').mockResolvedValue('fake-token');
+    jest
+      .spyOn(require('../js/services/authService.js'), 'getValidToken')
+      .mockResolvedValue('fake-token');
   });
 
   test('collects AdSense data even when GA4 ID is missing', async () => {
@@ -42,10 +50,18 @@ describe('analyticsService GA4 fallback', () => {
     });
 
     // spy on analytics functions to avoid real network calls
-    jest.spyOn(analyticsService, 'getAnalyticsData').mockResolvedValue({ pageviews: 0, gaEarnings: 0 });
-    jest.spyOn(analyticsService, 'getAdsenseData').mockResolvedValue({ estimatedEarnings: 0.5, pageViews: 8 });
+    jest
+      .spyOn(analyticsService, 'getAnalyticsData')
+      .mockResolvedValue({ pageviews: 0, gaEarnings: 0 });
+    jest
+      .spyOn(analyticsService, 'getAdsenseData')
+      .mockResolvedValue({ estimatedEarnings: 0.5, pageViews: 8 });
 
-    await analyticsService.updateSinglePerformanceMetric({ id: 'c1', path: 'kanban/user-123/ideas/c1', url: 'https://blog.example.com/post/1' });
+    await analyticsService.updateSinglePerformanceMetric({
+      id: 'c1',
+      path: 'kanban/user-123/ideas/c1',
+      url: 'https://blog.example.com/post/1',
+    });
 
     // Expect update called to write performance (collecting false after completion)
     expect(firebaseService.update).toHaveBeenCalled();

@@ -1,6 +1,6 @@
 // js/ui/thumbnailMaker.js
 import { renderTemplateFromData, createSmartTemplate } from './thumbnailGenerator.js';
-import { showToast, Logger } from '../utils.js';
+import { showToast, Logger, debounce } from '../utils.js';
 
 /**
  * 썸네일 제작 모달을 엽니다.
@@ -941,17 +941,23 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
   const titleInput = document.getElementById('tm-title');
   if (titleInput)
-    titleInput.addEventListener('input', () => {
-      updatePreview();
-      saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)
-    });
+    titleInput.addEventListener(
+      'input',
+      debounce(() => {
+        updatePreview();
+        saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)
+      }, 300)
+    );
 
   const subtitleInput = document.getElementById('tm-subtitle');
   if (subtitleInput)
-    subtitleInput.addEventListener('input', () => {
-      updatePreview();
-      saveState();
-    });
+    subtitleInput.addEventListener(
+      'input',
+      debounce(() => {
+        updatePreview();
+        saveState();
+      }, 300)
+    );
 
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
   const fontFamilySelect = document.getElementById('tm-font-family');
