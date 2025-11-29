@@ -1393,61 +1393,7 @@ export function renderChannelMode(container) {
     });
   }
 
-  // 블로그 URL과 플랫폼 타입을 받아 RSS URL로 변환하는 함수
-  function resolveBlogUrlToRss(url, type = 'naver') {
-    if (!url || typeof url !== 'string') return null;
-
-    // 1. 직접 입력 모드: 검증 없이 그대로 반환
-    if (type === 'direct') {
-      return url.startsWith('http') ? url : `https://${url}`;
-    }
-
-    try {
-      // URL 객체 생성 (프로토콜이 없으면 https 붙임)
-      const safeUrl = url.startsWith('http') ? url : `https://${url}`;
-      const urlObj = new URL(safeUrl);
-      const origin = urlObj.origin;
-      const host = urlObj.hostname.toLowerCase();
-
-      // 2. 명시적 플랫폼 선택 처리
-      if (type === 'naver') {
-        // 네이버: 경로에서 ID 추출 또는 파라미터에서 ID 추출
-        const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
-        if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
-          return `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
-        }
-        const blogId = new URLSearchParams(urlObj.search).get('blogId');
-        if (blogId) {
-          return `https://rss.blog.naver.com/${blogId}.xml`;
-        }
-        return null; // ID 추출 실패
-      }
-
-      if (type === 'tistory') {
-        // 티스토리: 무조건 /rss 붙임 (개인 도메인 해결!)
-        return `${origin}/rss`;
-      }
-
-      if (type === 'wordpress' || type === 'medium') {
-        // 워드프레스/미디엄: 무조건 /feed 붙임
-        return url.endsWith('/') ? `${url}feed` : `${url}/feed`;
-      }
-
-      if (type === 'blogger') {
-        // 구글 블로거
-        return `${origin}/feeds/posts/default?alt=rss`;
-      }
-
-      // 기본값 (Fallback) - 네이버로 처리
-      const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
-      if (pathMatch && pathMatch[1]) return `https://rss.blog.naver.com/${pathMatch[1]}.xml`;
-      return null;
-    } catch (e) {
-      console.warn('[ChannelMode] URL 파싱 실패:', url, e);
-      // 실패 시 직접 입력으로 간주하거나 null 반환
-      return type === 'direct' ? url : null;
-    }
-  }
+  // (중복 제거) 해당 파일 상단에 이미 정의된 resolveBlogUrlToRss를 사용합니다.
 
   // 모달 적용 버튼 (임시 저장)
   const modalApplyBtn = container.querySelector('#modal-apply-btn');

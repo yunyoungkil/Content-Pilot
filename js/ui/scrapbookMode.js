@@ -251,7 +251,8 @@ function renderScrapListChunked(scrapsToRender, listContainer, container) {
       progressIndicator.remove();
 
       // 이벤트 리스너 연결 (기존 로직 유지)
-      attachScrapListEventListeners(listContainer, container, scraps);
+      // `scraps`는 렌더링 파라미터가 아닌 내부 변수이므로 여기서는 `scrapsToRender`를 전달합니다.
+      attachScrapListEventListeners(listContainer, container, scrapsToRender);
     }
   }
 

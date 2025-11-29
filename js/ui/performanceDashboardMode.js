@@ -375,6 +375,19 @@ function createPerformanceCard(item, index) {
   `;
 }
 
+/**
+ * Confetti 애니메이션 트리거 (선택적)
+ */
+function triggerConfettiAnimation() {
+  try {
+    if (typeof globalThis.confetti === 'function') {
+      globalThis.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    }
+  } catch (e) {
+    Logger.warn('[PerformanceDashboard] confetti animation failed', e);
+  }
+}
+
 // 상세 정보 존재 여부 확인
 function hasDetails(perf) {
   return (

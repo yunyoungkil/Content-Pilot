@@ -1,4 +1,4 @@
-import { shortenLink, showToast, Logger } from '../utils.js';
+import { shortenLink, showToast, showConfirmationToast, Logger } from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
@@ -905,6 +905,7 @@ function buildPermalinkUrl(channelUrl, permalink, isTistory = null) {
     if (host.includes('blog.naver.com'))
       return permalink.startsWith('http') ? permalink : `${urlObj.origin}/${permalink}`;
     if (host.includes('brunch.co.kr')) {
+      /* eslint-disable-next-line no-useless-escape */
       const pathMatch = urlObj.pathname.match(/^\/@([^\/]+)/);
       return pathMatch
         ? `${urlObj.origin}/@${pathMatch[1]}/${permalink}`
@@ -931,7 +932,8 @@ function extractPermalinkFromUrl(publishedUrl) {
 
     // Tistory: /entry/12345 형식
     if (host.includes('tistory.com')) {
-      const match = pathname.match(/\/entry\/([^\/\?]+)/);
+      /* eslint-disable-next-line no-useless-escape */
+      const match = pathname.match(/\/entry\/([^\/?]+)/);
       if (match) return match[1];
     }
 
@@ -942,13 +944,15 @@ function extractPermalinkFromUrl(publishedUrl) {
       if (logNoMatch) return logNoMatch;
 
       // /12345 형식
-      const pathMatch = pathname.match(/^\/([^\/\?]+)$/);
+      /* eslint-disable-next-line no-useless-escape */
+      const pathMatch = pathname.match(/^\/([^\/]+)$/);
       if (pathMatch && pathMatch[1] !== 'PostView.naver') return pathMatch[1];
     }
 
     // Brunch: /@username/12345 형식
     if (host.includes('brunch.co.kr')) {
-      const match = pathname.match(/\/@[^\/]+\/([^\/\?]+)/);
+      /* eslint-disable-next-line no-useless-escape */
+      const match = pathname.match(/\/@[^\/]+\/([^\/?]+)/);
       if (match) return match[1];
     }
 
@@ -957,7 +961,7 @@ function extractPermalinkFromUrl(publishedUrl) {
     if (segments.length > 0) {
       const lastSegment = segments[segments.length - 1];
       // 확장자 제거 (예: .html, .php 등)
-      return lastSegment.replace(/\.[^\.]+$/, '');
+      return lastSegment.replace(/\.[^.]+$/, '');
     }
 
     return '';
@@ -1022,7 +1026,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       // 기존 publishInfo의 다른 필드들도 유지
       if (ideaData.publishInfo) {
         Object.keys(ideaData.publishInfo).forEach((key) => {
-          if (!publishInfoUpdates.hasOwnProperty(key)) {
+          if (!Object.prototype.hasOwnProperty.call(publishInfoUpdates, key)) {
             publishInfoUpdates[key] = ideaData.publishInfo[key];
           }
         });
@@ -2383,10 +2387,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
   }
 
   // [수정] 리스너 중복 등록 방지
+  // 툴바 에디터 메시지를 전역에서 참조하기 위해 외부 스코프에 선언
+  let tuiEditorMessageListener;
   if (!window.__cp_tui_listener_attached) {
     Logger.debug('🔧 [Workspace] addWorkspaceEventListeners 내부 TUI 리스너 등록 중...');
 
-    const tuiEditorMessageListener = (event) => {
+    tuiEditorMessageListener = (event) => {
       // 🔍 디버깅: 모든 메시지 로깅
       if (event.data && typeof event.data === 'object' && event.data.action) {
         Logger.debug('🔍 [Workspace] addWorkspace 리스너 - 메시지 수신:', {
