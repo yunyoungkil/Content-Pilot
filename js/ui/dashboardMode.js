@@ -1802,60 +1802,8 @@ function addDashboardEventListeners(container) {
       return;
     }
 
-    const handleAnalysis = async (action, content, isMyChannel, ideasContent, callback) => {
-      const message = isMyChannel
-        ? 'AI가 내 채널의 성공 요인을 분석 중입니다... 📈'
-        : 'AI가 경쟁 채널을 분석하여 새로운 아이디어를 생성 중입니다... 🧠';
-      ideasContent.innerHTML = `<p class="ai-ideas-placeholder">${message}</p>`;
-
-      const CACHE_KEY = await getCacheKey();
-
-      if (isMyChannel) {
-        chrome.storage.local.get(CACHE_KEY, (result) => {
-          let cache = result[CACHE_KEY] || {};
-          // 2. 'addedIdeas'를 제외한 분석 관련 캐시만 삭제합니다.
-          delete cache.myAnalysisResult;
-          delete cache.myAnalysisSummary;
-          delete cache.competitorAnalysisResult;
-          delete cache.isAnalysisScrapped;
-
-          // 3. 수정된 캐시를 다시 저장합니다.
-          chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
-            // UI 초기화 로직은 그대로 유지합니다.
-            const recentlyAddedPanel = container.querySelector('#recently-added-panel');
-            const recentlyAddedList = container.querySelector('#recently-added-list');
-            if (recentlyAddedPanel && recentlyAddedList) {
-              recentlyAddedPanel.style.display = 'none';
-              recentlyAddedList.innerHTML = `<li class="recent-add-placeholder">아이디어를 기획 보드에 추가하면 여기에 표시됩니다.</li>`;
-            }
-          });
-        });
-      }
-
-      chrome.runtime.sendMessage({ action, data: content }, (response) => {
-        if (response && response.success) {
-          const analysisText = response.analysis || response.ideas;
-          chrome.storage.local.get(CACHE_KEY, (result) => {
-            let cache = result[CACHE_KEY] || {};
-            if (isMyChannel) {
-              cache.myAnalysisResult = analysisText;
-              cache.myAnalysisSummary = analysisText.split(/###|\n##|\n\d\./)[0].trim();
-            } else {
-              cache.competitorAnalysisResult = analysisText;
-            }
-            chrome.storage.local.set({ [CACHE_KEY]: cache }, () => {
-              console.log('[Dashboard] 캐시 저장 완료:', CACHE_KEY);
-            });
-          });
-          renderAnalysisResult(ideasContent, analysisText, isMyChannel);
-          if (callback) callback(response);
-        } else {
-          ideasContent.innerHTML = `<p class="ai-ideas-placeholder">분석 중 오류: ${
-            response.error || ''
-          }</p>`;
-        }
-      });
-    };
+    // Note: handleAnalysis was previously defined here but is no longer used.
+    // Intentionally left out: consolidated analysis handling is implemented inline in the unified analyze flow.
 
     if (target.closest('#unified-analyze-btn')) {
       // [수정] 복잡한 데이터 수집 로직 제거 -> activeChannelId만 전송
@@ -2198,7 +2146,6 @@ function addDashboardEventListeners(container) {
     if (target.closest('.add-to-kanban-btn')) {
       const ideaCard = target.closest('.ai-idea-card');
       const ideaObjectString = ideaCard.dataset.ideaObject;
-      const ideaIndex = ideaCard.dataset.ideaIndex; // index may be used later
 
       // ▼▼▼ [수정] AI 아이디어 제안에 origin 필드 추가 ▼▼▼
       // AI 아이디어 제안은 ai_generated로 분류하여 브리핑 자동 생성되도록 함
