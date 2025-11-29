@@ -5,6 +5,177 @@ import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
 
+// 채널 정보 캐시 (메모리 캐시 + TTL)
+const channelCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5분
+
+// 채널 매칭을 위한 Map 생성 (빠른 조회용)
+function createChannelMap(blogs) {
+  const channelMap = new Map();
+
+  blogs.forEach((blog, index) => {
+    const inputUrl = blog.inputUrl || blog.url;
+    if (inputUrl) {
+      // URL 정규화
+      const normalizedUrl = inputUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      channelMap.set(normalizedUrl, { ...blog, index });
+
+      // hostname도 저장
+      try {
+        const hostname = new URL(inputUrl).hostname.toLowerCase();
+        if (!channelMap.has(hostname)) {
+          channelMap.set(hostname, { ...blog, index });
+        }
+      } catch (e) {
+        // URL 파싱 실패 시 무시
+      }
+    }
+  });
+
+  return channelMap;
+}
+
+// 최적화된 채널 매칭 함수
+function findMatchingChannel(contentUrl, channelMap) {
+  if (!contentUrl || channelMap.size === 0) return null;
+
+  try {
+    const contentHost = new URL(contentUrl).hostname.toLowerCase();
+    const normalizedContent = contentUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+    // 1. 정확한 URL 매칭
+    if (channelMap.has(normalizedContent)) {
+      return channelMap.get(normalizedContent);
+    }
+
+    // 2. hostname 매칭
+    if (channelMap.has(contentHost)) {
+      return channelMap.get(contentHost);
+    }
+
+    // 3. 부분 매칭 (fallback)
+    for (const [key, blog] of channelMap) {
+      if (normalizedContent.includes(key) && key.includes('.')) {
+        return blog;
+      }
+    }
+
+    // 4. hostname 기반 부분 매칭
+    for (const [key, blog] of channelMap) {
+      if (key.includes('.') && (
+        contentHost === key ||
+        contentHost.endsWith('.' + key) ||
+        key.endsWith('.' + contentHost)
+      )) {
+        return blog;
+      }
+    }
+
+  } catch (err) {
+    Logger.warn('[findMatchingChannel] URL 파싱 실패:', contentUrl, err.message);
+  }
+
+  return null;
+}
+
+// 캐시된 채널 정보 조회
+async function getCachedChannels(userId) {
+  const cacheKey = `channels_${userId}`;
+  const cached = channelCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+
+  // 캐시 만료 또는 없음 - DB 조회
+  const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+  const channels = channelsSnap.val() || {};
+
+  // 캐시 저장
+  channelCache.set(cacheKey, {
+    data: channels,
+    timestamp: Date.now()
+  });
+
+  return channels;
+}
+
+// 대체 채널 ID 조회 및 캐시
+async function getAlternativeChannels(userId) {
+  const cacheKey = `alt_channels_${userId}`;
+  const cached = channelCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+
+  const altChannels = { blogs: [] };
+
+  try {
+    const storage = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
+    const altIds = [];
+
+    // build email-derived safe id
+    if (storage.googleUserEmail) {
+      const safeEmail = storage.googleUserEmail
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '_')
+        .replace(/_{2,}/g, '_');
+      if (safeEmail && safeEmail !== userId) altIds.push(safeEmail);
+    }
+
+    // include googleUserId if different
+    if (storage.googleUserId && storage.googleUserId !== userId) {
+      altIds.push(storage.googleUserId);
+    }
+
+    // also check default placeholder as last resort
+    if (
+      CONSTANTS &&
+      CONSTANTS.USER_ID &&
+      !altIds.includes(CONSTANTS.USER_ID) &&
+      CONSTANTS.USER_ID !== userId
+    ) {
+      altIds.push(CONSTANTS.USER_ID);
+    }
+
+    for (const alt of altIds) {
+      try {
+        const snap = await get(ref(getDb(), `channels/${alt}`));
+        const val = snap?.val();
+        const candidateBlogs = val?.myChannels?.blogs || [];
+        if (candidateBlogs && candidateBlogs.length > 0) {
+          Logger.info(
+            '[getAlternativeChannels] 채널이 다른 사용자 키에서 발견되어 대체 사용:',
+            alt
+          );
+          altChannels.blogs = candidateBlogs;
+          break;
+        }
+      } catch (err) {
+        Logger.debug(
+          '[getAlternativeChannels] 대체 채널 조회 실패 (무시):',
+          alt,
+          err?.message || err
+        );
+      }
+    }
+  } catch (err) {
+    Logger.warn(
+      '[getAlternativeChannels] 채널 대체 키 조회 중 에러:',
+      err && err.message
+    );
+  }
+
+  // 캐시 저장
+  channelCache.set(cacheKey, {
+    data: altChannels,
+    timestamp: Date.now()
+  });
+
+  return altChannels;
+}
+
 // 1. 에러 전파 유틸리티
 export async function sendErrorToUI(errorType, message) {
   try {
@@ -422,9 +593,8 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     const adSenseId = storage.adSenseAccountId;
     if (!adSenseId) throw new Error('AdSense 계정 ID 없음');
 
-    // 채널 정보 로드
-    const channelsSnap = await get(ref(db, `channels/${userId}`));
-    let channels = channelsSnap.val() || {};
+    // 채널 정보 로드 (캐시 활용)
+    let channels = await getCachedChannels(userId);
     let gaId = null;
     let siteUrl = null; // GSC용 URL
 
@@ -435,98 +605,16 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     // (e.g. email-derived safe id vs. googleUserId) and prevents GA4 being reported
     // as missing when the channel actually exists under another key.
     if ((!blogs || blogs.length === 0) && userId) {
-      try {
-        const storage = await chrome.storage.local.get(['googleUserEmail', 'googleUserId']);
-        const altIds = [];
-
-        // build email-derived safe id
-        if (storage.googleUserEmail) {
-          const safeEmail = storage.googleUserEmail
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '_')
-            .replace(/_{2,}/g, '_');
-          if (safeEmail && safeEmail !== userId) altIds.push(safeEmail);
-        }
-
-        // include googleUserId if different
-        if (storage.googleUserId && storage.googleUserId !== userId) {
-          altIds.push(storage.googleUserId);
-        }
-
-        // also check default placeholder as last resort
-        if (
-          CONSTANTS &&
-          CONSTANTS.USER_ID &&
-          !altIds.includes(CONSTANTS.USER_ID) &&
-          CONSTANTS.USER_ID !== userId
-        ) {
-          altIds.push(CONSTANTS.USER_ID);
-        }
-
-        for (const alt of altIds) {
-          try {
-            const snap = await get(ref(db, `channels/${alt}`));
-            const val = snap?.val();
-            const candidateBlogs = val?.myChannels?.blogs || [];
-            if (candidateBlogs && candidateBlogs.length > 0) {
-              Logger.info(
-                '[updateSinglePerformanceMetric] 채널이 다른 사용자 키에서 발견되어 대체 사용:',
-                alt
-              );
-              channels = val;
-              blogs = candidateBlogs;
-              break;
-            }
-          } catch (err) {
-            // ignore per-candidate errors and try next
-            Logger.debug(
-              '[updateSinglePerformanceMetric] 대체 채널 조회 실패 (무시):',
-              alt,
-              err?.message || err
-            );
-          }
-        }
-      } catch (err) {
-        Logger.warn(
-          '[updateSinglePerformanceMetric] 채널 대체 키 조회 중 에러:',
-          err && err.message
-        );
+      const altChannels = await getAlternativeChannels(userId);
+      blogs = altChannels.blogs;
+      if (blogs.length > 0) {
+        channels = altChannels;
       }
     }
-    // Try exact include match first, then fallback to hostname-based matching for
-    // cases where inputUrl might be a blog root or variations (avoids false misses).
-    let blog = blogs.find((b) => contentInfo.url.includes(b.inputUrl || b.url));
-    if (!blog) {
-      try {
-        const contentHost = new URL(contentInfo.url).hostname.toLowerCase();
-        blog = blogs.find((b) => {
-          const candidate = (b.inputUrl || b.url || '').toString();
-          if (!candidate) return false;
-          try {
-            const candHost = new URL(candidate).hostname.toLowerCase();
-            return (
-              contentHost === candHost ||
-              contentHost.endsWith('.' + candHost) ||
-              candHost.endsWith('.' + contentHost)
-            );
-          } catch (e) {
-            // if candidate is not a well-formed URL, try substring match
-            return contentInfo.url.includes(candidate);
-          }
-        });
-        if (blog)
-          Logger.info(
-            '[updateSinglePerformanceMetric] hostname fallback matched blog for content URL',
-            { contentUrl: contentInfo.url, matched: blog.inputUrl || blog.url }
-          );
-      } catch (err) {
-        Logger.warn(
-          '[updateSinglePerformanceMetric] hostname fallback failed to parse URL:',
-          contentInfo.url,
-          err && err.message
-        );
-      }
-    }
+    // 채널 매칭 (최적화된 Map 기반 조회)
+    const channelMap = createChannelMap(blogs);
+    const blog = findMatchingChannel(contentInfo.url, channelMap);
+
     if (blog) {
       gaId = blog.gaPropertyId;
       // GSC 사이트 URL이 별도로 없으면 기본 URL 사용
@@ -614,7 +702,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   }
 }
 
-// 6. 전체 성과 업데이트 (배치 처리)
+// 6. 전체 성과 업데이트 (배치 처리 최적화)
 export async function updateAllPerformanceMetrics() {
   if (!initializeFirebase()) return;
   const db = getDb();
@@ -634,6 +722,11 @@ export async function updateAllPerformanceMetrics() {
     }
     return;
   }
+
+  // 채널 정보 미리 캐시 (배치 처리 전)
+  await getCachedChannels(userId);
+  await getAlternativeChannels(userId);
+
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -659,13 +752,34 @@ export async function updateAllPerformanceMetrics() {
     }
   }
 
-  // 5개씩 배치 실행
-  for (let i = 0; i < tasks.length; i += 5) {
-    const batch = tasks.slice(i, i + 5);
-    await Promise.all(batch.map((t) => updateSinglePerformanceMetric(t)));
-    await new Promise((r) => setTimeout(r, 1000));
+  Logger.info(`[updateAllPerformanceMetrics] 업데이트 대상 카드: ${tasks.length}개`);
+
+  // 10개씩 배치 실행 (증가) + Promise.allSettled로 더 효율적 처리
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+    const batch = tasks.slice(i, i + BATCH_SIZE);
+    Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${i + 1}-${Math.min(i + BATCH_SIZE, tasks.length)}`);
+
+    const results = await Promise.allSettled(
+      batch.map((t) => updateSinglePerformanceMetric(t))
+    );
+
+    // 실패한 작업 로깅
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length > 0) {
+      Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
+      failed.forEach((f, idx) => {
+        Logger.warn(`[updateAllPerformanceMetrics] 실패 ${idx + 1}:`, f.reason?.message || f.reason);
+      });
+    }
+
+    // 배치 간 딜레이 (API rate limit 고려)
+    if (i + BATCH_SIZE < tasks.length) {
+      await new Promise((r) => setTimeout(r, 2000)); // 2초로 증가
+    }
   }
 
+  Logger.info(`[updateAllPerformanceMetrics] 모든 배치 처리 완료`);
   await runAutomatedRenewalChecks();
 }
 

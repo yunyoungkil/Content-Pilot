@@ -1098,12 +1098,15 @@
   padding: 20px 24px;
   border-top: 1px solid rgba(102, 126, 234, 0.1);
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .form-footer-left,
 .form-footer-right {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .affiliate-preview-btn {
@@ -1120,6 +1123,11 @@
   align-items: center;
   gap: 6px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 80px;
+  justify-content: center;
 }
 
 .affiliate-preview-btn:hover {
@@ -1145,6 +1153,11 @@
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   position: relative;
   overflow: hidden;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 100px;
+  justify-content: center;
 }
 
 .affiliate-save-btn::before {
@@ -1214,6 +1227,17 @@
   color: #666;
   transition: all 0.3s ease;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 80px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .cp-btn-secondary:hover {

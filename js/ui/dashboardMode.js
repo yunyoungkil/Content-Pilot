@@ -3,19 +3,35 @@
 import { marked } from 'marked';
 import { showToast } from '../utils.js';
 
-// --- 전역 변수 및 캐시 관련 함수 (이전과 동일) ---
-let cachedData = null;
-const ITEMS_PER_PAGE = 5;
-let viewState = {
-  myChannels: { sortOrder: 'pubDate', currentPage: 0 },
-  competitorChannels: { sortOrder: 'pubDate', currentPage: 0 },
-};
-let activeTagFilter = null;
-let activeChannelFilter = null; // 경쟁 채널 필터
-const getCacheKey = async () => {
-  const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
-  return `analysisCache_${activeChannelId || 'default'}`;
-};
+// 대시보드 데이터 캐시 (메모리 캐시 + TTL)
+const dashboardCache = new Map();
+const DASHBOARD_CACHE_TTL = 3 * 60 * 1000; // 3분
+
+// 캐시된 대시보드 데이터 조회
+async function getCachedDashboardData(activeChannelId) {
+  const cacheKey = `dashboard_${activeChannelId || 'default'}`;
+  const cached = dashboardCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < DASHBOARD_CACHE_TTL) {
+    return cached.data;
+  }
+
+  // 캐시 만료 또는 없음 - 새로운 데이터 로드
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'get_channel_content' }, (response) => {
+      if (response && response.success) {
+        // 캐시 저장
+        dashboardCache.set(cacheKey, {
+          data: response.data,
+          timestamp: Date.now()
+        });
+        resolve(response.data);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
 
 /**
  * [체크리스트 2] 제목 정규화 함수 (AI 아이디어 매칭용)
@@ -1547,21 +1563,28 @@ function renderDashboard(container) {
               </div>
           </div>
       </div>
-    `;
-  chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (response) => {
-    if (!response || !response.success) {
-      container
-        .querySelectorAll('.content-list-area')
-        .forEach((list) => (list.innerHTML = '<p>콘텐츠를 불러오지 못했습니다.</p>'));
-      return;
+  `;
+
+  // 캐시된 데이터 로드 및 UI 업데이트
+  (async () => {
+    const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+    cachedData = await getCachedDashboardData(activeChannelId);
+    
+    if (cachedData) {
+      await updateDashboardUI(container);
+    } else {
+      // 캐시된 데이터가 없으면 실제 데이터 로드
+      chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (response) => {
+        if (response && response.success) {
+          cachedData = response.data;
+          await updateDashboardUI(container);
+        }
+      });
     }
-    cachedData = response.data;
-    await updateDashboardUI(container);
-    // DOM이 완전히 렌더링된 후 캐시 복원
-    setTimeout(() => {
-      initDashboardMode(container);
-    }, 100);
-  });
+    
+    // 이벤트 리스너 추가
+    addDashboardEventListeners(container);
+  })();
 }
 
 function addDashboardEventListeners(container) {
