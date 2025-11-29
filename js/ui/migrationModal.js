@@ -1,6 +1,6 @@
 // js/ui/migrationModal.js - 마이그레이션 선택 모달
 
-import { showToast } from "../utils.js";
+import { showToast } from '../utils.js';
 
 /**
  * 마이그레이션 선택 모달 표시
@@ -15,15 +15,15 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
   const { orphanCount, channelCount, channelOptions, autoAssign } = migrationInfo;
 
   // 모달이 이미 있으면 제거
-  const existingModal = shadowRoot.querySelector("#migration-modal");
+  const existingModal = shadowRoot.querySelector('#migration-modal');
   if (existingModal) {
     existingModal.remove();
   }
 
   // 모달 생성
-  const modal = document.createElement("div");
-  modal.id = "migration-modal";
-  modal.className = "cp-modal-wrap";
+  const modal = document.createElement('div');
+  modal.id = 'migration-modal';
+  modal.className = 'cp-modal-wrap';
   modal.style.cssText = `
     position: fixed;
     inset: 0;
@@ -34,8 +34,8 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
     background: rgba(0, 0, 0, 0.5);
   `;
 
-  const modalContent = document.createElement("div");
-  modalContent.className = "cp-modal";
+  const modalContent = document.createElement('div');
+  modalContent.className = 'cp-modal';
   modalContent.style.cssText = `
     background: white;
     border-radius: 12px;
@@ -80,7 +80,7 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
         </label>
         <select id="migration-channel-select" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
           <option value="__PUBLIC__">🌐 공용으로 유지 (모든 채널에서 사용 가능)</option>
-          ${channelOptions.map(ch => `<option value="${ch.id}">📺 ${ch.name}</option>`).join("")}
+          ${channelOptions.map((ch) => `<option value="${ch.id}">📺 ${ch.name}</option>`).join('')}
         </select>
         <p style="margin: 8px 0 0 0; color: #666; font-size: 12px;">
           💡 공용으로 유지하면 모든 채널에서 데이터를 볼 수 있습니다.
@@ -102,55 +102,60 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
   shadowRoot.appendChild(modal);
 
   // 이벤트 리스너
-  const confirmBtn = modalContent.querySelector("#migration-confirm-btn");
-  const cancelBtn = modalContent.querySelector("#migration-cancel-btn");
-  const channelSelect = modalContent.querySelector("#migration-channel-select");
+  const confirmBtn = modalContent.querySelector('#migration-confirm-btn');
+  const cancelBtn = modalContent.querySelector('#migration-cancel-btn');
+  const channelSelect = modalContent.querySelector('#migration-channel-select');
 
-  confirmBtn.addEventListener("click", () => {
+  confirmBtn.addEventListener('click', () => {
     let targetChannelId = null;
-    
+
     if (autoAssign) {
       targetChannelId = channelOptions[0].id;
     } else if (channelSelect) {
       const selectedValue = channelSelect.value;
-      targetChannelId = selectedValue === "__PUBLIC__" ? null : selectedValue;
+      targetChannelId = selectedValue === '__PUBLIC__' ? null : selectedValue;
     }
 
     confirmBtn.disabled = true;
-    confirmBtn.textContent = "처리 중...";
+    confirmBtn.textContent = '처리 중...';
 
-    chrome.runtime.sendMessage({
-      action: "run_data_migration",
-      targetChannelId: targetChannelId
-    }, (response) => {
-      if (response && response.success) {
-        // 마이그레이션 완료 상태 저장
-        chrome.storage.local.set({ migration_completed: true }, () => {
-          modal.remove();
-          // [체크리스트 2-B 최적화] 완료 알림
-          showToast("✅ 데이터 구조가 업데이트되었습니다. 모든 데이터가 정상적으로 보존되었습니다.");
-          
-          // 현재 탭 새로고침
-          const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
-          if (activeTab) {
-            setTimeout(() => activeTab.click(), 500);
-          }
-        });
-      } else {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "마이그레이션 실행";
-        showToast(`❌ 마이그레이션 실패: ${response?.error || "알 수 없는 오류"}`);
+    chrome.runtime.sendMessage(
+      {
+        action: 'run_data_migration',
+        targetChannelId: targetChannelId,
+      },
+      (response) => {
+        if (response && response.success) {
+          // 마이그레이션 완료 상태 저장
+          chrome.storage.local.set({ migration_completed: true }, () => {
+            modal.remove();
+            // [체크리스트 2-B 최적화] 완료 알림
+            showToast(
+              '✅ 데이터 구조가 업데이트되었습니다. 모든 데이터가 정상적으로 보존되었습니다.'
+            );
+
+            // 현재 탭 새로고침
+            const activeTab = shadowRoot.querySelector('.cp-mode-tab.active');
+            if (activeTab) {
+              setTimeout(() => activeTab.click(), 500);
+            }
+          });
+        } else {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = '마이그레이션 실행';
+          showToast(`❌ 마이그레이션 실패: ${response?.error || '알 수 없는 오류'}`);
+        }
       }
-    });
+    );
   });
 
-  cancelBtn.addEventListener("click", () => {
+  cancelBtn.addEventListener('click', () => {
     modal.remove();
     // 나중에 다시 보여줄 수 있도록 상태 저장하지 않음
   });
 
   // 백드롭 클릭 시 닫기
-  modal.addEventListener("click", (e) => {
+  modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       modal.remove();
     }
@@ -162,17 +167,16 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
  * @param {ShadowRoot} shadowRoot - Shadow DOM 루트
  */
 export function checkAndShowMigrationModal(shadowRoot) {
-  chrome.runtime.sendMessage({ action: "check_migration_needed" }, (response) => {
+  chrome.runtime.sendMessage({ action: 'check_migration_needed' }, (response) => {
     if (response && response.success) {
       if (response.needsMigration) {
         showMigrationModal(shadowRoot, {
           orphanCount: response.orphanCount,
           channelCount: response.channelCount,
           channelOptions: response.channelOptions,
-          autoAssign: response.autoAssign
+          autoAssign: response.autoAssign,
         });
       }
     }
   });
 }
-

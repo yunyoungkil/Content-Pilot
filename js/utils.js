@@ -13,12 +13,12 @@ export const Logger = {
         // Service Worker에서는 항상 디버그 모드 (개발 중)
         return true;
       }
-      
+
       // window가 없는 환경 (Service Worker 등)
       if (typeof window === 'undefined') {
         return true; // Service Worker는 기본적으로 디버그 모드
       }
-      
+
       // URL 파라미터로 DEBUG=true 체크
       try {
         const urlParams = new URLSearchParams(window.location.search);
@@ -26,7 +26,7 @@ export const Logger = {
       } catch (e) {
         // window.location 접근 불가 (cross-origin 등)
       }
-      
+
       // localStorage 체크
       try {
         const debugMode = localStorage.getItem('CP_DEBUG_MODE');
@@ -34,18 +34,20 @@ export const Logger = {
       } catch (e) {
         // localStorage 접근 불가
       }
-      
+
       // 개발 환경 자동 감지 (localhost 또는 확장 프로그램)
       try {
-        if (window.location.protocol === 'chrome-extension:' || 
-            window.location.hostname === 'localhost' || 
-            window.location.hostname === '127.0.0.1') {
+        if (
+          window.location.protocol === 'chrome-extension:' ||
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1'
+        ) {
           return true;
         }
       } catch (e) {
         // window.location 접근 불가
       }
-      
+
       return false;
     } catch (e) {
       // 모든 체크 실패 시 기본적으로 true (개발 편의성)
@@ -76,7 +78,8 @@ export const Logger = {
    */
   error: (...args) => {
     // 에러는 항상 출력 (프로덕션에서도)
-    const style = 'background: #FF4444; color: #FFFFFF; padding: 2px 6px; border-radius: 3px; font-weight: bold;';
+    const style =
+      'background: #FF4444; color: #FFFFFF; padding: 2px 6px; border-radius: 3px; font-weight: bold;';
     console.error(`%c[ERROR]`, style, ...args);
   },
 
@@ -129,36 +132,36 @@ export const Logger = {
   groupEnd: () => {
     if (!Logger.isDebugMode()) return;
     console.groupEnd();
-  }
+  },
 };
 
 // 전역 토스트(모달) 함수 (중복 방지, 어디서든 호출 가능)
 export function showToast(msg) {
-  let toast = document.getElementById("cp-toast-modal");
+  let toast = document.getElementById('cp-toast-modal');
   if (toast) toast.remove();
-  toast = document.createElement("div");
-  toast.id = "cp-toast-modal";
+  toast = document.createElement('div');
+  toast.id = 'cp-toast-modal';
   toast.textContent = msg;
-  toast.style.position = "fixed";
-  toast.style.left = "50%";
-  toast.style.top = "60px";
-  toast.style.transform = "translateX(-50%)";
-  toast.style.background = "rgba(34,34,34,0.97)";
-  toast.style.color = "#fff";
-  toast.style.fontSize = "15px";
-  toast.style.fontWeight = "600";
-  toast.style.padding = "13px 32px";
-  toast.style.borderRadius = "10px";
-  toast.style.boxShadow = "0 2px 12px rgba(0,0,0,0.13)";
-  toast.style.zIndex = "2147483647"; /* 모든 모달보다 위에 표시 */
-  toast.style.opacity = "0";
-  toast.style.transition = "opacity 0.3s";
+  toast.style.position = 'fixed';
+  toast.style.left = '50%';
+  toast.style.top = '60px';
+  toast.style.transform = 'translateX(-50%)';
+  toast.style.background = 'rgba(34,34,34,0.97)';
+  toast.style.color = '#fff';
+  toast.style.fontSize = '15px';
+  toast.style.fontWeight = '600';
+  toast.style.padding = '13px 32px';
+  toast.style.borderRadius = '10px';
+  toast.style.boxShadow = '0 2px 12px rgba(0,0,0,0.13)';
+  toast.style.zIndex = '2147483647'; /* 모든 모달보다 위에 표시 */
+  toast.style.opacity = '0';
+  toast.style.transition = 'opacity 0.3s';
   document.body.appendChild(toast);
   setTimeout(() => {
-    toast.style.opacity = "1";
+    toast.style.opacity = '1';
   }, 10);
   setTimeout(() => {
-    toast.style.opacity = "0";
+    toast.style.opacity = '0';
     setTimeout(() => {
       toast.remove();
     }, 350);
@@ -167,7 +170,7 @@ export function showToast(msg) {
 
 // 긴 링크를 줄여서 보여주는 함수
 export function shortenLink(url, maxLength = 40) {
-  if (!url) return "";
+  if (!url) return '';
   if (url.length <= maxLength) return url;
   const urlObj = (() => {
     try {
@@ -180,23 +183,23 @@ export function shortenLink(url, maxLength = 40) {
     const host = urlObj.host;
     const path =
       urlObj.pathname.length > 16
-        ? urlObj.pathname.slice(0, 12) + "..." + urlObj.pathname.slice(-4)
+        ? urlObj.pathname.slice(0, 12) + '...' + urlObj.pathname.slice(-4)
         : urlObj.pathname;
     return host + path;
   }
-  return url.slice(0, 25) + "..." + url.slice(-10);
+  return url.slice(0, 25) + '...' + url.slice(-10);
 }
 export function showConfirmationToast(message, onConfirm) {
   // 혹시 이전에 떠 있던 확인 창이 있다면 제거
-  const existingToast = document.getElementById("cp-confirm-toast");
+  const existingToast = document.getElementById('cp-confirm-toast');
   if (existingToast) {
-    Logger.debug("[showConfirmationToast] 기존 토스트 제거");
+    Logger.debug('[showConfirmationToast] 기존 토스트 제거');
     existingToast.remove();
     // 기존 토스트를 제거한 후에도 계속 진행하여 새 메시지 표시
   }
 
-  const toast = document.createElement("div");
-  toast.id = "cp-confirm-toast";
+  const toast = document.createElement('div');
+  toast.id = 'cp-confirm-toast';
   toast.style.cssText = `
     position: fixed;
     bottom: 36px;
@@ -218,7 +221,7 @@ export function showConfirmationToast(message, onConfirm) {
 
   // onConfirm이 있으면 확인 버튼 표시, 없으면 단순 알림으로 취소 버튼만 표시
   const hasConfirmAction = onConfirm && typeof onConfirm === 'function';
-  
+
   toast.innerHTML = `
     <span>${message}</span>
     <div class="cp-confirm-actions" style="display: flex; gap: 8px;">

@@ -1,9 +1,9 @@
 // js/services/scrapService.js
 // 스크랩 관련 서비스
 
-import { cleanDataForFirebase, getCurrentUserId } from "./firebaseService.js";
-import { get, remove, push } from "./firebaseService.js";
-import { Logger } from "../utils.js";
+import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
+import { get, remove, push } from './firebaseService.js';
+import { Logger } from '../utils.js';
 
 /**
  * 스크랩 요소 저장
@@ -15,19 +15,15 @@ export async function saveScrapElement(data, channelId = null) {
   try {
     // 스크랩 데이터 준비
     const scrapPayload = {
-      text: data.text || "",
-      html: data.html || "",
-      tag: data.tag || "UNKNOWN",
-      url: data.url || "",
+      text: data.text || '',
+      html: data.html || '',
+      tag: data.tag || 'UNKNOWN',
+      url: data.url || '',
       image: data.image || null,
       images: data.images || [],
       allImages:
         data.allImages ||
-        (data.images && data.images.length > 0
-          ? data.images
-          : data.image
-          ? [data.image]
-          : null),
+        (data.images && data.images.length > 0 ? data.images : data.image ? [data.image] : null),
       highlights: data.highlights || [], // 하이라이트 메타데이터 포함
       hasHighlights: data.hasHighlights || false,
       timestamp: Date.now(),
@@ -60,7 +56,7 @@ export async function saveScrapElement(data, channelId = null) {
       scrapData: scrapPayload,
     };
   } catch (error) {
-    Logger.error("[saveScrapElement] 저장 실패:", error);
+    Logger.error('[saveScrapElement] 저장 실패:', error);
     return { success: false, error: error.message };
   }
 }
@@ -108,18 +104,12 @@ export async function getFirebaseScraps(targetChannelId = null) {
         return true;
       }
 
-      Logger.debug(
-        `[getFirebaseScraps] 스크랩 필터링: ID ${scrap.id} - 제외됨`
-      );
+      Logger.debug(`[getFirebaseScraps] 스크랩 필터링: ID ${scrap.id} - 제외됨`);
       return false;
     });
 
-    Logger.info(
-      `[getFirebaseScraps] 필터링 후 스크랩 개수: ${filtered.length}`
-    );
-    const sortedScraps = filtered.sort(
-      (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
-    );
+    Logger.info(`[getFirebaseScraps] 필터링 후 스크랩 개수: ${filtered.length}`);
+    const sortedScraps = filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
     // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
     // 모든 탭에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
@@ -128,7 +118,7 @@ export async function getFirebaseScraps(targetChannelId = null) {
         if (tab.id) {
           chrome.tabs
             .sendMessage(tab.id, {
-              action: "scraps_data_updated",
+              action: 'scraps_data_updated',
               scraps: sortedScraps,
             })
             .catch((err) => {
@@ -141,7 +131,7 @@ export async function getFirebaseScraps(targetChannelId = null) {
 
     return { data: sortedScraps };
   } catch (error) {
-    Logger.error("[getFirebaseScraps] Firebase 로드 오류:", error);
+    Logger.error('[getFirebaseScraps] Firebase 로드 오류:', error);
     return { data: [] };
   }
 }
@@ -154,7 +144,7 @@ export async function getFirebaseScraps(targetChannelId = null) {
  */
 export async function getScrapDetail(scrapId, channelId = null) {
   if (!scrapId) {
-    return { success: false, error: "스크랩 ID가 없습니다." };
+    return { success: false, error: '스크랩 ID가 없습니다.' };
   }
 
   try {
@@ -164,7 +154,7 @@ export async function getScrapDetail(scrapId, channelId = null) {
     const scrapData = scrapSnap?.val();
 
     if (!scrapData) {
-      return { success: false, error: "스크랩을 찾을 수 없습니다." };
+      return { success: false, error: '스크랩을 찾을 수 없습니다.' };
     }
 
     // 채널 ID 필터링 (필요한 경우)
@@ -174,24 +164,23 @@ export async function getScrapDetail(scrapId, channelId = null) {
       scrapData.channelId !== null &&
       scrapData.channelId !== channelId
     ) {
-      return { success: false, error: "접근 권한이 없습니다." };
+      return { success: false, error: '접근 권한이 없습니다.' };
     }
 
     return {
       success: true,
       data: {
         id: scrapId,
-        text: scrapData.text || scrapData.cleanText || "",
-        url: scrapData.url || "",
-        image: scrapData.image || "",
-        allImages:
-          scrapData.allImages || (scrapData.image ? [scrapData.image] : []),
+        text: scrapData.text || scrapData.cleanText || '',
+        url: scrapData.url || '',
+        image: scrapData.image || '',
+        allImages: scrapData.allImages || (scrapData.image ? [scrapData.image] : []),
         tags: scrapData.tags || [],
         timestamp: scrapData.timestamp || 0,
       },
     };
   } catch (error) {
-    Logger.error("[getScrapDetail] 오류:", error);
+    Logger.error('[getScrapDetail] 오류:', error);
     return { success: false, error: error.message };
   }
 }
@@ -203,20 +192,20 @@ export async function getScrapDetail(scrapId, channelId = null) {
  */
 export async function saveEntireAnalysis(analysisContent) {
   if (!analysisContent) {
-    return { success: false, error: "분석 콘텐츠가 비어있습니다." };
+    return { success: false, error: '분석 콘텐츠가 비어있습니다.' };
   }
 
   try {
     const today = new Date();
     const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, "0");
-    const day = String(today.getDate()).padStart(2, "0");
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
     const dateTag = `${year}-${month}-${day}`;
 
     const scrapPayload = {
       text: analysisContent,
       html: `<pre>${analysisContent}</pre>`,
-      tag: "AI_ANALYSIS",
+      tag: 'AI_ANALYSIS',
       url: `content-pilot://analysis/${Date.now()}`,
       tags: [`#성과분석`, `#${dateTag}`],
       timestamp: Date.now(),
@@ -227,10 +216,10 @@ export async function saveEntireAnalysis(analysisContent) {
     const scrapPath = `scraps/${userId}`;
     await push(scrapPath, cleanedScrapPayload);
 
-    Logger.info("AI 분석 리포트가 스크랩북에 저장되었습니다.");
-    return { success: true, message: "AI 분석 리포트가 저장되었습니다." };
+    Logger.info('AI 분석 리포트가 스크랩북에 저장되었습니다.');
+    return { success: true, message: 'AI 분석 리포트가 저장되었습니다.' };
   } catch (error) {
-    Logger.error("[saveEntireAnalysis] 오류:", error);
+    Logger.error('[saveEntireAnalysis] 오류:', error);
     return { success: false, error: error.message };
   }
 }
@@ -242,7 +231,7 @@ export async function saveEntireAnalysis(analysisContent) {
  */
 export async function deleteScrap(scrapId) {
   if (!scrapId) {
-    return { success: false, error: "스크랩 ID가 필요합니다." };
+    return { success: false, error: '스크랩 ID가 필요합니다.' };
   }
 
   try {
@@ -253,7 +242,7 @@ export async function deleteScrap(scrapId) {
     Logger.info(`[deleteScrap] 스크랩 삭제 완료 - scrapId: ${scrapId}`);
     return { success: true };
   } catch (error) {
-    Logger.error("[deleteScrap] 오류:", error);
+    Logger.error('[deleteScrap] 오류:', error);
     return { success: false, error: error.message };
   }
 }

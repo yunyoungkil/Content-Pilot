@@ -1,5 +1,6 @@
 // webpack.config.js
 const path = require("path");
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 module.exports = {
   mode: "development",
@@ -14,6 +15,7 @@ module.exports = {
     filename: "[name].bundle.js",
     publicPath: "", // Chrome Extension에서는 상대 경로 사용
     chunkFilename: "[id]-[name].bundle.js", // 청크 파일명에 ID와 이름을 포함하여 디버깅 용이하게
+    clean: true,
   },
   optimization: {
     splitChunks: {
@@ -21,6 +23,14 @@ module.exports = {
     },
   },
   devtool: "cheap-module-source-map",
+  plugins: [
+    new CopyWebpackPlugin({
+      patterns: [
+        { from: 'css', to: 'css' },
+        { from: 'images', to: 'images', noErrorOnMissing: true },
+      ],
+    }),
+  ],
   module: {
     rules: [
       {

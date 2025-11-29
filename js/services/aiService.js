@@ -6,28 +6,21 @@ import {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
-} from "./firebaseService.js";
+} from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
-import { ref, update, get } from "./firebaseService.js";
+import { ref, update, get } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
-import {
-  analyzePerformanceData,
-  getUserFeedbackPatterns,
-} from "./analyticsService.js";
-import { Logger } from "../utils.js";
+import { analyzePerformanceData, getUserFeedbackPatterns } from './analyticsService.js';
+import { Logger } from '../utils.js';
 import {
   sanitizeHtmlInOffscreen,
   cropImageInOffscreen,
   composeThumbnailInOffscreen,
-} from "./offscreenService.js"; // [추가]
+} from './offscreenService.js'; // [추가]
 // [추가] PromptService 임포트
-import {
-  PromptBuilder,
-  detectPersona,
-  PROMPT_CONFIG,
-} from "./promptService.js";
+import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 // [추가] 상수 임포트
-import { AI_MODELS, COLLECTIONS } from "../constants.js";
+import { AI_MODELS, COLLECTIONS } from '../constants.js';
 
 // 1. Gemini API 호출 (Core)
 /**
@@ -37,25 +30,19 @@ import { AI_MODELS, COLLECTIONS } from "../constants.js";
  * @throws {Error} API 키가 없거나 API 호출 실패 시 에러 발생
  */
 export async function callGeminiAPI(prompt) {
-  const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
+  const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
-    Logger.error(
-      "[callGeminiAPI] Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요."
-    );
-    throw new Error(
-      "Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요."
-    );
+    Logger.error('[callGeminiAPI] Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.');
+    throw new Error('Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.');
   }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.TEXT}:generateContent?key=${geminiApiKey}`;
 
   try {
-    Logger.debug(
-      `[callGeminiAPI] API 호출 시작 - prompt 길이: ${prompt.length}`
-    );
+    Logger.debug(`[callGeminiAPI] API 호출 시작 - prompt 길이: ${prompt.length}`);
     const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });
     const data = await response.json();
@@ -63,11 +50,11 @@ export async function callGeminiAPI(prompt) {
       Logger.error(`[callGeminiAPI] API 오류 (${response.status}):`, data);
       throw new Error(data.error?.message || `API Error (${response.status})`);
     }
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     Logger.debug(`[callGeminiAPI] API 호출 성공 - 응답 길이: ${result.length}`);
     return result;
   } catch (e) {
-    Logger.error("[callGeminiAPI] Gemini API 호출 실패:", e);
+    Logger.error('[callGeminiAPI] Gemini API 호출 실패:', e);
     throw e; // 에러를 다시 throw하여 상위에서 처리할 수 있도록
   }
 }
@@ -80,13 +67,11 @@ export async function callGeminiAPI(prompt) {
 export async function analyzeKeywordGap(myContent, competitorContent) {
   // (단순화를 위해 Set 연산만 수행, 필요시 AI 필터링 추가)
   const myTags = new Set();
-  myContent.forEach((c) =>
-    (c.tags || []).forEach((t) => myTags.add(t.replace(/^#/, "")))
-  );
+  myContent.forEach((c) => (c.tags || []).forEach((t) => myTags.add(t.replace(/^#/, ''))));
 
   const compTags = new Set();
   competitorContent.forEach((c) =>
-    (c.tags || []).forEach((t) => compTags.add(t.replace(/^#/, "")))
+    (c.tags || []).forEach((t) => compTags.add(t.replace(/^#/, '')))
   );
 
   const gapKeywords = [...compTags].filter((t) => !myTags.has(t)).slice(0, 10);
@@ -107,13 +92,13 @@ async function getRelevantAffiliateLinks(userId, contextText) {
     const linksMap = snap?.val();
 
     if (!linksMap) {
-      Logger.debug("[getRelevantAffiliateLinks] 제휴 링크 없음");
+      Logger.debug('[getRelevantAffiliateLinks] 제휴 링크 없음');
       return [];
     }
 
     const links = Object.values(linksMap);
     if (links.length === 0) {
-      Logger.debug("[getRelevantAffiliateLinks] 제휴 링크 배열이 비어있음");
+      Logger.debug('[getRelevantAffiliateLinks] 제휴 링크 배열이 비어있음');
       return [];
     }
 
@@ -127,10 +112,7 @@ async function getRelevantAffiliateLinks(userId, contextText) {
         link.keywords.length === 0 ||
         !link.url
       ) {
-        Logger.debug(
-          `[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`,
-          link
-        );
+        Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
         return false;
       }
 
@@ -140,9 +122,8 @@ async function getRelevantAffiliateLinks(userId, contextText) {
         return contextLower.includes(keywordLower);
       });
 
-      const productNameLower = (link.productName || "").toLowerCase();
-      const hasRelevantProductName =
-        productNameLower && contextLower.includes(productNameLower);
+      const productNameLower = (link.productName || '').toLowerCase();
+      const hasRelevantProductName = productNameLower && contextLower.includes(productNameLower);
 
       // 키워드나 상품명이 문맥에 포함된 경우 선택
       const isRelevant = hasRelevantKeyword || hasRelevantProductName;
@@ -150,7 +131,7 @@ async function getRelevantAffiliateLinks(userId, contextText) {
       if (isRelevant) {
         Logger.debug(
           `[getRelevantAffiliateLinks] 관련 링크 발견: ${link.keywords.join(
-            ", "
+            ', '
           )} (${link.url.substring(0, 50)}...)`
         );
       }
@@ -165,7 +146,7 @@ async function getRelevantAffiliateLinks(userId, contextText) {
     );
     return result;
   } catch (error) {
-    Logger.warn("[getRelevantAffiliateLinks] 제휴 링크 조회 실패:", error);
+    Logger.warn('[getRelevantAffiliateLinks] 제휴 링크 조회 실패:', error);
     return [];
   }
 }
@@ -179,23 +160,18 @@ async function getRelevantAffiliateLinks(userId, contextText) {
  * @param {Object} options - { maxLinks: number }
  * @returns {string} modified HTML
  */
-export function postProcessAffiliateHtml(
-  html = "",
-  affiliateLinks = [],
-  options = {}
-) {
+export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options = {}) {
   const { maxLinks = 3 } = options || {};
-  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0)
-    return html;
+  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0) return html;
 
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
+    const doc = parser.parseFromString(html, 'text/html');
 
     // Normalize affiliate urls for quick lookup
     const normalized = affiliateLinks.map((l) => ({
-      url: (l.url || "").trim(),
-      productName: l.productName || "",
+      url: (l.url || '').trim(),
+      productName: l.productName || '',
       keywords: Array.isArray(l.keywords) ? l.keywords : [],
     }));
 
@@ -203,34 +179,37 @@ export function postProcessAffiliateHtml(
     const findAffiliateByHref = (href) => {
       if (!href) return null;
       const hrefNorm = href.trim();
-      return normalized.find(
-        (a) => hrefNorm === a.url || hrefNorm.startsWith(a.url)
-      );
+      return normalized.find((a) => hrefNorm === a.url || hrefNorm.startsWith(a.url));
     };
 
     // 1) Ensure existing anchors that match affiliate links are wrapped/styled
-    const anchors = Array.from(doc.querySelectorAll("a[href]") || []);
+    const anchors = Array.from(doc.querySelectorAll('a[href]') || []);
     let insertedCount = 0;
     anchors.forEach((a) => {
-      const match = findAffiliateByHref(a.getAttribute("href"));
+      const match = findAffiliateByHref(a.getAttribute('href'));
       if (match && insertedCount < maxLinks) {
         // Wrap with span color style if not already
         const parent = a.parentElement;
         if (
           !parent ||
-          parent.tagName.toLowerCase() !== "span" ||
-          !parent.getAttribute("style")?.includes("#2e7d32")
+          parent.tagName.toLowerCase() !== 'span' ||
+          !parent.getAttribute('style')?.includes('#2e7d32')
         ) {
-          const span = doc.createElement("span");
-          span.setAttribute("style", "color: #2e7d32;");
+          const span = doc.createElement('span');
+          span.setAttribute('style', 'color: #2e7d32;');
           a.replaceWith(span);
           span.appendChild(a);
         }
         // ensure target and rel are safe
         try {
-          a.setAttribute("target", "_blank");
-          a.setAttribute("rel", "noopener noreferrer");
-        } catch (e) {}
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        } catch (e) {
+          // Ignore DOM attribute setting errors (fallback behavior)
+          if (typeof Logger !== 'undefined') {
+            Logger.warn('[postProcessAffiliateHtml] attribute set ignored', e);
+          }
+        }
         insertedCount += 1;
       }
     });
@@ -238,44 +217,36 @@ export function postProcessAffiliateHtml(
     // 2) If we need more, attempt deterministic insertion: find keywords/productName matches in text nodes
     if (insertedCount < maxLinks) {
       const usedUrls = new Set(
-        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map(
-          (el) => el.getAttribute("href")
+        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map((el) =>
+          el.getAttribute('href')
         )
       );
 
       const textNodes = [];
-      const walker = doc.createTreeWalker(
-        doc.body,
-        NodeFilter.SHOW_TEXT,
-        null,
-        false
-      );
+      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
       let node;
       while ((node = walker.nextNode())) {
         const parentTag = node.parentElement?.tagName?.toLowerCase();
         // skip inside code/pre/a/script/style
-        if (["a", "code", "pre", "script", "style"].includes(parentTag))
-          continue;
+        if (['a', 'code', 'pre', 'script', 'style'].includes(parentTag)) continue;
         if (node.textContent && node.textContent.trim()) textNodes.push(node);
       }
 
       // Helper to escape regex
-      const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
       for (const link of normalized) {
         if (insertedCount >= maxLinks) break;
         const targetUrl = link.url;
         if (!targetUrl || usedUrls.has(targetUrl)) continue;
 
-        const candidates = [...(link.keywords || []), link.productName].filter(
-          Boolean
-        );
+        const candidates = [...(link.keywords || []), link.productName].filter(Boolean);
         if (candidates.length === 0) continue;
 
         // try to find first occurrence among text nodes
         let matched = false;
         // Use plain substring match (case-insensitive) for keywords and product names
-        const patterns = candidates.map((c) => new RegExp(escapeReg(c), "i"));
+        const patterns = candidates.map((c) => new RegExp(escapeReg(c), 'i'));
 
         for (const tnode of textNodes) {
           const txt = tnode.textContent;
@@ -283,16 +254,16 @@ export function postProcessAffiliateHtml(
             const m = txt.match(pattern);
             if (m) {
               // Create replacement span > a
-              const span = doc.createElement("span");
-              span.setAttribute("style", "color: #2e7d32;");
-              const a = doc.createElement("a");
-              a.setAttribute("href", targetUrl);
-              a.setAttribute("target", "_blank");
-              a.setAttribute("rel", "noopener noreferrer");
+              const span = doc.createElement('span');
+              span.setAttribute('style', 'color: #2e7d32;');
+              const a = doc.createElement('a');
+              a.setAttribute('href', targetUrl);
+              a.setAttribute('target', '_blank');
+              a.setAttribute('rel', 'noopener noreferrer');
               // CTA text - prefer short CTA using productName when available
               const cta = link.productName
                 ? `${link.productName} 최저가 확인하기`
-                : "상품 상세보기";
+                : '상품 상세보기';
               a.textContent = cta;
               span.appendChild(a);
 
@@ -304,7 +275,15 @@ export function postProcessAffiliateHtml(
               frag.appendChild(span);
               if (after) frag.appendChild(doc.createTextNode(after));
 
-              tnode.parentNode.replaceChild(frag, tnode);
+              // Guard against detached text nodes: ensure parentNode exists before replacing
+              if (tnode.parentNode) {
+                tnode.parentNode.replaceChild(frag, tnode);
+              } else {
+                Logger.warn(
+                  '[postProcessAffiliateHtml] 텍스트 노드의 parentNode가 존재하지 않아 대체 작업을 건너뜁니다.',
+                  tnode
+                );
+              }
               insertedCount += 1;
               usedUrls.add(targetUrl);
               matched = true;
@@ -319,7 +298,7 @@ export function postProcessAffiliateHtml(
     return doc.body.innerHTML || html;
   } catch (e) {
     // If anything fails, return original HTML and log
-    Logger.warn("[postProcessAffiliateHtml] 처리 실패, 원본 HTML 반환:", e);
+    Logger.warn('[postProcessAffiliateHtml] 처리 실패, 원본 HTML 반환:', e);
     return html;
   }
 }
@@ -347,24 +326,19 @@ export async function generateDraftFromIdea(ideaData) {
     if (!personaKey || !PROMPT_CONFIG.personas[personaKey]) {
       // 사용자 설정에서 기본 톤앤매너 확인
       try {
-        const storage = await chrome.storage.local.get([
-          "defaultPersona",
-          "defaultTone",
-        ]);
+        const storage = await chrome.storage.local.get(['defaultPersona', 'defaultTone']);
         personaKey = storage.defaultPersona || storage.defaultTone;
       } catch (e) {
-        Logger.warn("[generateDraftFromIdea] 사용자 설정 읽기 실패:", e);
+        Logger.warn('[generateDraftFromIdea] 사용자 설정 읽기 실패:', e);
       }
 
       // 여전히 없으면 자동 감지
       if (!personaKey || !PROMPT_CONFIG.personas[personaKey]) {
         const textToAnalyze = `${ideaData.title} ${ideaData.description} ${(
           ideaData.tags || []
-        ).join(" ")}`;
+        ).join(' ')}`;
         personaKey = detectPersona(textToAnalyze);
-        Logger.debug(
-          `[generateDraftFromIdea] 페르소나 자동 감지: ${personaKey}`
-        );
+        Logger.debug(`[generateDraftFromIdea] 페르소나 자동 감지: ${personaKey}`);
       }
     }
 
@@ -377,26 +351,21 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // 4. 트렌드 데이터 주입 (SEO 강화)
-    const keywords = (ideaData.tags || []).filter((t) => t !== "#AI-추천");
+    const keywords = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
     const trends = ideaData.recommendedSearches || []; // 연관 검색어 활용
     builder.setTrendContext(keywords, trends);
 
     // 4-A. 제휴 마케팅 링크 데이터 준비
     const userId = await getCurrentUserId();
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
-      " "
-    )} ${ideaData.description || ""}`;
-    const affiliateLinks = await getRelevantAffiliateLinks(
-      userId,
-      contextForLinks
-    );
+      ' '
+    )} ${ideaData.description || ''}`;
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
 
     // 4-B. 채널 정보 가져오기 (JSON-LD용)
     let channelInfo = null;
     try {
-      const { activeChannelId } = await chrome.storage.local.get(
-        "activeChannelId"
-      );
+      const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
       if (activeChannelId) {
         const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
         const channelsData = channelsSnap?.val() || {};
@@ -404,13 +373,12 @@ export async function generateDraftFromIdea(ideaData) {
         const myYoutubes = channelsData.myChannels?.youtubes || [];
         const allChannels = [...myBlogs, ...myYoutubes];
         channelInfo = allChannels.find((ch) => {
-          const chId =
-            ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, "") : null);
+          const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
           return chId === activeChannelId;
         });
       }
     } catch (error) {
-      Logger.warn("[generateDraftFromIdea] 채널 정보 조회 실패:", error);
+      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
     }
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
@@ -418,14 +386,14 @@ export async function generateDraftFromIdea(ideaData) {
       ideaData.skills.forEach((skill) => builder.addSkill(skill));
     } else {
       // 기본 스킬 매핑
-      if (personaKey === "viral") {
-        builder.addSkill("cliffhanger");
+      if (personaKey === 'viral') {
+        builder.addSkill('cliffhanger');
       }
-      if (personaKey === "professional") {
-        builder.addSkill("statistics").addSkill("comparison");
+      if (personaKey === 'professional') {
+        builder.addSkill('statistics').addSkill('comparison');
       }
-      if (personaKey === "friendly") {
-        builder.addSkill("questioning").addSkill("storytelling");
+      if (personaKey === 'friendly') {
+        builder.addSkill('questioning').addSkill('storytelling');
       }
     }
 
@@ -435,9 +403,7 @@ export async function generateDraftFromIdea(ideaData) {
     // 로깅
     Logger.biz(
       `🎭 [Persona Build]`,
-      `Type: ${builder.getPersonaName()}, Custom Tone: ${
-        ideaData.tone || builder.getToneName()
-      }`
+      `Type: ${builder.getPersonaName()}, Custom Tone: ${ideaData.tone || builder.getToneName()}`
     );
 
     // 데이터 준비 (analyticsService 활용)
@@ -446,31 +412,23 @@ export async function generateDraftFromIdea(ideaData) {
 
     // 1. 모든 키워드를 수집하고 중복을 제거합니다.
     const allKeywords = new Set([
-      ...(ideaData.tags || []).filter((t) => t !== "#AI-추천"),
+      ...(ideaData.tags || []).filter((t) => t !== '#AI-추천'),
       ...(ideaData.longTailKeywords || []),
     ]);
-    const keywordsText = Array.from(allKeywords).join("\n- ");
+    const keywordsText = Array.from(allKeywords).join('\n- ');
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
     const linkedScrapsText = (ideaData.linkedScrapsContent || [])
       .map((scrap, index) => {
-        const title =
-          scrap.title ||
-          scrap.text?.substring(0, 50) ||
-          `참고 자료 ${index + 1}`;
-        const url = scrap.url || "";
-        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용: ${
-          scrap.text || ""
-        }\n`;
+        const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
+        const url = scrap.url || '';
+        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용: ${scrap.text || ''}\n`;
       })
-      .join("\n");
+      .join('\n');
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
-    let originalContentText = "";
-    if (
-      ideaData.origin?.fullContent &&
-      ideaData.origin.fullContent.length > 0
-    ) {
+    let originalContentText = '';
+    if (ideaData.origin?.fullContent && ideaData.origin.fullContent.length > 0) {
       originalContentText = `[원본 본문 (리뉴얼 참고용)]\n${ideaData.origin.fullContent.substring(
         0,
         5000
@@ -478,12 +436,10 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회
-    let myPastPostsText = "";
+    let myPastPostsText = '';
     try {
       const userId = await getCurrentUserId();
-      const contentSnap = await get(
-        ref(getDb(), `channel_content/${userId}/blogs`)
-      );
+      const contentSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const allBlogs = contentSnap?.val() || {};
 
       // 현재 채널의 글만 필터링 (channelId가 일치하는 경우)
@@ -508,32 +464,29 @@ export async function generateDraftFromIdea(ideaData) {
         myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
         myPastPostsText += myPosts
           .map((post, idx) => {
-            const title = post.title || "제목 없음";
-            const url = post.fullLink || post.link || "";
-            const description =
-              post.description || post.cleanText?.substring(0, 100) || "";
-            return `${
-              idx + 1
-            }. 제목: ${title}\n   URL: ${url}\n   설명: ${description}\n`;
+            const title = post.title || '제목 없음';
+            const url = post.fullLink || post.link || '';
+            const description = post.description || post.cleanText?.substring(0, 100) || '';
+            return `${idx + 1}. 제목: ${title}\n   URL: ${url}\n   설명: ${description}\n`;
           })
-          .join("\n");
-        myPastPostsText += "\n";
+          .join('\n');
+        myPastPostsText += '\n';
       }
     } catch (error) {
-      Logger.warn("[generateDraftFromIdea] 내 과거 포스팅 조회 실패:", error);
+      Logger.warn('[generateDraftFromIdea] 내 과거 포스팅 조회 실패:', error);
       // 오류가 발생해도 계속 진행
     }
 
     // 5. 추천 검색어와 롱테일 키워드 수집
     const recommendedSearches = ideaData.recommendedSearches || [];
     const longTailKeywords = ideaData.longTailKeywords || [];
-    const tags = (ideaData.tags || []).filter((t) => t !== "#AI-추천");
+    const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
 
     // 6. 프롬프트 구성
     const performanceInfo =
       performanceData.decayContent && performanceData.decayContent.length > 0
         ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
-        : "";
+        : '';
 
     // 백업 파일의 상세한 프롬프트 구성
     const prompt = `
@@ -557,18 +510,16 @@ export async function generateDraftFromIdea(ideaData) {
             - **중요**: 아래 목차의 첫 번째 항목은 제목이 아닙니다. 목차는 본문 구조를 위한 것이며, 제목은 별도로 생성해야 합니다.
 
             ### 2. 핵심 요약
-            - ${ideaData.description || "주제에 대한 상세 설명"}
+            - ${ideaData.description || '주제에 대한 상세 설명'}
 
             ### 3. 현재까지 작성된 초안 (이 내용을 바탕으로 발전시켜주세요)
-            ${ideaData.currentDraft || "(비어 있음)"}
+            ${ideaData.currentDraft || '(비어 있음)'}
 
             ### 4. 본문 구조 (목차 - 이 목차는 본문 섹션 제목으로만 사용하세요)
             ${
               (ideaData.outline || []).length > 0
-                ? ideaData.outline
-                    .map((item, idx) => `${idx + 1}. ${item}`)
-                    .join("\n")
-                : "목차가 제공되지 않았습니다. 논리적이고 체계적인 구조로 작성해주세요."
+                ? ideaData.outline.map((item, idx) => `${idx + 1}. ${item}`).join('\n')
+                : '목차가 제공되지 않았습니다. 논리적이고 체계적인 구조로 작성해주세요.'
             }
             
             [문서 구조 규칙 - 매우 중요]
@@ -593,30 +544,24 @@ export async function generateDraftFromIdea(ideaData) {
             h1 제목 → 서론(일반 텍스트) → 본문(h2 섹션들) → 결론(h2)
 
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
-            ${
-              tags.length > 0
-                ? tags.map((t) => `- ${t.replace(/^#/, "")}`).join("\n")
-                : "없음"
-            }
+            ${tags.length > 0 ? tags.map((t) => `- ${t.replace(/^#/, '')}`).join('\n') : '없음'}
 
             ### 6. 롱테일 키워드 (SEO 최적화를 위해 본문에 자연스럽게 통합해주세요)
             ${
               longTailKeywords.length > 0
-                ? longTailKeywords.map((k) => `- ${k}`).join("\n")
-                : "없음"
+                ? longTailKeywords.map((k) => `- ${k}`).join('\n')
+                : '없음'
             }
             
             ### 7. 추천 검색어 (독자들이 검색할 수 있는 키워드, 본문에 자연스럽게 활용해주세요)
             ${
               recommendedSearches.length > 0
-                ? recommendedSearches
-                    .map((s, idx) => `${idx + 1}. ${s}`)
-                    .join("\n")
-                : "없음"
+                ? recommendedSearches.map((s, idx) => `${idx + 1}. ${s}`).join('\n')
+                : '없음'
             }
 
             ### 8. 관련 참고 자료
-            ${originalContentText}${linkedScrapsText || "참고 자료 없음"}
+            ${originalContentText}${linkedScrapsText || '참고 자료 없음'}
             
             ${
               myPastPostsText
@@ -638,7 +583,7 @@ export async function generateDraftFromIdea(ideaData) {
             - **중요**: 관련성이 없는 과거 글에 무리하게 링크를 걸지 마세요. 문맥상 자연스럽게 연결될 때만 링크를 삽입하세요.
             - 내부 링크는 본문 중간에 2~3개 정도가 적당합니다. 너무 많으면 독자 경험이 나빠질 수 있습니다.
             `
-                : ""
+                : ''
             }
             
             [참고 자료 활용 규칙]
@@ -692,11 +637,11 @@ export async function generateDraftFromIdea(ideaData) {
               ${affiliateLinks
                 .map(
                   (link) =>
-                    `- 키워드: "${(link.keywords || []).join(", ")}"${
-                      link.productName ? ` / 상품명: "${link.productName}"` : ""
+                    `- 키워드: "${(link.keywords || []).join(', ')}"${
+                      link.productName ? ` / 상품명: "${link.productName}"` : ''
                     } / URL: ${link.url}`
                 )
-                .join("\n              ")}
+                .join('\n              ')}
 
               [링크 삽입 규칙]
               1. **문맥 기반 자연스러운 삽입 (Context-Aware Injection)**: 
@@ -732,7 +677,7 @@ export async function generateDraftFromIdea(ideaData) {
 
               **중요**: 제휴 링크는 글의 품질을 해치지 않으면서도 자연스럽게 수익화를 달성하는 것이 목표입니다. 무리하게 삽입하지 마세요.
             `
-                : ""
+                : ''
             }
             12. **SEO용 JSON-LD 스키마 마크업 생성 (필수)**:
                - 구글 검색 엔진이 이 글을 더 잘 이해하고 상위 노출할 수 있도록, 글의 유형에 맞는 JSON-LD 구조화된 데이터를 생성해주세요.
@@ -746,15 +691,12 @@ export async function generateDraftFromIdea(ideaData) {
                      "@type": "Person",
                      "name": "${
                        channelInfo?.inputUrl
-                         ? new URL(channelInfo.inputUrl).hostname.replace(
-                             "www.",
-                             ""
-                           )
-                         : "Content Pilot"
+                         ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+                         : 'Content Pilot'
                      }"
                    }
                  * datePublished: 현재 날짜를 YYYY-MM-DD 형식으로 작성하세요. (예: ${
-                   new Date().toISOString().split("T")[0]
+                   new Date().toISOString().split('T')[0]
                  })
                  * dateModified: 현재 날짜를 YYYY-MM-DD 형식으로 작성하세요. (필수 필드, datePublished와 동일한 값 사용)
                  * image: 대표 이미지 URL을 배열(List) 형태로 작성하세요. 3가지 비율의 이미지 URL을 포함해야 합니다:
@@ -772,11 +714,8 @@ export async function generateDraftFromIdea(ideaData) {
                      "@type": "Organization",
                      "name": "${
                        channelInfo?.inputUrl
-                         ? new URL(channelInfo.inputUrl).hostname.replace(
-                             "www.",
-                             ""
-                           )
-                         : "Content Pilot"
+                         ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+                         : 'Content Pilot'
                      }",
                      "logo": {
                        "@type": "ImageObject",
@@ -905,37 +844,35 @@ export async function generateDraftFromIdea(ideaData) {
     const rawDraft = await callGeminiAPI(prompt);
 
     // 빈 응답 및 오류 응답 처리
-    if (!rawDraft || rawDraft.trim() === "") {
-      Logger.error("[generateDraftFromIdea] 초안이 비어있습니다.");
+    if (!rawDraft || rawDraft.trim() === '') {
+      Logger.error('[generateDraftFromIdea] 초안이 비어있습니다.');
       return {
         success: false,
-        error:
-          "초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.",
+        error: '초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.',
       };
     }
 
-    if (rawDraft.startsWith("오류:") || rawDraft.includes("오류:")) {
-      Logger.error("[generateDraftFromIdea] Gemini API 오류:", rawDraft);
+    if (rawDraft.startsWith('오류:') || rawDraft.includes('오류:')) {
+      Logger.error('[generateDraftFromIdea] Gemini API 오류:', rawDraft);
       const errorMessage =
-        rawDraft.replace(/^오류:\s*/i, "").trim() ||
-        "Gemini API에서 오류가 발생했습니다.";
+        rawDraft.replace(/^오류:\s*/i, '').trim() || 'Gemini API에서 오류가 발생했습니다.';
       return { success: false, error: errorMessage };
     }
 
     // 응답이 너무 짧거나 유효하지 않은 경우 체크
     if (rawDraft.trim().length < 50) {
-      Logger.warn("[generateDraftFromIdea] 초안이 너무 짧습니다:", rawDraft);
+      Logger.warn('[generateDraftFromIdea] 초안이 너무 짧습니다:', rawDraft);
       // 너무 짧은 경우에도 경고만 하고 계속 진행 (사용자가 확인할 수 있도록)
     }
 
     // 1. 마크다운 클리닝: 코드 블록 태그 제거
     let cleanedDraft = rawDraft;
-    cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, "");
-    cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, "");
-    cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, "");
-    cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, "");
-    cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, "");
-    cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, "");
+    cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
+    cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
+    cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
+    cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
+    cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
+    cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
     cleanedDraft = cleanedDraft.trim();
 
     // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
@@ -952,30 +889,20 @@ export async function generateDraftFromIdea(ideaData) {
         jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
 
         // 본문에서 태그 제거 (사용자에게는 보이지 않아야 함)
-        cleanedDraft = cleanedDraft.replace(
-          /<JSON-LD>[\s\S]*?<\/JSON-LD>/gi,
-          ""
-        );
+        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
 
-        Logger.info(
-          "[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)"
-        );
+        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)');
       } catch (e) {
-        Logger.warn("[generateDraftFromIdea] JSON-LD 파싱 실패:", e);
+        Logger.warn('[generateDraftFromIdea] JSON-LD 파싱 실패:', e);
         // 파싱 실패 시 null 반환 (본문에는 영향 없음)
         // 태그는 제거
-        cleanedDraft = cleanedDraft.replace(
-          /<JSON-LD>[\s\S]*?<\/JSON-LD>/gi,
-          ""
-        );
+        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
       }
     }
 
     // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
     let thumbnailCandidates = [];
-    const thumbnailMatch = cleanedDraft.match(
-      /<썸네일정보>([\s\S]*?)<\/썸네일정보>/
-    );
+    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
 
     if (thumbnailMatch && thumbnailMatch[1]) {
       try {
@@ -988,37 +915,31 @@ export async function generateDraftFromIdea(ideaData) {
         }
 
         // 태그 제거 (HTML 변환 전에 제거하여 본문에 포함되지 않도록)
-        cleanedDraft = cleanedDraft
-          .replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, "")
-          .trim();
-        Logger.debug("[generateDraftFromIdea] 썸네일 정보 추출 완료:", {
+        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+        Logger.debug('[generateDraftFromIdea] 썸네일 정보 추출 완료:', {
           count: thumbnailCandidates.length,
           types: thumbnailCandidates.map((c) => c.type),
         });
       } catch (e) {
-        Logger.error("[generateDraftFromIdea] 썸네일 JSON 파싱 실패:", e);
+        Logger.error('[generateDraftFromIdea] 썸네일 JSON 파싱 실패:', e);
         // 파싱 실패 시에도 태그는 제거
-        cleanedDraft = cleanedDraft
-          .replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, "")
-          .trim();
+        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
       }
     }
 
     // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
-    Logger.debug(
-      "[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)"
-    );
+    Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
     let formattedDraft;
     try {
       formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
     } catch (sanitizationError) {
       Logger.error(
-        "[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):",
+        '[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):',
         sanitizationError
       );
       // 정제 실패 시 비상 대책: 최소한의 특수문자만이라도 이스케이프하거나 에러 반환
       // 여기서는 안전을 위해 에러를 던지는 것이 맞음
-      throw new Error("보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.");
+      throw new Error('보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
 
     // 3. SEO 최적화된 제목 추출 (h1 태그에서)
@@ -1030,13 +951,13 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // 4. 제목이 포함되어 있지 않으면 h1으로 추가
-    const title = ideaData.title || "";
+    const title = ideaData.title || '';
     if (title) {
       // h1 태그나 # 제목 형식이 없으면 추가
       const hasH1 = /<h1[^>]*>|<h1>|^#\s+/i.test(formattedDraft);
       if (!hasH1) {
         // 마크다운 형식이면 # 제목, HTML이면 <h1>제목</h1> 추가
-        if (formattedDraft.includes("<")) {
+        if (formattedDraft.includes('<')) {
           // HTML 형식
           formattedDraft = `<h1>${title}</h1>\n${formattedDraft}`;
           seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
@@ -1049,8 +970,7 @@ export async function generateDraftFromIdea(ideaData) {
         // h1이 이미 있었지만 seoTitle이 추출되지 않았다면 다시 시도
         if (!seoTitle) {
           const h1MatchRetry =
-            formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) ||
-            formattedDraft.match(/^#\s+(.+)$/m);
+            formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || formattedDraft.match(/^#\s+(.+)$/m);
           if (h1MatchRetry && h1MatchRetry[1]) {
             seoTitle = h1MatchRetry[1].trim();
           }
@@ -1067,23 +987,19 @@ export async function generateDraftFromIdea(ideaData) {
     if (jsonLdSchema) {
       try {
         const now = new Date();
-        const today = now.toISOString().split("T")[0]; // YYYY-MM-DD
+        const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
         // headline이 없거나 비어있으면 seoTitle 사용
-        if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === "") {
-          jsonLdSchema.headline = seoTitle || ideaData.title || "";
+        if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === '') {
+          jsonLdSchema.headline = seoTitle || ideaData.title || '';
         }
 
         // description이 없거나 비어있으면 ideaData.description 사용
-        if (
-          !jsonLdSchema.description ||
-          jsonLdSchema.description.trim() === ""
-        ) {
-          jsonLdSchema.description = ideaData.description || "";
+        if (!jsonLdSchema.description || jsonLdSchema.description.trim() === '') {
+          jsonLdSchema.description = ideaData.description || '';
           // description이 너무 길면 200자로 제한
           if (jsonLdSchema.description.length > 200) {
-            jsonLdSchema.description =
-              jsonLdSchema.description.substring(0, 197) + "...";
+            jsonLdSchema.description = jsonLdSchema.description.substring(0, 197) + '...';
           }
         }
 
@@ -1102,13 +1018,13 @@ export async function generateDraftFromIdea(ideaData) {
         if (
           !jsonLdSchema.author ||
           !jsonLdSchema.author.name ||
-          jsonLdSchema.author.name === "Content Pilot"
+          jsonLdSchema.author.name === 'Content Pilot'
         ) {
           const authorName = channelInfo?.inputUrl
-            ? new URL(channelInfo.inputUrl).hostname.replace("www.", "")
-            : "Content Pilot";
+            ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+            : 'Content Pilot';
           jsonLdSchema.author = {
-            "@type": "Person",
+            '@type': 'Person',
             name: authorName,
           };
         }
@@ -1117,8 +1033,8 @@ export async function generateDraftFromIdea(ideaData) {
         // thumbnailUrls는 나중에 설정되므로 여기서는 기본 처리만
         if (
           !jsonLdSchema.image ||
-          jsonLdSchema.image === "https://example.com/image.jpg" ||
-          jsonLdSchema.image.includes("example.com")
+          jsonLdSchema.image === 'https://example.com/image.jpg' ||
+          jsonLdSchema.image.includes('example.com')
         ) {
           // 채널의 대표 이미지가 있으면 사용, 없으면 제거 (선택 필드)
           if (channelInfo?.thumbnail || channelInfo?.logo) {
@@ -1129,13 +1045,9 @@ export async function generateDraftFromIdea(ideaData) {
             // image 필드를 제거 (Google은 선택 필드로 처리)
             delete jsonLdSchema.image;
           }
-        } else if (typeof jsonLdSchema.image === "string") {
+        } else if (typeof jsonLdSchema.image === 'string') {
           // 문자열인 경우 배열로 변환
-          jsonLdSchema.image = [
-            jsonLdSchema.image,
-            jsonLdSchema.image,
-            jsonLdSchema.image,
-          ];
+          jsonLdSchema.image = [jsonLdSchema.image, jsonLdSchema.image, jsonLdSchema.image];
         } else if (!Array.isArray(jsonLdSchema.image)) {
           // 배열도 문자열도 아닌 경우 배열로 변환
           jsonLdSchema.image = [
@@ -1146,14 +1058,10 @@ export async function generateDraftFromIdea(ideaData) {
         }
 
         // url이 없고 publishInfo에 permalink가 있으면 조합
-        if (
-          !jsonLdSchema.url &&
-          ideaData.publishInfo?.permalink &&
-          channelInfo?.inputUrl
-        ) {
+        if (!jsonLdSchema.url && ideaData.publishInfo?.permalink && channelInfo?.inputUrl) {
           try {
             const channelUrl = new URL(channelInfo.inputUrl);
-            const isTistory = channelUrl.hostname.includes("tistory.com");
+            const isTistory = channelUrl.hostname.includes('tistory.com');
             if (isTistory) {
               jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
             } else {
@@ -1164,7 +1072,7 @@ export async function generateDraftFromIdea(ideaData) {
           }
         }
 
-        Logger.info("[generateDraftFromIdea] JSON-LD 스키마 후처리 완료", {
+        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 후처리 완료', {
           headline: jsonLdSchema.headline?.substring(0, 50),
           hasDescription: !!jsonLdSchema.description,
           datePublished: jsonLdSchema.datePublished,
@@ -1173,23 +1081,23 @@ export async function generateDraftFromIdea(ideaData) {
           hasUrl: !!jsonLdSchema.url,
         });
       } catch (e) {
-        Logger.warn("[generateDraftFromIdea] JSON-LD 후처리 실패:", e);
+        Logger.warn('[generateDraftFromIdea] JSON-LD 후처리 실패:', e);
         // 후처리 실패해도 기본 스키마는 유지
       }
     }
 
     // 5. 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
     const generatePermalink = async (title) => {
-      if (!title) return "";
+      if (!title) return '';
 
       // 기본 변환 함수 (빠른 폴백)
       const defaultConversion = (text) => {
         return text
           .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, "") // 영문, 숫자, 공백, 하이픈만 유지 (한글 제거)
-          .replace(/\s+/g, "-") // 공백을 하이픈으로
-          .replace(/-+/g, "-") // 연속된 하이픈을 하나로
-          .replace(/^-|-$/g, "") // 앞뒤 하이픈 제거
+          .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지 (한글 제거)
+          .replace(/\s+/g, '-') // 공백을 하이픈으로
+          .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+          .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
           .substring(0, 100); // 최대 100자
       };
 
@@ -1209,18 +1117,18 @@ export async function generateDraftFromIdea(ideaData) {
 영문 슬러그만 반환해주세요 (설명 없이):`;
 
             const translated = await callGeminiAPI(translationPrompt);
-            if (translated && !translated.startsWith("오류:")) {
+            if (translated && !translated.startsWith('오류:')) {
               return translated
                 .trim()
                 .toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, "") // 영문, 숫자, 공백, 하이픈만 유지
-                .replace(/\s+/g, "-") // 공백을 하이픈으로
-                .replace(/-+/g, "-") // 연속된 하이픈을 하나로
-                .replace(/^-|-$/g, "") // 앞뒤 하이픈 제거
+                .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지
+                .replace(/\s+/g, '-') // 공백을 하이픈으로
+                .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+                .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
                 .substring(0, 100); // 최대 100자
             }
           } catch (e) {
-            Logger.error("퍼머링크 번역 실패:", e);
+            Logger.error('퍼머링크 번역 실패:', e);
           }
           return null;
         })(),
@@ -1233,7 +1141,7 @@ export async function generateDraftFromIdea(ideaData) {
           return translated;
         }
       } catch (e) {
-        Logger.error("퍼머링크 생성 중 오류:", e);
+        Logger.error('퍼머링크 생성 중 오류:', e);
       }
 
       // 번역 실패 또는 타임아웃 시 기본 변환 반환
@@ -1241,50 +1149,50 @@ export async function generateDraftFromIdea(ideaData) {
     };
 
     // 퍼머링크 생성 (타임아웃 보호)
-    let permalink = "";
+    let permalink = '';
     try {
       permalink = await generatePermalink(seoTitle || title);
     } catch (e) {
-      Logger.error("퍼머링크 생성 실패, 기본값 사용:", e);
+      Logger.error('퍼머링크 생성 실패, 기본값 사용:', e);
       // 기본 변환 사용
-      const titleForPermalink = seoTitle || title || "";
+      const titleForPermalink = seoTitle || title || '';
       permalink = titleForPermalink
         .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, "")
-        .replace(/\s+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
         .substring(0, 100);
     }
 
     // 6. 태그 생성 (쉼표 구분)
     const tagsForPublish = tags
-      .map((t) => t.replace(/^#/, ""))
-      .filter((t) => t && t !== "AI-추천")
-      .join(", ");
+      .map((t) => t.replace(/^#/, ''))
+      .filter((t) => t && t !== 'AI-추천')
+      .join(', ');
 
     // 7. 썸네일 정보가 없거나 실패 시 기본값 생성 (3가지 컨셉 강제 생성)
     // (썸네일 정보는 이미 위에서 추출되었으므로, 여기서는 기본값 생성만 처리)
     if (thumbnailCandidates.length === 0) {
-      const baseTitle = seoTitle || title || "콘텐츠";
+      const baseTitle = seoTitle || title || '콘텐츠';
       thumbnailCandidates = [
         {
-          type: "curiosity",
+          type: 'curiosity',
           thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-          thumbnailText: "이거 실화냐?",
+          thumbnailText: '이거 실화냐?',
         },
         {
-          type: "informative",
+          type: 'informative',
           thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
-          thumbnailText: "완벽 정리",
+          thumbnailText: '완벽 정리',
         },
         {
-          type: "emotional",
+          type: 'emotional',
           thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
-          thumbnailText: "당신을 위한",
+          thumbnailText: '당신을 위한',
         },
       ];
     }
@@ -1294,30 +1202,26 @@ export async function generateDraftFromIdea(ideaData) {
     if (thumbnailCandidates.length > 0 && permalink) {
       try {
         const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
-        Logger.info("[generateDraftFromIdea] 썸네일 자동 생성 시작:", {
+        Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
           type: selectedThumbnail.type,
           permalink: permalink.substring(0, 30),
         });
 
         // 1. 16:9 원본 배경 이미지 생성 (AI - 텍스트 없이)
-        const originalImages = await generateAiImage(
-          selectedThumbnail.thumbnailPromptEn,
-          1
-        );
+        const originalImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
         if (originalImages.length === 0) {
-          throw new Error("썸네일 이미지 생성 실패");
+          throw new Error('썸네일 이미지 생성 실패');
         }
 
         // 2. [신규] 텍스트 합성 (하이브리드 합성)
         const thumbnailText =
-          selectedThumbnail.thumbnailText ||
-          `${seoTitle || ideaData.title}`.substring(0, 12);
-        Logger.info("[generateDraftFromIdea] 썸네일 텍스트 합성 시작:", {
+          selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
           text: thumbnailText,
         });
 
-        const textPosition = selectedThumbnail.textPosition || "bottom"; // AI가 결정한 위치 또는 기본값
-        Logger.info("[generateDraftFromIdea] 썸네일 텍스트 합성 시작:", {
+        const textPosition = selectedThumbnail.textPosition || 'bottom'; // AI가 결정한 위치 또는 기본값
+        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
           text: thumbnailText,
           position: textPosition,
         });
@@ -1333,12 +1237,12 @@ export async function generateDraftFromIdea(ideaData) {
         const cropPromises = [
           // 1:1 비율
           cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({
-            ratio: "1x1",
+            ratio: '1x1',
             dataUrl,
           })),
           // 4:3 비율
           cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({
-            ratio: "4x3",
+            ratio: '4x3',
             dataUrl,
           })),
         ];
@@ -1373,33 +1277,23 @@ export async function generateDraftFromIdea(ideaData) {
           url_1x1,
           url_4x3,
           url_16x9,
-          altText:
-            selectedThumbnail.altText ||
-            `${seoTitle || ideaData.title} 썸네일 이미지`,
+          altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
         };
 
-        Logger.info(
-          "[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:",
-          {
-            url_1x1: url_1x1.substring(0, 50) + "...",
-            url_4x3: url_4x3.substring(0, 50) + "...",
-            url_16x9: url_16x9.substring(0, 50) + "...",
-          }
-        );
+        Logger.info('[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:', {
+          url_1x1: url_1x1.substring(0, 50) + '...',
+          url_4x3: url_4x3.substring(0, 50) + '...',
+          url_16x9: url_16x9.substring(0, 50) + '...',
+        });
 
         // [신규] JSON-LD image 배열을 실제 Firebase URL로 교체
         if (jsonLdSchema) {
           jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
-          Logger.info(
-            "[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료"
-          );
+          Logger.info('[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료');
         }
       } catch (error) {
-        Logger.error(
-          "[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):",
-          error
-        );
-        Logger.error("[generateDraftFromIdea] 썸네일 생성 실패 상세:", {
+        Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
+        Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
           errorMessage: error.message,
           errorStack: error.stack,
           permalink: permalink?.substring(0, 30),
@@ -1426,60 +1320,39 @@ export async function generateDraftFromIdea(ideaData) {
           // 이미지 태그가 없으면 제목 바로 아래에 삽입
           const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
           if (h1Match) {
-            const h1EndIndex = formattedDraft.indexOf("</h1>") + 5;
+            const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
             const imgTag = `\n<img src="${thumbnailUrls.url_16x9}" alt="${
               thumbnailUrls.altText || seoTitle || ideaData.title
             }" style="max-width: 100%; height: auto; display: block;">\n`;
             formattedDraft =
-              formattedDraft.slice(0, h1EndIndex) +
-              imgTag +
-              formattedDraft.slice(h1EndIndex);
+              formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
           }
         }
 
-        Logger.info(
-          "[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료"
-        );
+        Logger.info('[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료');
       } catch (error) {
-        Logger.warn(
-          "[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:",
-          error
-        );
+        Logger.warn('[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:', error);
       }
     }
 
     // POST-PROCESS: validate and optionally auto-insert affiliate links
     try {
-      const storageRes = await chrome.storage.local.get(
-        "autoInsertAffiliateLinks"
-      );
+      const storageRes = await chrome.storage.local.get('autoInsertAffiliateLinks');
       const userAutoInsert = storageRes?.autoInsertAffiliateLinks;
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
-      const shouldAutoInsert =
-        typeof ideaOptIn === "boolean" ? ideaOptIn : !!userAutoInsert;
+      const shouldAutoInsert = typeof ideaOptIn === 'boolean' ? ideaOptIn : !!userAutoInsert;
 
-      if (
-        shouldAutoInsert &&
-        Array.isArray(affiliateLinks) &&
-        affiliateLinks.length > 0
-      ) {
+      if (shouldAutoInsert && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
         try {
-          formattedDraft = postProcessAffiliateHtml(
-            formattedDraft,
-            affiliateLinks,
-            {
-              maxLinks: 3,
-            }
-          );
+          formattedDraft = postProcessAffiliateHtml(formattedDraft, affiliateLinks, {
+            maxLinks: 3,
+          });
         } catch (e) {
-          Logger.warn(
-            "[generateDraftFromIdea] postProcessAffiliateHtml failed:",
-            e
-          );
+          Logger.warn('[generateDraftFromIdea] postProcessAffiliateHtml failed:', e);
         }
       }
     } catch (e) {
-      Logger.warn("[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:", e);
+      Logger.warn('[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:', e);
     }
 
     return {
@@ -1493,19 +1366,14 @@ export async function generateDraftFromIdea(ideaData) {
       jsonLdSchema: jsonLdSchema, // [신규] JSON-LD 구조화된 데이터
     };
   } catch (e) {
-    Logger.error("[generateDraftFromIdea] 오류:", e);
+    Logger.error('[generateDraftFromIdea] 오류:', e);
     return { success: false, error: e.message };
   }
 }
 
 // 6. 아이디어 브리핑
-export async function generateIdeaBriefing(
-  cardId,
-  title,
-  description,
-  options = {}
-) {
-  const { onProgress, status = "ideas" } = options; // status 옵션 추가
+export async function generateIdeaBriefing(cardId, title, description, options = {}) {
+  const { onProgress, status = 'ideas' } = options; // status 옵션 추가
   const userId = await getCurrentUserId(); // 동적으로 사용자 ID 가져오기
   const updates = {};
 
@@ -1515,11 +1383,9 @@ export async function generateIdeaBriefing(
     );
 
     // Gemini API 키 확인
-    const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
+    const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
     if (!geminiApiKey || !geminiApiKey.trim()) {
-      Logger.warn(
-        `[generateIdeaBriefing] Gemini API 키가 없습니다. 브리핑 생성을 건너뜁니다.`
-      );
+      Logger.warn(`[generateIdeaBriefing] Gemini API 키가 없습니다. 브리핑 생성을 건너뜁니다.`);
       // API 키가 없으면 조용히 실패 (에러를 throw하지 않고 조용히 종료)
       // 사용자에게는 UI에서 알림을 표시할 수 있도록 메시지 전송
       chrome.tabs.query({}, (tabs) => {
@@ -1527,9 +1393,9 @@ export async function generateIdeaBriefing(
           if (tab.id) {
             chrome.tabs
               .sendMessage(tab.id, {
-                action: "gemini_api_key_missing",
+                action: 'gemini_api_key_missing',
                 message:
-                  "Gemini API 키가 설정되지 않았습니다. 채널 관리에서 API 키를 입력해주세요.",
+                  'Gemini API 키가 설정되지 않았습니다. 채널 관리에서 API 키를 입력해주세요.',
               })
               .catch(() => {});
           }
@@ -1544,16 +1410,14 @@ export async function generateIdeaBriefing(
       let res;
       try {
         res = await callGeminiAPI(prompt);
-        Logger.debug(
-          `[generateIdeaBriefing] Gemini API 응답: ${res.substring(0, 200)}...`
-        );
+        Logger.debug(`[generateIdeaBriefing] Gemini API 응답: ${res.substring(0, 200)}...`);
       } catch (apiError) {
         Logger.error(`[generateIdeaBriefing] Gemini API 호출 실패:`, apiError);
         // API 호출 실패 시 목차 생성을 건너뛰고 계속 진행
         if (
-          apiError.message.includes("Gemini API 키가 없습니다") ||
-          apiError.message.includes("API key not valid") ||
-          apiError.message.includes("Please pass a valid API key")
+          apiError.message.includes('Gemini API 키가 없습니다') ||
+          apiError.message.includes('API key not valid') ||
+          apiError.message.includes('Please pass a valid API key')
         ) {
           Logger.warn(
             `[generateIdeaBriefing] Gemini API 키가 없거나 유효하지 않아 목차 생성을 건너뜁니다.`
@@ -1564,9 +1428,9 @@ export async function generateIdeaBriefing(
               if (tab.id) {
                 chrome.tabs
                   .sendMessage(tab.id, {
-                    action: "gemini_api_key_error",
+                    action: 'gemini_api_key_error',
                     message:
-                      "Gemini API 키가 없거나 유효하지 않습니다. 채널 관리에서 API 키를 확인해주세요.",
+                      'Gemini API 키가 없거나 유효하지 않습니다. 채널 관리에서 API 키를 확인해주세요.',
                   })
                   .catch(() => {});
               }
@@ -1576,7 +1440,7 @@ export async function generateIdeaBriefing(
         res = null;
       }
 
-      if (res && !res.startsWith("오류:")) {
+      if (res && !res.startsWith('오류:')) {
         try {
           // JSON 배열 추출 시도 (여러 방법)
           let outlineArray = null;
@@ -1591,9 +1455,7 @@ export async function generateIdeaBriefing(
               outlineArray = JSON.parse(arrayMatch[0]);
             } else {
               // 방법 3: 마크다운 코드 블록에서 추출
-              const codeBlockMatch = res.match(
-                /```(?:json)?\s*(\[[\s\S]*?\])\s*```/
-              );
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
               if (codeBlockMatch) {
                 outlineArray = JSON.parse(codeBlockMatch[1]);
               }
@@ -1605,7 +1467,7 @@ export async function generateIdeaBriefing(
             updates.outline = outlineArray
               .map((item) => {
                 // 객체인 경우 문자열로 변환
-                if (typeof item === "object" && item !== null) {
+                if (typeof item === 'object' && item !== null) {
                   return item.title || item.text || item.name || String(item);
                 }
                 return String(item);
@@ -1626,9 +1488,7 @@ export async function generateIdeaBriefing(
           Logger.debug(`[generateIdeaBriefing] 원본 응답: ${res}`);
         }
       } else {
-        Logger.warn(
-          `[generateIdeaBriefing] 목차 생성 실패 - 응답: ${res || "null"}`
-        );
+        Logger.warn(`[generateIdeaBriefing] 목차 생성 실패 - 응답: ${res || 'null'}`);
       }
 
       if (onProgress) onProgress(30);
@@ -1641,20 +1501,12 @@ export async function generateIdeaBriefing(
       let res;
       try {
         res = await callGeminiAPI(prompt);
-        Logger.debug(
-          `[generateIdeaBriefing] 주요 키워드 API 응답: ${res.substring(
-            0,
-            200
-          )}...`
-        );
+        Logger.debug(`[generateIdeaBriefing] 주요 키워드 API 응답: ${res.substring(0, 200)}...`);
       } catch (apiError) {
-        Logger.error(
-          `[generateIdeaBriefing] 주요 키워드 API 호출 실패:`,
-          apiError
-        );
+        Logger.error(`[generateIdeaBriefing] 주요 키워드 API 호출 실패:`, apiError);
         if (
-          apiError.message.includes("API key not valid") ||
-          apiError.message.includes("Please pass a valid API key")
+          apiError.message.includes('API key not valid') ||
+          apiError.message.includes('Please pass a valid API key')
         ) {
           Logger.warn(
             `[generateIdeaBriefing] Gemini API 키가 유효하지 않아 주요 키워드 생성을 건너뜁니다.`
@@ -1663,7 +1515,7 @@ export async function generateIdeaBriefing(
         res = null;
       }
 
-      if (res && !res.startsWith("오류:")) {
+      if (res && !res.startsWith('오류:')) {
         try {
           let keywordsArray = null;
           try {
@@ -1673,9 +1525,7 @@ export async function generateIdeaBriefing(
             if (arrayMatch) {
               keywordsArray = JSON.parse(arrayMatch[0]);
             } else {
-              const codeBlockMatch = res.match(
-                /```(?:json)?\s*(\[[\s\S]*?\])\s*```/
-              );
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
               if (codeBlockMatch) {
                 keywordsArray = JSON.parse(codeBlockMatch[1]);
               }
@@ -1685,7 +1535,7 @@ export async function generateIdeaBriefing(
           if (Array.isArray(keywordsArray)) {
             updates.mainKeywords = keywordsArray
               .map((item) => {
-                if (typeof item === "object" && item !== null) {
+                if (typeof item === 'object' && item !== null) {
                   return item.keyword || item.text || item.name || String(item);
                 }
                 return String(item);
@@ -1697,15 +1547,10 @@ export async function generateIdeaBriefing(
               updates.mainKeywords
             );
           } else {
-            Logger.warn(
-              `[generateIdeaBriefing] 주요 키워드 파싱 실패: 배열이 아님`
-            );
+            Logger.warn(`[generateIdeaBriefing] 주요 키워드 파싱 실패: 배열이 아님`);
           }
         } catch (parseError) {
-          Logger.error(
-            `[generateIdeaBriefing] 주요 키워드 파싱 오류:`,
-            parseError
-          );
+          Logger.error(`[generateIdeaBriefing] 주요 키워드 파싱 오류:`, parseError);
         }
       }
 
@@ -1719,20 +1564,12 @@ export async function generateIdeaBriefing(
       let res;
       try {
         res = await callGeminiAPI(prompt);
-        Logger.debug(
-          `[generateIdeaBriefing] 롱테일 키워드 API 응답: ${res.substring(
-            0,
-            200
-          )}...`
-        );
+        Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 API 응답: ${res.substring(0, 200)}...`);
       } catch (apiError) {
-        Logger.error(
-          `[generateIdeaBriefing] 롱테일 키워드 API 호출 실패:`,
-          apiError
-        );
+        Logger.error(`[generateIdeaBriefing] 롱테일 키워드 API 호출 실패:`, apiError);
         if (
-          apiError.message.includes("API key not valid") ||
-          apiError.message.includes("Please pass a valid API key")
+          apiError.message.includes('API key not valid') ||
+          apiError.message.includes('Please pass a valid API key')
         ) {
           Logger.warn(
             `[generateIdeaBriefing] Gemini API 키가 유효하지 않아 롱테일 키워드 생성을 건너뜁니다.`
@@ -1741,7 +1578,7 @@ export async function generateIdeaBriefing(
         res = null;
       }
 
-      if (res && !res.startsWith("오류:")) {
+      if (res && !res.startsWith('오류:')) {
         try {
           let longTailArray = null;
           try {
@@ -1751,9 +1588,7 @@ export async function generateIdeaBriefing(
             if (arrayMatch) {
               longTailArray = JSON.parse(arrayMatch[0]);
             } else {
-              const codeBlockMatch = res.match(
-                /```(?:json)?\s*(\[[\s\S]*?\])\s*```/
-              );
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
               if (codeBlockMatch) {
                 longTailArray = JSON.parse(codeBlockMatch[1]);
               }
@@ -1763,7 +1598,7 @@ export async function generateIdeaBriefing(
           if (Array.isArray(longTailArray)) {
             updates.longTailKeywords = longTailArray
               .map((item) => {
-                if (typeof item === "object" && item !== null) {
+                if (typeof item === 'object' && item !== null) {
                   return item.keyword || item.text || item.name || String(item);
                 }
                 return String(item);
@@ -1775,15 +1610,10 @@ export async function generateIdeaBriefing(
               updates.longTailKeywords
             );
           } else {
-            Logger.warn(
-              `[generateIdeaBriefing] 롱테일 키워드 파싱 실패: 배열이 아님`
-            );
+            Logger.warn(`[generateIdeaBriefing] 롱테일 키워드 파싱 실패: 배열이 아님`);
           }
         } catch (parseError) {
-          Logger.error(
-            `[generateIdeaBriefing] 롱테일 키워드 파싱 오류:`,
-            parseError
-          );
+          Logger.error(`[generateIdeaBriefing] 롱테일 키워드 파싱 오류:`, parseError);
         }
       }
 
@@ -1797,20 +1627,12 @@ export async function generateIdeaBriefing(
       let res;
       try {
         res = await callGeminiAPI(prompt);
-        Logger.debug(
-          `[generateIdeaBriefing] 추천 검색어 API 응답: ${res.substring(
-            0,
-            200
-          )}...`
-        );
+        Logger.debug(`[generateIdeaBriefing] 추천 검색어 API 응답: ${res.substring(0, 200)}...`);
       } catch (apiError) {
-        Logger.error(
-          `[generateIdeaBriefing] 추천 검색어 API 호출 실패:`,
-          apiError
-        );
+        Logger.error(`[generateIdeaBriefing] 추천 검색어 API 호출 실패:`, apiError);
         if (
-          apiError.message.includes("API key not valid") ||
-          apiError.message.includes("Please pass a valid API key")
+          apiError.message.includes('API key not valid') ||
+          apiError.message.includes('Please pass a valid API key')
         ) {
           Logger.warn(
             `[generateIdeaBriefing] Gemini API 키가 유효하지 않아 추천 검색어 생성을 건너뜁니다.`
@@ -1819,7 +1641,7 @@ export async function generateIdeaBriefing(
         res = null;
       }
 
-      if (res && !res.startsWith("오류:")) {
+      if (res && !res.startsWith('오류:')) {
         try {
           let keywordsArray = null;
           try {
@@ -1829,9 +1651,7 @@ export async function generateIdeaBriefing(
             if (arrayMatch) {
               keywordsArray = JSON.parse(arrayMatch[0]);
             } else {
-              const codeBlockMatch = res.match(
-                /```(?:json)?\s*(\[[\s\S]*?\])\s*```/
-              );
+              const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
               if (codeBlockMatch) {
                 keywordsArray = JSON.parse(codeBlockMatch[1]);
               }
@@ -1843,11 +1663,11 @@ export async function generateIdeaBriefing(
             updates.tags = keywordsArray
               .map((item) => {
                 let keyword =
-                  typeof item === "object" && item !== null
+                  typeof item === 'object' && item !== null
                     ? item.keyword || item.text || item.name || String(item)
                     : String(item);
                 // # 제거
-                keyword = keyword.replace(/^#+/, "").trim();
+                keyword = keyword.replace(/^#+/, '').trim();
                 return keyword;
               })
               .filter((item) => item && item.trim().length > 0)
@@ -1857,15 +1677,10 @@ export async function generateIdeaBriefing(
               updates.tags
             );
           } else {
-            Logger.warn(
-              `[generateIdeaBriefing] 추천 검색어 파싱 실패: 배열이 아님`
-            );
+            Logger.warn(`[generateIdeaBriefing] 추천 검색어 파싱 실패: 배열이 아님`);
           }
         } catch (parseError) {
-          Logger.error(
-            `[generateIdeaBriefing] 추천 검색어 파싱 오류:`,
-            parseError
-          );
+          Logger.error(`[generateIdeaBriefing] 추천 검색어 파싱 오류:`, parseError);
         }
       }
 
@@ -1883,13 +1698,10 @@ export async function generateIdeaBriefing(
         Logger.biz(
           `✅ [generateIdeaBriefing] 브리핑 생성 완료 - cardId: ${cardId}, status: ${status}, 업데이트 항목: ${Object.keys(
             updates
-          ).join(", ")}`
+          ).join(', ')}`
         );
       } catch (updateError) {
-        Logger.error(
-          `[generateIdeaBriefing] Firebase 업데이트 실패:`,
-          updateError
-        );
+        Logger.error(`[generateIdeaBriefing] Firebase 업데이트 실패:`, updateError);
         throw updateError;
       }
 
@@ -1902,15 +1714,15 @@ export async function generateIdeaBriefing(
         // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송 (chrome.runtime.sendMessage)
         chrome.runtime
           .sendMessage({
-            action: "kanban_data_updated",
+            action: 'kanban_data_updated',
             data: kanbanData,
           })
           .catch((err) => {
             // 확장 프로그램 UI가 닫혔을 수 있음 (정상적인 상황)
             if (
               err?.message &&
-              !err.message.includes("message port closed") &&
-              !err.message.includes("Could not establish connection")
+              !err.message.includes('message port closed') &&
+              !err.message.includes('Could not establish connection')
             ) {
               Logger.debug(
                 `[generateIdeaBriefing] 확장 프로그램 UI 메시지 전송 실패:`,
@@ -1925,13 +1737,13 @@ export async function generateIdeaBriefing(
             if (
               tab.id &&
               tab.url &&
-              !tab.url.startsWith("chrome://") &&
-              !tab.url.startsWith("edge://") &&
-              !tab.url.startsWith("about:")
+              !tab.url.startsWith('chrome://') &&
+              !tab.url.startsWith('edge://') &&
+              !tab.url.startsWith('about:')
             ) {
               chrome.tabs
                 .sendMessage(tab.id, {
-                  action: "kanban_data_updated",
+                  action: 'kanban_data_updated',
                   data: kanbanData,
                 })
                 .catch((err) => {
@@ -1943,10 +1755,7 @@ export async function generateIdeaBriefing(
         });
         Logger.debug(`[generateIdeaBriefing] UI 갱신 메시지 전송 완료`);
       } catch (updateError) {
-        Logger.warn(
-          `[generateIdeaBriefing] UI 갱신 메시지 전송 실패:`,
-          updateError
-        );
+        Logger.warn(`[generateIdeaBriefing] UI 갱신 메시지 전송 실패:`, updateError);
         // UI 갱신 실패해도 브리핑 생성은 성공으로 처리
       }
     } else {
@@ -1967,9 +1776,9 @@ export async function generateIdeaBriefing(
 // 7. 이미지 생성
 // 7. 이미지 생성 (병렬 처리 적용)
 export async function generateAiImage(prompt, count = 1) {
-  const { geminiApiKey } = await chrome.storage.local.get("geminiApiKey");
+  const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
-    throw new Error("Gemini API 키가 없습니다.");
+    throw new Error('Gemini API 키가 없습니다.');
   }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
@@ -1982,8 +1791,8 @@ export async function generateAiImage(prompt, count = 1) {
   const generateSingleImage = async (index) => {
     try {
       const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       });
 
@@ -1995,30 +1804,28 @@ export async function generateAiImage(prompt, count = 1) {
       const data = await res.json();
 
       if (data.error) {
-        throw new Error(data.error.message || "이미지 생성 실패");
+        throw new Error(data.error.message || '이미지 생성 실패');
       }
 
       if (!data.candidates || data.candidates.length === 0) {
-        throw new Error("이미지 생성 응답에 candidates가 없습니다.");
+        throw new Error('이미지 생성 응답에 candidates가 없습니다.');
       }
 
       const candidate = data.candidates[0];
       let base64 = null;
-      let mimeType = "image/png";
+      let mimeType = 'image/png';
 
       // Inline Data 확인
       if (candidate.content?.parts) {
         for (const part of candidate.content.parts) {
           if (part.inlineData?.data) {
             base64 = part.inlineData.data;
-            mimeType = part.inlineData.mimeType || "image/png";
+            mimeType = part.inlineData.mimeType || 'image/png';
             break;
           }
           // 텍스트 내 Base64 확인
           if (part.text) {
-            const base64Match = part.text.match(
-              /data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/
-            );
+            const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
             if (base64Match) {
               base64 = base64Match[1];
               const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
@@ -2036,27 +1843,19 @@ export async function generateAiImage(prompt, count = 1) {
           `thumbnails/${userId}/${Date.now()}_${index}.png`,
           userId
         );
-        Logger.debug(
-          `[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`
-        );
+        Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`);
         return url;
       } else {
-        throw new Error("base64 데이터를 찾을 수 없습니다.");
+        throw new Error('base64 데이터를 찾을 수 없습니다.');
       }
     } catch (e) {
-      Logger.error(
-        `[generateAiImage] 이미지 ${index + 1}/${count} 생성 실패:`,
-        e
-      );
+      Logger.error(`[generateAiImage] 이미지 ${index + 1}/${count} 생성 실패:`, e);
       return null; // 실패 시 null 반환
     }
   };
 
   // 작업 큐 생성
-  const tasks = Array.from(
-    { length: count },
-    (_, i) => () => generateSingleImage(i)
-  );
+  const tasks = Array.from({ length: count }, (_, i) => () => generateSingleImage(i));
 
   // 병렬 처리 로직 (Concurrency Control)
   const results = [];
@@ -2085,7 +1884,7 @@ export async function generateAiImage(prompt, count = 1) {
   const successfulImages = allResults.filter((url) => url !== null);
 
   if (successfulImages.length === 0) {
-    throw new Error("생성된 이미지가 없습니다. (모든 시도 실패)");
+    throw new Error('생성된 이미지가 없습니다. (모든 시도 실패)');
   }
 
   return successfulImages;
@@ -2100,7 +1899,7 @@ export async function analyzeImageForTemplate(data) {
 // 9. 채널 분석
 export async function analyzeMyChannel(data) {
   // TODO: 채널 분석 로직 구현
-  return { success: true, analysis: "" };
+  return { success: true, analysis: '' };
 }
 
 // 10. 콘텐츠 아이디어 생성
@@ -2116,7 +1915,7 @@ export async function generateAndSendKeywords(data, sender) {
   if (sender.tab?.id) {
     chrome.tabs
       .sendMessage(sender.tab.id, {
-        action: "search_queries_recommended",
+        action: 'search_queries_recommended',
         success: true,
         data: keywords,
         cardId: data.cardId,

@@ -21,34 +21,43 @@
  * @param {number} minFontSize - 최소 폰트 크기 (기본값: 12)
  * @returns {Object} { fontSize, textWidth, textHeight, lines } - 최적화된 폰트 정보
  */
-function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight, initialFontSize, minFontSize = 12) {
+function fitTextToCanvas(
+  ctx,
+  text,
+  maxWidth,
+  maxHeight,
+  fontFamily,
+  fontWeight,
+  initialFontSize,
+  minFontSize = 12
+) {
   if (!text || text.trim().length === 0) {
     return { fontSize: initialFontSize, textWidth: 0, textHeight: 0, lines: [] };
   }
-  
+
   let fontSize = Math.min(initialFontSize, maxHeight * 0.8); // 최대 높이의 80%를 초기값으로
   let textWidth = 0;
   let textHeight = 0;
   let lines = [];
-  
+
   // 이진 탐색으로 최적 폰트 크기 찾기
   let low = minFontSize;
   let high = Math.min(initialFontSize, maxHeight * 0.8);
   let bestSize = minFontSize;
-  
+
   while (low <= high) {
     const testSize = Math.floor((low + high) / 2);
     ctx.font = `${fontWeight} ${testSize}px ${fontFamily}`;
-    
+
     // 텍스트를 여러 줄로 나누기 (단어 단위)
     const words = text.split(/\s+/);
     const testLines = [];
     let currentLine = '';
-    
+
     for (const word of words) {
       const testLine = currentLine ? `${currentLine} ${word}` : word;
       const metrics = ctx.measureText(testLine);
-      
+
       if (metrics.width <= maxWidth) {
         currentLine = testLine;
       } else {
@@ -57,7 +66,7 @@ function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight,
           currentLine = word;
         } else {
           // 단어 하나가 너무 길면 강제로 자름
-          testLines.push(word.substring(0, Math.floor(word.length * maxWidth / metrics.width)));
+          testLines.push(word.substring(0, Math.floor((word.length * maxWidth) / metrics.width)));
           currentLine = '';
         }
       }
@@ -65,11 +74,11 @@ function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight,
     if (currentLine) {
       testLines.push(currentLine);
     }
-    
+
     const lineHeight = testSize * 1.2; // 줄 간격
     const totalHeight = testLines.length * lineHeight;
-    const maxLineWidth = Math.max(...testLines.map(line => ctx.measureText(line).width));
-    
+    const maxLineWidth = Math.max(...testLines.map((line) => ctx.measureText(line).width));
+
     if (maxLineWidth <= maxWidth && totalHeight <= maxHeight) {
       bestSize = testSize;
       low = testSize + 1;
@@ -80,7 +89,7 @@ function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight,
       high = testSize - 1;
     }
   }
-  
+
   // 최종 폰트 크기로 다시 측정
   ctx.font = `${fontWeight} ${bestSize}px ${fontFamily}`;
   if (lines.length === 0) {
@@ -100,12 +109,12 @@ function fitTextToCanvas(ctx, text, maxWidth, maxHeight, fontFamily, fontWeight,
       lines = [text];
     }
   }
-  
+
   return {
     fontSize: bestSize,
     textWidth,
     textHeight,
-    lines
+    lines,
   };
 }
 
@@ -128,7 +137,7 @@ function adjustTextColorForBackground(ctx, x, y, width, height) {
     const sampleY = Math.max(0, y - samplePadding);
     const sampleWidth = Math.min(ctx.canvas.width - sampleX, width + samplePadding * 2);
     const sampleHeight = Math.min(ctx.canvas.height - sampleY, height + samplePadding * 2);
-    
+
     const imageData = ctx.getImageData(sampleX, sampleY, sampleWidth, sampleHeight);
     const data = imageData.data;
     let r, g, b, avg;
@@ -146,12 +155,12 @@ function adjustTextColorForBackground(ctx, x, y, width, height) {
     }
 
     if (pixelCount === 0) return null;
-    
+
     const brightness = Math.floor(colorSum / pixelCount);
     // 밝기(0~255)가 128보다 낮으면(어두우면) 흰색 텍스트, 높으면 검은색 텍스트 리턴
-    return brightness < 128 ? "#FFFFFF" : "#000000";
+    return brightness < 128 ? '#FFFFFF' : '#000000';
   } catch (e) {
-    console.warn("[Color Adjust] 색상 보정 실패:", e);
+    console.warn('[Color Adjust] 색상 보정 실패:', e);
     return null; // 오류 시 null 반환 (기본 색상 사용)
   }
 }
@@ -184,13 +193,13 @@ const renderHelpers = {
     const styles = layer.styles || {};
 
     // 1. [PRD v3.2 FR-R1] 텍스트 내용 결정 - 플레이스홀더인 경우에만 치환
-    let text = layer.text || "";
+    let text = layer.text || '';
 
     // 조건부 치환: 정확히 플레이스홀더와 일치할 때만 동적 텍스트로 교체
-    if (text === "{{SLOGAN}}") {
-      text = dynamicText.slogan || "샘플 슬로건";
-    } else if (text === "{{VISUALIZATION_CUE}}") {
-      text = dynamicText.visualizationCue || "샘플 문구";
+    if (text === '{{SLOGAN}}') {
+      text = dynamicText.slogan || '샘플 슬로건';
+    } else if (text === '{{VISUALIZATION_CUE}}') {
+      text = dynamicText.visualizationCue || '샘플 문구';
     }
     // 플레이스홀더가 아니면 원본 텍스트를 그대로 사용 (고충실도 복제)
 
@@ -204,29 +213,27 @@ const renderHelpers = {
     let actualFontSize, fontWeight, fontFamily;
     if (styles.font) {
       // v2.3 이하: "900 36px 'Noto Sans KR'" 형식 파싱
-      const fontMatch = styles.font.match(
-        /^(normal|bold|\d+)\s+(\d+)px\s+(.+)$/
-      );
+      const fontMatch = styles.font.match(/^(normal|bold|\d+)\s+(\d+)px\s+(.+)$/);
       if (fontMatch) {
         fontWeight = fontMatch[1];
         actualFontSize = parseInt(fontMatch[2], 10);
         fontFamily = fontMatch[3];
       } else {
-        fontWeight = "normal";
+        fontWeight = 'normal';
         actualFontSize = 20;
-        fontFamily = "Arial";
+        fontFamily = 'Arial';
       }
     } else {
       // v2.4+: fontRatio를 캔버스 높이 기준으로 변환
       actualFontSize = (styles.fontRatio || 0.05) * canvasHeight;
-      fontWeight = styles.fontWeight || "normal";
-      fontFamily = styles.fontFamily || "Arial";
+      fontWeight = styles.fontWeight || 'normal';
+      fontFamily = styles.fontFamily || 'Arial';
     }
 
     // 2. [Smart Text Fitting] 텍스트 길이에 따라 폰트 크기 자동 조절
     const maxWidth = canvasWidth * 0.9; // 캔버스 너비의 90%를 최대 너비로 설정
     const maxHeight = canvasHeight * 0.4; // 최대 높이 설정 (여러 줄 텍스트 지원)
-    
+
     // fitTextToCanvas 함수로 최적 폰트 크기 계산
     const fitResult = fitTextToCanvas(
       ctx,
@@ -238,35 +245,37 @@ const renderHelpers = {
       actualFontSize,
       12 // 최소 폰트 크기
     );
-    
+
     const finalFontSize = fitResult.fontSize;
     let textWidth = fitResult.textWidth;
     const textLines = fitResult.lines;
-    
+
     // 최종 폰트 설정
     ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
-    
+
     if (finalFontSize !== actualFontSize) {
-      console.log(`[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (${textLines.length}줄)`);
+      console.log(
+        `[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (${textLines.length}줄)`
+      );
     }
 
     // 3. 정렬 및 기준선 설정 (JSON의 align, baseline 완벽 적용)
-    ctx.textAlign = styles.align || "left";
-    ctx.textBaseline = styles.baseline || "alphabetic";
+    ctx.textAlign = styles.align || 'left';
+    ctx.textBaseline = styles.baseline || 'alphabetic';
 
     // 4. 색상 설정 (자동 색상 보정 적용)
     // 배경 이미지가 있는 경우 텍스트 색상을 자동으로 조정
-    let textColor = styles.fill || "#000000";
-    
+    let textColor = styles.fill || '#000000';
+
     // 배경 이미지가 있는 경우 색상 보정 적용
     // (배경 레이어가 이미지 타입이고 텍스트 위치와 겹치는 경우)
     if (layer.autoColorAdjust !== false) {
       // 텍스트가 그려질 영역의 배경 밝기 분석
       const adjustedColor = adjustTextColorForBackground(
-        ctx, 
-        actualX, 
-        actualY, 
-        textWidth, 
+        ctx,
+        actualX,
+        actualY,
+        textWidth,
         finalFontSize
       );
       if (adjustedColor) {
@@ -274,28 +283,26 @@ const renderHelpers = {
         console.log(`[Text Render] 🎨 자동 색상 보정: ${textColor}`);
       }
     }
-    
+
     ctx.fillStyle = textColor;
 
     // 5. 그림자 설정 (PRD v2.7: 하위 호환성 처리 + 명시적 초기화)
     if (styles.shadow) {
-      ctx.shadowColor = styles.shadow.color || "rgba(0,0,0,0.5)";
+      ctx.shadowColor = styles.shadow.color || 'rgba(0,0,0,0.5)';
       const blurValue = styles.shadow.blur || 0;
       const offsetXValue = styles.shadow.offsetX || 0;
       const offsetYValue = styles.shadow.offsetY || 0;
       // v2.3: 절대 픽셀(>10), v2.4+: 비율(<=10)
       ctx.shadowBlur = blurValue > 10 ? blurValue : blurValue * canvasHeight;
-      ctx.shadowOffsetX =
-        offsetXValue > 10 ? offsetXValue : offsetXValue * canvasWidth;
-      ctx.shadowOffsetY =
-        offsetYValue > 10 ? offsetYValue : offsetYValue * canvasHeight;
+      ctx.shadowOffsetX = offsetXValue > 10 ? offsetXValue : offsetXValue * canvasWidth;
+      ctx.shadowOffsetY = offsetYValue > 10 ? offsetYValue : offsetYValue * canvasHeight;
 
       console.log(
         `[Text Render] 그림자: blur=${ctx.shadowBlur}, offset=(${ctx.shadowOffsetX}, ${ctx.shadowOffsetY}), color=${ctx.shadowColor}`
       );
     } else {
       // 그림자 없을 때 명시적 초기화 (중요: 이전 레이어의 그림자가 남지 않도록)
-      ctx.shadowColor = "rgba(0,0,0,0)";
+      ctx.shadowColor = 'rgba(0,0,0,0)';
       ctx.shadowBlur = 0;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
@@ -310,19 +317,21 @@ const renderHelpers = {
     const lineHeight = finalFontSize * 1.2;
     const totalTextHeight = textLines.length * lineHeight;
     let startY = actualY;
-    
+
     // baseline이 middle인 경우 수직 중앙 정렬
     if (ctx.textBaseline === 'middle') {
-      startY = actualY - (totalTextHeight / 2) + (lineHeight / 2);
+      startY = actualY - totalTextHeight / 2 + lineHeight / 2;
     } else if (ctx.textBaseline === 'bottom') {
       startY = actualY - totalTextHeight + lineHeight;
     }
-    
+
     // 여러 줄 텍스트 렌더링
     if (textLines.length > 1) {
       textLines.forEach((line, index) => {
-        const lineY = startY + (index * lineHeight);
-        console.log(`[Text Render] ✏️ fillText("${line}", ${actualX}, ${lineY}) [줄 ${index + 1}/${textLines.length}]`);
+        const lineY = startY + index * lineHeight;
+        console.log(
+          `[Text Render] ✏️ fillText("${line}", ${actualX}, ${lineY}) [줄 ${index + 1}/${textLines.length}]`
+        );
         ctx.fillText(line, actualX, lineY);
       });
     } else {
@@ -332,13 +341,13 @@ const renderHelpers = {
 
     // 7. 외곽선 (stroke) - 자동 색상 보정 적용 (여러 줄 지원)
     if (styles.stroke) {
-      const strokeColor = textColor || styles.strokeColor || "#000000";
+      const strokeColor = textColor || styles.strokeColor || '#000000';
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = styles.strokeWidth || 1;
-      
+
       if (textLines.length > 1) {
         textLines.forEach((line, index) => {
-          const lineY = startY + (index * lineHeight);
+          const lineY = startY + index * lineHeight;
           ctx.strokeText(line, actualX, lineY);
         });
       } else {
@@ -359,7 +368,7 @@ const renderHelpers = {
   drawShape: (ctx, layer, canvasWidth, canvasHeight) => {
     const styles = layer.styles || {};
 
-    if (layer.shape === "rect") {
+    if (layer.shape === 'rect') {
       ctx.save();
 
       // [TR-1] 공통 헬퍼를 사용한 크기 변환
@@ -391,13 +400,14 @@ const renderHelpers = {
       }
 
       ctx.restore();
-    } else if (layer.shape === "circle") {
+    } else if (layer.shape === 'circle') {
       ctx.save();
 
       // [TR-1] 공통 헬퍼를 사용한 좌표 및 크기 변환
       const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
       const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
-      const actualRadius = renderHelpers.convertCoordinate(layer.widthRatio || 0.05, canvasWidth) / 2;
+      const actualRadius =
+        renderHelpers.convertCoordinate(layer.widthRatio || 0.05, canvasWidth) / 2;
 
       console.log(
         `[Shape Render] ⭕ circle: center(${actualX}, ${actualY}), radius: ${actualRadius}`
@@ -433,195 +443,196 @@ const renderHelpers = {
     // 모든 경우에 Promise 반환 (비동기 일관성)
     return new Promise((resolve) => {
       if (!background) {
-        console.warn("[Background Render] ⚠️ 배경 정보 없음, 흰색으로 대체");
-        ctx.fillStyle = "#FFFFFF";
+        console.warn('[Background Render] ⚠️ 배경 정보 없음, 흰색으로 대체');
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         resolve();
         return;
       }
 
-      console.log(
-        `[Background Render] 배경 타입: ${background.type}, 값: ${background.value}`
-      );
+      console.log(`[Background Render] 배경 타입: ${background.type}, 값: ${background.value}`);
 
-      if (background.type === "solid") {
-        ctx.fillStyle = background.value || "#FFFFFF";
+      if (background.type === 'solid') {
+        ctx.fillStyle = background.value || '#FFFFFF';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         console.log(`[Background Render] ✅ 단색 배경: ${ctx.fillStyle}`);
         resolve();
-      } else if (background.type === "gradient") {
-      // 그라디언트 배경 (linear-gradient 파싱)
-      console.log(`[Background Render] 그라디언트 파싱: ${background.value}`);
-      const gradientMatch = (background.value || "").match(
-        /linear-gradient\(([^)]+)\)/
-      );
-      if (gradientMatch) {
-        const parts = gradientMatch[1].split(",").map((s) => s.trim());
-        // 색상 값 추출 (퍼센트나 숫자 제거)
-        const colors = parts
-          .map((p) => {
-            // #으로 시작하는 색상 값 찾기
-            const colorMatch = p.match(/#[0-9a-fA-F]{3,8}/);
-            if (colorMatch) {
-              return colorMatch[0];
-            }
-            // rgb/rgba 형식도 지원
-            const rgbMatch = p.match(/(rgba?\([^)]+\))/);
-            if (rgbMatch) {
-              return rgbMatch[1];
-            }
-            return null;
-          })
-          .filter((c) => c !== null);
-        
-        if (colors.length >= 2) {
-          const gradient = ctx.createLinearGradient(0, 0, canvasWidth, 0);
-          gradient.addColorStop(0, colors[0]);
-          gradient.addColorStop(1, colors[colors.length - 1]);
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-          console.log(
-            `[Background Render] ✅ 그라디언트: ${colors[0]} → ${
-              colors[colors.length - 1]
-            }`
-          );
-        } else {
-          ctx.fillStyle = "#FFFFFF";
-          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-          console.warn(`[Background Render] ⚠️ 그라디언트 색상 부족 (찾은 색상: ${colors.length}개)`);
-        }
-        resolve();
-      } else {
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-        console.warn(`[Background Render] ⚠️ 그라디언트 파싱 실패`);
-        resolve();
-      }
-    } else if (background.type === "image") {
-      // 이미지 배경 렌더링 (Base64 데이터 URL 지원)
-      const imageValue = background.value || "";
-      // Base64 데이터인 경우 요약만 표시
-      let logValue = imageValue;
-      if (imageValue.startsWith('data:image') && imageValue.length > 100) {
-        logValue = `[Base64 Image: ${imageValue.length} chars]`;
-      } else if (imageValue.length > 80) {
-        logValue = imageValue.substring(0, 80) + '...';
-      }
-      console.log(
-        `[Background Render] 이미지 배경 렌더링 시작: ${logValue}`
-      );
-      
-      if (imageValue.startsWith("data:image/") || imageValue.startsWith("http://") || imageValue.startsWith("https://")) {
-        // 비동기 이미지 로드
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        
-        img.onload = () => {
-          // 이미지 비율을 유지하면서 캔버스를 채우기 (cover 방식)
-          const imgAspect = img.width / img.height;
-          const canvasAspect = canvasWidth / canvasHeight;
-          
-          let drawWidth, drawHeight, drawX, drawY;
-          
-          if (imgAspect > canvasAspect) {
-            // 이미지가 더 넓음 - 높이에 맞춤
-            drawHeight = canvasHeight;
-            drawWidth = canvasHeight * imgAspect;
-            drawX = (canvasWidth - drawWidth) / 2;
-            drawY = 0;
-          } else {
-            // 이미지가 더 높음 - 너비에 맞춤
-            drawWidth = canvasWidth;
-            drawHeight = canvasWidth / imgAspect;
-            drawX = 0;
-            drawY = (canvasHeight - drawHeight) / 2;
-          }
-          
-          // 배경을 먼저 채우기 (이미지가 채우지 못하는 부분)
-          ctx.fillStyle = "#000000";
-          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-          
-          // 이미지를 비율 유지하면서 그리기
-          ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-          console.log(`[Background Render] ✅ 이미지 배경 렌더링 완료: ${canvasWidth}x${canvasHeight} (원본: ${img.width}x${img.height}, 비율 유지)`);
-          resolve();
-        };
-        
-        img.onerror = (e) => {
-          console.error("[Background Render] ❌ 이미지 로드 실패:", e);
-          
-          // Firebase Storage URL인 경우 CORS 오류일 수 있으므로 Base64로 변환 시도
-          if (imageValue.includes('firebasestorage.googleapis.com')) {
-            console.log("[Background Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...");
-            chrome.runtime.sendMessage({
-              action: "fetch_image_as_base64",
-              url: imageValue
-            }, (response) => {
-              if (response && response.success && response.dataUrl) {
-                // Base64로 변환 성공 - 다시 이미지 로드
-                const img2 = new Image();
-                img2.onload = () => {
-                  const imgAspect = img2.width / img2.height;
-                  const canvasAspect = canvasWidth / canvasHeight;
-                  
-                  let drawWidth, drawHeight, drawX, drawY;
-                  
-                  if (imgAspect > canvasAspect) {
-                    drawHeight = canvasHeight;
-                    drawWidth = canvasHeight * imgAspect;
-                    drawX = (canvasWidth - drawWidth) / 2;
-                    drawY = 0;
-                  } else {
-                    drawWidth = canvasWidth;
-                    drawHeight = canvasWidth / imgAspect;
-                    drawX = 0;
-                    drawY = (canvasHeight - drawHeight) / 2;
-                  }
-                  
-                  ctx.fillStyle = "#000000";
-                  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-                  ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
-                  console.log("[Background Render] ✅ Base64 변환 후 이미지 로드 성공");
-                  resolve();
-                };
-                img2.onerror = () => {
-                  console.error("[Background Render] ❌ Base64 변환 후에도 이미지 로드 실패");
-                  ctx.fillStyle = "#F0F0F0";
-                  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-                  resolve();
-                };
-                img2.src = response.dataUrl;
-              } else {
-                // Base64 변환 실패 - 기본 배경
-                console.error("[Background Render] ❌ Base64 변환 실패:", response?.error);
-                ctx.fillStyle = "#F0F0F0";
-                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-                resolve();
+      } else if (background.type === 'gradient') {
+        // 그라디언트 배경 (linear-gradient 파싱)
+        console.log(`[Background Render] 그라디언트 파싱: ${background.value}`);
+        const gradientMatch = (background.value || '').match(/linear-gradient\(([^)]+)\)/);
+        if (gradientMatch) {
+          const parts = gradientMatch[1].split(',').map((s) => s.trim());
+          // 색상 값 추출 (퍼센트나 숫자 제거)
+          const colors = parts
+            .map((p) => {
+              // #으로 시작하는 색상 값 찾기
+              const colorMatch = p.match(/#[0-9a-fA-F]{3,8}/);
+              if (colorMatch) {
+                return colorMatch[0];
               }
-            });
-          } else {
-            // Firebase Storage가 아닌 경우 기본 배경
-            ctx.fillStyle = "#F0F0F0";
+              // rgb/rgba 형식도 지원
+              const rgbMatch = p.match(/(rgba?\([^)]+\))/);
+              if (rgbMatch) {
+                return rgbMatch[1];
+              }
+              return null;
+            })
+            .filter((c) => c !== null);
+
+          if (colors.length >= 2) {
+            const gradient = ctx.createLinearGradient(0, 0, canvasWidth, 0);
+            gradient.addColorStop(0, colors[0]);
+            gradient.addColorStop(1, colors[colors.length - 1]);
+            ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-            resolve();
+            console.log(
+              `[Background Render] ✅ 그라디언트: ${colors[0]} → ${colors[colors.length - 1]}`
+            );
+          } else {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            console.warn(
+              `[Background Render] ⚠️ 그라디언트 색상 부족 (찾은 색상: ${colors.length}개)`
+            );
           }
-        };
-        
-        img.src = imageValue;
+          resolve();
+        } else {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          console.warn(`[Background Render] ⚠️ 그라디언트 파싱 실패`);
+          resolve();
+        }
+      } else if (background.type === 'image') {
+        // 이미지 배경 렌더링 (Base64 데이터 URL 지원)
+        const imageValue = background.value || '';
+        // Base64 데이터인 경우 요약만 표시
+        let logValue = imageValue;
+        if (imageValue.startsWith('data:image') && imageValue.length > 100) {
+          logValue = `[Base64 Image: ${imageValue.length} chars]`;
+        } else if (imageValue.length > 80) {
+          logValue = imageValue.substring(0, 80) + '...';
+        }
+        console.log(`[Background Render] 이미지 배경 렌더링 시작: ${logValue}`);
+
+        if (
+          imageValue.startsWith('data:image/') ||
+          imageValue.startsWith('http://') ||
+          imageValue.startsWith('https://')
+        ) {
+          // 비동기 이미지 로드
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+
+          img.onload = () => {
+            // 이미지 비율을 유지하면서 캔버스를 채우기 (cover 방식)
+            const imgAspect = img.width / img.height;
+            const canvasAspect = canvasWidth / canvasHeight;
+
+            let drawWidth, drawHeight, drawX, drawY;
+
+            if (imgAspect > canvasAspect) {
+              // 이미지가 더 넓음 - 높이에 맞춤
+              drawHeight = canvasHeight;
+              drawWidth = canvasHeight * imgAspect;
+              drawX = (canvasWidth - drawWidth) / 2;
+              drawY = 0;
+            } else {
+              // 이미지가 더 높음 - 너비에 맞춤
+              drawWidth = canvasWidth;
+              drawHeight = canvasWidth / imgAspect;
+              drawX = 0;
+              drawY = (canvasHeight - drawHeight) / 2;
+            }
+
+            // 배경을 먼저 채우기 (이미지가 채우지 못하는 부분)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+            // 이미지를 비율 유지하면서 그리기
+            ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+            console.log(
+              `[Background Render] ✅ 이미지 배경 렌더링 완료: ${canvasWidth}x${canvasHeight} (원본: ${img.width}x${img.height}, 비율 유지)`
+            );
+            resolve();
+          };
+
+          img.onerror = (e) => {
+            console.error('[Background Render] ❌ 이미지 로드 실패:', e);
+
+            // Firebase Storage URL인 경우 CORS 오류일 수 있으므로 Base64로 변환 시도
+            if (imageValue.includes('firebasestorage.googleapis.com')) {
+              console.log('[Background Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...');
+              chrome.runtime.sendMessage(
+                {
+                  action: 'fetch_image_as_base64',
+                  url: imageValue,
+                },
+                (response) => {
+                  if (response && response.success && response.dataUrl) {
+                    // Base64로 변환 성공 - 다시 이미지 로드
+                    const img2 = new Image();
+                    img2.onload = () => {
+                      const imgAspect = img2.width / img2.height;
+                      const canvasAspect = canvasWidth / canvasHeight;
+
+                      let drawWidth, drawHeight, drawX, drawY;
+
+                      if (imgAspect > canvasAspect) {
+                        drawHeight = canvasHeight;
+                        drawWidth = canvasHeight * imgAspect;
+                        drawX = (canvasWidth - drawWidth) / 2;
+                        drawY = 0;
+                      } else {
+                        drawWidth = canvasWidth;
+                        drawHeight = canvasWidth / imgAspect;
+                        drawX = 0;
+                        drawY = (canvasHeight - drawHeight) / 2;
+                      }
+
+                      ctx.fillStyle = '#000000';
+                      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                      ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
+                      console.log('[Background Render] ✅ Base64 변환 후 이미지 로드 성공');
+                      resolve();
+                    };
+                    img2.onerror = () => {
+                      console.error('[Background Render] ❌ Base64 변환 후에도 이미지 로드 실패');
+                      ctx.fillStyle = '#F0F0F0';
+                      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                      resolve();
+                    };
+                    img2.src = response.dataUrl;
+                  } else {
+                    // Base64 변환 실패 - 기본 배경
+                    console.error('[Background Render] ❌ Base64 변환 실패:', response?.error);
+                    ctx.fillStyle = '#F0F0F0';
+                    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                    resolve();
+                  }
+                }
+              );
+            } else {
+              // Firebase Storage가 아닌 경우 기본 배경
+              ctx.fillStyle = '#F0F0F0';
+              ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+              resolve();
+            }
+          };
+
+          img.src = imageValue;
+        } else {
+          console.warn('[Background Render] ⚠️ 유효하지 않은 이미지 URL');
+          ctx.fillStyle = '#F0F0F0';
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          resolve();
+        }
       } else {
-        console.warn("[Background Render] ⚠️ 유효하지 않은 이미지 URL");
-        ctx.fillStyle = "#F0F0F0";
+        console.warn(`[Background Render] ⚠️ 알 수 없는 배경 타입: ${background.type}`);
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         resolve();
       }
-    } else {
-      console.warn(
-        `[Background Render] ⚠️ 알 수 없는 배경 타입: ${background.type}`
-      );
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-      resolve();
-    }
     });
   },
 
@@ -639,12 +650,12 @@ const renderHelpers = {
     const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
     const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
     // widthRatio가 있으면 사용, 없으면 legacy width 또는 기본값
-    const actualW = layer.widthRatio 
+    const actualW = layer.widthRatio
       ? renderHelpers.convertCoordinate(layer.widthRatio, canvasWidth)
-      : (layer.width || 50);
+      : layer.width || 50;
     const actualH = layer.heightRatio
       ? renderHelpers.convertCoordinate(layer.heightRatio, canvasHeight)
-      : (layer.height || 50);
+      : layer.height || 50;
 
     console.log(
       `[SVG Render] 🎨 SVG 아이콘: pos(${actualX}, ${actualY}), size: ${actualW}x${actualH}`
@@ -685,21 +696,21 @@ const renderHelpers = {
       } catch (error) {
         console.error(`[SVG Render] ❌ Path2D 생성 실패:`, error);
         // 에러 시 플레이스홀더 표시
-        ctx.fillStyle = "#FFD700";
+        ctx.fillStyle = '#FFD700';
         ctx.fillRect(0, 0, viewBoxSize, viewBoxSize);
-        ctx.strokeStyle = "#FF6B00";
+        ctx.strokeStyle = '#FF6B00';
         ctx.strokeRect(0, 0, viewBoxSize, viewBoxSize);
       }
     } else {
       console.warn(`[SVG Render] ⚠️ pathData가 없습니다.`);
       // pathData 없으면 아이콘 플레이스홀더 표시
-      ctx.fillStyle = "#FFD700";
+      ctx.fillStyle = '#FFD700';
       ctx.fillRect(0, 0, viewBoxSize, viewBoxSize);
-      ctx.fillStyle = "#333333";
+      ctx.fillStyle = '#333333';
       ctx.font = `${viewBoxSize * 0.5}px Arial`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("🎨", viewBoxSize / 2, viewBoxSize / 2);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🎨', viewBoxSize / 2, viewBoxSize / 2);
     }
 
     ctx.restore();
@@ -714,22 +725,33 @@ const renderHelpers = {
       // [TR-1] 공통 헬퍼를 사용한 좌표 및 크기 변환
       const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
       const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
-      const actualW = renderHelpers.convertCoordinate(layer.width || layer.widthRatio || 0.1, canvasWidth);
-      const actualH = renderHelpers.convertCoordinate(layer.height || layer.heightRatio || 0.1, canvasHeight);
+      const actualW = renderHelpers.convertCoordinate(
+        layer.width || layer.widthRatio || 0.1,
+        canvasWidth
+      );
+      const actualH = renderHelpers.convertCoordinate(
+        layer.height || layer.heightRatio || 0.1,
+        canvasHeight
+      );
 
       ctx.save();
 
       // [FR-R3] Base64 이미지 데이터가 있으면 실제 렌더링
-      if (layer.src && (layer.src.startsWith("data:image") || layer.src.startsWith("http://") || layer.src.startsWith("https://"))) {
+      if (
+        layer.src &&
+        (layer.src.startsWith('data:image') ||
+          layer.src.startsWith('http://') ||
+          layer.src.startsWith('https://'))
+      ) {
         const img = new Image();
-        img.crossOrigin = "anonymous";
+        img.crossOrigin = 'anonymous';
         img.onload = () => {
           // 이미지 비율을 유지하면서 그리기
           const imgAspect = img.width / img.height;
           const targetAspect = actualW / actualH;
-          
+
           let drawWidth, drawHeight, drawX, drawY;
-          
+
           if (imgAspect > targetAspect) {
             // 이미지가 더 넓음 - 높이에 맞춤
             drawHeight = actualH;
@@ -743,11 +765,11 @@ const renderHelpers = {
             drawX = actualX;
             drawY = actualY + (actualH - drawHeight) / 2;
           }
-          
+
           // 배경을 먼저 채우기 (이미지가 채우지 못하는 부분)
-          ctx.fillStyle = "#000000";
+          ctx.fillStyle = '#000000';
           ctx.fillRect(actualX, actualY, actualW, actualH);
-          
+
           // 이미지를 비율 유지하면서 그리기
           ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
           console.log(
@@ -757,86 +779,89 @@ const renderHelpers = {
           resolve();
         };
         img.onerror = (e) => {
-          console.error("[Image Render] ❌ 이미지 로드 실패:", e);
-          
+          console.error('[Image Render] ❌ 이미지 로드 실패:', e);
+
           // Firebase Storage URL인 경우 CORS 오류일 수 있으므로 Base64로 변환 시도
           if (layer.src && layer.src.includes('firebasestorage.googleapis.com')) {
-            console.log("[Image Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...");
-            chrome.runtime.sendMessage({
-              action: "fetch_image_as_base64",
-              url: layer.src
-            }, (response) => {
-              if (response && response.success && response.dataUrl) {
-                // Base64로 변환 성공 - 다시 이미지 로드
-                const img2 = new Image();
-                img2.onload = () => {
-                  const imgAspect = img2.width / img2.height;
-                  const targetAspect = actualW / actualH;
-                  
-                  let drawWidth, drawHeight, drawX, drawY;
-                  
-                  if (imgAspect > targetAspect) {
-                    drawHeight = actualH;
-                    drawWidth = actualH * imgAspect;
-                    drawX = actualX + (actualW - drawWidth) / 2;
-                    drawY = actualY;
-                  } else {
-                    drawWidth = actualW;
-                    drawHeight = actualW / imgAspect;
-                    drawX = actualX;
-                    drawY = actualY + (actualH - drawHeight) / 2;
-                  }
-                  
-                  ctx.fillStyle = "#000000";
+            console.log('[Image Render] 🔄 Firebase Storage URL 감지, Base64 변환 시도...');
+            chrome.runtime.sendMessage(
+              {
+                action: 'fetch_image_as_base64',
+                url: layer.src,
+              },
+              (response) => {
+                if (response && response.success && response.dataUrl) {
+                  // Base64로 변환 성공 - 다시 이미지 로드
+                  const img2 = new Image();
+                  img2.onload = () => {
+                    const imgAspect = img2.width / img2.height;
+                    const targetAspect = actualW / actualH;
+
+                    let drawWidth, drawHeight, drawX, drawY;
+
+                    if (imgAspect > targetAspect) {
+                      drawHeight = actualH;
+                      drawWidth = actualH * imgAspect;
+                      drawX = actualX + (actualW - drawWidth) / 2;
+                      drawY = actualY;
+                    } else {
+                      drawWidth = actualW;
+                      drawHeight = actualW / imgAspect;
+                      drawX = actualX;
+                      drawY = actualY + (actualH - drawHeight) / 2;
+                    }
+
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(actualX, actualY, actualW, actualH);
+                    ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
+                    console.log('[Image Render] ✅ Base64 변환 후 이미지 로드 성공');
+                    ctx.restore();
+                    resolve();
+                  };
+                  img2.onerror = () => {
+                    console.error('[Image Render] ❌ Base64 변환 후에도 이미지 로드 실패');
+                    // 플레이스홀더 렌더링
+                    ctx.fillStyle = '#DDDDDD';
+                    ctx.fillRect(actualX, actualY, actualW, actualH);
+                    ctx.strokeStyle = '#999999';
+                    ctx.strokeRect(actualX, actualY, actualW, actualH);
+                    ctx.fillStyle = '#666666';
+                    ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('X', actualX + actualW / 2, actualY + actualH / 2);
+                    ctx.restore();
+                    resolve();
+                  };
+                  img2.src = response.dataUrl;
+                } else {
+                  // Base64 변환 실패 - 플레이스홀더
+                  console.error('[Image Render] ❌ Base64 변환 실패:', response?.error);
+                  ctx.fillStyle = '#DDDDDD';
                   ctx.fillRect(actualX, actualY, actualW, actualH);
-                  ctx.drawImage(img2, drawX, drawY, drawWidth, drawHeight);
-                  console.log("[Image Render] ✅ Base64 변환 후 이미지 로드 성공");
-                  ctx.restore();
-                  resolve();
-                };
-                img2.onerror = () => {
-                  console.error("[Image Render] ❌ Base64 변환 후에도 이미지 로드 실패");
-                  // 플레이스홀더 렌더링
-                  ctx.fillStyle = "#DDDDDD";
-                  ctx.fillRect(actualX, actualY, actualW, actualH);
-                  ctx.strokeStyle = "#999999";
+                  ctx.strokeStyle = '#999999';
                   ctx.strokeRect(actualX, actualY, actualW, actualH);
-                  ctx.fillStyle = "#666666";
+                  ctx.fillStyle = '#666666';
                   ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
-                  ctx.textAlign = "center";
-                  ctx.textBaseline = "middle";
-                  ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText('X', actualX + actualW / 2, actualY + actualH / 2);
                   ctx.restore();
                   resolve();
-                };
-                img2.src = response.dataUrl;
-              } else {
-                // Base64 변환 실패 - 플레이스홀더
-                console.error("[Image Render] ❌ Base64 변환 실패:", response?.error);
-                ctx.fillStyle = "#DDDDDD";
-                ctx.fillRect(actualX, actualY, actualW, actualH);
-                ctx.strokeStyle = "#999999";
-                ctx.strokeRect(actualX, actualY, actualW, actualH);
-                ctx.fillStyle = "#666666";
-                ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
-                ctx.restore();
-                resolve();
+                }
               }
-            });
+            );
           } else {
             // Firebase Storage가 아닌 경우 플레이스홀더
-            ctx.fillStyle = "#DDDDDD";
+            ctx.fillStyle = '#DDDDDD';
             ctx.fillRect(actualX, actualY, actualW, actualH);
-            ctx.strokeStyle = "#999999";
+            ctx.strokeStyle = '#999999';
             ctx.strokeRect(actualX, actualY, actualW, actualH);
-            ctx.fillStyle = "#666666";
+            ctx.fillStyle = '#666666';
             ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText("X", actualX + actualW / 2, actualY + actualH / 2);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('X', actualX + actualW / 2, actualY + actualH / 2);
             ctx.restore();
             resolve();
           }
@@ -844,15 +869,15 @@ const renderHelpers = {
         img.src = layer.src;
       } else {
         // [기존] 플레이스홀더 렌더링
-        ctx.fillStyle = "#DDDDDD";
+        ctx.fillStyle = '#DDDDDD';
         ctx.fillRect(actualX, actualY, actualW, actualH);
-        ctx.strokeStyle = "#999999";
+        ctx.strokeStyle = '#999999';
         ctx.strokeRect(actualX, actualY, actualW, actualH);
-        ctx.fillStyle = "#666666";
+        ctx.fillStyle = '#666666';
         ctx.font = `${Math.max(12, canvasHeight * 0.03)}px Arial`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("IMAGE", actualX + actualW / 2, actualY + actualH / 2);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('IMAGE', actualX + actualW / 2, actualY + actualH / 2);
         ctx.restore();
         resolve();
       }
@@ -870,12 +895,12 @@ function calculateGoldenRatio(canvasWidth, canvasHeight) {
   const goldenRatio = 1.618;
   const centerX = canvasWidth / 2;
   const centerY = canvasHeight / goldenRatio; // 황금비율 지점
-  
+
   return {
     x: centerX,
     y: centerY,
     width: canvasWidth * 0.8,
-    height: canvasHeight * 0.3
+    height: canvasHeight * 0.3,
   };
 }
 
@@ -888,282 +913,291 @@ function calculateGoldenRatio(canvasWidth, canvasHeight) {
  * @param {Object} options - 추가 옵션
  * @returns {Object} TemplateDataSchema JSON 객체
  */
-export function createSmartTemplate(templateType, title, subtitle = "", background = null, options = {}) {
+export function createSmartTemplate(
+  templateType,
+  title,
+  subtitle = '',
+  background = null,
+  options = {}
+) {
   const defaultBackground = background || {
-    type: "gradient",
-    value: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+    type: 'gradient',
+    value: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   };
-  
+
   const layers = [];
-  
+
   // 배경 오버레이 (가독성 향상)
-  if (background?.type === "image") {
+  if (background?.type === 'image') {
     layers.push({
-      type: "shape",
-      shape: "rect",
+      type: 'shape',
+      shape: 'rect',
       x: 0.5,
       y: 0.5,
       widthRatio: 1,
       heightRatio: 1,
       styles: {
-        fill: "rgba(0,0,0,0.4)"
-      }
+        fill: 'rgba(0,0,0,0.4)',
+      },
     });
   }
-  
+
   switch (templateType) {
-    case "comparison": {
+    case 'comparison': {
       // 비교형 템플릿: VS, Before/After 등
       const parts = title.split(/\s*(VS|vs|대|vs\.|VS\.)\s*/);
       if (parts.length >= 3) {
         const leftText = parts[0].trim();
         const rightText = parts[2].trim();
-        const vsText = parts[1] || "VS";
-        
+        const vsText = parts[1] || 'VS';
+
         // 왼쪽 텍스트 (황금비율 좌측)
         layers.push({
-          type: "text",
+          type: 'text',
           text: leftText,
           x: 0.25,
           y: 0.5,
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.06,
-            fontWeight: "bold",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-          }
+            fontWeight: 'bold',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+          },
         });
-        
+
         // VS 텍스트 (중앙)
         layers.push({
-          type: "text",
+          type: 'text',
           text: vsText,
           x: 0.5,
           y: 0.5,
           autoColorAdjust: true,
           styles: {
-            fill: "#FFD700",
+            fill: '#FFD700',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.08,
-            fontWeight: "900",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.9)", blur: 0.015, offsetX: 0, offsetY: 0.008 }
-          }
+            fontWeight: '900',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.9)', blur: 0.015, offsetX: 0, offsetY: 0.008 },
+          },
         });
-        
+
         // 오른쪽 텍스트 (황금비율 우측)
         layers.push({
-          type: "text",
+          type: 'text',
           text: rightText,
           x: 0.75,
           y: 0.5,
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.06,
-            fontWeight: "bold",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-          }
+            fontWeight: 'bold',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+          },
         });
       } else {
         // VS가 없는 경우 일반 타이틀
         layers.push({
-          type: "text",
+          type: 'text',
           text: title,
           x: 0.5,
           y: 0.382, // 황금비율 지점 (1/1.618)
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.08,
-            fontWeight: "bold",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-          }
+            fontWeight: 'bold',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+          },
         });
       }
       break;
     }
-    
-    case "question": {
+
+    case 'question': {
       // 질문형 템플릿: 물음표 강조
       layers.push({
-        type: "text",
-        text: title.replace(/\?+$/, ""), // 물음표 제거 (별도로 추가)
+        type: 'text',
+        text: title.replace(/\?+$/, ''), // 물음표 제거 (별도로 추가)
         x: 0.5,
         y: 0.382, // 황금비율 지점
         autoColorAdjust: true,
         styles: {
-          fill: "#FFFFFF",
+          fill: '#FFFFFF',
           fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
           fontRatio: 0.07,
-          fontWeight: "bold",
-          align: "center",
-          baseline: "middle",
-          shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-        }
+          fontWeight: 'bold',
+          align: 'center',
+          baseline: 'middle',
+          shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+        },
       });
-      
+
       // 큰 물음표 아이콘
       layers.push({
-        type: "text",
-        text: "?",
+        type: 'text',
+        text: '?',
         x: 0.85,
         y: 0.25,
         autoColorAdjust: false,
         styles: {
-          fill: "#FFD700",
+          fill: '#FFD700',
           fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
           fontRatio: 0.15,
-          fontWeight: "900",
-          align: "center",
-          baseline: "middle",
-          shadow: { color: "rgba(0,0,0,0.9)", blur: 0.02, offsetX: 0, offsetY: 0.01 }
-        }
+          fontWeight: '900',
+          align: 'center',
+          baseline: 'middle',
+          shadow: { color: 'rgba(0,0,0,0.9)', blur: 0.02, offsetX: 0, offsetY: 0.01 },
+        },
       });
-      
+
       if (subtitle) {
         layers.push({
-          type: "text",
+          type: 'text',
           text: subtitle,
           x: 0.5,
           y: 0.618, // 황금비율 하단
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.04,
-            fontWeight: "normal",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
-          }
+            fontWeight: 'normal',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.7)', blur: 0.008, offsetX: 0, offsetY: 0.004 },
+          },
         });
       }
       break;
     }
-    
-    case "list": {
+
+    case 'list': {
       // 리스트형 템플릿: 번호 또는 체크리스트
-      const listItems = title.split(/\n|,|\./).filter(item => item.trim().length > 0).slice(0, 3);
+      const listItems = title
+        .split(/\n|,|\./)
+        .filter((item) => item.trim().length > 0)
+        .slice(0, 3);
       const startY = 0.35;
       const itemSpacing = 0.15;
-      
+
       listItems.forEach((item, index) => {
-        const yPos = startY + (index * itemSpacing);
-        
+        const yPos = startY + index * itemSpacing;
+
         // 번호 또는 아이콘
         layers.push({
-          type: "text",
+          type: 'text',
           text: `${index + 1}.`,
           x: 0.2,
           y: yPos,
           autoColorAdjust: false,
           styles: {
-            fill: "#FFD700",
+            fill: '#FFD700',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.06,
-            fontWeight: "900",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.9)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-          }
+            fontWeight: '900',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.9)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+          },
         });
-        
+
         // 리스트 아이템 텍스트
         layers.push({
-          type: "text",
+          type: 'text',
           text: item.trim(),
           x: 0.5,
           y: yPos,
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.05,
-            fontWeight: "bold",
-            align: "left",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-          }
+            fontWeight: 'bold',
+            align: 'left',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+          },
         });
       });
-      
+
       if (subtitle) {
         layers.push({
-          type: "text",
+          type: 'text',
           text: subtitle,
           x: 0.5,
           y: 0.8,
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.035,
-            fontWeight: "normal",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
-          }
+            fontWeight: 'normal',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.7)', blur: 0.008, offsetX: 0, offsetY: 0.004 },
+          },
         });
       }
       break;
     }
-    
+
     default: {
       // 기본 템플릿 (황금비율 배치)
       layers.push({
-        type: "text",
+        type: 'text',
         text: title,
         x: 0.5,
         y: 0.382, // 황금비율 지점
         autoColorAdjust: true,
         styles: {
-          fill: "#FFFFFF",
+          fill: '#FFFFFF',
           fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
           fontRatio: 0.08,
-          fontWeight: "bold",
-          align: "center",
-          baseline: "middle",
-          shadow: { color: "rgba(0,0,0,0.8)", blur: 0.01, offsetX: 0, offsetY: 0.005 }
-        }
+          fontWeight: 'bold',
+          align: 'center',
+          baseline: 'middle',
+          shadow: { color: 'rgba(0,0,0,0.8)', blur: 0.01, offsetX: 0, offsetY: 0.005 },
+        },
       });
-      
+
       if (subtitle) {
         layers.push({
-          type: "text",
+          type: 'text',
           text: subtitle,
           x: 0.5,
           y: 0.618, // 황금비율 하단
           autoColorAdjust: true,
           styles: {
-            fill: "#FFFFFF",
+            fill: '#FFFFFF',
             fontFamily: options.fontFamily || "'Noto Sans KR', sans-serif",
             fontRatio: 0.05,
-            fontWeight: "normal",
-            align: "center",
-            baseline: "middle",
-            shadow: { color: "rgba(0,0,0,0.7)", blur: 0.008, offsetX: 0, offsetY: 0.004 }
-          }
+            fontWeight: 'normal',
+            align: 'center',
+            baseline: 'middle',
+            shadow: { color: 'rgba(0,0,0,0.7)', blur: 0.008, offsetX: 0, offsetY: 0.004 },
+          },
         });
       }
     }
   }
-  
+
   return {
     name: `Smart Template: ${templateType}`,
     background: defaultBackground,
-    layers
+    layers,
   };
 }
 
@@ -1178,7 +1212,7 @@ export async function loadTemplateFromJSON(templateSource, dynamicText = {}) {
     // 이미 객체인 경우 플레이스홀더만 치환
     return replacePlaceholders(JSON.parse(JSON.stringify(templateSource)), dynamicText);
   }
-  
+
   // JSON 파일 로드
   try {
     const response = await fetch(templateSource);
@@ -1195,9 +1229,9 @@ export async function loadTemplateFromJSON(templateSource, dynamicText = {}) {
  */
 function replacePlaceholders(templateData, dynamicText) {
   const replaced = JSON.parse(JSON.stringify(templateData));
-  
+
   if (replaced.layers) {
-    replaced.layers.forEach(layer => {
+    replaced.layers.forEach((layer) => {
       if (layer.type === 'text' && layer.text) {
         if (layer.text === '{{SLOGAN}}') {
           layer.text = dynamicText.slogan || layer.text;
@@ -1211,7 +1245,7 @@ function replacePlaceholders(templateData, dynamicText) {
       }
     });
   }
-  
+
   return replaced;
 }
 
@@ -1223,23 +1257,17 @@ function replacePlaceholders(templateData, dynamicText) {
  * @param {Object} dynamicText - 플레이스홀더를 치환할 동적 텍스트 { slogan, visualizationCue }
  * @returns {Promise} 모든 레이어 렌더링 완료 시 resolve
  */
-export async function renderTemplateFromData(
-  ctx,
-  templateData,
-  dynamicText = {}
-) {
+export async function renderTemplateFromData(ctx, templateData, dynamicText = {}) {
   if (!templateData) {
-    console.error("[Template Renderer] 템플릿 데이터가 없습니다.");
+    console.error('[Template Renderer] 템플릿 데이터가 없습니다.');
     return;
   }
 
   const canvasWidth = ctx.canvas.width;
   const canvasHeight = ctx.canvas.height;
 
-  console.log(
-    `[Template Renderer] 렌더링 시작 - 캔버스 크기: ${canvasWidth}x${canvasHeight}`
-  );
-  
+  console.log(`[Template Renderer] 렌더링 시작 - 캔버스 크기: ${canvasWidth}x${canvasHeight}`);
+
   // Base64 데이터를 숨기고 요약 정보만 표시
   const sanitizedData = JSON.parse(JSON.stringify(templateData));
   if (sanitizedData.background?.value) {
@@ -1252,73 +1280,50 @@ export async function renderTemplateFromData(
       sanitizedData.background.value = bgValue.substring(0, 80) + '...';
     }
   }
-  
-  console.log(
-    `[Template Renderer] 📋 템플릿 전체 데이터:`,
-    JSON.stringify(sanitizedData, null, 2)
-  );
-  console.log(
-    `[Template Renderer] 📊 레이어 개수: ${templateData.layers?.length || 0}`
-  );
+
+  console.log(`[Template Renderer] 📋 템플릿 전체 데이터:`, JSON.stringify(sanitizedData, null, 2));
+  console.log(`[Template Renderer] 📊 레이어 개수: ${templateData.layers?.length || 0}`);
 
   // 1. 배경 렌더링 (비동기 지원)
-  await renderHelpers.drawBackground(
-    ctx,
-    templateData.background,
-    canvasWidth,
-    canvasHeight
-  );
+  await renderHelpers.drawBackground(ctx, templateData.background, canvasWidth, canvasHeight);
 
   // 2. [FR-R3] 레이어 렌더링 (비동기 지원)
   if (templateData.layers && Array.isArray(templateData.layers)) {
     for (let i = 0; i < templateData.layers.length; i++) {
       const layer = templateData.layers[i];
 
-      console.log(
-        `[Template Renderer] 🎨 레이어 ${i + 1}/${templateData.layers.length}:`,
-        {
-          type: layer.type,
-          text: layer.text,
-          x: layer.x,
-          y: layer.y,
-          styles: layer.styles,
-        }
-      );
+      console.log(`[Template Renderer] 🎨 레이어 ${i + 1}/${templateData.layers.length}:`, {
+        type: layer.type,
+        text: layer.text,
+        x: layer.x,
+        y: layer.y,
+        styles: layer.styles,
+      });
 
       switch (layer.type) {
-        case "text":
-          renderHelpers.drawText(
-            ctx,
-            layer,
-            canvasWidth,
-            canvasHeight,
-            dynamicText
-          );
+        case 'text':
+          renderHelpers.drawText(ctx, layer, canvasWidth, canvasHeight, dynamicText);
           break;
 
-        case "shape":
+        case 'shape':
           renderHelpers.drawShape(ctx, layer, canvasWidth, canvasHeight);
           break;
 
-        case "image":
+        case 'image':
           // [FR-R3] 비동기 이미지 렌더링
           await renderHelpers.drawImage(ctx, layer, canvasWidth, canvasHeight);
           break;
 
-        case "svg":
+        case 'svg':
           // [FR-R2] SVG 벡터 아이콘 렌더링
           renderHelpers.drawSVG(ctx, layer, canvasWidth, canvasHeight);
           break;
 
         default:
-          console.warn(
-            `[Template Renderer] ⚠️ 알 수 없는 레이어 타입: ${layer.type}`
-          );
+          console.warn(`[Template Renderer] ⚠️ 알 수 없는 레이어 타입: ${layer.type}`);
       }
     }
   }
 
-  console.log(
-    `[Template Renderer] ✅ 템플릿 "${templateData.name}" 렌더링 완료`
-  );
+  console.log(`[Template Renderer] ✅ 템플릿 "${templateData.name}" 렌더링 완료`);
 }

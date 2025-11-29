@@ -1,9 +1,9 @@
 // js/services/cascadeDeleteService.js
 // 연쇄 삭제(Cascade Delete) 서비스 - 덤프 데이터 기반 정밀 수정
 
-import { getDb } from "./firebaseService.js";
-import { ref, get, remove } from "./firebaseService.js";
-import { Logger } from "../utils.js";
+import { getDb } from './firebaseService.js';
+import { ref, get, remove } from './firebaseService.js';
+import { Logger } from '../utils.js';
 
 /**
  * [수정 1] URL 인덱스 키 생성기 (덤프 데이터 형식 반영)
@@ -14,13 +14,13 @@ function encodeUrlForIndex(url) {
   try {
     let cleanUrl = url.trim();
     // 프로토콜 제거
-    cleanUrl = cleanUrl.replace(/^https?:\/\//, "");
+    cleanUrl = cleanUrl.replace(/^https?:\/\//, '');
     // 특수문자 치환 (collectorService 로직 추정)
     return cleanUrl
-      .replace(/\./g, "_DOT_")
-      .replace(/\//g, "_SLASH_")
-      .replace(/#/g, "_HASH_")
-      .replace(/\?/g, "_QM_");
+      .replace(/\./g, '_DOT_')
+      .replace(/\//g, '_SLASH_')
+      .replace(/#/g, '_HASH_')
+      .replace(/\?/g, '_QM_');
   } catch (e) {
     return null;
   }
@@ -32,16 +32,14 @@ function encodeUrlForIndex(url) {
  */
 function generateLegacyKeys(url) {
   const keys = new Set();
-  if (!url || typeof url !== "string") return keys;
+  if (!url || typeof url !== 'string') return keys;
 
   try {
     // 1. URL 정규화 및 객체 생성
-    const cleanUrl = url.trim().replace(/\/$/, ""); // 끝 슬래시 제거
+    const cleanUrl = url.trim().replace(/\/$/, ''); // 끝 슬래시 제거
     let urlObj;
     try {
-      urlObj = new URL(
-        cleanUrl.startsWith("http") ? cleanUrl : `https://${cleanUrl}`
-      );
+      urlObj = new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`);
     } catch (e) {
       return keys; // 유효하지 않은 URL
     }
@@ -58,7 +56,7 @@ function generateLegacyKeys(url) {
     ];
 
     // 경로가 이미 있는 경우 (예: /rss가 포함된 경우)
-    if (!pathname || pathname === "/") {
+    if (!pathname || pathname === '/') {
       // 이미 위에서 처리됨
     } else {
       candidates.push(`${origin}${pathname}`); // 경로 포함 원본
@@ -66,16 +64,16 @@ function generateLegacyKeys(url) {
 
     // 3. 모든 후보를 Base64 인코딩하여 키 생성
     candidates.forEach((c) => {
-      keys.add(btoa(c).replace(/=/g, "")); // Standard Base64
+      keys.add(btoa(c).replace(/=/g, '')); // Standard Base64
       // http/https 교차 검증
-      if (c.startsWith("https:")) {
-        keys.add(btoa(c.replace("https:", "http:")).replace(/=/g, ""));
-      } else if (c.startsWith("http:")) {
-        keys.add(btoa(c.replace("http:", "https:")).replace(/=/g, ""));
+      if (c.startsWith('https:')) {
+        keys.add(btoa(c.replace('https:', 'http:')).replace(/=/g, ''));
+      } else if (c.startsWith('http:')) {
+        keys.add(btoa(c.replace('http:', 'https:')).replace(/=/g, ''));
       }
     });
   } catch (e) {
-    console.warn("Key gen error:", e);
+    console.warn('Key gen error:', e);
   }
   return keys;
 }
@@ -83,15 +81,9 @@ function generateLegacyKeys(url) {
 /**
  * [채널 전체 삭제] 채널 ID(UUID)와 URL(Legacy Key)을 모두 사용하여 데이터 완전 삭제
  */
-export async function deleteChannelDataCascade(
-  channelId,
-  userId,
-  channelUrl = null
-) {
+export async function deleteChannelDataCascade(channelId, userId, channelUrl = null) {
   try {
-    Logger.biz(
-      `🚨 [Cascade Delete] 정밀 삭제 시작 - ID: ${channelId}, URL: ${channelUrl}`
-    );
+    Logger.biz(`🚨 [Cascade Delete] 정밀 삭제 시작 - ID: ${channelId}, URL: ${channelUrl}`);
 
     const stats = {
       kanban: 0,
@@ -105,13 +97,8 @@ export async function deleteChannelDataCascade(
     // 1. Legacy Key 추적 (Source ID 계산)
     // -------------------------------------------------------
     const targetKeys = Array.from(generateLegacyKeys(channelUrl));
-    Logger.debug(
-      `[Cascade Delete] 삭제할 채널 ID: ${channelId}, URL: ${channelUrl}`
-    );
-    Logger.debug(
-      `[Cascade Delete] 추적할 Legacy Keys (${targetKeys.length}개):`,
-      targetKeys
-    );
+    Logger.debug(`[Cascade Delete] 삭제할 채널 ID: ${channelId}, URL: ${channelUrl}`);
+    Logger.debug(`[Cascade Delete] 추적할 Legacy Keys (${targetKeys.length}개):`, targetKeys);
 
     // -------------------------------------------------------
     // 1.5. Competitor Channels 가져오기
@@ -131,35 +118,32 @@ export async function deleteChannelDataCascade(
       try {
         await remove(ref(getDb(), `channel_meta/${userId}/${key}`));
         stats.meta++;
-      } catch (e) {}
+      } catch (e) {
+        Logger.warn('[Cascade Delete] channel_meta delete ignored error', e);
+      }
     }
     // UUID 키 메타도 시도
-    if (channelId)
-      await remove(ref(getDb(), `channel_meta/${userId}/${channelId}`));
+    if (channelId) await remove(ref(getDb(), `channel_meta/${userId}/${channelId}`));
     // Competitor Channels 메타 삭제
     for (const competitorChannelId of competitorChannels) {
       try {
-        await remove(
-          ref(getDb(), `channel_meta/${userId}/${competitorChannelId}`)
-        );
+        await remove(ref(getDb(), `channel_meta/${userId}/${competitorChannelId}`));
         stats.meta++;
-      } catch (e) {}
+      } catch (e) {
+        Logger.warn('[Cascade Delete] competitor channel meta delete ignored error', e);
+      }
     }
 
     // (B) Channel Content 삭제
     try {
       // 블로그 캐시
-      const blogsSnap = await get(
-        ref(getDb(), `channel_content/${userId}/blogs`)
-      );
+      const blogsSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const blogs = blogsSnap?.val() || {};
-      Logger.debug(
-        `[Cascade Delete] blogs 데이터 개수: ${Object.keys(blogs).length}`
-      );
+      Logger.debug(`[Cascade Delete] blogs 데이터 개수: ${Object.keys(blogs).length}`);
       for (const contentId in blogs) {
         const content = blogs[contentId];
         let shouldDelete = false;
-        if (content.channelType === "competitorChannels") {
+        if (content.channelType === 'competitorChannels') {
           shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
         } else {
           shouldDelete =
@@ -171,25 +155,19 @@ export async function deleteChannelDataCascade(
           `[Cascade Delete] blogs/${contentId} - channelId: ${content.channelId}, sourceId: ${content.sourceId}, shouldDelete: ${shouldDelete}`
         );
         if (shouldDelete) {
-          await remove(
-            ref(getDb(), `channel_content/${userId}/blogs/${contentId}`)
-          );
+          await remove(ref(getDb(), `channel_content/${userId}/blogs/${contentId}`));
           stats.contentCache++;
         }
       }
 
       // 유튜브 캐시
-      const youtubesSnap = await get(
-        ref(getDb(), `channel_content/${userId}/youtubes`)
-      );
+      const youtubesSnap = await get(ref(getDb(), `channel_content/${userId}/youtubes`));
       const youtubes = youtubesSnap?.val() || {};
-      Logger.debug(
-        `[Cascade Delete] youtubes 데이터 개수: ${Object.keys(youtubes).length}`
-      );
+      Logger.debug(`[Cascade Delete] youtubes 데이터 개수: ${Object.keys(youtubes).length}`);
       for (const videoId in youtubes) {
         const video = youtubes[videoId];
         let shouldDelete = false;
-        if (video.channelType === "competitorChannels") {
+        if (video.channelType === 'competitorChannels') {
           shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
         } else {
           shouldDelete =
@@ -201,9 +179,7 @@ export async function deleteChannelDataCascade(
           `[Cascade Delete] youtubes/${videoId} - channelId: ${video.channelId}, sourceId: ${video.sourceId}, shouldDelete: ${shouldDelete}`
         );
         if (shouldDelete) {
-          await remove(
-            ref(getDb(), `channel_content/${userId}/youtubes/${videoId}`)
-          );
+          await remove(ref(getDb(), `channel_content/${userId}/youtubes/${videoId}`));
           stats.contentCache++;
         }
       }
@@ -214,14 +190,12 @@ export async function deleteChannelDataCascade(
       );
       const competitorBlogs = competitorBlogsSnap?.val() || {};
       Logger.debug(
-        `[Cascade Delete] competitorBlogs 데이터 개수: ${
-          Object.keys(competitorBlogs).length
-        }`
+        `[Cascade Delete] competitorBlogs 데이터 개수: ${Object.keys(competitorBlogs).length}`
       );
       for (const contentId in competitorBlogs) {
         const content = competitorBlogs[contentId];
         let shouldDelete = false;
-        if (content.channelType === "competitorChannels") {
+        if (content.channelType === 'competitorChannels') {
           shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
         } else {
           shouldDelete =
@@ -234,10 +208,7 @@ export async function deleteChannelDataCascade(
         );
         if (shouldDelete) {
           await remove(
-            ref(
-              getDb(),
-              `channel_content/${userId}/competitorChannels/blogs/${contentId}`
-            )
+            ref(getDb(), `channel_content/${userId}/competitorChannels/blogs/${contentId}`)
           );
           stats.contentCache++;
         }
@@ -248,14 +219,12 @@ export async function deleteChannelDataCascade(
       );
       const competitorYoutubes = competitorYoutubesSnap?.val() || {};
       Logger.debug(
-        `[Cascade Delete] competitorYoutubes 데이터 개수: ${
-          Object.keys(competitorYoutubes).length
-        }`
+        `[Cascade Delete] competitorYoutubes 데이터 개수: ${Object.keys(competitorYoutubes).length}`
       );
       for (const videoId in competitorYoutubes) {
         const video = competitorYoutubes[videoId];
         let shouldDelete = false;
-        if (video.channelType === "competitorChannels") {
+        if (video.channelType === 'competitorChannels') {
           shouldDelete = true; // competitorChannels 타입의 데이터는 삭제
         } else {
           shouldDelete =
@@ -268,16 +237,13 @@ export async function deleteChannelDataCascade(
         );
         if (shouldDelete) {
           await remove(
-            ref(
-              getDb(),
-              `channel_content/${userId}/competitorChannels/youtubes/${videoId}`
-            )
+            ref(getDb(), `channel_content/${userId}/competitorChannels/youtubes/${videoId}`)
           );
           stats.contentCache++;
         }
       }
     } catch (e) {
-      Logger.warn("Content deletion error", e);
+      Logger.warn('Content deletion error', e);
     }
 
     // -------------------------------------------------------
@@ -291,28 +257,21 @@ export async function deleteChannelDataCascade(
         for (const cardId in kanban[status]) {
           const card = kanban[status][cardId];
 
-          if (
-            card.channelId === channelId ||
-            competitorChannels.includes(card.channelId)
-          ) {
+          if (card.channelId === channelId || competitorChannels.includes(card.channelId)) {
             // (A) URL 인덱스 삭제 (수정된 키 생성기 사용)
             if (card.origin?.postUrl) {
               const k = encodeUrlForIndex(card.origin.postUrl);
               // 로그로 키 확인
               // Logger.debug(`Deleting Index Key: ${k}`);
               if (k) {
-                await remove(
-                  ref(getDb(), `url_index/${userId}/${k}/origin/${cardId}`)
-                );
+                await remove(ref(getDb(), `url_index/${userId}/${k}/origin/${cardId}`));
                 stats.urlIndex++;
               }
             }
             if (card.publishedUrl) {
               const k = encodeUrlForIndex(card.publishedUrl);
               if (k) {
-                await remove(
-                  ref(getDb(), `url_index/${userId}/${k}/published/${cardId}`)
-                );
+                await remove(ref(getDb(), `url_index/${userId}/${k}/published/${cardId}`));
                 stats.urlIndex++;
               }
             }
@@ -324,7 +283,7 @@ export async function deleteChannelDataCascade(
         }
       }
     } catch (e) {
-      Logger.error("Kanban deletion error", e);
+      Logger.error('Kanban deletion error', e);
     }
 
     // -------------------------------------------------------
@@ -342,7 +301,9 @@ export async function deleteChannelDataCascade(
           stats.scraps++;
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      Logger.warn('[Cascade Delete] Channel content delete stage error', e);
+    }
 
     Logger.biz(
       `✅ [Cascade Delete] 최종 완료: 카드(${stats.kanban}), 스크랩(${stats.scraps}), 메타(${stats.meta}), 캐시(${stats.contentCache}), 인덱스(${stats.urlIndex})`
@@ -360,12 +321,10 @@ export async function deleteChannelDataCascade(
  */
 export async function deleteCompetitorData(competitorUrl, userId) {
   try {
-    if (!competitorUrl) return { success: false, error: "URL이 없습니다." };
+    if (!competitorUrl) return { success: false, error: 'URL이 없습니다.' };
 
     // 로그: 삭제 시작
-    Logger.info(
-      `[Delete Competitor] 경쟁사 데이터 삭제 시작: ${competitorUrl}`
-    );
+    Logger.info(`[Delete Competitor] 경쟁사 데이터 삭제 시작: ${competitorUrl}`);
 
     // 1. 삭제할 키(Source ID) 목록 생성
     const targetKeys = Array.from(generateLegacyKeys(competitorUrl));
@@ -380,22 +339,20 @@ export async function deleteCompetitorData(competitorUrl, userId) {
         // 데이터가 있는지 확인하고 삭제 (선택 사항)
         await remove(metaRef);
         // Logger.debug(`Deleted Meta: ${key}`);
-      } catch (e) {}
+      } catch (e) {
+        Logger.warn('[Cascade Delete] iterate child delete ignored error', e);
+      }
     }
 
     // 3. [Channel Content] RSS 캐시 삭제
     try {
-      const blogsSnap = await get(
-        ref(getDb(), `channel_content/${userId}/blogs`)
-      );
+      const blogsSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const blogs = blogsSnap?.val() || {};
 
       for (const contentId in blogs) {
         // sourceId가 타겟 키 목록에 포함되면 삭제
         if (targetKeys.includes(blogs[contentId].sourceId)) {
-          await remove(
-            ref(getDb(), `channel_content/${userId}/blogs/${contentId}`)
-          );
+          await remove(ref(getDb(), `channel_content/${userId}/blogs/${contentId}`));
           deletedCount++;
         }
       }
@@ -403,9 +360,7 @@ export async function deleteCompetitorData(competitorUrl, userId) {
       Logger.error(`Cache deletion error`, error);
     }
 
-    Logger.biz(
-      `✅ [Delete Competitor] 삭제 완료 (캐시 ${deletedCount}개 + 메타데이터)`
-    );
+    Logger.biz(`✅ [Delete Competitor] 삭제 완료 (캐시 ${deletedCount}개 + 메타데이터)`);
     return { success: true, deletedCount };
   } catch (error) {
     Logger.error(`[Delete Competitor] 오류:`, error);
@@ -417,9 +372,7 @@ export function findDeletedCompetitors(oldCompetitors, newCompetitors) {
   if (!Array.isArray(oldCompetitors) || oldCompetitors.length === 0) return [];
   if (!Array.isArray(newCompetitors)) return oldCompetitors;
   const normalize = (url) =>
-    typeof url === "string" ? url.trim() : url?.inputUrl || url?.url || "";
+    typeof url === 'string' ? url.trim() : url?.inputUrl || url?.url || '';
   const newUrls = new Set(newCompetitors.map(normalize).filter(Boolean));
-  return oldCompetitors
-    .map(normalize)
-    .filter((url) => url && !newUrls.has(url));
+  return oldCompetitors.map(normalize).filter((url) => url && !newUrls.has(url));
 }

@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+lib
+*.bundle.js
+vendor
+test/setup.js

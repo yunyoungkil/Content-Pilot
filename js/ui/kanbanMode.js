@@ -1,29 +1,29 @@
 // js/ui/kanbanMode.js (수정 완료된 최종 버전)
 
-import { renderWorkspace } from "./workspaceMode.js";
-import { showToast, Logger } from "../utils.js";
-import { renderPanelHeader, renderHeaderAndTabs } from "./header.js";
+import { renderWorkspace } from './workspaceMode.js';
+import { showToast, Logger } from '../utils.js';
+import { renderPanelHeader, renderHeaderAndTabs } from './header.js';
 
 let allKanbanData = {};
 let currentlyDragging = { cardId: null, originalStatus: null };
 let kanbanContainer = null;
-let sortOrder = "desc";
+let sortOrder = 'desc';
 
 /**
  * Kanban 모드 정리 함수
  * 모드 전환 시 호출되어 메모리 누수 방지
  */
 function destroyKanbanMode() {
-    // 드래그 중이 아닐 때만 초기화 (드래그 중에는 데이터 보존)
-    if (!currentlyDragging.cardId) {
-        allKanbanData = {};
-    }
-    // 드래그 상태는 유지 (드래그 완료 후 초기화)
-    // currentlyDragging은 dragend에서 초기화됨
-    kanbanContainer = null;
-    // sortOrder는 유지 (사용자 설정 보존)
-    
-    // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+  // 드래그 중이 아닐 때만 초기화 (드래그 중에는 데이터 보존)
+  if (!currentlyDragging.cardId) {
+    allKanbanData = {};
+  }
+  // 드래그 상태는 유지 (드래그 완료 후 초기화)
+  // currentlyDragging은 dragend에서 초기화됨
+  kanbanContainer = null;
+  // sortOrder는 유지 (사용자 설정 보존)
+
+  // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
 }
 
 export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMode };
@@ -32,24 +32,26 @@ export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMod
  */
 function renderKanban(container) {
   kanbanContainer = container;
-  
+
   // [체크리스트 3-4] 입력창 닫기: 열려있던 카드 추가 입력창이나 상세 메뉴 닫기
-  const existingInputs = container.querySelectorAll('.kanban-card-input, .kanban-card-detail-modal');
-  existingInputs.forEach(el => el.remove());
-  
+  const existingInputs = container.querySelectorAll(
+    '.kanban-card-input, .kanban-card-detail-modal'
+  );
+  existingInputs.forEach((el) => el.remove());
+
   // [체크리스트 3-1] 완전 초기화: 이전 채널의 모든 카드 제거
   container.innerHTML = '';
-  
+
   container.innerHTML = `
     <div class="kanban-board-container">
       <div class="kanban-controls-header">
         <div class="kanban-sort-controls">
           <span class="kanban-sort-label">정렬:</span>
           <button class="kanban-sort-btn ${
-            sortOrder === "desc" ? "active" : ""
+            sortOrder === 'desc' ? 'active' : ''
           }" data-sort="desc">최신순</button>
           <button class="kanban-sort-btn ${
-            sortOrder === "asc" ? "active" : ""
+            sortOrder === 'asc' ? 'active' : ''
           }" data-sort="asc">오래된순</button>
         </div>
       </div>
@@ -86,41 +88,45 @@ function renderKanban(container) {
     addRealtimeUpdateListener();
     window.kanbanListenersAttached = true;
   }
-  
+
   // 칸반 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.action === "kanban_data_updated") {
-      console.log("[KanbanMode] 칸반 데이터 업데이트 메시지 수신:", Object.keys(msg.data || {}).length, "개 카드");
-      
+    if (msg.action === 'kanban_data_updated') {
+      console.log(
+        '[KanbanMode] 칸반 데이터 업데이트 메시지 수신:',
+        Object.keys(msg.data || {}).length,
+        '개 카드'
+      );
+
       // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
-      if (!kanbanContainer || !kanbanContainer.querySelector("#cp-kanban-board-root")) {
-        console.log("[KanbanMode] 칸반 모드가 아닌 상태에서 메시지 수신, 무시");
+      if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) {
+        console.log('[KanbanMode] 칸반 모드가 아닌 상태에서 메시지 수신, 무시');
         return false;
       }
-      
+
       if (msg.data) {
-        console.log("[KanbanMode] updateKanbanUI 호출 시작");
+        console.log('[KanbanMode] updateKanbanUI 호출 시작');
         allKanbanData = msg.data || {};
         updateKanbanUI(allKanbanData);
-        console.log("[KanbanMode] updateKanbanUI 호출 완료");
+        console.log('[KanbanMode] updateKanbanUI 호출 완료');
       }
     }
     return false;
   });
-  
+
   // 인증 상태 변경 감지하여 데이터 재로드
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === "local" && changes.googleUserEmail) {
+    if (namespace === 'local' && changes.googleUserEmail) {
       const newValue = changes.googleUserEmail.newValue;
       const oldValue = changes.googleUserEmail.oldValue;
-      
+
       if (newValue && !oldValue) {
         // 로그인: 새로 로그인한 경우 데이터 로드
-        console.log("[KanbanMode] 로그인 감지, 데이터 재로드");
+        console.log('[KanbanMode] 로그인 감지, 데이터 재로드');
         loadKanbanData();
       } else if (!newValue && oldValue) {
         // 로그아웃: 로그아웃한 경우 데이터 초기화
-        console.log("[KanbanMode] 로그아웃 감지, 데이터 초기화");
+        console.log('[KanbanMode] 로그아웃 감지, 데이터 초기화');
         allKanbanData = {};
         updateKanbanUI({});
       }
@@ -131,8 +137,8 @@ function renderKanban(container) {
 // 칸반 데이터 로드 함수 (인증 상태 확인 후 실행)
 function loadKanbanData(retryCount = 0) {
   const MAX_RETRIES = 10;
-  
-  chrome.storage.local.get(["googleUserEmail"], (authResult) => {
+
+  chrome.storage.local.get(['googleUserEmail'], (authResult) => {
     if (!authResult.googleUserEmail) {
       if (retryCount < MAX_RETRIES) {
         console.log(`[KanbanMode] 인증 대기 중... (${retryCount + 1}/${MAX_RETRIES})`);
@@ -140,28 +146,28 @@ function loadKanbanData(retryCount = 0) {
           loadKanbanData(retryCount + 1);
         }, 1000);
       } else {
-        console.warn("[KanbanMode] 인증 대기 시간 초과");
+        console.warn('[KanbanMode] 인증 대기 시간 초과');
         // 로그아웃 상태이므로 데이터 초기화
         allKanbanData = {};
         updateKanbanUI({});
       }
       return;
     }
-    
+
     // 인증 완료 후 데이터 로드
-    console.log("[KanbanMode] 인증 확인 완료, 칸반 데이터 로드");
-    chrome.runtime.sendMessage({ action: "get_kanban_data" }, (response) => {
-      console.log("[KanbanMode] loadKanbanData - 응답 받음:", response);
+    console.log('[KanbanMode] 인증 확인 완료, 칸반 데이터 로드');
+    chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
+      console.log('[KanbanMode] loadKanbanData - 응답 받음:', response);
       if (response && response.success && response.data) {
         updateKanbanUI(response.data);
       }
     });
-    
+
     // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
     setTimeout(() => {
       if (Object.keys(allKanbanData).length === 0) {
-        console.log("[KanbanMode] 콜백 미실행 감지, 재요청");
-        chrome.runtime.sendMessage({ action: "get_kanban_data" });
+        console.log('[KanbanMode] 콜백 미실행 감지, 재요청');
+        chrome.runtime.sendMessage({ action: 'get_kanban_data' });
       }
     }, 1000);
   });
@@ -172,18 +178,14 @@ function loadKanbanData(retryCount = 0) {
  */
 function addRealtimeUpdateListener() {
   chrome.runtime.onMessage.addListener((msg) => {
-    if (
-      !kanbanContainer ||
-      !kanbanContainer.querySelector("#cp-kanban-board-root")
-    )
-      return;
+    if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) return;
 
-    if (msg.action === "kanban_data_updated") {
+    if (msg.action === 'kanban_data_updated') {
       allKanbanData = msg.data || {};
       updateKanbanUI(allKanbanData);
-      
+
       // 워크스페이스가 열려있고 해당 아이디어 데이터가 업데이트된 경우 워크스페이스 갱신
-      if (window.__cp_active_mode === "workspace" && window.__cp_workspace_idea_id) {
+      if (window.__cp_active_mode === 'workspace' && window.__cp_workspace_idea_id) {
         const ideaId = window.__cp_workspace_idea_id;
         // 모든 상태에서 아이디어 찾기
         let ideaData = null;
@@ -197,7 +199,7 @@ function addRealtimeUpdateListener() {
         }
         if (ideaData) {
           const shadowRoot = kanbanContainer.getRootNode();
-          const container = shadowRoot.querySelector("#cp-main-content");
+          const container = shadowRoot.querySelector('#cp-main-content');
           if (container) {
             renderHeaderAndTabs(shadowRoot);
             // ▼▼▼ [수정] 기본값 할당 ▼▼▼
@@ -207,12 +209,12 @@ function addRealtimeUpdateListener() {
               id: ideaId,
               status: foundStatus,
               // workspace 객체가 없으면(null/undefined) 빈 값으로 초기화
-              workspace: ideaData.workspace || { 
-                keywords: [], 
-                outline: [], 
-                draft: "", 
-                linkedScraps: {} 
-              } 
+              workspace: ideaData.workspace || {
+                keywords: [],
+                outline: [],
+                draft: '',
+                linkedScraps: {},
+              },
             };
             // 전역 ideaData 업데이트 (실시간 업데이트를 위해)
             window.__cp_workspace_idea_data = ideaDataForWorkspace;
@@ -229,40 +231,38 @@ function addRealtimeUpdateListener() {
  * 전체 칸반 UI를 데이터에 따라 다시 그리는 함수
  */
 async function updateKanbanUI(allCards) {
-  console.log("[KanbanMode] updateKanbanUI 호출:", {
+  console.log('[KanbanMode] updateKanbanUI 호출:', {
     hasKanbanContainer: !!kanbanContainer,
     cardsCount: Object.keys(allCards || {}).length,
-    allCards: allCards
+    allCards: allCards,
   });
-  
+
   if (!kanbanContainer) {
-    console.warn("[KanbanMode] updateKanbanUI - kanbanContainer 없음");
-    return;
-  }
-  
-  const rootEl = kanbanContainer.querySelector("#cp-kanban-board-root");
-  if (!rootEl) {
-    console.warn("[KanbanMode] updateKanbanUI - rootEl 없음");
+    console.warn('[KanbanMode] updateKanbanUI - kanbanContainer 없음');
     return;
   }
 
-  console.log("[KanbanMode] updateKanbanUI - rootEl 확인 완료, activeChannelId 가져오기 시작");
+  const rootEl = kanbanContainer.querySelector('#cp-kanban-board-root');
+  if (!rootEl) {
+    console.warn('[KanbanMode] updateKanbanUI - rootEl 없음');
+    return;
+  }
+
+  console.log('[KanbanMode] updateKanbanUI - rootEl 확인 완료, activeChannelId 가져오기 시작');
 
   // [신규] 현재 활성 채널 ID 가져오기
   let activeChannelId;
   try {
-    const result = await chrome.storage.local.get("activeChannelId");
+    const result = await chrome.storage.local.get('activeChannelId');
     activeChannelId = result.activeChannelId;
-    console.log("[KanbanMode] updateKanbanUI - activeChannelId:", activeChannelId);
+    console.log('[KanbanMode] updateKanbanUI - activeChannelId:', activeChannelId);
   } catch (error) {
-    console.error("[KanbanMode] updateKanbanUI - activeChannelId 가져오기 실패:", error);
+    console.error('[KanbanMode] updateKanbanUI - activeChannelId 가져오기 실패:', error);
     activeChannelId = null;
   }
 
   // 각 컬럼의 카드 목록을 비움
-  rootEl
-    .querySelectorAll(".kanban-col-cards")
-    .forEach((col) => (col.innerHTML = ""));
+  rootEl.querySelectorAll('.kanban-col-cards').forEach((col) => (col.innerHTML = ''));
 
   // [UI 모듈 독립성 강화] 카드 렌더링 후 이벤트 리스너가 등록되어 있는지 확인
   // addKanbanEventListeners가 이미 호출되었는지 확인
@@ -273,10 +273,8 @@ async function updateKanbanUI(allCards) {
 
   // 채널이 선택되지 않았을 때 온보딩 메시지 표시
   if (!activeChannelId) {
-    console.log("[KanbanMode] updateKanbanUI - activeChannelId 없음, 온보딩 메시지 표시");
-    const ideasCol = rootEl.querySelector(
-      '[data-status="ideas"] .kanban-col-cards'
-    );
+    console.log('[KanbanMode] updateKanbanUI - activeChannelId 없음, 온보딩 메시지 표시');
+    const ideasCol = rootEl.querySelector('[data-status="ideas"] .kanban-col-cards');
     if (ideasCol) {
       ideasCol.innerHTML = `
         <div style="text-align: center; padding: 40px 20px; background: #f8f9fa; border-radius: 8px; margin: 20px;">
@@ -293,18 +291,18 @@ async function updateKanbanUI(allCards) {
           </button>
         </div>
       `;
-      
+
       // 채널 관리 버튼 이벤트
-      const manageBtn = ideasCol.querySelector("#kanban-onboarding-manage-btn");
+      const manageBtn = ideasCol.querySelector('#kanban-onboarding-manage-btn');
       if (manageBtn) {
-        manageBtn.addEventListener("click", () => {
+        manageBtn.addEventListener('click', () => {
           const shadowRoot = kanbanContainer.getRootNode();
-          const header = shadowRoot.querySelector("#cp-header-area");
+          const header = shadowRoot.querySelector('#cp-header-area');
           if (header) {
-            const channelSelector = shadowRoot.querySelector("#global-channel-selector");
+            const channelSelector = shadowRoot.querySelector('#global-channel-selector');
             if (channelSelector) {
-              channelSelector.value = "__MANAGE__";
-              channelSelector.dispatchEvent(new Event("change"));
+              channelSelector.value = '__MANAGE__';
+              channelSelector.dispatchEvent(new Event('change'));
             }
           }
         });
@@ -315,17 +313,18 @@ async function updateKanbanUI(allCards) {
 
   // 데이터가 없을 때 처리
   if (!allCards || Object.keys(allCards).length === 0) {
-    console.log("[KanbanMode] updateKanbanUI - 데이터 없음");
-    const ideasCol = rootEl.querySelector(
-      '[data-status="ideas"] .kanban-col-cards'
-    );
+    console.log('[KanbanMode] updateKanbanUI - 데이터 없음');
+    const ideasCol = rootEl.querySelector('[data-status="ideas"] .kanban-col-cards');
     if (ideasCol)
       ideasCol.innerHTML =
         '<p style="text-align: center; color: #888; padding: 20px;">기획 보드에 아이디어를 추가해주세요.</p>';
     return;
   }
 
-  console.log("[KanbanMode] updateKanbanUI - 카드 렌더링 시작, status 개수:", Object.keys(allCards).length);
+  console.log(
+    '[KanbanMode] updateKanbanUI - 카드 렌더링 시작, status 개수:',
+    Object.keys(allCards).length
+  );
 
   for (const status in allCards) {
     const colContainer = rootEl.querySelector(
@@ -335,18 +334,23 @@ async function updateKanbanUI(allCards) {
       // [수정] 채널 ID로 데이터 필터링
       const rawCards = allCards[status] || {};
       const filteredCards = {};
-      
-      console.log(`[KanbanMode] updateKanbanUI - status: ${status}, rawCards 개수:`, Object.keys(rawCards).length);
+
+      console.log(
+        `[KanbanMode] updateKanbanUI - status: ${status}, rawCards 개수:`,
+        Object.keys(rawCards).length
+      );
 
       for (const [cardId, cardData] of Object.entries(rawCards)) {
         // [수정] 채널 ID 필터링 로직
         // 1. channelId가 현재 활성 채널과 일치하는 카드 표시
         // 2. channelId가 undefined인 경우 (구버전 데이터)는 일단 포함 (마이그레이션 전까지 호환성 유지)
         // 3. channelId가 null인 경우는 제외 (칸반은 채널별로 관리)
-        console.log(`[KanbanMode] updateKanbanUI - 카드 필터링: cardId=${cardId}, cardData.channelId=${cardData.channelId}, activeChannelId=${activeChannelId}`);
-        
+        console.log(
+          `[KanbanMode] updateKanbanUI - 카드 필터링: cardId=${cardId}, cardData.channelId=${cardData.channelId}, activeChannelId=${activeChannelId}`
+        );
+
         let shouldInclude = false;
-        
+
         if (cardData.channelId === undefined && activeChannelId) {
           // 구버전 데이터 (channelId가 없는 경우)
           shouldInclude = true;
@@ -359,15 +363,17 @@ async function updateKanbanUI(allCards) {
             try {
               const cardUrl = atob(cardData.channelId.replace(/=/g, ''));
               const activeUrl = atob(activeChannelId.replace(/=/g, ''));
-              
+
               // URL 객체로 변환하여 origin 비교
               const cardUrlObj = new URL(cardUrl);
               const activeUrlObj = new URL(activeUrl);
-              
+
               // origin이 같으면 같은 채널로 간주
               if (cardUrlObj.origin === activeUrlObj.origin) {
                 shouldInclude = true;
-                console.log(`[KanbanMode] updateKanbanUI - URL origin 일치: ${cardUrlObj.origin} === ${activeUrlObj.origin}`);
+                console.log(
+                  `[KanbanMode] updateKanbanUI - URL origin 일치: ${cardUrlObj.origin} === ${activeUrlObj.origin}`
+                );
               }
             } catch (e) {
               // base64 디코딩 실패 시 정확히 일치하는 경우만 포함
@@ -375,25 +381,28 @@ async function updateKanbanUI(allCards) {
             }
           }
         }
-        
+
         if (shouldInclude) {
           filteredCards[cardId] = cardData;
         }
       }
 
-      console.log(`[KanbanMode] updateKanbanUI - status: ${status}, filteredCards 개수:`, Object.keys(filteredCards).length);
+      console.log(
+        `[KanbanMode] updateKanbanUI - status: ${status}, filteredCards 개수:`,
+        Object.keys(filteredCards).length
+      );
       renderCardsInColumn(colContainer, status, filteredCards);
     }
   }
-  
-  console.log("[KanbanMode] updateKanbanUI 완료");
+
+  console.log('[KanbanMode] updateKanbanUI 완료');
 }
 
 function renderCardsInColumn(columnEl, status, cards) {
   const sortedCards = Object.entries(cards).sort((a, b) => {
     const timeA = a[1].createdAt || 0;
     const timeB = b[1].createdAt || 0;
-    if (sortOrder === "asc") {
+    if (sortOrder === 'asc') {
       return timeA - timeB;
     } else {
       return timeB - timeA;
@@ -407,23 +416,23 @@ function renderCardsInColumn(columnEl, status, cards) {
 }
 
 function createKanbanCard(id, data, status) {
-  const card = document.createElement("div");
-  card.className = "cp-kanban-card";
+  const card = document.createElement('div');
+  card.className = 'cp-kanban-card';
   card.dataset.id = id;
   card.dataset.status = status;
-  card.dataset.title = data.title || "";
-  card.dataset.description = data.description || "";
+  card.dataset.title = data.title || '';
+  card.dataset.description = data.description || '';
   card.draggable = true;
 
-  card.title = data.description || "";
+  card.title = data.description || '';
 
   // 1. AI 추천 아이디어인 경우 cluster 클래스를 추가하여 왼쪽 테두리를 표시합니다.
-  const isAiIdea = data.tags && data.tags.includes("#AI-추천");
+  const isAiIdea = data.tags && data.tags.includes('#AI-추천');
   if (isAiIdea) {
-    card.classList.add("cluster");
+    card.classList.add('cluster');
   }
 
-  let topTagsHtml = "";
+  let topTagsHtml = '';
   // outline-tag를 가장 앞에 위치시키기
   const hasOutline = data.outline && data.outline.length > 0;
   if (hasOutline) {
@@ -435,19 +444,17 @@ function createKanbanCard(id, data, status) {
       .map((keyword) => {
         return `<span class="kanban-card-tag main-keyword-tag">🔑 ${keyword}</span>`;
       })
-      .join("");
+      .join('');
   }
   if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
     topTagsHtml += data.tags
       .map((tag) => {
-        const cleanTag = tag.replace(/^#/, "");
+        const cleanTag = tag.replace(/^#/, '');
         const tagClass =
-          cleanTag === "AI-추천"
-            ? "kanban-card-tag ai-tag"
-            : "kanban-card-tag default-tag";
+          cleanTag === 'AI-추천' ? 'kanban-card-tag ai-tag' : 'kanban-card-tag default-tag';
         return `<span class="${tagClass}">#${cleanTag}</span>`;
       })
-      .join("");
+      .join('');
   }
   if (
     data.longTailKeywords &&
@@ -458,30 +465,33 @@ function createKanbanCard(id, data, status) {
       .map((keyword) => {
         return `<span class="kanban-card-tag long-tail-tag">${keyword}</span>`;
       })
-      .join("");
+      .join('');
   }
 
   // [체크리스트 2] 연결된 스크랩 개수 확인 (workspace.linkedScraps 우선, 없으면 linkedScraps)
   const linkedScraps = data.workspace?.linkedScraps || data.linkedScraps || {};
-  const linkedScrapsCount = typeof linkedScraps === 'object' && !Array.isArray(linkedScraps)
-    ? Object.keys(linkedScraps).length
-    : (Array.isArray(linkedScraps) ? linkedScraps.length : 0);
-  let metaInfoHtml = "";
+  const linkedScrapsCount =
+    typeof linkedScraps === 'object' && !Array.isArray(linkedScraps)
+      ? Object.keys(linkedScraps).length
+      : Array.isArray(linkedScraps)
+        ? linkedScraps.length
+        : 0;
+  let metaInfoHtml = '';
 
   // ▼▼▼ [1] 애드센스 배지 HTML 생성 (조건 없이 독립적으로 생성) ▼▼▼
-  let adsenseBadgeHtml = "";
+  let adsenseBadgeHtml = '';
   if (data.adSenseRegistered) {
     adsenseBadgeHtml = `<span class="adsense-badge" title="애드센스 URL 채널에 정식 등록됨 (데이터 2중 백업)">A</span>`;
   }
   // ▲▲▲ 생성 끝 ▲▲▲
-  
+
   // ▼▼▼ [수정] 모든 아이디어 카드의 출처 라벨을 명확히 정의 ▼▼▼
   // 출처 정보 표시 (모든 origin 타입에 대해 명확한 라벨 정의)
   if (data.origin && data.origin.type) {
     let originIcon = '';
     let originText = '';
     let originClass = data.origin.type;
-    
+
     switch (data.origin.type) {
       case 'my_post':
         originIcon = '🔄';
@@ -509,7 +519,7 @@ function createKanbanCard(id, data, status) {
         originText = `출처: ${data.origin.type}`;
         break;
     }
-    
+
     if (originIcon || originText) {
       metaInfoHtml += `<span class="kanban-card-meta origin-tag ${originClass}" title="아이디어 출처: ${originText}">${originIcon} ${originText}</span>`;
     }
@@ -529,23 +539,25 @@ function createKanbanCard(id, data, status) {
     }
   }
   // ▲▲▲ [수정 완료] ▲▲▲
-  
+
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }
   // K-1: draftContent 또는 workspace.draft가 있으면 초안 완료 표시
   // null, 빈 문자열, 빈 객체는 제외
-  const hasDraftContent = data.draftContent && 
-    data.draftContent !== null && 
-    data.draftContent !== "" && 
-    data.draftContent !== "<p><br></p>" && 
-    data.draftContent !== "<p></p>";
-  const hasWorkspaceDraft = data.workspace?.draft && 
-    data.workspace.draft !== null && 
-    data.workspace.draft !== "" && 
-    data.workspace.draft !== "<p><br></p>" && 
-    data.workspace.draft !== "<p></p>";
-  
+  const hasDraftContent =
+    data.draftContent &&
+    data.draftContent !== null &&
+    data.draftContent !== '' &&
+    data.draftContent !== '<p><br></p>' &&
+    data.draftContent !== '<p></p>';
+  const hasWorkspaceDraft =
+    data.workspace?.draft &&
+    data.workspace.draft !== null &&
+    data.workspace.draft !== '' &&
+    data.workspace.draft !== '<p><br></p>' &&
+    data.workspace.draft !== '<p></p>';
+
   if (hasDraftContent || hasWorkspaceDraft) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
   }
@@ -553,48 +565,54 @@ function createKanbanCard(id, data, status) {
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;
   // [수정] performance 필드가 있고 collecting이 false이며 collectingCompletedAt이 있으면 수집 완료로 간주
-  const isCollectionCompleted = performance && 
-    performance.collecting === false && 
-    performance.collectingCompletedAt;
+  const isCollectionCompleted =
+    performance && performance.collecting === false && performance.collectingCompletedAt;
   // 데이터 없음(0 값)은 오류가 아님 - error 필드가 없고, collectionErrors도 없어야 함
-  const hasPerformance = performance && !performance.error && 
-    (performance.pageviews > 0 || performance.estimatedEarnings > 0 || 
-     performance.sessions > 0 || performance.avgSessionDuration > 0);
+  const hasPerformance =
+    performance &&
+    !performance.error &&
+    (performance.pageviews > 0 ||
+      performance.estimatedEarnings > 0 ||
+      performance.sessions > 0 ||
+      performance.avgSessionDuration > 0);
   const isCollecting = performance && performance.collecting === true;
   // 실제 오류인지 확인: error 필드가 있거나, collectionErrors와 errorType이 모두 있는 경우
   // 단, error 필드가 "데이터 없음" 관련 메시지면 오류가 아님
-  const hasError = performance && (
-    (performance.error && !performance.error.includes('데이터 없음') && !performance.error.includes('데이터가 없을 수 있습니다')) ||
-    (performance.collectionErrors && performance.errorType)
-  );
+  const hasError =
+    performance &&
+    ((performance.error &&
+      !performance.error.includes('데이터 없음') &&
+      !performance.error.includes('데이터가 없을 수 있습니다')) ||
+      (performance.collectionErrors && performance.errorType));
   const errorType = performance?.errorType;
   const collectionErrors = performance?.collectionErrors;
-  
+
   // 발행 완료 카드에 성과 추적 상태 및 해지 성과 태그 추가
-  if (status === "done") {
+  if (status === 'done') {
     // 성과 추적 연결 상태 태그
     if (data.publishedUrl) {
       if (isCollecting) {
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag collecting">🔄 수집 중...</span>`;
       } else if (hasError) {
         // 에러 타입에 따른 메시지
-        let errorMessage = "❌ 수집 실패";
-        let errorTooltip = performance.error || "알 수 없는 오류";
-        
-        if (errorType === "AUTH_MISSING") {
-          errorMessage = "🔑 인증 필요";
-          errorTooltip = "Google 계정 연동이 필요합니다. 채널 연동 설정에서 연동해주세요.";
-        } else if (errorType === "ID_MISSING") {
-          errorMessage = "⚙️ 설정 필요";
-          errorTooltip = "GA4 속성 ID 또는 AdSense 계정 ID가 설정되지 않았습니다. 채널 연동 설정을 확인해주세요.";
-        } else if (errorType === "API_ERROR") {
-          errorMessage = "⚠️ API 오류";
+        let errorMessage = '❌ 수집 실패';
+        let errorTooltip = performance.error || '알 수 없는 오류';
+
+        if (errorType === 'AUTH_MISSING') {
+          errorMessage = '🔑 인증 필요';
+          errorTooltip = 'Google 계정 연동이 필요합니다. 채널 연동 설정에서 연동해주세요.';
+        } else if (errorType === 'ID_MISSING') {
+          errorMessage = '⚙️ 설정 필요';
+          errorTooltip =
+            'GA4 속성 ID 또는 AdSense 계정 ID가 설정되지 않았습니다. 채널 연동 설정을 확인해주세요.';
+        } else if (errorType === 'API_ERROR') {
+          errorMessage = '⚠️ API 오류';
           // collectionErrors가 있으면 더 자세한 정보 표시
           if (collectionErrors) {
             const errors = [];
             if (collectionErrors.analytics) errors.push(`GA4: ${collectionErrors.analytics}`);
             if (collectionErrors.adsense) errors.push(`AdSense: ${collectionErrors.adsense}`);
-            errorTooltip = errors.length > 0 ? errors.join("\n") : errorTooltip;
+            errorTooltip = errors.length > 0 ? errors.join('\n') : errorTooltip;
           } else {
             errorTooltip = `API 호출 중 오류가 발생했습니다: ${errorTooltip}`;
           }
@@ -603,11 +621,11 @@ function createKanbanCard(id, data, status) {
           const errors = [];
           if (collectionErrors.analytics) errors.push(`GA4: ${collectionErrors.analytics}`);
           if (collectionErrors.adsense) errors.push(`AdSense: ${collectionErrors.adsense}`);
-          errorTooltip = errors.length > 0 ? errors.join("\n") : errorTooltip;
+          errorTooltip = errors.length > 0 ? errors.join('\n') : errorTooltip;
           // errorType이 없으면 데이터 없음으로 처리 (오류 아님)
         }
         // collectionErrors만 있고 errorType이 없으면 데이터 없음으로 처리 (오류 표시하지 않음)
-        
+
         metaInfoHtml += `<span class="kanban-card-meta performance-status-tag error" title="${errorTooltip}">${errorMessage}</span>`;
       } else if (hasPerformance) {
         // 데이터가 있는 경우 (실제 성과 데이터 있음)
@@ -624,7 +642,7 @@ function createKanbanCard(id, data, status) {
     } else {
       metaInfoHtml += `<span class="kanban-card-meta performance-status-tag not-connected">❌ 미연결</span>`;
     }
-    
+
     // 해지 성과 태그 (성과 데이터가 있을 때만)
     if (hasPerformance) {
       const pageviews = performance.pageviews || 0;
@@ -637,7 +655,7 @@ function createKanbanCard(id, data, status) {
         </span>
       `;
     }
-    
+
     // ▼▼▼ [2] 메타 정보(metaInfoHtml)에 배지 추가하기 ▼▼▼
     // [수정 포인트] 기존에는 hasPerformance 안에서만 배지를 넣었을 수 있습니다.
     // 아래와 같이 '발행 완료(done)' 컬럼이면 성과가 없어도 배지가 보이게 하세요.
@@ -647,34 +665,42 @@ function createKanbanCard(id, data, status) {
       metaInfoHtml += `<span class="kanban-card-meta" style="margin-left:4px;">${adsenseBadgeHtml} 인증됨</span>`;
     }
     // ▲▲▲ 추가 완료 ▲▲▲
-    
+
     // 데이터 수집 상태 표시 (GA4, AdSense 개별 상태)
     // 실제 오류가 있거나 수집 중이거나 성과 데이터가 있을 때만 표시
     if (data.publishedUrl && (hasPerformance || hasError || isCollecting)) {
       // collectionErrors가 있어도 errorType이 없으면 데이터 없음으로 처리 (오류 아님)
       const hasRealCollectionError = collectionErrors && errorType;
-      const gaStatus = hasPerformance && !hasRealCollectionError ? "✅" : 
-                      (hasRealCollectionError && collectionErrors?.analytics ? "❌" : "⏳");
-      const adsenseStatus = hasPerformance && !hasRealCollectionError ? "✅" : 
-                           (hasRealCollectionError && collectionErrors?.adsense ? "❌" : "⏳");
-      
+      const gaStatus =
+        hasPerformance && !hasRealCollectionError
+          ? '✅'
+          : hasRealCollectionError && collectionErrors?.analytics
+            ? '❌'
+            : '⏳';
+      const adsenseStatus =
+        hasPerformance && !hasRealCollectionError
+          ? '✅'
+          : hasRealCollectionError && collectionErrors?.adsense
+            ? '❌'
+            : '⏳';
+
       // 수집 중이거나 실제 오류가 있을 때만 표시 (데이터 없음은 표시하지 않음)
       if (isCollecting || hasError) {
         metaInfoHtml += `
-          <span class="kanban-card-meta data-source-status" title="GA4: ${gaStatus === "✅" ? "정상" : gaStatus === "❌" ? "오류" : "대기"} | AdSense: ${adsenseStatus === "✅" ? "정상" : adsenseStatus === "❌" ? "오류" : "대기"}">
+          <span class="kanban-card-meta data-source-status" title="GA4: ${gaStatus === '✅' ? '정상' : gaStatus === '❌' ? '오류' : '대기'} | AdSense: ${adsenseStatus === '✅' ? '정상' : adsenseStatus === '❌' ? '오류' : '대기'}">
             📡 ${gaStatus} GA4 ${adsenseStatus} AdSense
           </span>
         `;
       }
     }
   }
-  
+
   if (hasPerformance) {
-    card.classList.add("has-performance");
+    card.classList.add('has-performance');
     const pageviews = performance.pageviews || 0;
     const earnings = performance.estimatedEarnings || 0;
     const avgDuration = performance.avgSessionDuration || 0;
-    
+
     // 성과 지표 미리보기
     const pageRPM = performance.pageRPM || 0; // [추가]
     const pageCTR = performance.pageCTR || 0; // [추가]
@@ -685,34 +711,38 @@ function createKanbanCard(id, data, status) {
         <span class="perf-metric" title="수익">💰 $${earnings.toFixed(2)}</span>
         ${avgDuration > 0 ? `<span class="perf-metric" title="평균 체류 시간">⏱️ ${Math.round(avgDuration)}초</span>` : ''}
       </div>
-      ${(pageRPM > 0 || pageCTR > 0) ? `
+      ${
+        pageRPM > 0 || pageCTR > 0
+          ? `
         <div class="metric-detail-row">
           <span class="metric-sub-tag" title="1,000회 노출당 수익">RPM $${pageRPM.toFixed(2)}</span>
           <span class="metric-sub-tag" title="광고 클릭률">CTR ${pageCTR.toFixed(1)}%</span>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
     `;
     metaInfoHtml += performancePreview;
   } else if (hasError) {
     // 에러가 있는 경우 카드에 에러 스타일 적용
-    card.classList.add("has-error");
+    card.classList.add('has-error');
   }
 
   let actionButtons = ``;
   // 컨텍스트 메뉴 버튼 추가 (모든 상태에서)
   actionButtons += `<button class="card-context-menu-btn" title="더보기" data-card-id="${id}">⋯</button>`;
   // 삭제 버튼은 "ideas" 단계에서만 표시
-  if (status === "ideas") {
+  if (status === 'ideas') {
     actionButtons += `<button class="delete-card-btn" title="카드 삭제" data-card-id="${id}">🗑️</button>`;
   }
-  
-  if (status === "done") {
+
+  if (status === 'done') {
     if (!data.publishedUrl) {
       actionButtons += `<button class="track-performance-btn">🔗 성과 추적</button>`;
     } else {
       const earnings = hasPerformance
         ? `$${(performance.estimatedEarnings || 0).toFixed(2)}`
-        : "대기중";
+        : '대기중';
       actionButtons += `
         <a href="${data.publishedUrl}" target="_blank" class="performance-link">수익: ${earnings}</a>
         <button class="change-url-btn" title="링크 변경">✏️ 변경</button>
@@ -721,15 +751,16 @@ function createKanbanCard(id, data, status) {
     }
   }
   // SEO 제목이 있으면 표시
-  const seoTitleHtml = data.seoTitle && data.seoTitle !== data.title
-    ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
+  const seoTitleHtml =
+    data.seoTitle && data.seoTitle !== data.title
+      ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
         <span style="color: #4285f4;">SEO:</span> ${data.seoTitle}
       </div>`
-    : '';
-  
+      : '';
+
   card.innerHTML = `
     <div class="kanban-card-body">
-      <span class="kanban-card-title">${data.title || "제목 없음"}</span>
+      <span class="kanban-card-title">${data.title || '제목 없음'}</span>
       ${seoTitleHtml}
       <div class="card-top-tags">${topTagsHtml}</div>
     </div>
@@ -746,7 +777,7 @@ let kanbanClickHandler = null;
 let kanbanAddCardHandler = null;
 
 function addKanbanEventListeners(container) {
-  const root = container.querySelector("#cp-kanban-board-root");
+  const root = container.querySelector('#cp-kanban-board-root');
   if (!root) return;
 
   // [UI 모듈 독립성 강화] 중복 등록 방지
@@ -754,29 +785,29 @@ function addKanbanEventListeners(container) {
     return; // 이미 등록됨
   }
   root.dataset.listenersAttached = 'true';
-  
+
   // 기존 리스너가 있다면 제거 (안전장치)
   if (kanbanClickHandler) {
-    root.removeEventListener("click", kanbanClickHandler);
+    root.removeEventListener('click', kanbanClickHandler);
   }
   if (kanbanAddCardHandler) {
-    root.removeEventListener("click", kanbanAddCardHandler);
+    root.removeEventListener('click', kanbanAddCardHandler);
   }
 
   // K-3: 초안 삭제 버튼 클릭 이벤트 리스너 완전 제거
-  const sortControls = container.querySelector(".kanban-sort-controls");
+  const sortControls = container.querySelector('.kanban-sort-controls');
   if (sortControls) {
-    sortControls.addEventListener("click", (e) => {
+    sortControls.addEventListener('click', (e) => {
       const target = e.target;
-      if (target.classList.contains("kanban-sort-btn")) {
+      if (target.classList.contains('kanban-sort-btn')) {
         const newSortOrder = target.dataset.sort;
         if (newSortOrder !== sortOrder) {
           // 상태 변수 업데이트
           sortOrder = newSortOrder;
 
           // 버튼 활성 상태 업데이트
-          sortControls.querySelector(".active").classList.remove("active");
-          target.classList.add("active");
+          sortControls.querySelector('.active').classList.remove('active');
+          target.classList.add('active');
 
           // 변경된 정렬 순서로 UI 전체를 다시 렌더링
           updateKanbanUI(allKanbanData);
@@ -787,16 +818,16 @@ function addKanbanEventListeners(container) {
 
   // [신규] 채널 변경 감지 -> 칸반 UI 새로고침
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === "local" && changes.activeChannelId) {
-      console.log("[Kanban] 채널 변경 감지, 데이터 다시 로드 및 UI 새로고침");
+    if (namespace === 'local' && changes.activeChannelId) {
+      console.log('[Kanban] 채널 변경 감지, 데이터 다시 로드 및 UI 새로고침');
       // 채널이 변경되면 항상 데이터를 다시 로드하여 최신 상태 보장
-      chrome.runtime.sendMessage({ action: "get_kanban_data" });
+      chrome.runtime.sendMessage({ action: 'get_kanban_data' });
     }
   });
 
   // ▼▼▼ [추가] "+ 카드 추가" 버튼 클릭 이벤트 리스너 ▼▼▼
   kanbanAddCardHandler = (e) => {
-    const addCardBtn = e.target.closest(".kanban-add-card-btn");
+    const addCardBtn = e.target.closest('.kanban-add-card-btn');
     if (addCardBtn) {
       e.stopPropagation();
       const status = addCardBtn.dataset.status;
@@ -804,77 +835,88 @@ function addKanbanEventListeners(container) {
       return;
     }
   };
-  root.addEventListener("click", kanbanAddCardHandler);
+  root.addEventListener('click', kanbanAddCardHandler);
 
   kanbanClickHandler = (e) => {
-    const card = e.target.closest(".cp-kanban-card");
+    const card = e.target.closest('.cp-kanban-card');
     if (!card) return;
 
-    if (e.target.closest(".card-context-menu-btn")) {
+    if (e.target.closest('.card-context-menu-btn')) {
       e.stopPropagation();
-      const menuBtn = e.target.closest(".card-context-menu-btn");
+      const menuBtn = e.target.closest('.card-context-menu-btn');
       const cardId = menuBtn.dataset.cardId;
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
       showCardContextMenu(container, card, cardId, status, cardData, menuBtn);
       return;
-    } else if (e.target.closest(".delete-card-btn")) {
+    } else if (e.target.closest('.delete-card-btn')) {
       e.stopPropagation();
-      const cardId = e.target.closest(".delete-card-btn").dataset.cardId;
+      const cardId = e.target.closest('.delete-card-btn').dataset.cardId;
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
-      const cardTitle = cardData?.title || "제목 없음";
-      
+      const cardTitle = cardData?.title || '제목 없음';
+
       if (confirm(`"${cardTitle}" 카드를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
-        chrome.runtime.sendMessage({
-          action: "delete_kanban_card",
-          data: { cardId, status }
-        }, (response) => {
-          if (response && response.success) {
-            showToast("✅ 카드가 삭제되었습니다.");
-            
-            // 로컬 데이터에서 카드 제거
-            if (allKanbanData[status] && allKanbanData[status][cardId]) {
-              delete allKanbanData[status][cardId];
-            }
-            
-            // UI 즉시 업데이트
-            updateKanbanUI(allKanbanData);
-            
-            // ▼▼▼ [수정] 대시보드의 addedIdeas에서도 제거 ▼▼▼
-            // 모든 캐시 키를 확인하여 해당 firebaseKey를 가진 아이디어 제거
-            chrome.storage.local.get(null, (allStorage) => {
-              const updates = {};
-              for (const key in allStorage) {
-                if (key.startsWith('analysisCache_')) {
-                  const cache = allStorage[key];
-                  if (cache && cache.addedIdeas && Array.isArray(cache.addedIdeas)) {
-                    const filteredIdeas = cache.addedIdeas.filter(idea => idea.firebaseKey !== cardId);
-                    if (filteredIdeas.length !== cache.addedIdeas.length) {
-                      updates[key] = { ...cache, addedIdeas: filteredIdeas };
+        chrome.runtime.sendMessage(
+          {
+            action: 'delete_kanban_card',
+            data: { cardId, status },
+          },
+          (response) => {
+            if (response && response.success) {
+              showToast('✅ 카드가 삭제되었습니다.');
+
+              // 로컬 데이터에서 카드 제거
+              if (allKanbanData[status] && allKanbanData[status][cardId]) {
+                delete allKanbanData[status][cardId];
+              }
+
+              // UI 즉시 업데이트
+              updateKanbanUI(allKanbanData);
+
+              // ▼▼▼ [수정] 대시보드의 addedIdeas에서도 제거 ▼▼▼
+              // 모든 캐시 키를 확인하여 해당 firebaseKey를 가진 아이디어 제거
+              chrome.storage.local.get(null, (allStorage) => {
+                const updates = {};
+                for (const key in allStorage) {
+                  if (key.startsWith('analysisCache_')) {
+                    const cache = allStorage[key];
+                    if (cache && cache.addedIdeas && Array.isArray(cache.addedIdeas)) {
+                      const filteredIdeas = cache.addedIdeas.filter(
+                        (idea) => idea.firebaseKey !== cardId
+                      );
+                      if (filteredIdeas.length !== cache.addedIdeas.length) {
+                        updates[key] = { ...cache, addedIdeas: filteredIdeas };
+                      }
                     }
                   }
                 }
-              }
-              if (Object.keys(updates).length > 0) {
-                chrome.storage.local.set(updates);
-              }
-            });
-            // ▲▲▲ [수정 완료] ▲▲▲
-          } else {
-            showToast("❌ 삭제 실패: " + (response?.error || "알 수 없는 오류"));
+                if (Object.keys(updates).length > 0) {
+                  chrome.storage.local.set(updates);
+                }
+              });
+              // ▲▲▲ [수정 완료] ▲▲▲
+            } else {
+              showToast('❌ 삭제 실패: ' + (response?.error || '알 수 없는 오류'));
+            }
           }
-        });
+        );
       }
-    } else if (e.target.closest(".track-performance-btn") || e.target.closest(".change-url-btn")) {
+    } else if (e.target.closest('.track-performance-btn') || e.target.closest('.change-url-btn')) {
       e.stopPropagation();
       const cardId = card.dataset.id;
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
-      showPublishUrlModal(container, cardId, status, cardData?.title || "", cardData?.publishedUrl || "");
-    } else if (e.target.closest(".view-performance-detail-btn")) {
+      showPublishUrlModal(
+        container,
+        cardId,
+        status,
+        cardData?.title || '',
+        cardData?.publishedUrl || ''
+      );
+    } else if (e.target.closest('.view-performance-detail-btn')) {
       e.stopPropagation();
-      const cardId = e.target.closest(".view-performance-detail-btn").dataset.cardId;
+      const cardId = e.target.closest('.view-performance-detail-btn').dataset.cardId;
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
       if (cardData && cardData.performance) {
@@ -885,7 +927,7 @@ function addKanbanEventListeners(container) {
       const status = card.dataset.status;
       const cardData = allKanbanData[status]?.[cardId];
       if (cardData) {
-        window.__cp_active_mode = "workspace";
+        window.__cp_active_mode = 'workspace';
 
         const shadowRoot = container.getRootNode();
         renderHeaderAndTabs(shadowRoot);
@@ -897,12 +939,12 @@ function addKanbanEventListeners(container) {
           id: cardId,
           status: status,
           // workspace 객체가 없으면(null/undefined) 빈 값으로 초기화
-          workspace: cardData.workspace || { 
-            keywords: [], 
-            outline: [], 
-            draft: "", 
-            linkedScraps: {} 
-          } 
+          workspace: cardData.workspace || {
+            keywords: [],
+            outline: [],
+            draft: '',
+            linkedScraps: {},
+          },
         };
         // 전역 ideaData 업데이트 (실시간 업데이트를 위해)
         window.__cp_workspace_idea_data = ideaDataForWorkspace;
@@ -912,49 +954,49 @@ function addKanbanEventListeners(container) {
       }
     }
   };
-  
-  root.addEventListener("click", kanbanClickHandler);
 
-  root.addEventListener("dragstart", (e) => {
-    const card = e.target.closest(".cp-kanban-card");
+  root.addEventListener('click', kanbanClickHandler);
+
+  root.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.cp-kanban-card');
     if (card) {
       currentlyDragging.cardId = card.dataset.id;
       currentlyDragging.originalStatus = card.dataset.status;
-      e.dataTransfer.effectAllowed = "move";
-      setTimeout(() => (card.style.opacity = "0.5"), 0);
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => (card.style.opacity = '0.5'), 0);
     }
   });
 
-  root.addEventListener("dragend", (e) => {
-    const card = e.target.closest(".cp-kanban-card");
-    if (card) card.style.opacity = "1";
+  root.addEventListener('dragend', (e) => {
+    const card = e.target.closest('.cp-kanban-card');
+    if (card) card.style.opacity = '1';
     currentlyDragging = { cardId: null, originalStatus: null };
   });
 
-  root.addEventListener("dragover", (e) => {
-    if (e.target.closest(".cp-kanban-col")) {
+  root.addEventListener('dragover', (e) => {
+    if (e.target.closest('.cp-kanban-col')) {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = 'move';
     }
   });
 
-  root.addEventListener("drop", (e) => {
+  root.addEventListener('drop', (e) => {
     e.preventDefault();
-    const targetColumn = e.target.closest(".cp-kanban-col");
+    const targetColumn = e.target.closest('.cp-kanban-col');
     const newStatus = targetColumn?.dataset.status;
     const { cardId, originalStatus } = currentlyDragging;
     if (newStatus && cardId && originalStatus && newStatus !== originalStatus) {
       const cardData = allKanbanData[originalStatus]?.[cardId];
       const hasDraft = !!cardData?.draftContent;
       // K-7: 아이디어 컬럼에서 초안 없는 카드 이동 제한
-      if (originalStatus === "ideas" && !hasDraft) {
+      if (originalStatus === 'ideas' && !hasDraft) {
         showToast(
-          "⚠️ 기획을 시작하려면 카드를 클릭하여 워크스페이스에서 초안을 생성하거나, 자료를 연결해야 합니다."
+          '⚠️ 기획을 시작하려면 카드를 클릭하여 워크스페이스에서 초안을 생성하거나, 자료를 연결해야 합니다.'
         );
         return;
       }
       // 기존 K-5: 초안이 존재하는 상태에서 'ideas' 컬럼으로 복귀 시 제한
-      if (hasDraft && newStatus === "ideas") {
+      if (hasDraft && newStatus === 'ideas') {
         showToast(
           "⚠️ 초안이 작성된 아이디어는 '아이디어' 단계로 되돌릴 수 없습니다. (초안 삭제 후 복귀 가능)"
         );
@@ -962,7 +1004,7 @@ function addKanbanEventListeners(container) {
       }
       // 모든 제한을 통과하면 이동 허용
       chrome.runtime.sendMessage({
-        action: "move_kanban_card",
+        action: 'move_kanban_card',
         data: { cardId, originalStatus, newStatus },
       });
     }
@@ -989,7 +1031,7 @@ function showAddCardInput(container, status, addCardBtn) {
     border-radius: 8px;
     margin-top: 8px;
   `;
-  
+
   inputWrapper.innerHTML = `
     <textarea 
       class="kanban-add-card-input" 
@@ -1090,36 +1132,48 @@ function submitCard(container, status, title, inputWrapper) {
     title: title.trim(),
     description: '',
     tags: [],
-    createdAt: Date.now()
+    createdAt: Date.now(),
   };
 
   // [수정] 활성 채널 ID를 가져와서 함께 전송
-  chrome.storage.local.get("activeChannelId", (res) => {
+  chrome.storage.local.get('activeChannelId', (res) => {
     const activeChannelId = res.activeChannelId || null;
 
     // background.js에 카드 추가 요청 (상태 지정)
-    chrome.runtime.sendMessage({
-      action: 'add_idea_to_kanban',
-      data: JSON.stringify(ideaData),
-      status: status, // 카드를 추가할 상태 지정
-      channelId: activeChannelId // 👈 추가됨
-    }, (response) => {
-      if (response && response.success) {
-        showToast('✅ 카드가 추가되었습니다.');
-        // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
-      } else {
-        // 중복 검사 실패 시 친절한 메시지 표시
-        if (response?.code === 'DUPLICATE_FOUND') {
-          const statusText = response.cardInfo?.status === 'ideas' ? '기획' 
-            : response.cardInfo?.status === 'in-progress' ? '작성 중'
-            : response.cardInfo?.status === 'done' ? '발행 완료'
-            : response.cardInfo?.status || '알 수 없음';
-          showToast(`⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`);
+    chrome.runtime.sendMessage(
+      {
+        action: 'add_idea_to_kanban',
+        data: JSON.stringify(ideaData),
+        status: status, // 카드를 추가할 상태 지정
+        channelId: activeChannelId, // 👈 추가됨
+      },
+      (response) => {
+        if (response && response.success) {
+          showToast('✅ 카드가 추가되었습니다.');
+          // 카드 목록이 자동으로 업데이트됨 (실시간 리스너)
         } else {
-          showToast('❌ 카드 추가에 실패했습니다: ' + (response?.error || response?.message || '알 수 없는 오류'));
+          // 중복 검사 실패 시 친절한 메시지 표시
+          if (response?.code === 'DUPLICATE_FOUND') {
+            const statusText =
+              response.cardInfo?.status === 'ideas'
+                ? '기획'
+                : response.cardInfo?.status === 'in-progress'
+                  ? '작성 중'
+                  : response.cardInfo?.status === 'done'
+                    ? '발행 완료'
+                    : response.cardInfo?.status || '알 수 없음';
+            showToast(
+              `⚠️ 이미 '${statusText}' 단계에 등록된 아이디어입니다.\n카드명: ${response.cardInfo?.title || '알 수 없음'}`
+            );
+          } else {
+            showToast(
+              '❌ 카드 추가에 실패했습니다: ' +
+                (response?.error || response?.message || '알 수 없는 오류')
+            );
+          }
         }
       }
-    });
+    );
   });
 }
 
@@ -1195,7 +1249,7 @@ function showCardContextMenu(container, card, cardId, status, cardData, menuBtn)
   menu.innerHTML = menuItems.join('');
 
   // 메뉴 항목 hover 효과
-  menu.querySelectorAll('.context-menu-item').forEach(item => {
+  menu.querySelectorAll('.context-menu-item').forEach((item) => {
     item.addEventListener('mouseenter', () => {
       item.style.background = '#f5f5f5';
     });
@@ -1271,59 +1325,73 @@ function generateSimilarIdea(cardId, status, cardData) {
 ]
 `;
 
-  chrome.runtime.sendMessage({
-    action: 'call_gemini',
-    prompt: prompt
-  }, (response) => {
-    if (response && response.text && !response.text.trim().startsWith('오류:') && !response.text.trim().startsWith('오류：')) {
-      try {
-        // JSON 파싱
-        let ideasText = response.text.trim();
-        if (ideasText.startsWith('```json')) {
-          ideasText = ideasText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        } else if (ideasText.startsWith('```')) {
-          ideasText = ideasText.replace(/```\n?/g, '').trim();
-        }
-        const ideas = JSON.parse(ideasText);
+  chrome.runtime.sendMessage(
+    {
+      action: 'call_gemini',
+      prompt: prompt,
+    },
+    (response) => {
+      if (
+        response &&
+        response.text &&
+        !response.text.trim().startsWith('오류:') &&
+        !response.text.trim().startsWith('오류：')
+      ) {
+        try {
+          // JSON 파싱
+          let ideasText = response.text.trim();
+          if (ideasText.startsWith('```json')) {
+            ideasText = ideasText
+              .replace(/```json\n?/g, '')
+              .replace(/```\n?/g, '')
+              .trim();
+          } else if (ideasText.startsWith('```')) {
+            ideasText = ideasText.replace(/```\n?/g, '').trim();
+          }
+          const ideas = JSON.parse(ideasText);
 
-        if (Array.isArray(ideas) && ideas.length > 0) {
-          // 첫 번째 아이디어를 자동으로 추가
-          const firstIdea = ideas[0];
-          const ideaData = {
-            title: firstIdea.title || '유사 아이디어',
-            description: firstIdea.description || '',
-            keywords: [...(cardData.tags || []), '#유사-아이디어'],
-            createdAt: Date.now()
-          };
+          if (Array.isArray(ideas) && ideas.length > 0) {
+            // 첫 번째 아이디어를 자동으로 추가
+            const firstIdea = ideas[0];
+            const ideaData = {
+              title: firstIdea.title || '유사 아이디어',
+              description: firstIdea.description || '',
+              keywords: [...(cardData.tags || []), '#유사-아이디어'],
+              createdAt: Date.now(),
+            };
 
-          // [수정] 활성 채널 ID를 가져와서 함께 전송
-          chrome.storage.local.get("activeChannelId", (res) => {
-            const activeChannelId = res.activeChannelId || null;
+            // [수정] 활성 채널 ID를 가져와서 함께 전송
+            chrome.storage.local.get('activeChannelId', (res) => {
+              const activeChannelId = res.activeChannelId || null;
 
-            chrome.runtime.sendMessage({
-              action: 'add_idea_to_kanban',
-              data: JSON.stringify(ideaData),
-              status: 'ideas',
-              channelId: activeChannelId // 👈 추가됨
-            }, (addResponse) => {
-              if (addResponse && addResponse.success) {
-                showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
-              } else {
-                showToast('❌ 아이디어 추가에 실패했습니다.');
-              }
+              chrome.runtime.sendMessage(
+                {
+                  action: 'add_idea_to_kanban',
+                  data: JSON.stringify(ideaData),
+                  status: 'ideas',
+                  channelId: activeChannelId, // 👈 추가됨
+                },
+                (addResponse) => {
+                  if (addResponse && addResponse.success) {
+                    showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
+                  } else {
+                    showToast('❌ 아이디어 추가에 실패했습니다.');
+                  }
+                }
+              );
             });
-          });
-        } else {
-          showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
+          } else {
+            showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
+          }
+        } catch (e) {
+          console.error('아이디어 파싱 오류:', e);
+          showToast('❌ AI 응답을 파싱하는 중 오류가 발생했습니다.');
         }
-      } catch (e) {
-        console.error('아이디어 파싱 오류:', e);
-        showToast('❌ AI 응답을 파싱하는 중 오류가 발생했습니다.');
+      } else {
+        showToast('❌ AI 아이디어 생성에 실패했습니다.');
       }
-    } else {
-      showToast('❌ AI 아이디어 생성에 실패했습니다.');
     }
-  });
+  );
 }
 
 /**
@@ -1366,40 +1434,46 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
    - 구체적인 개선 방안 설명
 `;
 
-  chrome.runtime.sendMessage({
-    action: 'call_gemini',
-    prompt: prompt
-  }, (response) => {
-    if (response && response.text && !response.text.includes('오류')) {
-      // 리뉴얼 제안을 새 아이디어로 저장
-      const ideaData = {
-        title: `[리뉴얼] ${cardData.title || '제목 없음'}`,
-        description: `원본: ${cardData.publishedUrl}\n\n${response.text}`,
-        keywords: [...(cardData.tags || []), '#리뉴얼-제안'],
-        createdAt: Date.now()
-      };
+  chrome.runtime.sendMessage(
+    {
+      action: 'call_gemini',
+      prompt: prompt,
+    },
+    (response) => {
+      if (response && response.text && !response.text.includes('오류')) {
+        // 리뉴얼 제안을 새 아이디어로 저장
+        const ideaData = {
+          title: `[리뉴얼] ${cardData.title || '제목 없음'}`,
+          description: `원본: ${cardData.publishedUrl}\n\n${response.text}`,
+          keywords: [...(cardData.tags || []), '#리뉴얼-제안'],
+          createdAt: Date.now(),
+        };
 
-      // [수정] 활성 채널 ID를 가져와서 함께 전송
-      chrome.storage.local.get("activeChannelId", (res) => {
-        const activeChannelId = res.activeChannelId || null;
+        // [수정] 활성 채널 ID를 가져와서 함께 전송
+        chrome.storage.local.get('activeChannelId', (res) => {
+          const activeChannelId = res.activeChannelId || null;
 
-        chrome.runtime.sendMessage({
-          action: 'add_idea_to_kanban',
-          data: JSON.stringify(ideaData),
-          status: 'ideas',
-          channelId: activeChannelId // 👈 추가됨
-        }, (addResponse) => {
-          if (addResponse && addResponse.success) {
-            showToast('✅ 리뉴얼 제안이 아이디어로 저장되었습니다!');
-        } else {
-          showToast('❌ 리뉴얼 제안 저장에 실패했습니다.');
-        }
-      });
-      });
-    } else {
-      showToast('❌ 리뉴얼 제안 생성에 실패했습니다.');
+          chrome.runtime.sendMessage(
+            {
+              action: 'add_idea_to_kanban',
+              data: JSON.stringify(ideaData),
+              status: 'ideas',
+              channelId: activeChannelId, // 👈 추가됨
+            },
+            (addResponse) => {
+              if (addResponse && addResponse.success) {
+                showToast('✅ 리뉴얼 제안이 아이디어로 저장되었습니다!');
+              } else {
+                showToast('❌ 리뉴얼 제안 저장에 실패했습니다.');
+              }
+            }
+          );
+        });
+      } else {
+        showToast('❌ 리뉴얼 제안 생성에 실패했습니다.');
+      }
     }
-  });
+  );
 }
 
 // renderHeaderAndTabs는 header.js에서 import하여 사용
@@ -1410,42 +1484,42 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
 // 모달이 이미 열려있는지 추적하는 플래그
 let isPublishUrlModalOpen = false;
 
-function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl = "") {
+function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl = '') {
   // 이미 모달이 열려있으면 무시 (중복 호출 방지)
   if (isPublishUrlModalOpen) {
-    Logger.debug("[KanbanMode] 발행 URL 모달이 이미 열려있음, 중복 호출 무시");
+    Logger.debug('[KanbanMode] 발행 URL 모달이 이미 열려있음, 중복 호출 무시');
     return;
   }
-  
+
   // 기존 모달이 있으면 제거
-  const existingModal = container.querySelector(".cp-publish-url-modal-wrap");
+  const existingModal = container.querySelector('.cp-publish-url-modal-wrap');
   if (existingModal) {
     existingModal.remove();
   }
-  
+
   // 모달 열림 플래그 설정
   isPublishUrlModalOpen = true;
 
   // URL 히스토리 가져오기
-  chrome.storage.local.get(["publishUrlHistory"], (result) => {
+  chrome.storage.local.get(['publishUrlHistory'], (result) => {
     const urlHistory = result.publishUrlHistory || [];
     const isEditing = !!existingUrl;
 
     // 모달 생성
-    const modalWrap = document.createElement("div");
-    modalWrap.className = "cp-publish-url-modal-wrap";
+    const modalWrap = document.createElement('div');
+    modalWrap.className = 'cp-publish-url-modal-wrap';
     modalWrap.innerHTML = `
       <div class="cp-modal-backdrop"></div>
       <div class="cp-publish-url-modal">
         <div class="cp-modal-header">
-          <div class="cp-modal-title">${isEditing ? "✏️ 발행 URL 변경" : "🔗 발행 URL 연결"}</div>
+          <div class="cp-modal-title">${isEditing ? '✏️ 발행 URL 변경' : '🔗 발행 URL 연결'}</div>
           <button class="cp-modal-close" title="닫기">×</button>
         </div>
         <div class="cp-modal-body">
           <div class="publish-url-form">
             <label class="form-label">
               <span>콘텐츠 제목</span>
-              <input type="text" class="form-input" value="${cardTitle || ""}" readonly disabled>
+              <input type="text" class="form-input" value="${cardTitle || ''}" readonly disabled>
             </label>
             <label class="form-label">
               <span>발행 URL <span class="required">*</span></span>
@@ -1460,80 +1534,80 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
         </div>
         <div class="cp-modal-footer">
           <button class="cp-btn cp-btn-secondary" id="cancel-btn">취소</button>
-          <button class="cp-btn cp-btn-primary" id="submit-btn">${isEditing ? "변경하기" : "연결하기"}</button>
+          <button class="cp-btn cp-btn-primary" id="submit-btn">${isEditing ? '변경하기' : '연결하기'}</button>
         </div>
       </div>
     `;
 
     container.appendChild(modalWrap);
 
-    const urlInput = modalWrap.querySelector("#publish-url-input");
-    const urlHistoryList = modalWrap.querySelector("#url-history-list");
-    const platformDetection = modalWrap.querySelector("#platform-detection");
-    const platformBadge = platformDetection.querySelector(".platform-badge");
-    const urlError = modalWrap.querySelector("#url-error");
-    const submitBtn = modalWrap.querySelector("#submit-btn");
-    const cancelBtn = modalWrap.querySelector("#cancel-btn");
-    const closeBtn = modalWrap.querySelector(".cp-modal-close");
-    const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
-    
+    const urlInput = modalWrap.querySelector('#publish-url-input');
+    const urlHistoryList = modalWrap.querySelector('#url-history-list');
+    const platformDetection = modalWrap.querySelector('#platform-detection');
+    const platformBadge = platformDetection.querySelector('.platform-badge');
+    const urlError = modalWrap.querySelector('#url-error');
+    const submitBtn = modalWrap.querySelector('#submit-btn');
+    const cancelBtn = modalWrap.querySelector('#cancel-btn');
+    const closeBtn = modalWrap.querySelector('.cp-modal-close');
+    const backdrop = modalWrap.querySelector('.cp-modal-backdrop');
+
     // 버튼 텍스트 동적 변경
     if (isEditing) {
-      submitBtn.textContent = "변경하기";
+      submitBtn.textContent = '변경하기';
     }
 
     // URL 유효성 검증 및 플랫폼 감지
     function validateAndDetectPlatform(url) {
-      urlError.style.display = "none";
-      platformDetection.style.display = "none";
+      urlError.style.display = 'none';
+      platformDetection.style.display = 'none';
 
-      if (!url || url.trim() === "") {
+      if (!url || url.trim() === '') {
         return false;
       }
 
       // URL 형식 검증
       try {
         const urlObj = new URL(url);
-        if (!urlObj.protocol.startsWith("http")) {
-          urlError.textContent = "올바른 HTTP/HTTPS URL을 입력해주세요.";
-          urlError.style.display = "block";
+        if (!urlObj.protocol.startsWith('http')) {
+          urlError.textContent = '올바른 HTTP/HTTPS URL을 입력해주세요.';
+          urlError.style.display = 'block';
           return false;
         }
 
         // 플랫폼 자동 감지
         const hostname = urlObj.hostname.toLowerCase();
-        let platform = "";
-        let platformIcon = "";
+        let platform = '';
+        let platformIcon = '';
 
-        if (hostname.includes("blog.naver.com") || hostname.includes("blog.me")) {
-          platform = "네이버 블로그";
-          platformIcon = "📝";
-        } else if (hostname.includes("brunch.co.kr")) {
-          platform = "브런치";
-          platformIcon = "✍️";
-        } else if (hostname.includes("medium.com")) {
-          platform = "Medium";
-          platformIcon = "📄";
-        } else if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
-          platform = "유튜브";
-          platformIcon = "▶️";
-        } else if (hostname.includes("tistory.com")) {
-          platform = "티스토리";
-          platformIcon = "📚";
-        } else if (hostname.includes("velog.io")) {
-          platform = "벨로그";
-          platformIcon = "💻";
+        if (hostname.includes('blog.naver.com') || hostname.includes('blog.me')) {
+          platform = '네이버 블로그';
+          platformIcon = '📝';
+        } else if (hostname.includes('brunch.co.kr')) {
+          platform = '브런치';
+          platformIcon = '✍️';
+        } else if (hostname.includes('medium.com')) {
+          platform = 'Medium';
+          platformIcon = '📄';
+        } else if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+          platform = '유튜브';
+          platformIcon = '▶️';
+        } else if (hostname.includes('tistory.com')) {
+          platform = '티스토리';
+          platformIcon = '📚';
+        } else if (hostname.includes('velog.io')) {
+          platform = '벨로그';
+          platformIcon = '💻';
         } else {
-          platform = "기타";
-          platformIcon = "🌐";
+          platform = '기타';
+          platformIcon = '🌐';
         }
 
         platformBadge.textContent = `${platformIcon} ${platform}`;
-        platformDetection.style.display = "block";
+        platformDetection.style.display = 'block';
         return true;
       } catch (e) {
-        urlError.textContent = "올바른 URL 형식이 아닙니다.";
-        urlError.style.display = "block";
+        urlError.textContent = '올바른 URL 형식이 아닙니다.';
+        urlError.style.display = 'block';
         return false;
       }
     }
@@ -1541,50 +1615,50 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
     // URL 히스토리 표시
     function showUrlHistory() {
       if (urlHistory.length === 0) {
-        urlHistoryList.style.display = "none";
+        urlHistoryList.style.display = 'none';
         return;
       }
 
       const filteredHistory = urlHistory
-        .filter(url => url.toLowerCase().includes(urlInput.value.toLowerCase()))
+        .filter((url) => url.toLowerCase().includes(urlInput.value.toLowerCase()))
         .slice(0, 5);
 
       if (filteredHistory.length === 0 || !urlInput.value) {
-        urlHistoryList.style.display = "none";
+        urlHistoryList.style.display = 'none';
         return;
       }
 
       urlHistoryList.innerHTML = filteredHistory
-        .map(url => `<div class="url-history-item">${url}</div>`)
-        .join("");
+        .map((url) => `<div class="url-history-item">${url}</div>`)
+        .join('');
 
-      urlHistoryList.style.display = "block";
+      urlHistoryList.style.display = 'block';
 
       // 히스토리 항목 클릭 이벤트
-      urlHistoryList.querySelectorAll(".url-history-item").forEach(item => {
-        item.addEventListener("click", () => {
+      urlHistoryList.querySelectorAll('.url-history-item').forEach((item) => {
+        item.addEventListener('click', () => {
           urlInput.value = item.textContent;
-          urlHistoryList.style.display = "none";
+          urlHistoryList.style.display = 'none';
           validateAndDetectPlatform(urlInput.value);
         });
       });
     }
 
     // 이벤트 리스너
-    urlInput.addEventListener("input", (e) => {
+    urlInput.addEventListener('input', (e) => {
       validateAndDetectPlatform(e.target.value);
       showUrlHistory();
     });
 
-    urlInput.addEventListener("focus", () => {
+    urlInput.addEventListener('focus', () => {
       if (urlInput.value) {
         showUrlHistory();
       }
     });
 
-    document.addEventListener("click", (e) => {
+    document.addEventListener('click', (e) => {
       if (!modalWrap.contains(e.target)) {
-        urlHistoryList.style.display = "none";
+        urlHistoryList.style.display = 'none';
       }
     });
 
@@ -1593,7 +1667,7 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
       isPublishUrlModalOpen = false; // 모달 닫힘 플래그 리셋
     };
 
-    submitBtn.addEventListener("click", () => {
+    submitBtn.addEventListener('click', () => {
       const url = urlInput.value.trim();
       if (!validateAndDetectPlatform(url)) {
         return;
@@ -1602,73 +1676,84 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
       // [UX 개선] 즉시 로딩 상태 표시 (사용자 피드백)
       submitBtn.disabled = true;
       const originalBtnText = submitBtn.textContent;
-      submitBtn.innerHTML = '<span style="display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle;"></span>처리 중...';
-      submitBtn.style.opacity = "0.7";
-      submitBtn.style.cursor = "not-allowed";
-      submitBtn.style.pointerEvents = "none";
-      
+      submitBtn.innerHTML =
+        '<span style="display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle;"></span>처리 중...';
+      submitBtn.style.opacity = '0.7';
+      submitBtn.style.cursor = 'not-allowed';
+      submitBtn.style.pointerEvents = 'none';
+
       // URL 히스토리 리스트 즉시 숨기기 (딜레이 제거)
-      urlHistoryList.style.display = "none";
-      
+      urlHistoryList.style.display = 'none';
+
       // 입력 필드 비활성화
       urlInput.disabled = true;
-      urlInput.style.opacity = "0.6";
-      urlInput.style.cursor = "not-allowed";
-      
+      urlInput.style.opacity = '0.6';
+      urlInput.style.cursor = 'not-allowed';
+
       // 취소 버튼도 비활성화 (일관성)
       cancelBtn.disabled = true;
-      cancelBtn.style.opacity = "0.6";
-      cancelBtn.style.cursor = "not-allowed";
+      cancelBtn.style.opacity = '0.6';
+      cancelBtn.style.cursor = 'not-allowed';
 
       // URL 히스토리에 추가 (중복 제거)
-      const newHistory = [url, ...urlHistory.filter(h => h !== url)].slice(0, 10);
+      const newHistory = [url, ...urlHistory.filter((h) => h !== url)].slice(0, 10);
       chrome.storage.local.set({ publishUrlHistory: newHistory });
 
       // 성과 추적 시작 (기존 URL이 있으면 변경, 없으면 새로 연결)
-      chrome.runtime.sendMessage({
-        action: "link_published_url",
-        data: {
-          cardId: cardId,
-          url: url,
-          status: status,
+      chrome.runtime.sendMessage(
+        {
+          action: 'link_published_url',
+          data: {
+            cardId: cardId,
+            url: url,
+            status: status,
+          },
         },
-      }, (response) => {
-        // 버튼 상태 복원 (에러 발생 시에도)
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = originalBtnText;
-        submitBtn.style.opacity = "1";
-        submitBtn.style.cursor = "pointer";
-        submitBtn.style.pointerEvents = "auto";
-        urlInput.disabled = false;
-        urlInput.style.opacity = "1";
-        urlInput.style.cursor = "text";
-        cancelBtn.disabled = false;
-        cancelBtn.style.opacity = "1";
-        cancelBtn.style.cursor = "pointer";
-        
-        if (response && response.success) {
-          showToast(isEditing 
-            ? "✅ 발행 URL이 변경되었습니다. 성과 추적이 다시 시작됩니다." 
-            : "✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.");
-          cleanup();
-        } else {
-          showToast("❌ URL " + (isEditing ? "변경" : "연결") + " 실패: " + (response?.error || "알 수 없는 오류"));
+        (response) => {
+          // 버튼 상태 복원 (에러 발생 시에도)
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = originalBtnText;
+          submitBtn.style.opacity = '1';
+          submitBtn.style.cursor = 'pointer';
+          submitBtn.style.pointerEvents = 'auto';
+          urlInput.disabled = false;
+          urlInput.style.opacity = '1';
+          urlInput.style.cursor = 'text';
+          cancelBtn.disabled = false;
+          cancelBtn.style.opacity = '1';
+          cancelBtn.style.cursor = 'pointer';
+
+          if (response && response.success) {
+            showToast(
+              isEditing
+                ? '✅ 발행 URL이 변경되었습니다. 성과 추적이 다시 시작됩니다.'
+                : '✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.'
+            );
+            cleanup();
+          } else {
+            showToast(
+              '❌ URL ' +
+                (isEditing ? '변경' : '연결') +
+                ' 실패: ' +
+                (response?.error || '알 수 없는 오류')
+            );
+          }
         }
-      });
+      );
     });
 
-    cancelBtn.addEventListener("click", cleanup);
-    closeBtn.addEventListener("click", cleanup);
-    backdrop.addEventListener("click", cleanup);
+    cancelBtn.addEventListener('click', cleanup);
+    closeBtn.addEventListener('click', cleanup);
+    backdrop.addEventListener('click', cleanup);
 
     // ESC 키로 닫기
     const handleKeydown = (e) => {
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         cleanup();
-        document.removeEventListener("keydown", handleKeydown);
+        document.removeEventListener('keydown', handleKeydown);
       }
     };
-    document.addEventListener("keydown", handleKeydown);
+    document.addEventListener('keydown', handleKeydown);
 
     // 모달 표시 후 입력 필드에 포커스
     setTimeout(() => {
@@ -1683,23 +1768,23 @@ function showPublishUrlModal(container, cardId, status, cardTitle, existingUrl =
 function showPerformanceDetailModal(container, cardId, cardData) {
   const performance = cardData.performance;
   if (!performance || performance.error) {
-    showToast("성과 데이터가 없습니다.");
+    showToast('성과 데이터가 없습니다.');
     return;
   }
 
   // 기존 모달이 있으면 제거
-  const existingModal = container.querySelector(".cp-performance-detail-modal-wrap");
+  const existingModal = container.querySelector('.cp-performance-detail-modal-wrap');
   if (existingModal) {
     existingModal.remove();
   }
 
-  const modalWrap = document.createElement("div");
-  modalWrap.className = "cp-performance-detail-modal-wrap";
-  
+  const modalWrap = document.createElement('div');
+  modalWrap.className = 'cp-performance-detail-modal-wrap';
+
   // 시간대별 데이터 준비
   const hourlyData = performance.hourlyViews || [];
   const hourlyChartData = Array(24).fill(0);
-  hourlyData.forEach(item => {
+  hourlyData.forEach((item) => {
     if (item.hour >= 0 && item.hour < 24) {
       hourlyChartData[item.hour] = item.views;
     }
@@ -1723,7 +1808,7 @@ function showPerformanceDetailModal(container, cardId, cardData) {
       <div class="cp-modal-body">
         <div class="performance-detail-content">
           <div class="perf-header">
-            <h3>${cardData.title || "제목 없음"}</h3>
+            <h3>${cardData.title || '제목 없음'}</h3>
             ${cardData.publishedUrl ? `<a href="${cardData.publishedUrl}" target="_blank" class="perf-url-link">🔗 발행 URL 보기</a>` : ''}
           </div>
 
@@ -1762,24 +1847,30 @@ function showPerformanceDetailModal(container, cardId, cardData) {
             </div>
           </div>
 
-          ${hourlyData.length > 0 ? `
+          ${
+            hourlyData.length > 0
+              ? `
             <div class="perf-chart-section">
               <h4>시간대별 페이지뷰 추이</h4>
               <div class="hourly-chart">
-                ${hourlyChartData.map((views, hour) => {
-                  const maxViews = Math.max(...hourlyChartData, 1);
-                  const height = maxViews > 0 ? (views / maxViews) * 100 : 0;
-                  return `
+                ${hourlyChartData
+                  .map((views, hour) => {
+                    const maxViews = Math.max(...hourlyChartData, 1);
+                    const height = maxViews > 0 ? (views / maxViews) * 100 : 0;
+                    return `
                     <div class="hourly-bar" style="height: ${height}%">
                       <div class="bar-value">${views > 0 ? views : ''}</div>
                       <div class="bar-fill"></div>
                       <div class="bar-label">${hour}시</div>
                     </div>
                   `;
-                }).join('')}
+                  })
+                  .join('')}
               </div>
             </div>
-          ` : ''}
+          `
+              : ''
+          }
 
           <div class="perf-chart-section">
             <h4>주요 성과 지표 비교</h4>
@@ -1787,7 +1878,7 @@ function showPerformanceDetailModal(container, cardId, cardData) {
               <div class="comparison-item">
                 <div class="comparison-label">수익</div>
                 <div class="comparison-bar-wrapper">
-                  <div class="comparison-bar earnings-comparison" style="width: ${Math.min((performance.estimatedEarnings || 0) / Math.max(maxEarnings || 1, 1) * 100, 100)}%">
+                  <div class="comparison-bar earnings-comparison" style="width: ${Math.min(((performance.estimatedEarnings || 0) / Math.max(maxEarnings || 1, 1)) * 100, 100)}%">
                     <span class="comparison-value">$${(performance.estimatedEarnings || 0).toFixed(2)}</span>
                   </div>
                 </div>
@@ -1795,7 +1886,7 @@ function showPerformanceDetailModal(container, cardId, cardData) {
               <div class="comparison-item">
                 <div class="comparison-label">페이지뷰</div>
                 <div class="comparison-bar-wrapper">
-                  <div class="comparison-bar pageviews-comparison" style="width: ${Math.min((performance.pageviews || 0) / Math.max(maxPageviews || 1, 1) * 100, 100)}%">
+                  <div class="comparison-bar pageviews-comparison" style="width: ${Math.min(((performance.pageviews || 0) / Math.max(maxPageviews || 1, 1)) * 100, 100)}%">
                     <span class="comparison-value">${(performance.pageviews || 0).toLocaleString()}</span>
                   </div>
                 </div>
@@ -1803,7 +1894,7 @@ function showPerformanceDetailModal(container, cardId, cardData) {
               <div class="comparison-item">
                 <div class="comparison-label">체류 시간</div>
                 <div class="comparison-bar-wrapper">
-                  <div class="comparison-bar duration-comparison" style="width: ${Math.min((performance.avgSessionDuration || 0) / Math.max(maxDuration || 1, 1) * 100, 100)}%">
+                  <div class="comparison-bar duration-comparison" style="width: ${Math.min(((performance.avgSessionDuration || 0) / Math.max(maxDuration || 1, 1)) * 100, 100)}%">
                     <span class="comparison-value">${Math.round(performance.avgSessionDuration || 0)}초</span>
                   </div>
                 </div>
@@ -1811,11 +1902,15 @@ function showPerformanceDetailModal(container, cardId, cardData) {
             </div>
           </div>
 
-          ${topSources.length > 0 ? `
+          ${
+            topSources.length > 0
+              ? `
             <div class="perf-traffic-section">
               <h4>주요 유입 경로</h4>
               <div class="traffic-sources-list">
-                ${topSources.map((source, idx) => `
+                ${topSources
+                  .map(
+                    (source, idx) => `
                   <div class="traffic-source-item">
                     <span class="source-rank">${idx + 1}</span>
                     <div class="source-info">
@@ -1824,16 +1919,24 @@ function showPerformanceDetailModal(container, cardId, cardData) {
                     </div>
                     <div class="source-sessions">${source.sessions.toLocaleString()} 세션</div>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
-          ` : ''}
+          `
+              : ''
+          }
 
-          ${performance.lastUpdatedAt ? `
+          ${
+            performance.lastUpdatedAt
+              ? `
             <div class="perf-footer">
               <span class="last-updated">마지막 업데이트: ${new Date(performance.lastUpdatedAt).toLocaleString('ko-KR')}</span>
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
       <div class="cp-modal-footer">
@@ -1847,8 +1950,8 @@ function showPerformanceDetailModal(container, cardId, cardData) {
   // 전체 데이터에서 최대값 계산 (비교 차트용)
   const firebase = window.firebase;
   if (firebase) {
-    const kanbanRef = firebase.database().ref("kanban");
-    kanbanRef.once("value", (snapshot) => {
+    const kanbanRef = firebase.database().ref('kanban');
+    kanbanRef.once('value', (snapshot) => {
       const allCards = snapshot.val() || {};
       let allEarnings = [performance.estimatedEarnings || 0];
       let allPageviews = [performance.pageviews || 0];
@@ -1874,43 +1977,52 @@ function showPerformanceDetailModal(container, cardId, cardData) {
     });
   }
 
-  const closeBtn = modalWrap.querySelector(".cp-modal-close");
-  const cancelBtn = modalWrap.querySelector("#close-detail-btn");
-  const backdrop = modalWrap.querySelector(".cp-modal-backdrop");
+  const closeBtn = modalWrap.querySelector('.cp-modal-close');
+  const cancelBtn = modalWrap.querySelector('#close-detail-btn');
+  const backdrop = modalWrap.querySelector('.cp-modal-backdrop');
 
-    const cleanup = () => {
-      modalWrap.remove();
-      isPublishUrlModalOpen = false; // 모달 닫힘 플래그 리셋
-    };
+  const cleanup = () => {
+    modalWrap.remove();
+    isPublishUrlModalOpen = false; // 모달 닫힘 플래그 리셋
+  };
 
-  closeBtn.addEventListener("click", cleanup);
-  cancelBtn.addEventListener("click", cleanup);
-  backdrop.addEventListener("click", cleanup);
+  closeBtn.addEventListener('click', cleanup);
+  cancelBtn.addEventListener('click', cleanup);
+  backdrop.addEventListener('click', cleanup);
 
   // ESC 키로 닫기
   const handleKeydown = (e) => {
-    if (e.key === "Escape") {
+    if (e.key === 'Escape') {
       cleanup();
-      document.removeEventListener("keydown", handleKeydown);
+      document.removeEventListener('keydown', handleKeydown);
     }
   };
-  document.addEventListener("keydown", handleKeydown);
+  document.addEventListener('keydown', handleKeydown);
 }
 
 /**
  * 비교 차트 업데이트 함수
  */
 function updateComparisonChart(modalWrap, performance, maxEarnings, maxPageviews, maxDuration) {
-  const chartContainer = modalWrap.querySelector("#metrics-comparison-chart");
+  const chartContainer = modalWrap.querySelector('#metrics-comparison-chart');
   if (!chartContainer) return;
 
-  const earningsWidth = Math.min((performance.estimatedEarnings || 0) / Math.max(maxEarnings, 1) * 100, 100);
-  const pageviewsWidth = Math.min((performance.pageviews || 0) / Math.max(maxPageviews, 1) * 100, 100);
-  const durationWidth = Math.min((performance.avgSessionDuration || 0) / Math.max(maxDuration, 1) * 100, 100);
+  const earningsWidth = Math.min(
+    ((performance.estimatedEarnings || 0) / Math.max(maxEarnings, 1)) * 100,
+    100
+  );
+  const pageviewsWidth = Math.min(
+    ((performance.pageviews || 0) / Math.max(maxPageviews, 1)) * 100,
+    100
+  );
+  const durationWidth = Math.min(
+    ((performance.avgSessionDuration || 0) / Math.max(maxDuration, 1)) * 100,
+    100
+  );
 
-  const earningsBar = chartContainer.querySelector(".earnings-comparison");
-  const pageviewsBar = chartContainer.querySelector(".pageviews-comparison");
-  const durationBar = chartContainer.querySelector(".duration-comparison");
+  const earningsBar = chartContainer.querySelector('.earnings-comparison');
+  const pageviewsBar = chartContainer.querySelector('.pageviews-comparison');
+  const durationBar = chartContainer.querySelector('.duration-comparison');
 
   if (earningsBar) {
     earningsBar.style.width = `${earningsWidth}%`;

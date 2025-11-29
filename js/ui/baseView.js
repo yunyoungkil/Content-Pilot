@@ -17,7 +17,7 @@ export class BaseView {
     this.observers = []; // 등록된 observer 추적
     this.isDestroyed = false;
     this.createdAt = Date.now();
-    
+
     Logger.debug(`[BaseView] ${this.constructor.name} 인스턴스 생성됨`);
   }
 
@@ -30,14 +30,18 @@ export class BaseView {
    */
   addEventListener(target, event, handler, options = false) {
     if (this.isDestroyed) {
-      Logger.warn(`[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. 이벤트 리스너 추가 무시.`);
+      Logger.warn(
+        `[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. 이벤트 리스너 추가 무시.`
+      );
       return;
     }
 
     target.addEventListener(event, handler, options);
     this.eventListeners.push({ target, event, handler, options });
-    
-    Logger.debug(`[BaseView] ${this.constructor.name} 이벤트 리스너 추가: ${event} on ${target.constructor.name || target.nodeName}`);
+
+    Logger.debug(
+      `[BaseView] ${this.constructor.name} 이벤트 리스너 추가: ${event} on ${target.constructor.name || target.nodeName}`
+    );
   }
 
   /**
@@ -48,13 +52,15 @@ export class BaseView {
    */
   setInterval(callback, delay) {
     if (this.isDestroyed) {
-      Logger.warn(`[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. interval 추가 무시.`);
+      Logger.warn(
+        `[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. interval 추가 무시.`
+      );
       return null;
     }
 
     const id = setInterval(callback, delay);
     this.intervals.push(id);
-    
+
     Logger.debug(`[BaseView] ${this.constructor.name} interval 등록: ${delay}ms`);
     return id;
   }
@@ -67,13 +73,15 @@ export class BaseView {
    */
   setTimeout(callback, delay) {
     if (this.isDestroyed) {
-      Logger.warn(`[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. timeout 추가 무시.`);
+      Logger.warn(
+        `[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. timeout 추가 무시.`
+      );
       return null;
     }
 
     const id = setTimeout(callback, delay);
     this.timeouts.push(id);
-    
+
     Logger.debug(`[BaseView] ${this.constructor.name} timeout 등록: ${delay}ms`);
     return id;
   }
@@ -87,14 +95,16 @@ export class BaseView {
    */
   observeMutation(target, callback, options = {}) {
     if (this.isDestroyed) {
-      Logger.warn(`[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. observer 추가 무시.`);
+      Logger.warn(
+        `[BaseView] ${this.constructor.name}는 이미 destroy되었습니다. observer 추가 무시.`
+      );
       return null;
     }
 
     const observer = new MutationObserver(callback);
     observer.observe(target, options);
     this.observers.push(observer);
-    
+
     Logger.debug(`[BaseView] ${this.constructor.name} MutationObserver 등록`);
     return observer;
   }
@@ -115,7 +125,9 @@ export class BaseView {
     this.eventListeners.forEach(({ target, event, handler, options }) => {
       try {
         target.removeEventListener(event, handler, options);
-        Logger.debug(`[BaseView] 이벤트 리스너 제거: ${event} on ${target.constructor.name || target.nodeName}`);
+        Logger.debug(
+          `[BaseView] 이벤트 리스너 제거: ${event} on ${target.constructor.name || target.nodeName}`
+        );
       } catch (error) {
         Logger.error(`[BaseView] 이벤트 리스너 제거 실패:`, error);
       }
@@ -123,7 +135,7 @@ export class BaseView {
     this.eventListeners = [];
 
     // Interval 정리
-    this.intervals.forEach(id => {
+    this.intervals.forEach((id) => {
       try {
         clearInterval(id);
         Logger.debug(`[BaseView] interval 제거: ${id}`);
@@ -134,7 +146,7 @@ export class BaseView {
     this.intervals = [];
 
     // Timeout 정리
-    this.timeouts.forEach(id => {
+    this.timeouts.forEach((id) => {
       try {
         clearTimeout(id);
         Logger.debug(`[BaseView] timeout 제거: ${id}`);
@@ -145,7 +157,7 @@ export class BaseView {
     this.timeouts = [];
 
     // Observer 정리
-    this.observers.forEach(observer => {
+    this.observers.forEach((observer) => {
       try {
         observer.disconnect();
         Logger.debug(`[BaseView] MutationObserver 제거`);
@@ -215,4 +227,3 @@ export class BaseView {
     Logger.debug(`[BaseView] ${this.constructor.name} 비활성화됨`);
   }
 }
-

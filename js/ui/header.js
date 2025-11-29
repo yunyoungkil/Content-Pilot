@@ -1,22 +1,22 @@
 // js/ui/header.js
 
 // 정적 import로 affiliateModal을 미리 로드하여 청크 로딩 문제 해결
-import { renderAffiliateModal } from "./affiliateModal.js";
+import { renderAffiliateModal } from './affiliateModal.js';
 
 // 공통 헤더 렌더링 함수
 export function renderPanelHeader() {
-  const iconUrl = chrome.runtime.getURL("images/icon-32.png");
-  const activeMode = window.__cp_active_mode || "scrapbook";
-  const isWorkspaceMode = activeMode === "workspace";
+  const iconUrl = chrome.runtime.getURL('images/icon-32.png');
+  const activeMode = window.__cp_active_mode || 'scrapbook';
+  const isWorkspaceMode = activeMode === 'workspace';
   const isLayoutMode = !!window.__cp_layout_mode_active;
 
   const tabs = [
-    { key: "dashboard", label: "대시보드", color: "#1a73e8" },
-    { key: "scrapbook", label: "스크랩북", color: "#4285F4" },
-    { key: "kanban", label: "기획 보드", color: "#34A853" },
-    { key: "performance", label: "성과 대시보드", color: "#9C27B0" },
-    { key: "report", label: "성과 리포트", color: "#FF6B6B" },
-    { key: "draft", label: "초안 작성", color: "#FBBC05" },
+    { key: 'dashboard', label: '대시보드', color: '#1a73e8' },
+    { key: 'scrapbook', label: '스크랩북', color: '#4285F4' },
+    { key: 'kanban', label: '기획 보드', color: '#34A853' },
+    { key: 'performance', label: '성과 대시보드', color: '#9C27B0' },
+    { key: 'report', label: '성과 리포트', color: '#FF6B6B' },
+    { key: 'draft', label: '초안 작성', color: '#FBBC05' },
     // 채널 연동 탭 제거됨 - 헤더의 글로벌 선택기로 대체
   ];
 
@@ -39,20 +39,20 @@ export function renderPanelHeader() {
         </button>
         <label id="cp-layout-mode-btn" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:2px 4px;border-radius:6px;transition:background 0.15s;line-height:1;">
           <input type="checkbox" id="cp-layout-mode-switch" style="display:none;" ${
-            isLayoutMode ? "checked" : ""
+            isLayoutMode ? 'checked' : ''
           }>
           <span style="width:34px;height:20px;display:inline-block;position:relative;">
             <span style="position:absolute;left:0;top:0;width:34px;height:20px;background:${
-              isLayoutMode ? "#e3f2fd" : "#e0e0e0"
+              isLayoutMode ? '#e3f2fd' : '#e0e0e0'
             };border-radius:12px;transition:background 0.2s;"></span>
             <span style="position:absolute;top:2px;left:${
-              isLayoutMode ? "16px" : "2px"
+              isLayoutMode ? '16px' : '2px'
             };width:16px;height:16px;background:${
-    isLayoutMode ? "#1976d2" : "#888"
-  };border-radius:50%;transition:left 0.2s,background 0.2s;"></span>
+              isLayoutMode ? '#1976d2' : '#888'
+            };border-radius:50%;transition:left 0.2s,background 0.2s;"></span>
           </span>
           <span style="font-size:14px;font-weight:600;color:${
-            isLayoutMode ? "#1976d2" : "#888"
+            isLayoutMode ? '#1976d2' : '#888'
           };user-select:none;">레이아웃</span>
         </label>
         <button id="open-diagnostics-btn" class="cp-panel-icon-btn" title="시스템 진단" style="font-size:18px;padding:4px;border-radius:50%;transition:background 0.2s;">🛠️</button>
@@ -77,9 +77,7 @@ export function renderPanelHeader() {
       </div>
     </div>
     
-    ${
-      /* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */ ""
-    }
+    ${/* 워크스페이스 모드일 경우 '뒤로가기' 버튼을, 아닐 경우 기존 탭을 보여줍니다. */ ''}
     ${
       isWorkspaceMode
         ? `
@@ -95,22 +93,18 @@ export function renderPanelHeader() {
       ${tabs
         .map(
           (tab) => `
-        <div class="cp-mode-tab ${
-          activeMode === tab.key ? " active" : ""
-        }" data-key="${
-            tab.key
-          }" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${
-            activeMode === tab.key ? tab.color : "#888"
-          };background:${
-            activeMode === tab.key ? "#f2f3f7" : "transparent"
-          };border:2px solid ${
-            activeMode === tab.key ? tab.color : "transparent"
-          };transition:all 0.2s;">
+        <div class="cp-mode-tab ${activeMode === tab.key ? ' active' : ''}" data-key="${
+          tab.key
+        }" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:15px;color:${
+          activeMode === tab.key ? tab.color : '#888'
+        };background:${activeMode === tab.key ? '#f2f3f7' : 'transparent'};border:2px solid ${
+          activeMode === tab.key ? tab.color : 'transparent'
+        };transition:all 0.2s;">
           ${tab.label}
         </div>
       `
         )
-        .join("")}
+        .join('')}
     </div>
     `
     }
@@ -119,11 +113,11 @@ export function renderPanelHeader() {
 
 // 헤더 이벤트 리스너 추가 함수
 export function addHeaderEventListeners(shadowRoot) {
-  console.log("[DEBUG] addHeaderEventListeners called");
+  console.log('[DEBUG] addHeaderEventListeners called');
 
   // DOM이 완전히 렌더링된 후 이벤트 리스너 추가
   const initHandler = () => {
-    console.log("[DEBUG] requestAnimationFrame callback executed");
+    console.log('[DEBUG] requestAnimationFrame callback executed');
 
     // 글로벌 채널 선택기 초기화
     initGlobalChannelSelector(shadowRoot);
@@ -132,66 +126,57 @@ export function addHeaderEventListeners(shadowRoot) {
     // we intentionally avoid capturing elements here because the header
     // may be re-rendered. Resolve them on each click so the delegated
     // handler will work even after header DOM replacement.
-    const settingsBtn = () => shadowRoot.querySelector("#cp-settings-btn");
-    const settingsMenu = () => shadowRoot.querySelector("#cp-settings-menu");
+    const settingsBtn = () => shadowRoot.querySelector('#cp-settings-btn');
+    const settingsMenu = () => shadowRoot.querySelector('#cp-settings-menu');
 
-    console.log("[DEBUG] settingsBtn found:", !!settingsBtn);
-    console.log("[DEBUG] settingsMenu found:", !!settingsMenu);
+    console.log('[DEBUG] settingsBtn found:', !!settingsBtn);
+    console.log('[DEBUG] settingsMenu found:', !!settingsMenu);
 
     if (settingsBtn && settingsMenu) {
       // 이벤트 위임을 shadowRoot에서 한 번만 등록하도록 보호합니다.
       if (shadowRoot.__cpHeaderHandlersAttached) {
-        console.log("[DEBUG] header handlers already attached for this root");
+        console.log('[DEBUG] header handlers already attached for this root');
       } else {
-        console.log("[DEBUG] Attaching delegated header handlers");
+        console.log('[DEBUG] Attaching delegated header handlers');
 
         // 클릭 위임: settings 버튼과 메뉴 항목 처리를 하나의 핸들러에서 담당
         const shadowClickHandler = (e) => {
           const target = e.target;
 
           // 설정 버튼 토글 - resolve menu dynamically so re-renders work
-          if (target.closest && target.closest("#cp-settings-btn")) {
+          if (target.closest && target.closest('#cp-settings-btn')) {
             const menuEl = settingsMenu();
             if (!menuEl) return;
-            console.log("[DEBUG] settingsBtn clicked (delegated)");
+            console.log('[DEBUG] settingsBtn clicked (delegated)');
             e.stopPropagation();
-            const isVisible = menuEl.style.display !== "none";
-            menuEl.style.display = isVisible ? "none" : "block";
-            console.log(
-              "[DEBUG] settingsMenu display set to:",
-              menuEl.style.display
-            );
+            const isVisible = menuEl.style.display !== 'none';
+            menuEl.style.display = isVisible ? 'none' : 'block';
+            console.log('[DEBUG] settingsMenu display set to:', menuEl.style.display);
             return;
           }
 
           // 메뉴 아이템 클릭
-          const item =
-            target.closest && target.closest(".cp-settings-menu-item");
+          const item = target.closest && target.closest('.cp-settings-menu-item');
           if (item) {
-            console.log(
-              "[DEBUG] Menu item clicked (delegated):",
-              item.dataset.action
-            );
+            console.log('[DEBUG] Menu item clicked (delegated):', item.dataset.action);
             e.stopPropagation();
             const action = item.dataset.action;
             const menuEl = settingsMenu();
-            if (menuEl) menuEl.style.display = "none";
+            if (menuEl) menuEl.style.display = 'none';
 
-            if (action === "affiliate") {
-              const mainArea = shadowRoot.querySelector("#cp-main-area");
+            if (action === 'affiliate') {
+              const mainArea = shadowRoot.querySelector('#cp-main-area');
               if (mainArea) {
                 renderAffiliateModal(mainArea);
-                const modal = mainArea.querySelector("#affiliate-modal");
-                if (modal) modal.style.display = "flex";
+                const modal = mainArea.querySelector('#affiliate-modal');
+                if (modal) modal.style.display = 'flex';
               }
-            } else if (action === "diagnosis") {
-              const mainArea = shadowRoot.querySelector("#cp-main-area");
+            } else if (action === 'diagnosis') {
+              const mainArea = shadowRoot.querySelector('#cp-main-area');
               if (mainArea) {
-                window.__cp_active_mode = "admin";
+                window.__cp_active_mode = 'admin';
                 renderHeaderAndTabs(shadowRoot);
-                import("./adminMode.js").then((module) =>
-                  module.renderAdminMode(mainArea)
-                );
+                import('./adminMode.js').then((module) => module.renderAdminMode(mainArea));
               }
             }
             return;
@@ -205,12 +190,12 @@ export function addHeaderEventListeners(shadowRoot) {
           if (path.includes(shadowRoot.host)) {
             return; // shadow 내부 클릭이면 무시
           }
-          const menu = shadowRoot.querySelector("#cp-settings-menu");
-          if (menu) menu.style.display = "none";
+          const menu = shadowRoot.querySelector('#cp-settings-menu');
+          if (menu) menu.style.display = 'none';
         };
 
-        shadowRoot.addEventListener("click", shadowClickHandler);
-        document.addEventListener("click", documentClickHandler);
+        shadowRoot.addEventListener('click', shadowClickHandler);
+        document.addEventListener('click', documentClickHandler);
 
         // 상태 표시 및 핸들러 레퍼런스 저장
         shadowRoot.__cpHeaderHandlersAttached = true;
@@ -220,17 +205,14 @@ export function addHeaderEventListeners(shadowRoot) {
         };
       }
     } else {
-      console.error("[ERROR] settingsBtn or settingsMenu not found");
+      console.error('[ERROR] settingsBtn or settingsMenu not found');
     }
   };
 
   // Try to run on next animation frame but also schedule a micro fallback
   // so environments (like Jest/jsdom) which don't reliably run RAF in tests
   // still execute the initialization quickly.
-  if (
-    typeof window !== "undefined" &&
-    typeof window.requestAnimationFrame === "function"
-  ) {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     window.requestAnimationFrame(initHandler);
     // micro-fallback
     setTimeout(initHandler, 0);
@@ -241,52 +223,50 @@ export function addHeaderEventListeners(shadowRoot) {
 
 // 글로벌 채널 선택기 초기화
 async function initGlobalChannelSelector(shadowRoot) {
-  const selector = shadowRoot.querySelector("#global-channel-selector");
+  const selector = shadowRoot.querySelector('#global-channel-selector');
   if (!selector) return;
 
   // 1. 저장된 활성 채널 ID 가져오기
-  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+  const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
 
   // 2. 채널 목록 가져오기
-  chrome.runtime.sendMessage({ action: "get_channels_and_key" }, (response) => {
+  chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
     if (response && response.success) {
       const myBlogs = response.data.myChannels?.blogs || [];
 
       // 옵션 초기화
-      selector.innerHTML = "";
+      selector.innerHTML = '';
 
       if (myBlogs.length === 0) {
         // [체크리스트 3-🅱️] 채널이 없을 때
-        const option = document.createElement("option");
-        option.value = "__MANAGE__";
-        option.textContent = "👉 채널을 추가해주세요";
+        const option = document.createElement('option');
+        option.value = '__MANAGE__';
+        option.textContent = '👉 채널을 추가해주세요';
         selector.appendChild(option);
-        selector.style.borderColor = "#ea4335"; // 빨간색 테두리로 강조
-        selector.style.color = "#ea4335"; // 빨간색 텍스트로 강조
-        selector.style.fontWeight = "500";
+        selector.style.borderColor = '#ea4335'; // 빨간색 테두리로 강조
+        selector.style.color = '#ea4335'; // 빨간색 텍스트로 강조
+        selector.style.fontWeight = '500';
         // openChannelManager(); // panel.js에서 처리하므로 여기선 생략 가능
       } else {
         // 채널 목록 추가
         let foundActive = false;
         const generateChannelId = (channel) => {
           if (channel.id) return channel.id;
-          if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, "");
-          if (channel.url) return btoa(channel.url).replace(/=/g, "");
+          if (channel.apiUrl) return btoa(channel.apiUrl).replace(/=/g, '');
+          if (channel.url) return btoa(channel.url).replace(/=/g, '');
           return null;
         };
 
         myBlogs.forEach((blog) => {
-          const option = document.createElement("option");
+          const option = document.createElement('option');
           // ID 생성 (id > apiUrl > url 순서)
           const id = generateChannelId(blog);
           if (!id) {
-            console.warn("[Header] 채널 ID를 생성할 수 없습니다:", blog);
+            console.warn('[Header] 채널 ID를 생성할 수 없습니다:', blog);
             return;
           }
           option.value = id;
-          option.textContent = `📺 ${
-            blog.inputUrl || blog.url || blog.apiUrl || "알 수 없음"
-          }`;
+          option.textContent = `📺 ${blog.inputUrl || blog.url || blog.apiUrl || '알 수 없음'}`;
           selector.appendChild(option);
 
           if (id === activeChannelId) foundActive = true;
@@ -302,29 +282,29 @@ async function initGlobalChannelSelector(shadowRoot) {
         }
 
         // 구분선 및 관리 메뉴 추가
-        const separator = document.createElement("option");
+        const separator = document.createElement('option');
         separator.disabled = true;
-        separator.textContent = "──────────";
+        separator.textContent = '──────────';
         selector.appendChild(separator);
 
-        const manageOption = document.createElement("option");
-        manageOption.value = "__MANAGE__";
-        manageOption.textContent = "⚙️ 채널 관리...";
+        const manageOption = document.createElement('option');
+        manageOption.value = '__MANAGE__';
+        manageOption.textContent = '⚙️ 채널 관리...';
         selector.appendChild(manageOption);
       }
     }
   });
 
   // 3. 변경 이벤트 리스너
-  selector.addEventListener("change", (e) => {
+  selector.addEventListener('change', (e) => {
     const selectedValue = e.target.value;
 
-    if (selectedValue === "__MANAGE__") {
+    if (selectedValue === '__MANAGE__') {
       // '채널 관리' 선택 시
       openChannelManager(shadowRoot);
 
       // UI 상으로는 다시 원래 채널(또는 첫번째)로 돌려놓기 (UX)
-      chrome.storage.local.get("activeChannelId", (res) => {
+      chrome.storage.local.get('activeChannelId', (res) => {
         if (res.activeChannelId) {
           // 목록에 해당 ID가 있는지 확인 후 복구
           const exists = Array.from(selector.options).some(
@@ -339,12 +319,12 @@ async function initGlobalChannelSelector(shadowRoot) {
         console.log(`[Global] 활성 채널 변경됨: ${selectedValue}`);
 
         // [체크리스트 4-1] 헤더 반응성: 로딩 표시 추가
-        const mainArea = shadowRoot.querySelector("#cp-main-area");
+        const mainArea = shadowRoot.querySelector('#cp-main-area');
         if (!mainArea) return;
 
         // 로딩 오버레이 표시
-        const loadingOverlay = document.createElement("div");
-        loadingOverlay.id = "channel-switch-loading";
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.id = 'channel-switch-loading';
         loadingOverlay.style.cssText = `
           position: absolute;
           top: 0;
@@ -360,10 +340,10 @@ async function initGlobalChannelSelector(shadowRoot) {
           color: #666;
         `;
         loadingOverlay.innerHTML = `<div style="text-align: center;"><div style="margin-bottom: 8px;">⏳ 채널 데이터 로딩 중...</div></div>`;
-        mainArea.style.position = "relative";
+        mainArea.style.position = 'relative';
         mainArea.appendChild(loadingOverlay);
 
-        const activeTab = shadowRoot.querySelector(".cp-mode-tab.active");
+        const activeTab = shadowRoot.querySelector('.cp-mode-tab.active');
         if (activeTab) {
           const tabName = activeTab.dataset.key;
 
@@ -372,44 +352,44 @@ async function initGlobalChannelSelector(shadowRoot) {
             // 탭별 새로고침 로직
             Promise.all(
               [
-                tabName === "dashboard"
-                  ? import("./dashboardMode.js").then((module) => {
+                tabName === 'dashboard'
+                  ? import('./dashboardMode.js').then((module) => {
                       module.renderDashboard(mainArea);
                       module.addDashboardEventListeners(mainArea);
                     })
                   : null,
-                tabName === "scrapbook"
-                  ? import("./scrapbookMode.js").then((module) => {
+                tabName === 'scrapbook'
+                  ? import('./scrapbookMode.js').then((module) => {
                       module.renderScrapbook(mainArea);
                     })
                   : null,
-                tabName === "kanban"
-                  ? import("./kanbanMode.js").then((module) => {
+                tabName === 'kanban'
+                  ? import('./kanbanMode.js').then((module) => {
                       module.renderKanban(mainArea);
                       module.addKanbanEventListeners(mainArea);
                     })
                   : null,
-                tabName === "performance"
-                  ? import("./performanceDashboardMode.js").then((module) => {
+                tabName === 'performance'
+                  ? import('./performanceDashboardMode.js').then((module) => {
                       module.renderPerformanceDashboard(mainArea);
                     })
                   : null,
-                tabName === "report"
-                  ? import("./performanceReportMode.js").then((module) => {
+                tabName === 'report'
+                  ? import('./performanceReportMode.js').then((module) => {
                       module.renderPerformanceReport(mainArea);
                     })
                   : null,
               ].filter(Boolean)
             ).then(() => {
               // 로딩 오버레이 제거
-              const loading = mainArea.querySelector("#channel-switch-loading");
+              const loading = mainArea.querySelector('#channel-switch-loading');
               if (loading) loading.remove();
             });
           }, 100);
         } else {
           // 로딩 오버레이 제거 (탭이 없는 경우)
           setTimeout(() => {
-            const loading = mainArea.querySelector("#channel-switch-loading");
+            const loading = mainArea.querySelector('#channel-switch-loading');
             if (loading) loading.remove();
           }, 500);
         }
@@ -420,16 +400,14 @@ async function initGlobalChannelSelector(shadowRoot) {
 
 // 채널 관리 화면으로 전환하는 헬퍼
 function openChannelManager(shadowRoot) {
-  const mainArea = shadowRoot.querySelector("#cp-main-area");
+  const mainArea = shadowRoot.querySelector('#cp-main-area');
   if (mainArea) {
     // 탭 스타일 초기화
-    shadowRoot
-      .querySelectorAll(".cp-mode-tab")
-      .forEach((btn) => btn.classList.remove("active"));
+    shadowRoot.querySelectorAll('.cp-mode-tab').forEach((btn) => btn.classList.remove('active'));
 
     // 채널 관리 UI 렌더링
-    window.__cp_active_mode = "channel";
-    import("./channelMode.js").then((module) => {
+    window.__cp_active_mode = 'channel';
+    import('./channelMode.js').then((module) => {
       module.renderChannelMode(mainArea);
       renderHeaderAndTabs(shadowRoot);
     });
@@ -438,7 +416,7 @@ function openChannelManager(shadowRoot) {
 
 // renderHeaderAndTabs 함수 (panel.js에서 사용)
 export function renderHeaderAndTabs(shadowRoot) {
-  const headerArea = shadowRoot.querySelector("#cp-header-area");
+  const headerArea = shadowRoot.querySelector('#cp-header-area');
   if (headerArea) {
     headerArea.innerHTML = renderPanelHeader();
     addHeaderEventListeners(shadowRoot);

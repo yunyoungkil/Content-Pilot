@@ -1,57 +1,56 @@
 // js/services/analyticsService.js
 
-import { getDb, CONSTANTS, initializeFirebase } from "./firebaseService.js";
-import { ref, get, update } from "./firebaseService.js";
-import { getValidToken } from "./authService.js";
-import { Logger } from "../utils.js";
+import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
+import { ref, get, update } from './firebaseService.js';
+import { getValidToken } from './authService.js';
+import { Logger } from '../utils.js';
 
 // 1. 에러 전파 유틸리티
 export async function sendErrorToUI(errorType, message) {
   try {
-    let icon = "⚠️";
+    let icon = '⚠️';
     let msg = message;
 
     switch (errorType) {
-      case "TOKEN_EXPIRED":
-        icon = "🔑";
-        msg = "인증 토큰 만료. 재로그인이 필요합니다.";
+      case 'TOKEN_EXPIRED':
+        icon = '🔑';
+        msg = '인증 토큰 만료. 재로그인이 필요합니다.';
         break;
-      case "QUOTA_EXCEEDED":
-        icon = "📊";
-        msg = "API 할당량 초과.";
+      case 'QUOTA_EXCEEDED':
+        icon = '📊';
+        msg = 'API 할당량 초과.';
         break;
-      case "API_KEY_MISSING":
-        icon = "🔑";
-        msg =
-          "API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
+      case 'API_KEY_MISSING':
+        icon = '🔑';
+        msg = "API 키가 설정되지 않았습니다. '채널 연동' 탭에서 API 키를 저장해주세요.";
         break;
-      case "UNAUTHORIZED":
-        icon = "🔴";
-        msg = "인증 실패: 토큰이 만료되었습니다 (재로그인 필요)";
+      case 'UNAUTHORIZED':
+        icon = '🔴';
+        msg = '인증 실패: 토큰이 만료되었습니다 (재로그인 필요)';
         break;
-      case "FORBIDDEN":
-        icon = "🚫";
-        msg = "접근 권한이 없습니다.";
+      case 'FORBIDDEN':
+        icon = '🚫';
+        msg = '접근 권한이 없습니다.';
         break;
-      case "API_ERROR":
-        icon = "⚠️";
-        msg = message || "API 호출 중 오류가 발생했습니다.";
+      case 'API_ERROR':
+        icon = '⚠️';
+        msg = message || 'API 호출 중 오류가 발생했습니다.';
         break;
       default:
-        icon = "⚠️";
-        msg = message || "오류가 발생했습니다.";
+        icon = '⚠️';
+        msg = message || '오류가 발생했습니다.';
     }
 
     chrome.runtime
       .sendMessage({
-        action: "show_error_toast",
+        action: 'show_error_toast',
         errorType,
         message: msg,
         icon,
       })
       .catch(() => {});
   } catch (e) {
-    console.error("[sendErrorToUI] 에러 전파 실패:", e);
+    console.error('[sendErrorToUI] 에러 전파 실패:', e);
   }
 }
 
@@ -67,60 +66,57 @@ export async function getAnalyticsData(
 
   let urlObj;
   try {
-    const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
+    const normalizedUrl = url.startsWith('http') ? url : `https://${url}`;
     urlObj = new URL(normalizedUrl);
   } catch (e) {
     return { pageviews: 0, gaEarnings: 0 };
   }
 
   const rawPath = urlObj.pathname;
-  const normalizedPath =
-    rawPath.endsWith("/") && rawPath !== "/" ? rawPath.slice(0, -1) : rawPath;
+  const normalizedPath = rawPath.endsWith('/') && rawPath !== '/' ? rawPath.slice(0, -1) : rawPath;
 
   let filterPath = normalizedPath;
   if (!useEncodedPath) {
     try {
       filterPath = decodeURIComponent(normalizedPath);
-    } catch (e) {}
+    } catch (e) {
+      Logger.warn('[analyticsService] decodeURIComponent failed', e);
+    }
   }
 
   try {
     const res = await fetch(API_URL, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+        dateRanges: [{ startDate: '28daysAgo', endDate: 'today' }],
         // [핵심] 차원 확장: 경로 + 소스 + 기기
-        dimensions: [
-          { name: "pagePath" },
-          { name: "sessionSource" },
-          { name: "deviceCategory" },
-        ],
+        dimensions: [{ name: 'pagePath' }, { name: 'sessionSource' }, { name: 'deviceCategory' }],
         metrics: [
-          { name: "screenPageViews" },
-          { name: "averageSessionDuration" },
-          { name: "sessions" },
-          { name: "screenPageViewsPerSession" },
-          { name: "bounceRate" },
-          { name: "engagementRate" },
-          { name: "newUsers" },
-          { name: "activeUsers" },
-          { name: "totalAdRevenue" },
+          { name: 'screenPageViews' },
+          { name: 'averageSessionDuration' },
+          { name: 'sessions' },
+          { name: 'screenPageViewsPerSession' },
+          { name: 'bounceRate' },
+          { name: 'engagementRate' },
+          { name: 'newUsers' },
+          { name: 'activeUsers' },
+          { name: 'totalAdRevenue' },
         ],
         dimensionFilter: {
           filter: {
-            fieldName: "pagePath",
-            stringFilter: { matchType: "BEGINS_WITH", value: filterPath },
+            fieldName: 'pagePath',
+            stringFilter: { matchType: 'BEGINS_WITH', value: filterPath },
           },
         },
       }),
     });
 
     if (!res.ok) {
-      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      if (res.status === 401) throw new Error('UNAUTHORIZED');
       if (res.status === 400 && !useEncodedPath && retryCount === 0) {
         return getAnalyticsData(token, propertyId, url, retryCount + 1, true);
       }
@@ -185,7 +181,7 @@ export async function getAnalyticsData(
           deviceMap[device].revenue += revenue;
         } else {
           // 기타 기기(smart tv 등)는 mobile이나 desktop으로 귀속하거나 무시
-          if (device.includes("mobile")) {
+          if (device.includes('mobile')) {
             deviceMap.mobile.users += activeUsers;
             deviceMap.mobile.revenue += revenue;
           }
@@ -193,21 +189,16 @@ export async function getAnalyticsData(
       });
 
       // 평균값 계산
-      const avgSessionDuration =
-        totalSessions > 0 ? weightedSessionDuration / totalSessions : 0;
-      const avgEngagementRate =
-        totalSessions > 0 ? weightedEngagementRate / totalSessions : 0;
+      const avgSessionDuration = totalSessions > 0 ? weightedSessionDuration / totalSessions : 0;
+      const avgEngagementRate = totalSessions > 0 ? weightedEngagementRate / totalSessions : 0;
 
       // Top Source 선정
       const topSource =
-        Object.keys(sourceMap).sort((a, b) => sourceMap[b] - sourceMap[a])[0] ||
-        "direct";
+        Object.keys(sourceMap).sort((a, b) => sourceMap[b] - sourceMap[a])[0] || 'direct';
 
       // [추가] 재방문율 계산 ((활성 - 신규) / 활성)
       const returningUsersRatio =
-        totalActiveUsers > 0
-          ? (totalActiveUsers - totalNewUsers) / totalActiveUsers
-          : 0;
+        totalActiveUsers > 0 ? (totalActiveUsers - totalNewUsers) / totalActiveUsers : 0;
 
       return {
         pageviews: totalPageviews,
@@ -228,17 +219,11 @@ export async function getAnalyticsData(
     }
     return { pageviews: 0, gaEarnings: 0 };
   } catch (e) {
-    if (e.message === "UNAUTHORIZED" && retryCount < 1) {
+    if (e.message === 'UNAUTHORIZED' && retryCount < 1) {
       try {
         const refreshedToken = await getValidToken(false);
         if (refreshedToken) {
-          return getAnalyticsData(
-            refreshedToken,
-            propertyId,
-            url,
-            retryCount + 1,
-            useEncodedPath
-          );
+          return getAnalyticsData(refreshedToken, propertyId, url, retryCount + 1, useEncodedPath);
         }
       } catch (refreshError) {
         console.error(refreshError);
@@ -259,26 +244,21 @@ export async function getAdsenseData(token, accountId, url, retryCount = 0) {
     const domain = urlObj.hostname;
 
     const res = await fetch(API_URL, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        dateRange: "LAST_30_DAYS",
-        metrics: [
-          "ESTIMATED_EARNINGS",
-          "PAGE_VIEWS",
-          "CLICKS",
-          "PAGE_VIEWS_RPM",
-        ],
-        dimensions: ["URL_CHANNEL_NAME"],
+        dateRange: 'LAST_30_DAYS',
+        metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'PAGE_VIEWS_RPM'],
+        dimensions: ['URL_CHANNEL_NAME'],
         filters: [`URL_CHANNEL_NAME==${domain}`],
       }),
     });
 
     if (!res.ok) {
-      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      if (res.status === 401) throw new Error('UNAUTHORIZED');
       return { estimatedEarnings: 0, pageViews: 0 };
     }
 
@@ -301,7 +281,7 @@ export async function getAdsenseData(token, accountId, url, retryCount = 0) {
     }
     return { estimatedEarnings: 0, pageViews: 0 };
   } catch (e) {
-    if (e.message === "UNAUTHORIZED" && retryCount < 1) {
+    if (e.message === 'UNAUTHORIZED' && retryCount < 1) {
       try {
         const refreshedToken = await getValidToken(false);
         if (refreshedToken) {
@@ -312,18 +292,13 @@ export async function getAdsenseData(token, accountId, url, retryCount = 0) {
       }
       throw e;
     }
-    if (e.message === "UNAUTHORIZED") throw e;
+    if (e.message === 'UNAUTHORIZED') throw e;
     return { estimatedEarnings: 0, pageViews: 0, error: e.message };
   }
 }
 
 // [신규] 4. 데이터 수집 (Google Search Console) - CTR & 검색어
-export async function getSearchConsoleData(
-  token,
-  siteUrl,
-  pageUrl,
-  retryCount = 0
-) {
+export async function getSearchConsoleData(token, siteUrl, pageUrl, retryCount = 0) {
   // GSC API URL
   const API_URL = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(
     siteUrl
@@ -331,24 +306,22 @@ export async function getSearchConsoleData(
 
   try {
     const res = await fetch(API_URL, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        startDate: "28daysAgo",
-        endDate: "today",
-        dimensions: ["query"], // 검색어 기준
-        filters: [
-          { dimension: "page", operator: "equals", expression: pageUrl },
-        ],
+        startDate: '28daysAgo',
+        endDate: 'today',
+        dimensions: ['query'], // 검색어 기준
+        filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }],
         rowLimit: 5, // 상위 5개만
       }),
     });
 
     if (!res.ok) {
-      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      if (res.status === 401) throw new Error('UNAUTHORIZED');
       // 403/404 등은 연동 안됨으로 간주하고 0 리턴
       return { pageCTR: 0, topSearchTerms: [] };
     }
@@ -375,8 +348,7 @@ export async function getSearchConsoleData(
       });
 
       const avgCtr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
-      const avgPosition =
-        totalImpressions > 0 ? weightedPosition / totalImpressions : 0;
+      const avgPosition = totalImpressions > 0 ? weightedPosition / totalImpressions : 0;
 
       return {
         pageCTR: avgCtr,
@@ -388,16 +360,11 @@ export async function getSearchConsoleData(
 
     return { pageCTR: 0, topSearchTerms: [] };
   } catch (e) {
-    if (e.message === "UNAUTHORIZED" && retryCount < 1) {
+    if (e.message === 'UNAUTHORIZED' && retryCount < 1) {
       try {
         const refreshedToken = await getValidToken(false);
         if (refreshedToken) {
-          return getSearchConsoleData(
-            refreshedToken,
-            siteUrl,
-            pageUrl,
-            retryCount + 1
-          );
+          return getSearchConsoleData(refreshedToken, siteUrl, pageUrl, retryCount + 1);
         }
       } catch (refreshError) {
         console.error(refreshError);
@@ -415,18 +382,15 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   const userId = CONSTANTS.USER_ID;
 
   let path = contentInfo.path;
-  if (!path.includes(userId))
-    path = path.replace("kanban/", `kanban/${userId}/`);
+  if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
 
   try {
     const cardSnap = await get(ref(db, path));
     const card = cardSnap?.val() || {};
-    const isCompetitorPost = card.origin?.type === "competitor_post";
+    const isCompetitorPost = card.origin?.type === 'competitor_post';
 
     if (isCompetitorPost) {
-      Logger.info(
-        `[updateSinglePerformanceMetric] 경쟁사 포스트 스킵: ${contentInfo.id}`
-      );
+      Logger.info(`[updateSinglePerformanceMetric] 경쟁사 포스트 스킵: ${contentInfo.id}`);
       return;
     }
 
@@ -436,11 +400,11 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     });
 
     const token = await getValidToken(false);
-    if (!token) throw new Error("인증 토큰 부재");
+    if (!token) throw new Error('인증 토큰 부재');
 
-    const storage = await chrome.storage.local.get(["adSenseAccountId"]);
+    const storage = await chrome.storage.local.get(['adSenseAccountId']);
     const adSenseId = storage.adSenseAccountId;
-    if (!adSenseId) throw new Error("AdSense 계정 ID 없음");
+    if (!adSenseId) throw new Error('AdSense 계정 ID 없음');
 
     // 채널 정보 로드
     const channelsSnap = await get(ref(db, `channels/${userId}`));
@@ -449,35 +413,26 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     let siteUrl = null; // GSC용 URL
 
     const blogs = channels.myChannels?.blogs || [];
-    const blog = blogs.find((b) =>
-      contentInfo.url.includes(b.inputUrl || b.url)
-    );
+    const blog = blogs.find((b) => contentInfo.url.includes(b.inputUrl || b.url));
     if (blog) {
       gaId = blog.gaPropertyId;
       // GSC 사이트 URL이 별도로 없으면 기본 URL 사용
       siteUrl = blog.gscSiteUrl || blog.inputUrl || blog.url;
     }
 
-    if (!gaId) throw new Error("GA4 속성 ID 없음");
+    if (!gaId) throw new Error('GA4 속성 ID 없음');
 
     // 병렬 호출 (GA4, AdSense, GSC)
     const [gaData, adData, gscData] = await Promise.allSettled([
       getAnalyticsData(token, gaId, contentInfo.url),
       getAdsenseData(token, adSenseId, contentInfo.url),
-      siteUrl
-        ? getSearchConsoleData(token, siteUrl, contentInfo.url)
-        : Promise.resolve({}),
+      siteUrl ? getSearchConsoleData(token, siteUrl, contentInfo.url) : Promise.resolve({}),
     ]);
 
-    const ga =
-      gaData.status === "fulfilled"
-        ? gaData.value
-        : { gaEarnings: 0, pageviews: 0 };
+    const ga = gaData.status === 'fulfilled' ? gaData.value : { gaEarnings: 0, pageviews: 0 };
     const ad =
-      adData.status === "fulfilled"
-        ? adData.value
-        : { estimatedEarnings: 0, pageViews: 0 };
-    const gsc = gscData.status === "fulfilled" ? gscData.value : { pageCTR: 0 };
+      adData.status === 'fulfilled' ? adData.value : { estimatedEarnings: 0, pageViews: 0 };
+    const gsc = gscData.status === 'fulfilled' ? gscData.value : { pageCTR: 0 };
 
     // 하이브리드 수익 계산
     let finalEarnings = ga.gaEarnings || ad.estimatedEarnings || 0;
@@ -488,7 +443,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       const max = Math.max(ga.gaEarnings, ad.estimatedEarnings);
       if (diff / max > 0.2) {
         dataWarning = {
-          type: "EARNINGS_MISMATCH",
+          type: 'EARNINGS_MISMATCH',
           ga: ga.gaEarnings,
           ad: ad.estimatedEarnings,
         };
@@ -518,7 +473,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       collecting: false,
     });
   } catch (e) {
-    console.error("[Performance Update Fail]", e);
+    console.error('[Performance Update Fail]', e);
     await update(ref(db, `${path}/performance`), {
       collecting: false,
       error: e.message,
@@ -540,15 +495,12 @@ export async function updateAllPerformanceMetrics() {
   for (const status in cards) {
     for (const id in cards[status]) {
       const card = cards[status][id];
-      const isCompetitorPost = card.origin?.type === "competitor_post";
+      const isCompetitorPost = card.origin?.type === 'competitor_post';
       if (isCompetitorPost) continue;
 
       // 6시간 경과 체크
       if (card.performanceTracked && card.publishedUrl) {
-        if (
-          !card.performance?.lastUpdatedAt ||
-          now - card.performance.lastUpdatedAt > 21600000
-        ) {
+        if (!card.performance?.lastUpdatedAt || now - card.performance.lastUpdatedAt > 21600000) {
           tasks.push({
             id,
             path: `kanban/${userId}/${status}/${id}`,
@@ -576,9 +528,9 @@ export async function runAutomatedRenewalChecks() {
 
   if (count > 0) {
     chrome.action.setBadgeText({ text: String(count) });
-    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
   } else {
-    chrome.action.setBadgeText({ text: "" });
+    chrome.action.setBadgeText({ text: '' });
   }
 }
 
@@ -620,10 +572,8 @@ export async function analyzePerformanceData(targetChannelId = null) {
 
   let analysisText = null;
   if (candidates.length > 0) {
-    const avgEarnings =
-      candidates.reduce((sum, c) => sum + c.earnings, 0) / candidates.length;
-    const avgPageviews =
-      candidates.reduce((sum, c) => sum + c.pageviews, 0) / candidates.length;
+    const avgEarnings = candidates.reduce((sum, c) => sum + c.earnings, 0) / candidates.length;
+    const avgPageviews = candidates.reduce((sum, c) => sum + c.pageviews, 0) / candidates.length;
 
     const topTags = {};
     candidates.slice(0, 5).forEach((c) => {
@@ -633,8 +583,7 @@ export async function analyzePerformanceData(targetChannelId = null) {
       });
     });
     const mostCommonTag =
-      Object.keys(topTags).sort((a, b) => topTags[b] - topTags[a])[0] ||
-      "특정 주제";
+      Object.keys(topTags).sort((a, b) => topTags[b] - topTags[a])[0] || '특정 주제';
 
     analysisText = `
 과거 발행 콘텐츠 분석 (${candidates.length}개):
@@ -647,14 +596,14 @@ export async function analyzePerformanceData(targetChannelId = null) {
 ${candidates
   .slice(0, 3)
   .map((c, i) => `${i + 1}. ${c.title} ($${c.earnings.toFixed(2)})`)
-  .join("\n")}
+  .join('\n')}
 
 [인사이트]
 
 상위 콘텐츠들은 주로 '${mostCommonTag}'와 관련된 내용을 다루고 있습니다.
     `.trim();
   } else {
-    analysisText = "분석할 성과 데이터가 없습니다.";
+    analysisText = '분석할 성과 데이터가 없습니다.';
   }
 
   return {
@@ -676,13 +625,13 @@ export async function checkAdSenseRegistrationStatus(
   targetStatus = null
 ) {
   if (!initializeFirebase()) {
-    throw new Error("Firebase 초기화 실패");
+    throw new Error('Firebase 초기화 실패');
   }
 
   const isSingleCardCheck = targetUrl && targetCardId && targetStatus;
   Logger.info(
     `🚀 [AdSense] 등록 확인 시작...${
-      isSingleCardCheck ? ` [단일 카드: ${targetCardId}]` : " [전체 카드]"
+      isSingleCardCheck ? ` [단일 카드: ${targetCardId}]` : ' [전체 카드]'
     }`
   );
 
@@ -690,48 +639,35 @@ export async function checkAdSenseRegistrationStatus(
   let accountId = null;
 
   if (!token) {
-    const storage = await chrome.storage.local.get([
-      "googleAuthToken",
-      "adSenseAccountId",
-    ]);
+    const storage = await chrome.storage.local.get(['googleAuthToken', 'adSenseAccountId']);
     token = storage.googleAuthToken;
     accountId = storage.adSenseAccountId;
   } else {
-    const storage = await chrome.storage.local.get("adSenseAccountId");
+    const storage = await chrome.storage.local.get('adSenseAccountId');
     accountId = storage.adSenseAccountId;
   }
 
   if (!token || !accountId) {
-    throw new Error(
-      "인증 정보가 없습니다. Google 로그인 및 AdSense 계정 ID 설정이 필요합니다."
-    );
+    throw new Error('인증 정보가 없습니다. Google 로그인 및 AdSense 계정 ID 설정이 필요합니다.');
   }
 
   try {
     // 1. 계정 확인
     let accountName = `accounts/${accountId}`;
     try {
-      const listRes = await fetch(
-        "https://adsense.googleapis.com/v2/accounts",
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (listRes.status === 401) throw new Error("UNAUTHORIZED");
+      const listRes = await fetch('https://adsense.googleapis.com/v2/accounts', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (listRes.status === 401) throw new Error('UNAUTHORIZED');
       if (listRes.ok) {
         const listData = await listRes.json();
-        const normalizedInput = accountId.trim().replace(/^accounts\//, "");
-        const matched = listData.accounts?.find((acc) =>
-          acc.name.includes(normalizedInput)
-        );
+        const normalizedInput = accountId.trim().replace(/^accounts\//, '');
+        const matched = listData.accounts?.find((acc) => acc.name.includes(normalizedInput));
         if (matched) accountName = matched.name;
       }
     } catch (e) {
-      if (e.message === "UNAUTHORIZED") {
-        await sendErrorToUI(
-          "UNAUTHORIZED",
-          "인증 토큰이 만료되었습니다. 재로그인이 필요합니다."
-        );
+      if (e.message === 'UNAUTHORIZED') {
+        await sendErrorToUI('UNAUTHORIZED', '인증 토큰이 만료되었습니다. 재로그인이 필요합니다.');
         throw e;
       }
     }
@@ -739,19 +675,13 @@ export async function checkAdSenseRegistrationStatus(
     // 2. 클라이언트 및 URL 채널 조회
     const registeredUrls = new Set();
 
-    const clientsRes = await fetch(
-      `https://adsense.googleapis.com/v2/${accountName}/adclients`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    const clientsRes = await fetch(`https://adsense.googleapis.com/v2/${accountName}/adclients`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     if (clientsRes.status === 401) {
-      await sendErrorToUI(
-        "UNAUTHORIZED",
-        "인증 토큰이 만료되었습니다. 재로그인이 필요합니다."
-      );
-      throw new Error("UNAUTHORIZED");
+      await sendErrorToUI('UNAUTHORIZED', '인증 토큰이 만료되었습니다. 재로그인이 필요합니다.');
+      throw new Error('UNAUTHORIZED');
     }
     if (!clientsRes.ok) {
       throw new Error(`AdSense 조회 실패 (${clientsRes.status})`);
@@ -762,8 +692,7 @@ export async function checkAdSenseRegistrationStatus(
 
     await Promise.all(
       adClients.map(async (client) => {
-        if (client.productCode === "YOUTUBE" || client.name.includes("ca-yt"))
-          return;
+        if (client.productCode === 'YOUTUBE' || client.name.includes('ca-yt')) return;
 
         Logger.debug(`📡 [AdSense] 조회 중: ${client.name}`);
 
@@ -775,7 +704,7 @@ export async function checkAdSenseRegistrationStatus(
           const res = await fetch(url, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (res.status === 401) throw new Error("UNAUTHORIZED");
+          if (res.status === 401) throw new Error('UNAUTHORIZED');
           if (!res.ok) return;
 
           const json = await res.json();
@@ -783,18 +712,18 @@ export async function checkAdSenseRegistrationStatus(
             json.urlChannels.forEach((ch) => {
               const urlValue = ch.uriPattern || ch.urlPattern;
               if (urlValue) {
-                let normalized = "";
+                let normalized = '';
                 try {
                   // URL 정규화: 소문자 변환, 프로토콜 제거, 마지막 슬래시 제거
                   normalized = decodeURIComponent(urlValue)
                     .toLowerCase()
-                    .replace(/^https?:\/\//, "")
-                    .replace(/\/$/, "");
+                    .replace(/^https?:\/\//, '')
+                    .replace(/\/$/, '');
                 } catch (e) {
                   normalized = urlValue
                     .toLowerCase()
-                    .replace(/^https?:\/\//, "")
-                    .replace(/\/$/, "");
+                    .replace(/^https?:\/\//, '')
+                    .replace(/\/$/, '');
                 }
                 registeredUrls.add(normalized);
               }
@@ -822,13 +751,11 @@ export async function checkAdSenseRegistrationStatus(
       const normalizer = (u) =>
         u
           .toLowerCase()
-          .replace(/^https?:\/\//, "")
-          .replace(/\/$/, "");
+          .replace(/^https?:\/\//, '')
+          .replace(/\/$/, '');
       const urlList = [...registeredUrls]; // 배열로 변환
 
-      const statusesToCheck = isSingleCardCheck
-        ? [targetStatus]
-        : Object.keys(allCards);
+      const statusesToCheck = isSingleCardCheck ? [targetStatus] : Object.keys(allCards);
 
       for (const status of statusesToCheck) {
         const cardsToCheck = isSingleCardCheck
@@ -846,7 +773,7 @@ export async function checkAdSenseRegistrationStatus(
             // 단일 카드 모드인 경우 targetUrl과 일치하는지 확인
             if (isSingleCardCheck && card.publishedUrl !== targetUrl) continue;
 
-            let normUrl = "";
+            let normUrl = '';
             try {
               normUrl = normalizer(decodeURIComponent(card.publishedUrl));
             } catch (e) {
@@ -861,7 +788,7 @@ export async function checkAdSenseRegistrationStatus(
               return (
                 normUrl === reg ||
                 normUrl.startsWith(reg) ||
-                (normUrl.includes(reg) && reg.includes("."))
+                (normUrl.includes(reg) && reg.includes('.'))
               );
             });
 
@@ -883,13 +810,10 @@ export async function checkAdSenseRegistrationStatus(
               const cardPath = `kanban/${userId}/${status}/${cardId}`;
               updates[cardPath] = { adSenseRegistered: isReg };
               updatedCount++;
-              Logger.info(
-                `🔄 [상태 업데이트] 카드 ${cardId}: ${currentStatus} → ${isReg}`,
-                {
-                  url: normUrl,
-                  title: card.title || "제목 없음",
-                }
-              );
+              Logger.info(`🔄 [상태 업데이트] 카드 ${cardId}: ${currentStatus} → ${isReg}`, {
+                url: normUrl,
+                title: card.title || '제목 없음',
+              });
             }
           }
         }
@@ -897,26 +821,22 @@ export async function checkAdSenseRegistrationStatus(
 
       // Firebase 업데이트 (배치 업데이트)
       if (updatedCount > 0) {
-        Logger.info(
-          `💾 [AdSense] Firebase 업데이트 시작: ${updatedCount}개 카드`
-        );
+        Logger.info(`💾 [AdSense] Firebase 업데이트 시작: ${updatedCount}개 카드`);
         for (const [path, data] of Object.entries(updates)) {
           await update(ref(db, path), data);
         }
-        Logger.info(
-          `✅ [AdSense] Firebase 업데이트 완료: ${updatedCount}개 카드`
-        );
+        Logger.info(`✅ [AdSense] Firebase 업데이트 완료: ${updatedCount}개 카드`);
       }
 
       // 상태 요약 로그
       const summaryMessage =
         updatedCount === 0 && alreadyRegisteredCount === matchedCount
-          ? "✅ 모든 카드가 이미 올바르게 등록되어 있습니다."
+          ? '✅ 모든 카드가 이미 올바르게 등록되어 있습니다.'
           : updatedCount === 0 && matchedCount === 0
-          ? "⚠️ 매칭된 카드가 없습니다. URL 패턴을 확인하세요."
-          : updatedCount > 0
-          ? `🔄 ${updatedCount}개 카드 상태가 업데이트되었습니다.`
-          : "ℹ️ 상태 변경이 필요하지 않습니다.";
+            ? '⚠️ 매칭된 카드가 없습니다. URL 패턴을 확인하세요.'
+            : updatedCount > 0
+              ? `🔄 ${updatedCount}개 카드 상태가 업데이트되었습니다.`
+              : 'ℹ️ 상태 변경이 필요하지 않습니다.';
 
       Logger.info(`📊 [AdSense] 상태 요약:`, {
         총_수집된_URL_패턴: registeredUrls.size,
@@ -939,11 +859,8 @@ export async function checkAdSenseRegistrationStatus(
   } catch (error) {
     Logger.error(`[AdSense] 등록 상태 확인 실패:`, error);
 
-    if (error.message === "UNAUTHORIZED") {
-      await sendErrorToUI(
-        "UNAUTHORIZED",
-        "인증 토큰이 만료되었습니다. 재로그인이 필요합니다."
-      );
+    if (error.message === 'UNAUTHORIZED') {
+      await sendErrorToUI('UNAUTHORIZED', '인증 토큰이 만료되었습니다. 재로그인이 필요합니다.');
     }
 
     throw error;

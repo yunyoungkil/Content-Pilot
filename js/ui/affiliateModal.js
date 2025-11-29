@@ -5,67 +5,54 @@ import {
   addAffiliateLink,
   updateAffiliateLink,
   deleteAffiliateLink,
-} from "../services/affiliateService.js";
+} from '../services/affiliateService.js';
 
-import { showToast } from "../utils.js";
+import { showToast } from '../utils.js';
 
 let currentLinks = [];
 
 export function renderAffiliateModal(container) {
   if (!container) {
-    console.error(
-      "[AffiliateModal] renderAffiliateModal: container is null or undefined"
-    );
+    console.error('[AffiliateModal] renderAffiliateModal: container is null or undefined');
     return;
   }
   // CSS 로드 (한 번만) — Shadow DOM에서 렌더링될 수 있으므로
   // 루트 노드(문서 또는 쉐도우 루트)에 스타일 시트를 삽입합니다.
   try {
-    const rootNode = container?.getRootNode
-      ? container.getRootNode()
-      : document;
+    const rootNode = container?.getRootNode ? container.getRootNode() : document;
     const alreadyLinked =
-      (rootNode.querySelector &&
-        rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
+      (rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
       document.querySelector('link[href*="affiliate-modal.css"]');
 
     if (!alreadyLinked) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = chrome.runtime.getURL("css/affiliate-modal.css");
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = chrome.runtime.getURL('css/affiliate-modal.css');
 
       // ShadowRoot에서도 append 가능 (open mode인 경우)
       if (rootNode instanceof ShadowRoot) {
         rootNode.appendChild(link);
-        console.info(
-          "[AffiliateModal] stylesheet injected into ShadowRoot:",
-          link.href
-        );
+        console.info('[AffiliateModal] stylesheet injected into ShadowRoot:', link.href);
       } else if (document.head) {
         document.head.appendChild(link);
-        console.info(
-          "[AffiliateModal] stylesheet injected into document.head:",
-          link.href
-        );
+        console.info('[AffiliateModal] stylesheet injected into document.head:', link.href);
       }
     }
   } catch (err) {
     // 안전 장치 — 스타일이 못 들어가도 동작은 계속되게 함
-    console.warn("[AffiliateModal] 스타일 로드 실패, 계속 진행합니다:", err);
+    console.warn('[AffiliateModal] 스타일 로드 실패, 계속 진행합니다:', err);
   }
 
   // [Fallback] 외부 스타일 로드에 실패했을 때도 최소한의 기본 스타일을 적용하기 위해
   // 쉐도우 루트(또는 container)에 인라인 스타일 블록을 추가합니다. 이는 시각 확인용 최소 스타일입니다.
   try {
-    const rootNode = container?.getRootNode
-      ? container.getRootNode()
-      : document;
-    const inlineId = "affiliate-inline-style";
+    const rootNode = container?.getRootNode ? container.getRootNode() : document;
+    const inlineId = 'affiliate-inline-style';
     const hasInline =
       (rootNode.querySelector && rootNode.querySelector(`#${inlineId}`)) ||
       document.querySelector(`#${inlineId}`);
     if (!hasInline) {
-      const styleEl = document.createElement("style");
+      const styleEl = document.createElement('style');
       styleEl.id = inlineId;
       styleEl.textContent = `
         /* minimal fallback styles to confirm UI changes */
@@ -77,11 +64,11 @@ export function renderAffiliateModal(container) {
       if (rootNode instanceof ShadowRoot) rootNode.appendChild(styleEl);
       else if (document.head) document.head.appendChild(styleEl);
 
-      console.info("[AffiliateModal] minimal inline fallback styles injected.");
+      console.info('[AffiliateModal] minimal inline fallback styles injected.');
     }
   } catch (err) {
     // 너무 중요한 실패는 아니므로 경고만 남기고 계속 진행
-    console.warn("[AffiliateModal] fallback inline style 적용 실패:", err);
+    console.warn('[AffiliateModal] fallback inline style 적용 실패:', err);
   }
 
   // 모달 HTML 주입 - 개선된 UI
@@ -257,10 +244,10 @@ export function renderAffiliateModal(container) {
   `;
 
   // 이미 모달이 있으면 제거 후 다시 생성 (재렌더링 방지)
-  const existing = container.querySelector("#affiliate-modal");
+  const existing = container.querySelector('#affiliate-modal');
   if (existing) existing.remove();
 
-  container.insertAdjacentHTML("beforeend", modalHTML);
+  container.insertAdjacentHTML('beforeend', modalHTML);
 
   // 이벤트 바인딩
   bindEvents(container);
@@ -274,7 +261,7 @@ let tempKeywords = [];
 
 // 텍스트에서 키워드를 파싱하는 헬퍼 함수
 function parseKeywordsFromText(text) {
-  if (!text || typeof text !== "string") return [];
+  if (!text || typeof text !== 'string') return [];
 
   // 여러 구분자로 분리: 줄바꿈, 쉼표, 탭, 연속된 공백
   let keywords = text.split(/[\n,\t]+/);
@@ -295,10 +282,10 @@ function parseKeywordsFromText(text) {
  * - 이 파서는 완벽하지 않으므로 실패해도 기존 폼 필드를 수동으로 편집할 수 있습니다.
  */
 export function parseCoupangText(rawText) {
-  if (!rawText || typeof rawText !== "string") return null;
+  if (!rawText || typeof rawText !== 'string') return null;
 
   const result = {
-    productName: "",
+    productName: '',
     originalPrice: 0,
     salePrice: 0,
     discountRate: 0,
@@ -306,7 +293,7 @@ export function parseCoupangText(rawText) {
     reviewCount: 0,
     isRocket: false,
     badges: [],
-    imageUrl: "",
+    imageUrl: '',
   };
 
   const text = rawText.trim();
@@ -314,13 +301,13 @@ export function parseCoupangText(rawText) {
   let doc = null;
   if (/<[a-z][\s\S]*>/i.test(text)) {
     try {
-      doc = new DOMParser().parseFromString(text, "text/html");
+      doc = new DOMParser().parseFromString(text, 'text/html');
     } catch (e) {
       doc = null;
     }
   }
 
-  const lines = (doc ? doc.body.textContent || "" : text)
+  const lines = (doc ? doc.body.textContent || '' : text)
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -330,12 +317,13 @@ export function parseCoupangText(rawText) {
     if (doc) {
       // common class patterns seen on Coupang / other marketplaces
       const nameEl = doc.querySelector(
-        ".ProductUnit_productNameV2__cV9cw, .ProductUnit_productName, .product-name, .ProductName, .title, .product-title"
+        '.ProductUnit_productNameV2__cV9cw, .ProductUnit_productName, .product-name, .ProductName, .title, .product-title'
       );
-      if (nameEl && nameEl.textContent.trim())
-        result.productName = nameEl.textContent.trim();
+      if (nameEl && nameEl.textContent.trim()) result.productName = nameEl.textContent.trim();
     }
-  } catch (e) {}
+    } catch (e) {
+      Logger.warn('[AffiliateModal] DOMParser parseFromString failed', e);
+    }
 
   if (!result.productName && lines.length > 0) result.productName = lines[0];
 
@@ -347,14 +335,14 @@ export function parseCoupangText(rawText) {
   if (doc) {
     try {
       const priceContainer =
-        doc.querySelector(".PriceArea_priceArea__NntJz") ||
-        doc.querySelector(".PriceArea") ||
-        doc.querySelector(".PriceArea_priceArea");
+        doc.querySelector('.PriceArea_priceArea__NntJz') ||
+        doc.querySelector('.PriceArea') ||
+        doc.querySelector('.PriceArea_priceArea');
       const priceSourceText = priceContainer
-        ? priceContainer.textContent || ""
-        : doc.body.textContent || "";
+        ? priceContainer.textContent || ''
+        : doc.body.textContent || '';
       while ((m = priceRegex.exec(priceSourceText)) !== null) {
-        prices.push(parseInt(m[1].replace(/,/g, ""), 10));
+        prices.push(parseInt(m[1].replace(/,/g, ''), 10));
       }
     } catch (e) {
       // fallback to scanning full text
@@ -363,7 +351,7 @@ export function parseCoupangText(rawText) {
   // fallback: scan whole text if none found in DOM price container
   if (prices.length === 0) {
     while ((m = priceRegex.exec(text)) !== null) {
-      prices.push(parseInt(m[1].replace(/,/g, ""), 10));
+      prices.push(parseInt(m[1].replace(/,/g, ''), 10));
     }
   }
   if (prices.length >= 2) {
@@ -378,14 +366,10 @@ export function parseCoupangText(rawText) {
   let discountMatch = null;
   if (doc) {
     try {
-      const percEl = doc.querySelector(
-        "*[class*='percent'], *[class*='discount'], div, span"
-      );
+      const percEl = doc.querySelector("*[class*='percent'], *[class*='discount'], div, span");
       // fallback: search for any % in body text
       const pct =
-        doc.body && doc.body.textContent
-          ? doc.body.textContent.match(/(\d{1,3})%/) || null
-          : null;
+        doc.body && doc.body.textContent ? doc.body.textContent.match(/(\d{1,3})%/) || null : null;
       discountMatch = pct;
     } catch (e) {
       discountMatch = text.match(/(\d{1,3})%/);
@@ -402,10 +386,10 @@ export function parseCoupangText(rawText) {
     if (doc) {
       // rating (stars or numeric)
       const starEl = doc.querySelector(
-        ".ProductRating_star__RGSlV, .ProductRating_rating__lMxS9, .rating, .star"
+        '.ProductRating_star__RGSlV, .ProductRating_rating__lMxS9, .rating, .star'
       );
       const reviewEl = doc.querySelector(
-        ".ProductRating_ratingCount__R0Vhz, .ratingCount, .review-count"
+        '.ProductRating_ratingCount__R0Vhz, .ratingCount, .review-count'
       );
       if (starEl && starEl.textContent) {
         const starTxt = starEl.textContent.trim();
@@ -418,17 +402,14 @@ export function parseCoupangText(rawText) {
       }
       // final fallback: try to search the body text
       if (!ratingMatch) {
-        const bodyText = doc.body.textContent || "";
-        ratingMatch = bodyText
-          ? bodyText.match(/([0-5](?:\.\d)?)\s*\(?([0-9,]{1,})?\)?/)
-          : null;
+        const bodyText = doc.body.textContent || '';
+        ratingMatch = bodyText ? bodyText.match(/([0-5](?:\.\d)?)\s*\(?([0-9,]{1,})?\)?/) : null;
       }
     }
   } catch (e) {
     ratingMatch = null;
   }
-  if (!ratingMatch)
-    ratingMatch = text.match(/([0-5](?:\.\d)?)\s*\(?([0-9,]{1,})?\)?/);
+  if (!ratingMatch) ratingMatch = text.match(/([0-5](?:\.\d)?)\s*\(?([0-9,]{1,})?\)?/);
   if (ratingMatch) {
     // ratingMatch might be custom-generated array above
     const maybeRating = parseFloat(ratingMatch[1] || ratingMatch[0] || 0);
@@ -441,8 +422,8 @@ export function parseCoupangText(rawText) {
     if (rc) {
       // rc may include commas
       const digits = String(rc)
-        .replace(/[^0-9,]/g, "")
-        .replace(/,/g, "");
+        .replace(/[^0-9,]/g, '')
+        .replace(/,/g, '');
       if (digits) result.reviewCount = parseInt(digits, 10);
     }
   }
@@ -450,18 +431,15 @@ export function parseCoupangText(rawText) {
   // 5) 배송/로켓배송 여부
   try {
     if (doc) {
-      const deliveryText = doc.body.textContent || "";
-      if (
-        /로켓|도착 보장|내일\(|오늘\(|빠른 배송|로켓배송/.test(deliveryText)
-      ) {
+      const deliveryText = doc.body.textContent || '';
+      if (/로켓|도착 보장|내일\(|오늘\(|빠른 배송|로켓배송/.test(deliveryText)) {
         result.isRocket = true;
       }
     } else if (/로켓|도착 보장|내일\(|오늘\(|빠른 배송|로켓배송/.test(text)) {
       result.isRocket = true;
     }
   } catch (e) {
-    if (/로켓|도착 보장|내일\(|오늘\(|빠른 배송|로켓배송/.test(text))
-      result.isRocket = true;
+    if (/로켓|도착 보장|내일\(|오늘\(|빠른 배송|로켓배송/.test(text)) result.isRocket = true;
   }
 
   // 6) 뱃지 키워드 간단 추출 - prefer DOM (badges or img alt / span text)
@@ -469,35 +447,27 @@ export function parseCoupangText(rawText) {
     if (doc) {
       const badgeEls = Array.from(
         doc.querySelectorAll(
-          "img[alt], .BenefitBadge_cash-benefit__SmkrN span, .custom-oos, .ImageBadge_default__JWaYp, .ImageBadge_coupick__0i8UV, .ProductRating_ratingCount__R0Vhz, .ProductUnit_productInfo__1l0il span"
+          'img[alt], .BenefitBadge_cash-benefit__SmkrN span, .custom-oos, .ImageBadge_default__JWaYp, .ImageBadge_coupick__0i8UV, .ProductRating_ratingCount__R0Vhz, .ProductUnit_productInfo__1l0il span'
         )
       );
       const badgeTexts = new Set();
       badgeEls.forEach((el) => {
-        const t =
-          (el.getAttribute && el.getAttribute("alt")) || el.textContent || "";
-        const trimmed = (t || "").trim();
+        const t = (el.getAttribute && el.getAttribute('alt')) || el.textContent || '';
+        const trimmed = (t || '').trim();
         if (trimmed) badgeTexts.add(trimmed);
       });
       // fallback keywords
-      [
-        "무료배송",
-        "적립",
-        "쿠폰",
-        "최저가",
-        "세일",
-        "웰컴백 쿠폰 적용됨",
-      ].forEach((k) => {
-        if ((doc.body.textContent || "").includes(k)) badgeTexts.add(k);
+      ['무료배송', '적립', '쿠폰', '최저가', '세일', '웰컴백 쿠폰 적용됨'].forEach((k) => {
+        if ((doc.body.textContent || '').includes(k)) badgeTexts.add(k);
       });
       result.badges = Array.from(badgeTexts).filter(Boolean);
     } else {
-      ["무료배송", "적립", "쿠폰", "최저가", "세일"].forEach((k) => {
+      ['무료배송', '적립', '쿠폰', '최저가', '세일'].forEach((k) => {
         if (text.includes(k)) result.badges.push(k);
       });
     }
   } catch (e) {
-    ["무료배송", "적립", "쿠폰", "최저가", "세일"].forEach((k) => {
+    ['무료배송', '적립', '쿠폰', '최저가', '세일'].forEach((k) => {
       if (text.includes(k)) result.badges.push(k);
     });
   }
@@ -506,59 +476,59 @@ export function parseCoupangText(rawText) {
   try {
     if (doc) {
       const mainImg = doc.querySelector(
-        "figure img, .ProductUnit_productImage__Mqcg1 img, img[src]"
+        'figure img, .ProductUnit_productImage__Mqcg1 img, img[src]'
       );
       if (mainImg && mainImg.src) result.imageUrl = mainImg.src;
     }
-  } catch (e) {}
+  } catch (e) {
+    Logger.warn('[AffiliateModal] product name extraction failed', e);
+  }
 
   // if still missing some values, keep fallback from text results above
   // Fallback: if reviewCount still missing, try to extract digits from collected badge texts (e.g. "(867)")
   try {
     if (!result.reviewCount && result.badges && result.badges.length > 0) {
-      const joined = result.badges.join(" ");
+      const joined = result.badges.join(' ');
       // prioritize numbers inside parentheses (e.g. (867)), otherwise prefer any number with >=3 digits
       const paren = joined.match(/\((\d{1,3}(?:,\d{3})*)\)/);
       if (paren && paren[1]) {
-        result.reviewCount = parseInt(paren[1].replace(/,/g, ""), 10);
+        result.reviewCount = parseInt(paren[1].replace(/,/g, ''), 10);
       } else {
         const numMatches = joined.match(/\d{1,3}(?:,\d{3})*/g) || [];
-        const candidate = numMatches.find(
-          (x) => x.replace(/,/g, "").length >= 3
-        );
-        if (candidate)
-          result.reviewCount = parseInt(candidate.replace(/,/g, ""), 10);
+        const candidate = numMatches.find((x) => x.replace(/,/g, '').length >= 3);
+        if (candidate) result.reviewCount = parseInt(candidate.replace(/,/g, ''), 10);
       }
     }
-  } catch (e) {}
-  return result;
-}
+    } catch (e) {
+      // fallback to scanning full text
+      Logger.warn('[AffiliateModal] price DOM scan failed, falling back to text parse', e);
+    }
 
 function bindEvents(container) {
   if (!container) {
-    console.error("[AffiliateModal] Container is null");
+    console.error('[AffiliateModal] Container is null');
     return;
   }
 
-  const modal = container.querySelector("#affiliate-modal");
-  const formContainer = container.querySelector("#affiliate-form-container");
-  const keywordInput = container.querySelector("#affiliate-keyword-input");
+  const modal = container.querySelector('#affiliate-modal');
+  const formContainer = container.querySelector('#affiliate-form-container');
+  const keywordInput = container.querySelector('#affiliate-keyword-input');
   // search controls (may exist in modal)
-  const searchToggle = container.querySelector(".affiliate-search-toggle");
-  const searchBar = container.querySelector(".affiliate-search-bar");
-  const searchInput = container.querySelector(".affiliate-search-input");
-  const searchClear = container.querySelector(".affiliate-search-clear");
+  const searchToggle = container.querySelector('.affiliate-search-toggle');
+  const searchBar = container.querySelector('.affiliate-search-bar');
+  const searchInput = container.querySelector('.affiliate-search-input');
+  const searchClear = container.querySelector('.affiliate-search-clear');
 
   if (!modal) {
-    console.error("[AffiliateModal] Modal element not found");
+    console.error('[AffiliateModal] Modal element not found');
     return;
   }
 
   // (removed stray DOM parsing code that was accidentally placed here)
   if (searchToggle && searchBar) {
-    searchToggle.addEventListener("click", () => {
-      const isVisible = searchBar.style.display !== "none";
-      searchBar.style.display = isVisible ? "none" : "flex";
+    searchToggle.addEventListener('click', () => {
+      const isVisible = searchBar.style.display !== 'none';
+      searchBar.style.display = isVisible ? 'none' : 'flex';
       if (!isVisible && searchInput) {
         searchInput.focus();
       }
@@ -567,114 +537,100 @@ function bindEvents(container) {
 
   // 검색 기능
   if (searchInput) {
-    searchInput.addEventListener("input", (e) => {
+    searchInput.addEventListener('input', (e) => {
       filterLinks(container, e.target.value);
     });
   }
 
   // 검색 초기화
   if (searchClear) {
-    searchClear.addEventListener("click", () => {
-      if (searchInput) searchInput.value = "";
-      filterLinks(container, "");
+    searchClear.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      filterLinks(container, '');
     });
   }
 
   // 새로고침 버튼
-  const refreshBtn = container.querySelector(".affiliate-refresh-btn");
+  const refreshBtn = container.querySelector('.affiliate-refresh-btn');
   if (refreshBtn) {
-    refreshBtn.addEventListener("click", () => {
+    refreshBtn.addEventListener('click', () => {
       loadLinks(container);
     });
   }
 
   // 폼 열기 (추가 모드)
-  const showFormBtn = container.querySelector("#btn-show-add-form");
+  const showFormBtn = container.querySelector('#btn-show-add-form');
   if (showFormBtn) {
-    showFormBtn.addEventListener("click", () => {
+    showFormBtn.addEventListener('click', () => {
       resetForm(container);
-      if (formContainer) formContainer.style.display = "block";
+      if (formContainer) formContainer.style.display = 'block';
       // 폼이 열리면 상품명 입력창에 포커스
-      const nameInput = container.querySelector("#aff-name");
+      const nameInput = container.querySelector('#aff-name');
       if (nameInput) setTimeout(() => nameInput.focus(), 100);
     });
   }
 
   // 폼 취소
-  const cancelBtn = container.querySelector("#btn-cancel-form");
+  const cancelBtn = container.querySelector('#btn-cancel-form');
   if (cancelBtn) {
-    cancelBtn.addEventListener("click", () => {
-      if (formContainer) formContainer.style.display = "none";
+    cancelBtn.addEventListener('click', () => {
+      if (formContainer) formContainer.style.display = 'none';
     });
   }
 
   // 모달 닫기 버튼 (헤더 우측 X)
-  const closeModalBtn = container.querySelector(
-    ".cp-modal-close, .affiliate-close-btn"
-  );
+  const closeModalBtn = container.querySelector('.cp-modal-close, .affiliate-close-btn');
   if (closeModalBtn) {
-    closeModalBtn.addEventListener("click", (e) => {
+    closeModalBtn.addEventListener('click', (e) => {
       e.preventDefault();
       // 먼저 폼이 열려있다면 폼 숨김
-      if (formContainer && formContainer.style.display !== "none") {
-        formContainer.style.display = "none";
+      if (formContainer && formContainer.style.display !== 'none') {
+        formContainer.style.display = 'none';
       }
       // 모달 숨김
-      modal.style.display = "none";
+      modal.style.display = 'none';
     });
   }
 
   // 모달 백드롭 클릭으로 닫기
-  const backdrop = container.querySelector(".cp-modal-backdrop");
+  const backdrop = container.querySelector('.cp-modal-backdrop');
   if (backdrop) {
-    backdrop.addEventListener("click", (e) => {
+    backdrop.addEventListener('click', (e) => {
       e.preventDefault();
-      if (formContainer && formContainer.style.display !== "none") {
-        formContainer.style.display = "none";
+      if (formContainer && formContainer.style.display !== 'none') {
+        formContainer.style.display = 'none';
       }
-      modal.style.display = "none";
+      modal.style.display = 'none';
     });
   }
 
   // 미리보기 버튼
-  const previewBtn = container.querySelector("#btn-preview-link");
+  const previewBtn = container.querySelector('#btn-preview-link');
   if (previewBtn) {
-    previewBtn.addEventListener("click", () => {
+    previewBtn.addEventListener('click', () => {
       showLinkPreview(container);
     });
   }
 
   // 카드 HTML 복사 버튼 (form footer 좌측에 추가)
-  const copyHtmlBtnId = "btn-copy-card-html";
+  const copyHtmlBtnId = 'btn-copy-card-html';
   if (!container.querySelector(`#${copyHtmlBtnId}`)) {
-    const copyBtn = document.createElement("button");
+    const copyBtn = document.createElement('button');
     copyBtn.id = copyHtmlBtnId;
-    copyBtn.className = "cp-btn cp-btn-secondary";
-    copyBtn.style.marginLeft = "8px";
-    copyBtn.textContent = "카드 HTML 복사";
+    copyBtn.className = 'cp-btn cp-btn-secondary';
+    copyBtn.style.marginLeft = '8px';
+    copyBtn.textContent = '카드 HTML 복사';
 
-    copyBtn.addEventListener("click", (e) => {
+    copyBtn.addEventListener('click', (e) => {
       e.preventDefault();
       try {
-        const cardProductName = container
-          .querySelector("#card-product-name")
-          ?.value?.trim();
-        const cardImg = container
-          .querySelector("#card-image-url")
-          ?.value?.trim();
-        const cardSale = container
-          .querySelector("#card-sale-price")
-          ?.value?.trim();
-        const cardOrig = container
-          .querySelector("#card-original-price")
-          ?.value?.trim();
-        const cardDiscount = container
-          .querySelector("#card-discount-rate")
-          ?.value?.trim();
-        const cardBadges = container
-          .querySelector("#card-badges")
-          ?.value?.trim();
-        const url = container.querySelector("#aff-url")?.value?.trim() || "";
+        const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
+        const cardImg = container.querySelector('#card-image-url')?.value?.trim();
+        const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
+        const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
+        const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
+        const cardBadges = container.querySelector('#card-badges')?.value?.trim();
+        const url = container.querySelector('#aff-url')?.value?.trim() || '';
 
         const cardHtml = `
           <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
@@ -687,30 +643,26 @@ function bindEvents(container) {
             </div>
             <div style="flex:1;">
               <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${
-                cardProductName || ""
+                cardProductName || ''
               }</div>
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
                 <div style="font-weight:900;color:#ae0000;font-size:18px;">${
-                  cardSale ? Number(cardSale).toLocaleString() + "원" : ""
+                  cardSale ? Number(cardSale).toLocaleString() + '원' : ''
                 }</div>
                 ${
                   cardOrig && Number(cardOrig) > Number(cardSale || 0)
                     ? `<div style="text-decoration:line-through;color:#999;">${Number(
                         cardOrig
                       ).toLocaleString()}원</div>`
-                    : ""
+                    : ''
                 }
                 ${
                   cardDiscount
                     ? `<div style="color:#ae0000;font-weight:700;">${cardDiscount}%</div>`
-                    : ""
+                    : ''
                 }
               </div>
-              ${
-                cardBadges
-                  ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>`
-                  : ""
-              }
+              ${cardBadges ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>` : ''}
               <div style="margin-top:12px;"><a href="${url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
             </div>
           </div>
@@ -720,68 +672,51 @@ function bindEvents(container) {
           navigator.clipboard
             .writeText(cardHtml)
             .then(() => {
-              showToast(
-                "✅ 카드 HTML이 클립보드에 복사되었습니다. 에디터에 붙여넣으세요."
-              );
+              showToast('✅ 카드 HTML이 클립보드에 복사되었습니다. 에디터에 붙여넣으세요.');
             })
             .catch((err) => {
-              console.error("카드 HTML 복사 실패", err);
-              showToast("⚠️ 카드 HTML 복사 실패");
+              console.error('카드 HTML 복사 실패', err);
+              showToast('⚠️ 카드 HTML 복사 실패');
             });
         } else {
           // 폴백: prompt로 보여주기
-          window.prompt("아래 HTML을 복사하세요:", cardHtml);
+          window.prompt('아래 HTML을 복사하세요:', cardHtml);
         }
       } catch (err) {
-        console.error("카드 HTML 생성 오류", err);
-        showToast("⚠️ 카드 HTML 생성 실패");
+        console.error('카드 HTML 생성 오류', err);
+        showToast('⚠️ 카드 HTML 생성 실패');
       }
     });
 
-    const footerLeft = container.querySelector(
-      ".affiliate-form-footer .form-footer-left"
-    );
+    const footerLeft = container.querySelector('.affiliate-form-footer .form-footer-left');
     if (footerLeft) footerLeft.appendChild(copyBtn);
   }
 
   // '에디터에 삽입' 버튼: 카드 HTML을 직접 워크스페이스 에디터로 전송합니다.
-  const insertHtmlBtnId = "btn-insert-card-html";
+  const insertHtmlBtnId = 'btn-insert-card-html';
   if (!container.querySelector(`#${insertHtmlBtnId}`)) {
-    const insertBtn = document.createElement("button");
+    const insertBtn = document.createElement('button');
     insertBtn.id = insertHtmlBtnId;
-    insertBtn.className = "cp-btn cp-btn-primary";
-    insertBtn.style.marginLeft = "8px";
-    insertBtn.textContent = "에디터에 삽입";
+    insertBtn.className = 'cp-btn cp-btn-primary';
+    insertBtn.style.marginLeft = '8px';
+    insertBtn.textContent = '에디터에 삽입';
 
-    insertBtn.addEventListener("click", (e) => {
+    insertBtn.addEventListener('click', (e) => {
       e.preventDefault();
 
       try {
-        const cardProductName = container
-          .querySelector("#card-product-name")
-          ?.value?.trim();
-        const cardImg = container
-          .querySelector("#card-image-url")
-          ?.value?.trim();
-        const cardSale = container
-          .querySelector("#card-sale-price")
-          ?.value?.trim();
-        const cardOrig = container
-          .querySelector("#card-original-price")
-          ?.value?.trim();
-        const cardDiscount = container
-          .querySelector("#card-discount-rate")
-          ?.value?.trim();
-        const cardBadges = container
-          .querySelector("#card-badges")
-          ?.value?.trim();
-        const url = container.querySelector("#aff-url")?.value?.trim() || "";
-        const insertMode =
-          container.querySelector("#card-insert-mode")?.value || "card";
+        const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
+        const cardImg = container.querySelector('#card-image-url')?.value?.trim();
+        const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
+        const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
+        const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
+        const cardBadges = container.querySelector('#card-badges')?.value?.trim();
+        const url = container.querySelector('#aff-url')?.value?.trim() || '';
+        const insertMode = container.querySelector('#card-insert-mode')?.value || 'card';
 
         // 카드 모드와 텍스트 모드 선택에 따른 패이로드
-        let payloadHtml = "";
-        if (insertMode === "card") {
+        let payloadHtml = '';
+        if (insertMode === 'card') {
           payloadHtml = `
             <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
               <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
@@ -793,30 +728,26 @@ function bindEvents(container) {
               </div>
               <div style="flex:1;">
                 <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${
-                  cardProductName || ""
+                  cardProductName || ''
                 }</div>
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
                   <div style="font-weight:900;color:#ae0000;font-size:18px;">${
-                    cardSale ? Number(cardSale).toLocaleString() + "원" : ""
+                    cardSale ? Number(cardSale).toLocaleString() + '원' : ''
                   }</div>
                   ${
                     cardOrig && Number(cardOrig) > Number(cardSale || 0)
                       ? `<div style="text-decoration:line-through;color:#999;">${Number(
                           cardOrig
                         ).toLocaleString()}원</div>`
-                      : ""
+                      : ''
                   }
                   ${
                     cardDiscount
                       ? `<div style="color:#ae0000;font-weight:700;">${cardDiscount}%</div>`
-                      : ""
+                      : ''
                   }
                 </div>
-                ${
-                  cardBadges
-                    ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>`
-                    : ""
-                }
+                ${cardBadges ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>` : ''}
                 <div style="margin-top:12px;"><a href="${url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
               </div>
             </div>
@@ -824,9 +755,7 @@ function bindEvents(container) {
         } else {
           // 텍스트 모드: 간단한 앵커 태그 삽입
           const txtTitle =
-            cardProductName ||
-            container.querySelector("#aff-name")?.value?.trim() ||
-            "상품 링크";
+            cardProductName || container.querySelector('#aff-name')?.value?.trim() || '상품 링크';
           payloadHtml = `<a href="${url}" target="_blank" rel="nofollow noopener">${txtTitle}</a>`;
         }
 
@@ -842,18 +771,20 @@ function bindEvents(container) {
               const el = rootNode.querySelector(sel);
               if (el) return el;
             }
-          } catch (e) {}
-
-          // 2) If container is in panel, try the host shadow root
+          } catch (e) {
+            discountMatch = text.match(/(\d{1,3})%/);
+            Logger.warn('[AffiliateModal] discount element scan failed, fallback to text', e);
+          }
           try {
-            const host =
-              container?.closest && container.closest("#content-pilot-host");
+            const host = container?.closest && container.closest('#content-pilot-host');
             const hostShadow = host && host.shadowRoot;
             if (hostShadow && hostShadow.querySelector) {
               const el = hostShadow.querySelector(sel);
               if (el) return el;
             }
-          } catch (e) {}
+          } catch (e) {
+            Logger.warn('[AffiliateModal] image extraction error', e);
+          }
 
           // 3) global document fallback
           try {
@@ -865,14 +796,12 @@ function bindEvents(container) {
         };
 
         // prefer quill in same workspace (shadow root / host) then global
-        const quillIframe = findIframeInRoots("#quill-editor-iframe");
-        if (quillIframe && quillIframe.contentWindow)
-          tryIframes.push(quillIframe.contentWindow);
+        const quillIframe = findIframeInRoots('#quill-editor-iframe');
+        if (quillIframe && quillIframe.contentWindow) tryIframes.push(quillIframe.contentWindow);
 
         // TUI iframe can be in the same roots too
-        const tuiIframe = findIframeInRoots("#tui-editor-iframe");
-        if (tuiIframe && tuiIframe.contentWindow)
-          tryIframes.push(tuiIframe.contentWindow);
+        const tuiIframe = findIframeInRoots('#tui-editor-iframe');
+        if (tuiIframe && tuiIframe.contentWindow) tryIframes.push(tuiIframe.contentWindow);
 
         // Lastly, include all editor-like iframes in global document (avoid duplicates)
         document.querySelectorAll('iframe[id*="editor"]').forEach((f) => {
@@ -883,20 +812,15 @@ function bindEvents(container) {
         let sent = false;
         for (const win of tryIframes) {
           try {
-            win.postMessage(
-              { action: "insert-html", data: { html: payloadHtml } },
-              "*"
-            );
+            win.postMessage({ action: 'insert-html', data: { html: payloadHtml } }, '*');
             sent = true;
           } catch (err) {
-            console.warn("에디터 전송 실패 대상:", err);
+            console.warn('에디터 전송 실패 대상:', err);
           }
         }
 
         if (sent) {
-          showToast(
-            "✅ 에디터에 삽입 요청을 보냈습니다. (성공하면 에디터에 카드가 들어갑니다)"
-          );
+          showToast('✅ 에디터에 삽입 요청을 보냈습니다. (성공하면 에디터에 카드가 들어갑니다)');
         } else {
           // 실패시 클립보드 복사 폴백
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -904,87 +828,79 @@ function bindEvents(container) {
               .writeText(payloadHtml)
               .then(() => {
                 showToast(
-                  "ℹ️ 에디터가 감지되지 않았습니다. 카드 HTML을 클립보드에 복사했습니다 — 에디터에 붙여넣어 주세요."
+                  'ℹ️ 에디터가 감지되지 않았습니다. 카드 HTML을 클립보드에 복사했습니다 — 에디터에 붙여넣어 주세요.'
                 );
               })
               .catch(() => {
-                window.prompt(
-                  "에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:",
-                  payloadHtml
-                );
+                window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml);
               });
           } else {
-            window.prompt(
-              "에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:",
-              payloadHtml
-            );
+            window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml);
           }
         }
       } catch (err) {
-        console.error("에디터 삽입 처리 중 오류", err);
-        showToast("⚠️ 에디터 삽입에 실패했습니다.");
+        console.error('에디터 삽입 처리 중 오류', err);
+        showToast('⚠️ 에디터 삽입에 실패했습니다.');
       }
     });
 
-    const footerLeft2 = container.querySelector(
-      ".affiliate-form-footer .form-footer-left"
-    );
+    const footerLeft2 = container.querySelector('.affiliate-form-footer .form-footer-left');
     if (footerLeft2) footerLeft2.appendChild(insertBtn);
   }
 
   // 카드 자동분석 버튼
-  const parseBtn = container.querySelector("#btn-parse-card");
+  const parseBtn = container.querySelector('#btn-parse-card');
   if (parseBtn) {
-    parseBtn.addEventListener("click", (e) => {
+    parseBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      const rawText = container.querySelector("#card-raw-text")?.value?.trim();
+      const rawText = container.querySelector('#card-raw-text')?.value?.trim();
       if (!rawText) {
-        showToast("⚠️ 먼저 텍스트를 붙여넣어 주세요.");
+        showToast('⚠️ 먼저 텍스트를 붙여넣어 주세요.');
         return;
       }
 
       const parsed = parseCoupangText(rawText);
       if (!parsed) {
-        showToast("⚠️ 텍스트 파싱에 실패했습니다. 수동으로 입력하세요.");
+        showToast('⚠️ 텍스트 파싱에 실패했습니다. 수동으로 입력하세요.');
         return;
       }
 
       // 채워 넣기
       const setValue = (id, value) => {
         const el = container.querySelector(`#${id}`);
-        if (el) el.value = value !== undefined && value !== null ? value : "";
+        if (el) el.value = value !== undefined && value !== null ? value : '';
       };
 
-      setValue("card-product-name", parsed.productName || "");
-      setValue("card-original-price", parsed.originalPrice || "");
-      setValue("card-sale-price", parsed.salePrice || "");
-      setValue("card-discount-rate", parsed.discountRate || "");
-      setValue("card-rating", parsed.rating || "");
-      setValue("card-review-count", parsed.reviewCount || "");
-      setValue("card-badges", (parsed.badges || []).join(", "));
-      setValue("card-image-url", parsed.imageUrl || "");
-      const rocket = container.querySelector("#card-is-rocket");
+      setValue('card-product-name', parsed.productName || '');
+      setValue('card-original-price', parsed.originalPrice || '');
+      setValue('card-sale-price', parsed.salePrice || '');
+      setValue('card-discount-rate', parsed.discountRate || '');
+      setValue('card-rating', parsed.rating || '');
+      setValue('card-review-count', parsed.reviewCount || '');
+      setValue('card-badges', (parsed.badges || []).join(', '));
+      setValue('card-image-url', parsed.imageUrl || '');
+      const rocket = container.querySelector('#card-is-rocket');
       if (rocket) rocket.checked = !!parsed.isRocket;
 
-      showToast("✅ 텍스트 분석 완료 — 카드 필드에 값이 채워졌습니다.");
+      showToast('✅ 텍스트 분석 완료 — 카드 필드에 값이 채워졌습니다.');
     });
   }
 
   // 폼 상단의 X 버튼 (폼 내부 닫기)
-  const formClose = container.querySelector(".affiliate-form-close");
+  const formClose = container.querySelector('.affiliate-form-close');
   if (formClose) {
-    formClose.addEventListener("click", (e) => {
+    formClose.addEventListener('click', (e) => {
       e.preventDefault();
-      if (formContainer) formContainer.style.display = "none";
+      if (formContainer) formContainer.style.display = 'none';
     });
   }
 
   // 키워드 태그 입력 (Enter 감지 및 붙여넣기 자동 분리)
   if (keywordInput) {
     // 붙여넣기 이벤트 처리 - 자동으로 키워드 분리
-    keywordInput.addEventListener("paste", (e) => {
+    keywordInput.addEventListener('paste', (e) => {
       e.preventDefault();
-      const pastedText = e.clipboardData.getData("text");
+      const pastedText = e.clipboardData.getData('text');
       const keywords = parseKeywordsFromText(pastedText);
 
       let addedCount = 0;
@@ -999,29 +915,29 @@ function bindEvents(container) {
       if (addedCount > 0) {
         renderTags(container);
         updateKeywordSuggestions(container);
-        e.target.value = "";
+        e.target.value = '';
         showToast(`✅ ${addedCount}개의 키워드가 추가되었습니다.`);
       } else if (keywords.length > 0) {
-        showToast("ℹ️ 모든 키워드가 이미 존재하거나 비어있습니다.");
+        showToast('ℹ️ 모든 키워드가 이미 존재하거나 비어있습니다.');
       }
     });
 
     // Enter 키 입력 처리
-    keywordInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+    keywordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
         e.preventDefault();
         const val = e.target.value.trim();
         if (val && !tempKeywords.includes(val)) {
           tempKeywords.push(val);
           renderTags(container);
           updateKeywordSuggestions(container);
-          e.target.value = "";
+          e.target.value = '';
         }
       }
     });
 
     // 입력 중 실시간 힌트 표시
-    keywordInput.addEventListener("input", (e) => {
+    keywordInput.addEventListener('input', (e) => {
       const value = e.target.value.trim();
       if (value.length > 0) {
         // 잠시 후 힌트 표시
@@ -1031,14 +947,10 @@ function bindEvents(container) {
             const keywords = parseKeywordsFromText(value);
             if (keywords.length > 1) {
               showToast(
-                "💡 붙여넣기나 Enter로 키워드를 추가하세요. 공백/줄바꿈/쉼표로 구분된 텍스트는 자동으로 분리됩니다."
+                '💡 붙여넣기나 Enter로 키워드를 추가하세요. 공백/줄바꿈/쉼표로 구분된 텍스트는 자동으로 분리됩니다.'
               );
-            } else if (
-              value.includes(" ") ||
-              value.includes("\n") ||
-              value.includes(",")
-            ) {
-              showToast("💡 붙여넣기나 Enter로 키워드를 추가하세요.");
+            } else if (value.includes(' ') || value.includes('\n') || value.includes(',')) {
+              showToast('💡 붙여넣기나 Enter로 키워드를 추가하세요.');
             }
           }
         }, 1500);
@@ -1047,76 +959,54 @@ function bindEvents(container) {
   }
 
   // 저장 버튼
-  const saveBtn = container.querySelector("#btn-save-link");
+  const saveBtn = container.querySelector('#btn-save-link');
   if (saveBtn) {
-    saveBtn.addEventListener("click", async () => {
-      const id = container.querySelector("#edit-link-id")?.value;
-      const name = container.querySelector("#aff-name")?.value?.trim();
-      const url = container.querySelector("#aff-url")?.value?.trim();
-      const platform = container.querySelector("#aff-platform")?.value;
+    saveBtn.addEventListener('click', async () => {
+      const id = container.querySelector('#edit-link-id')?.value;
+      const name = container.querySelector('#aff-name')?.value?.trim();
+      const url = container.querySelector('#aff-url')?.value?.trim();
+      const platform = container.querySelector('#aff-platform')?.value;
 
       if (!name || !url) {
-        showToast("❌ 상품명과 링크 URL은 필수입니다.");
+        showToast('❌ 상품명과 링크 URL은 필수입니다.');
         // 필수 필드 하이라이트
-        const nameInput = container.querySelector("#aff-name");
-        const urlInput = container.querySelector("#aff-url");
-        if (!name && nameInput) nameInput.classList.add("error");
-        if (!url && urlInput) urlInput.classList.add("error");
+        const nameInput = container.querySelector('#aff-name');
+        const urlInput = container.querySelector('#aff-url');
+        if (!name && nameInput) nameInput.classList.add('error');
+        if (!url && urlInput) urlInput.classList.add('error');
         return;
       }
 
       // 로딩 상태 표시
       saveBtn.disabled = true;
-      saveBtn.innerHTML =
-        '<div class="loading-spinner small"></div> 저장 중...';
+      saveBtn.innerHTML = '<div class="loading-spinner small"></div> 저장 중...';
 
       // 카드형 데이터가 있을 경우 cardData 객체를 구성
-      const cardProductName = container
-        .querySelector("#card-product-name")
-        ?.value?.trim();
-      const cardImageUrl = container
-        .querySelector("#card-image-url")
-        ?.value?.trim();
+      const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
+      const cardImageUrl = container.querySelector('#card-image-url')?.value?.trim();
       const cardOriginalPrice =
-        parseInt(
-          container.querySelector("#card-original-price")?.value || 0,
-          10
-        ) || 0;
+        parseInt(container.querySelector('#card-original-price')?.value || 0, 10) || 0;
       const cardSalePrice =
-        parseInt(container.querySelector("#card-sale-price")?.value || 0, 10) ||
-        0;
+        parseInt(container.querySelector('#card-sale-price')?.value || 0, 10) || 0;
       const cardDiscountRate =
-        parseInt(
-          container.querySelector("#card-discount-rate")?.value || 0,
-          10
-        ) || 0;
-      const cardRating =
-        parseFloat(container.querySelector("#card-rating")?.value || 0) || 0;
+        parseInt(container.querySelector('#card-discount-rate')?.value || 0, 10) || 0;
+      const cardRating = parseFloat(container.querySelector('#card-rating')?.value || 0) || 0;
       const cardReviewCount =
-        parseInt(
-          container.querySelector("#card-review-count")?.value || 0,
-          10
-        ) || 0;
+        parseInt(container.querySelector('#card-review-count')?.value || 0, 10) || 0;
       const cardBadges =
         container
-          .querySelector("#card-badges")
-          ?.value?.split(",")
+          .querySelector('#card-badges')
+          ?.value?.split(',')
           .map((s) => s.trim())
           .filter(Boolean) || [];
-      const cardIsRocket =
-        !!container.querySelector("#card-is-rocket")?.checked;
-      const cardInsertMode =
-        container.querySelector("#card-insert-mode")?.value || "card";
+      const cardIsRocket = !!container.querySelector('#card-is-rocket')?.checked;
+      const cardInsertMode = container.querySelector('#card-insert-mode')?.value || 'card';
 
       const cardData =
-        cardProductName ||
-        cardImageUrl ||
-        cardSalePrice ||
-        cardOriginalPrice ||
-        cardRating
+        cardProductName || cardImageUrl || cardSalePrice || cardOriginalPrice || cardRating
           ? {
               productName: cardProductName || name,
-              imageUrl: cardImageUrl || "",
+              imageUrl: cardImageUrl || '',
               originalPrice: cardOriginalPrice || 0,
               salePrice: cardSalePrice || 0,
               discountRate: cardDiscountRate || 0,
@@ -1139,18 +1029,18 @@ function bindEvents(container) {
       try {
         if (id) {
           await updateAffiliateLink(id, payload);
-          showToast("✅ 링크가 수정되었습니다.");
+          showToast('✅ 링크가 수정되었습니다.');
         } else {
           await addAffiliateLink(payload);
-          showToast("✅ 새 링크가 등록되었습니다.");
+          showToast('✅ 새 링크가 등록되었습니다.');
         }
 
         resetForm(container);
-        if (formContainer) formContainer.style.display = "none";
+        if (formContainer) formContainer.style.display = 'none';
         loadLinks(container); // 목록 갱신
       } catch (error) {
-        console.error("[AffiliateModal] Save error:", error);
-        showToast("❌ 저장 중 오류가 발생했습니다.");
+        console.error('[AffiliateModal] Save error:', error);
+        showToast('❌ 저장 중 오류가 발생했습니다.');
       } finally {
         // 로딩 상태 해제
         saveBtn.disabled = false;
@@ -1160,12 +1050,12 @@ function bindEvents(container) {
   }
 
   // ESC 키로 모달 닫기
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (formContainer && formContainer.style.display !== "none") {
-        formContainer.style.display = "none";
-      } else if (modal.style.display !== "none") {
-        modal.style.display = "none";
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (formContainer && formContainer.style.display !== 'none') {
+        formContainer.style.display = 'none';
+      } else if (modal.style.display !== 'none') {
+        modal.style.display = 'none';
       }
     }
   });
@@ -1174,8 +1064,8 @@ function bindEvents(container) {
 function renderTags(container) {
   if (!container) return;
 
-  const tagContainer = container.querySelector("#keyword-tags-container");
-  const input = container.querySelector("#affiliate-keyword-input");
+  const tagContainer = container.querySelector('#keyword-tags-container');
+  const input = container.querySelector('#affiliate-keyword-input');
 
   if (!tagContainer || !input) return;
 
@@ -1186,17 +1076,17 @@ function renderTags(container) {
 
   // 태그 다시 그리기
   tempKeywords.forEach((tag, index) => {
-    const tagEl = document.createElement("span");
-    tagEl.className = "affiliate-keyword-tag";
+    const tagEl = document.createElement('span');
+    tagEl.className = 'affiliate-keyword-tag';
     tagEl.innerHTML = `
       <span class="tag-text">${tag}</span>
       <button class="tag-remove" title="키워드 삭제" data-index="${index}">×</button>
     `;
 
     // 태그 삭제 이벤트
-    const removeBtn = tagEl.querySelector(".tag-remove");
+    const removeBtn = tagEl.querySelector('.tag-remove');
     if (removeBtn) {
-      removeBtn.addEventListener("click", () => {
+      removeBtn.addEventListener('click', () => {
         tempKeywords.splice(index, 1);
         renderTags(container);
         updateKeywordSuggestions(container);
@@ -1211,17 +1101,17 @@ function renderTags(container) {
 }
 
 function updateTagContainerHeight(container) {
-  const tagContainer = container.querySelector("#keyword-tags-container");
+  const tagContainer = container.querySelector('#keyword-tags-container');
   if (!tagContainer) return;
 
   const tagCount = tempKeywords.length;
-  const minHeight = tagCount > 3 ? "80px" : "48px";
+  const minHeight = tagCount > 3 ? '80px' : '48px';
   tagContainer.style.minHeight = minHeight;
 }
 
 function updateKeywordSuggestions(container) {
-  const suggestionsContainer = container.querySelector(".keyword-suggestions");
-  const suggestionsTags = container.querySelector("#keyword-suggestions");
+  const suggestionsContainer = container.querySelector('.keyword-suggestions');
+  const suggestionsTags = container.querySelector('#keyword-suggestions');
 
   if (!suggestionsContainer || !suggestionsTags) return;
 
@@ -1235,11 +1125,11 @@ function updateKeywordSuggestions(container) {
       <button class="suggestion-tag" data-keyword="${suggestion}">${suggestion}</button>
     `
       )
-      .join("");
+      .join('');
 
     // 추천 키워드 클릭 이벤트
-    suggestionsTags.querySelectorAll(".suggestion-tag").forEach((btn) => {
-      btn.addEventListener("click", () => {
+    suggestionsTags.querySelectorAll('.suggestion-tag').forEach((btn) => {
+      btn.addEventListener('click', () => {
         const keyword = btn.dataset.keyword;
         if (keyword && !tempKeywords.includes(keyword)) {
           tempKeywords.push(keyword);
@@ -1250,29 +1140,29 @@ function updateKeywordSuggestions(container) {
       });
     });
 
-    suggestionsContainer.style.display = "block";
+    suggestionsContainer.style.display = 'block';
   } else {
-    suggestionsContainer.style.display = "none";
+    suggestionsContainer.style.display = 'none';
   }
 }
 
 function generateKeywordSuggestions(existingKeywords) {
   // 간단한 추천 로직 - 실제로는 더 정교한 알고리즘 사용 가능
   const commonSuggestions = [
-    "구매",
-    "가격",
-    "할인",
-    "리뷰",
-    "추천",
-    "최저가",
-    "배송",
-    "무료배송",
-    "특가",
-    "세일",
-    "이벤트",
-    "쿠폰",
-    "포토후기",
-    "사용후기",
+    '구매',
+    '가격',
+    '할인',
+    '리뷰',
+    '추천',
+    '최저가',
+    '배송',
+    '무료배송',
+    '특가',
+    '세일',
+    '이벤트',
+    '쿠폰',
+    '포토후기',
+    '사용후기',
   ];
 
   return commonSuggestions
@@ -1280,47 +1170,40 @@ function generateKeywordSuggestions(existingKeywords) {
       (suggestion) =>
         !existingKeywords.includes(suggestion) &&
         !existingKeywords.some(
-          (keyword) =>
-            keyword.includes(suggestion) || suggestion.includes(keyword)
+          (keyword) => keyword.includes(suggestion) || suggestion.includes(keyword)
         )
     )
     .slice(0, 8);
 }
 
 function showLinkPreview(container) {
-  const name = container.querySelector("#aff-name")?.value?.trim();
-  const url = container.querySelector("#aff-url")?.value?.trim();
-  const platform = container.querySelector("#aff-platform")?.value;
+  const name = container.querySelector('#aff-name')?.value?.trim();
+  const url = container.querySelector('#aff-url')?.value?.trim();
+  const platform = container.querySelector('#aff-platform')?.value;
 
   if (!name || !url) {
-    showToast("⚠️ 상품명과 URL을 입력한 후 미리보기를 확인하세요.");
+    showToast('⚠️ 상품명과 URL을 입력한 후 미리보기를 확인하세요.');
     return;
   }
 
-  const previewContainer = container.querySelector("#affiliate-link-preview");
-  const previewContent = container.querySelector("#preview-content");
+  const previewContainer = container.querySelector('#affiliate-link-preview');
+  const previewContent = container.querySelector('#preview-content');
 
   if (!previewContainer || !previewContent) return;
 
   // 플랫폼 아이콘 결정
-  let icon = "🔗";
-  if (platform === "Coupang") icon = "🚀";
-  else if (platform === "AliExpress") icon = "🛍️";
-  else if (platform === "Amazon") icon = "📦";
+  let icon = '🔗';
+  if (platform === 'Coupang') icon = '🚀';
+  else if (platform === 'AliExpress') icon = '🛍️';
+  else if (platform === 'Amazon') icon = '📦';
 
   // 미리보기 HTML 생성
   // 만약 카드 필드가 채워진 경우 '카드형 미리보기'를 우선적으로 보여줍니다.
-  const cardProductName = container
-    .querySelector("#card-product-name")
-    ?.value?.trim();
-  const cardImg = container.querySelector("#card-image-url")?.value?.trim();
-  const cardSale = container.querySelector("#card-sale-price")?.value?.trim();
-  const cardOrig = container
-    .querySelector("#card-original-price")
-    ?.value?.trim();
-  const cardDiscount = container
-    .querySelector("#card-discount-rate")
-    ?.value?.trim();
+  const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
+  const cardImg = container.querySelector('#card-image-url')?.value?.trim();
+  const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
+  const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
+  const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
 
   if (cardProductName || cardImg || cardSale) {
     previewContent.innerHTML = `
@@ -1338,19 +1221,19 @@ function showLinkPreview(container) {
           }</div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <div style="font-weight:800;color:#ae0000;font-size:16px;">${
-              cardSale ? Number(cardSale).toLocaleString() + "원" : ""
+              cardSale ? Number(cardSale).toLocaleString() + '원' : ''
             }</div>
             ${
               cardOrig && Number(cardOrig) > Number(cardSale || 0)
                 ? `<div style="text-decoration:line-through;color:#999;font-size:13px;">${Number(
                     cardOrig
                   ).toLocaleString()}원</div>`
-                : ""
+                : ''
             }
             ${
               cardDiscount
                 ? `<div style="color:#ae0000;font-weight:700;font-size:13px;">${cardDiscount}%↓</div>`
-                : ""
+                : ''
             }
           </div>
           <div style="font-size:12px;color:#666;">${
@@ -1360,7 +1243,7 @@ function showLinkPreview(container) {
                     (k) =>
                       `<span style='background:#f0f0f0;padding:3px 6px;border-radius:12px;margin-right:4px;font-size:12px;'>#${k}</span>`
                   )
-                  .join("")
+                  .join('')
               : '<span class="no-keywords">키워드 없음</span>'
           }</div>
         </div>
@@ -1378,9 +1261,7 @@ function showLinkPreview(container) {
         <div class="preview-link-keywords">
           ${
             tempKeywords.length > 0
-              ? tempKeywords
-                  .map((k) => `<span class="preview-keyword">#${k}</span>`)
-                  .join(" ")
+              ? tempKeywords.map((k) => `<span class="preview-keyword">#${k}</span>`).join(' ')
               : '<span class="no-keywords">키워드 없음</span>'
           }
         </div>
@@ -1388,26 +1269,24 @@ function showLinkPreview(container) {
     `;
   }
 
-  previewContainer.style.display = "block";
+  previewContainer.style.display = 'block';
 
   // 미리보기 스크롤
-  previewContainer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function filterLinks(container, searchTerm) {
-  const listEl = container.querySelector("#affiliate-link-list");
+  const listEl = container.querySelector('#affiliate-link-list');
   if (!listEl) return;
 
   const searchLower = searchTerm.toLowerCase();
-  const linkCards = listEl.querySelectorAll(".affiliate-link-card");
+  const linkCards = listEl.querySelectorAll('.affiliate-link-card');
 
   linkCards.forEach((card) => {
-    const title =
-      card.querySelector(".link-title")?.textContent?.toLowerCase() || "";
-    const platform =
-      card.querySelector(".link-platform")?.textContent?.toLowerCase() || "";
-    const keywords = Array.from(card.querySelectorAll(".link-keyword")).map(
-      (k) => k.textContent.toLowerCase()
+    const title = card.querySelector('.link-title')?.textContent?.toLowerCase() || '';
+    const platform = card.querySelector('.link-platform')?.textContent?.toLowerCase() || '';
+    const keywords = Array.from(card.querySelectorAll('.link-keyword')).map((k) =>
+      k.textContent.toLowerCase()
     );
 
     const matches =
@@ -1415,7 +1294,7 @@ function filterLinks(container, searchTerm) {
       platform.includes(searchLower) ||
       keywords.some((k) => k.includes(searchLower));
 
-    card.style.display = matches ? "block" : "none";
+    card.style.display = matches ? 'block' : 'none';
   });
 
   // 검색 결과 개수 표시
@@ -1432,38 +1311,38 @@ function filterLinks(container, searchTerm) {
 function resetForm(container) {
   if (!container) return;
 
-  const editIdInput = container.querySelector("#edit-link-id");
-  const nameInput = container.querySelector("#aff-name");
-  const urlInput = container.querySelector("#aff-url");
-  const platformSelect = container.querySelector("#aff-platform");
-  const formTitle = container.querySelector("#form-title");
-  const previewContainer = container.querySelector("#affiliate-link-preview");
+  const editIdInput = container.querySelector('#edit-link-id');
+  const nameInput = container.querySelector('#aff-name');
+  const urlInput = container.querySelector('#aff-url');
+  const platformSelect = container.querySelector('#aff-platform');
+  const formTitle = container.querySelector('#form-title');
+  const previewContainer = container.querySelector('#affiliate-link-preview');
 
-  if (editIdInput) editIdInput.value = "";
+  if (editIdInput) editIdInput.value = '';
   if (nameInput) {
-    nameInput.value = "";
-    nameInput.classList.remove("error");
+    nameInput.value = '';
+    nameInput.classList.remove('error');
   }
   if (urlInput) {
-    urlInput.value = "";
-    urlInput.classList.remove("error");
+    urlInput.value = '';
+    urlInput.classList.remove('error');
   }
-  if (platformSelect) platformSelect.value = "Coupang";
+  if (platformSelect) platformSelect.value = 'Coupang';
 
   tempKeywords = [];
   renderTags(container);
   updateKeywordSuggestions(container);
 
-  if (formTitle) formTitle.textContent = "새 링크 등록";
-  if (previewContainer) previewContainer.style.display = "none";
+  if (formTitle) formTitle.textContent = '새 링크 등록';
+  if (previewContainer) previewContainer.style.display = 'none';
 }
 
 async function loadLinks(container) {
   if (!container) return;
 
-  const listEl = container.querySelector("#affiliate-link-list");
-  const countEl = container.querySelector("#affiliate-link-count");
-  const statsEl = container.querySelector("#affiliate-link-stats");
+  const listEl = container.querySelector('#affiliate-link-list');
+  const countEl = container.querySelector('#affiliate-link-count');
+  const statsEl = container.querySelector('#affiliate-link-stats');
 
   if (!listEl) return;
 
@@ -1485,22 +1364,18 @@ async function loadLinks(container) {
 
     // 통계 업데이트
     if (statsEl) {
-      const totalClicks = currentLinks.reduce(
-        (sum, link) => sum + (link.clickCount || 0),
-        0
-      );
+      const totalClicks = currentLinks.reduce((sum, link) => sum + (link.clickCount || 0), 0);
       const activeLinks = currentLinks.filter(
         (link) => link.keywords && link.keywords.length > 0
       ).length;
 
-      container.querySelector("#total-clicks").textContent =
-        totalClicks.toLocaleString();
-      container.querySelector("#active-links").textContent = activeLinks;
+      container.querySelector('#total-clicks').textContent = totalClicks.toLocaleString();
+      container.querySelector('#active-links').textContent = activeLinks;
 
       if (currentLinks.length > 0) {
-        statsEl.style.display = "flex";
+        statsEl.style.display = 'flex';
       } else {
-        statsEl.style.display = "none";
+        statsEl.style.display = 'none';
       }
     }
 
@@ -1518,10 +1393,10 @@ async function loadLinks(container) {
       `;
 
       // 빈 상태에서 추가 버튼 이벤트
-      const addFromEmptyBtn = listEl.querySelector("#btn-add-from-empty");
+      const addFromEmptyBtn = listEl.querySelector('#btn-add-from-empty');
       if (addFromEmptyBtn) {
-        addFromEmptyBtn.addEventListener("click", () => {
-          const addBtn = container.querySelector("#btn-show-add-form");
+        addFromEmptyBtn.addEventListener('click', () => {
+          const addBtn = container.querySelector('#btn-show-add-form');
           if (addBtn) addBtn.click();
         });
       }
@@ -1529,28 +1404,28 @@ async function loadLinks(container) {
       return;
     }
 
-    listEl.innerHTML = "";
+    listEl.innerHTML = '';
     currentLinks.forEach((link) => {
-      const item = document.createElement("div");
-      item.className = "affiliate-link-card";
+      const item = document.createElement('div');
+      item.className = 'affiliate-link-card';
 
       // 플랫폼 정보 결정
-      let platformIcon = "🔗";
-      let platformName = "일반";
-      let platformColor = "#666";
+      let platformIcon = '🔗';
+      let platformName = '일반';
+      let platformColor = '#666';
 
-      if (link.platform === "Coupang") {
-        platformIcon = "🚀";
-        platformName = "쿠팡";
-        platformColor = "#ff5a5f";
-      } else if (link.platform === "AliExpress") {
-        platformIcon = "🛍️";
-        platformName = "알리익스프레스";
-        platformColor = "#ff6a00";
-      } else if (link.platform === "Amazon") {
-        platformIcon = "📦";
-        platformName = "아마존";
-        platformColor = "#ff9900";
+      if (link.platform === 'Coupang') {
+        platformIcon = '🚀';
+        platformName = '쿠팡';
+        platformColor = '#ff5a5f';
+      } else if (link.platform === 'AliExpress') {
+        platformIcon = '🛍️';
+        platformName = '알리익스프레스';
+        platformColor = '#ff6a00';
+      } else if (link.platform === 'Amazon') {
+        platformIcon = '📦';
+        platformName = '아마존';
+        platformColor = '#ff9900';
       }
 
       // 카드형 데이터가 있으면 간단한 카드 미리보기 추가
@@ -1560,25 +1435,21 @@ async function loadLinks(container) {
           <div class="link-card-preview">
             <div class="link-card-preview__img">
               <img src="${
-                cardData.imageUrl || ""
+                cardData.imageUrl || ''
               }" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
             </div>
-            <div class="link-card-preview__meta">${(
-              cardData.productName || ""
-            ).slice(0, 60)}</div>
+            <div class="link-card-preview__meta">${(cardData.productName || '').slice(0, 60)}</div>
             <div class="link-card-preview__price">${
-              cardData.salePrice
-                ? cardData.salePrice.toLocaleString() + "원"
-                : ""
+              cardData.salePrice ? cardData.salePrice.toLocaleString() + '원' : ''
             }</div>
           </div>
         `
-        : "";
+        : '';
 
       // 키워드 표시
       const keywordsHtml = (link.keywords || [])
         .map((k) => `<span class="link-keyword">#${k}</span>`)
-        .join("");
+        .join('');
 
       // 클릭 수 표시
       const clickCount = link.clickCount || 0;
@@ -1608,49 +1479,49 @@ async function loadLinks(container) {
           <div class="link-stats">
             <span class="click-count">클릭: ${clickCount.toLocaleString()}</span>
           </div>
-          <div class="link-date">등록: ${new Date(
-            link.createdAt || Date.now()
-          ).toLocaleDateString("ko-KR")}</div>
+          <div class="link-date">등록: ${new Date(link.createdAt || Date.now()).toLocaleDateString(
+            'ko-KR'
+          )}</div>
         </div>
       `;
 
       // 수정 버튼 이벤트
-      const editBtn = item.querySelector(".link-edit-btn");
+      const editBtn = item.querySelector('.link-edit-btn');
       if (editBtn) {
-        editBtn.addEventListener("click", (e) => {
+        editBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           openEditForm(container, link);
         });
       }
 
       // 삭제 버튼 이벤트
-      const deleteBtn = item.querySelector(".link-delete-btn");
+      const deleteBtn = item.querySelector('.link-delete-btn');
       if (deleteBtn) {
-        deleteBtn.addEventListener("click", async (e) => {
+        deleteBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           if (confirm(`"${link.name}" 링크를 정말 삭제하시겠습니까?`)) {
             try {
               deleteBtn.disabled = true;
-              deleteBtn.textContent = "삭제 중...";
+              deleteBtn.textContent = '삭제 중...';
 
               await deleteAffiliateLink(link.id);
               await loadLinks(container);
-              showToast("🗑️ 링크가 삭제되었습니다.");
+              showToast('🗑️ 링크가 삭제되었습니다.');
             } catch (error) {
-              console.error("[AffiliateModal] Delete error:", error);
-              showToast("❌ 삭제 중 오류가 발생했습니다.");
+              console.error('[AffiliateModal] Delete error:', error);
+              showToast('❌ 삭제 중 오류가 발생했습니다.');
               deleteBtn.disabled = false;
-              deleteBtn.textContent = "🗑️";
+              deleteBtn.textContent = '🗑️';
             }
           }
         });
       }
 
       // 카드 클릭으로 수정 모드 (삭제 버튼 제외)
-      item.addEventListener("click", (e) => {
+      item.addEventListener('click', (e) => {
         if (
-          !e.target.classList.contains("link-delete-btn") &&
-          !e.target.classList.contains("link-edit-btn")
+          !e.target.classList.contains('link-delete-btn') &&
+          !e.target.classList.contains('link-edit-btn')
         ) {
           openEditForm(container, link);
         }
@@ -1659,7 +1530,7 @@ async function loadLinks(container) {
       listEl.appendChild(item);
     });
   } catch (error) {
-    console.error("[AffiliateModal] Load links error:", error);
+    console.error('[AffiliateModal] Load links error:', error);
     if (listEl) {
       listEl.innerHTML = `
         <div class="affiliate-error-state">
@@ -1674,9 +1545,9 @@ async function loadLinks(container) {
       `;
 
       // 에러 상태에서 다시 시도 버튼 이벤트 추가
-      const retryBtn = listEl.querySelector("#affiliate-retry-btn");
+      const retryBtn = listEl.querySelector('#affiliate-retry-btn');
       if (retryBtn) {
-        retryBtn.addEventListener("click", () => {
+        retryBtn.addEventListener('click', () => {
           loadLinks(container);
         });
       }
@@ -1685,19 +1556,19 @@ async function loadLinks(container) {
 }
 
 function openEditForm(container, link) {
-  const formContainer = container.querySelector("#affiliate-form-container");
+  const formContainer = container.querySelector('#affiliate-form-container');
   resetForm(container);
 
-  const editIdInput = container.querySelector("#edit-link-id");
-  const nameInput = container.querySelector("#aff-name");
-  const urlInput = container.querySelector("#aff-url");
-  const platformSelect = container.querySelector("#aff-platform");
-  const formTitle = container.querySelector("#form-title");
+  const editIdInput = container.querySelector('#edit-link-id');
+  const nameInput = container.querySelector('#aff-name');
+  const urlInput = container.querySelector('#aff-url');
+  const platformSelect = container.querySelector('#aff-platform');
+  const formTitle = container.querySelector('#form-title');
 
   if (editIdInput) editIdInput.value = link.id;
   if (nameInput) nameInput.value = link.name;
   if (urlInput) urlInput.value = link.url;
-  if (platformSelect) platformSelect.value = link.platform || "General";
+  if (platformSelect) platformSelect.value = link.platform || 'General';
 
   tempKeywords = [...(link.keywords || [])];
   renderTags(container);
@@ -1707,24 +1578,24 @@ function openEditForm(container, link) {
   const cd = link.cardData || {};
   const setValue = (id, v) => {
     const el = container.querySelector(`#${id}`);
-    if (el) el.value = v !== undefined && v !== null ? v : "";
+    if (el) el.value = v !== undefined && v !== null ? v : '';
   };
 
-  setValue("card-product-name", cd.productName || "");
-  setValue("card-image-url", cd.imageUrl || "");
-  setValue("card-original-price", cd.originalPrice || "");
-  setValue("card-sale-price", cd.salePrice || "");
-  setValue("card-discount-rate", cd.discountRate || "");
-  setValue("card-rating", cd.rating || "");
-  setValue("card-review-count", cd.reviewCount || "");
-  setValue("card-badges", (cd.badges || []).join(", "));
-  const rocket = container.querySelector("#card-is-rocket");
+  setValue('card-product-name', cd.productName || '');
+  setValue('card-image-url', cd.imageUrl || '');
+  setValue('card-original-price', cd.originalPrice || '');
+  setValue('card-sale-price', cd.salePrice || '');
+  setValue('card-discount-rate', cd.discountRate || '');
+  setValue('card-rating', cd.rating || '');
+  setValue('card-review-count', cd.reviewCount || '');
+  setValue('card-badges', (cd.badges || []).join(', '));
+  const rocket = container.querySelector('#card-is-rocket');
   if (rocket) rocket.checked = !!cd.isRocket;
-  const insertMode = container.querySelector("#card-insert-mode");
-  if (insertMode) insertMode.value = cd.insertMode || "card";
+  const insertMode = container.querySelector('#card-insert-mode');
+  if (insertMode) insertMode.value = cd.insertMode || 'card';
 
-  if (formTitle) formTitle.textContent = "링크 수정";
-  if (formContainer) formContainer.style.display = "block";
+  if (formTitle) formTitle.textContent = '링크 수정';
+  if (formContainer) formContainer.style.display = 'block';
 
   // 폼이 열리면 상품명 입력창에 포커스
   if (nameInput) setTimeout(() => nameInput.focus(), 100);

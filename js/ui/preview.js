@@ -1,15 +1,15 @@
 // js/ui/preview.js
 
-import { shortenLink, showToast } from "../utils.js";
+import { shortenLink, showToast } from '../utils.js';
 
 // 최근 스크랩 미리보기 카드를 화면에 보여주는 함수
 export function showRecentScrapPreview(scrapData) {
-  let container = document.getElementById("cp-dock-container");
-  
+  let container = document.getElementById('cp-dock-container');
+
   // [체크리스트 1-A] 컨테이너가 없으면 자동 생성
   if (!container) {
-    container = document.createElement("div");
-    container.id = "cp-dock-container";
+    container = document.createElement('div');
+    container.id = 'cp-dock-container';
     container.style.cssText = `
       position: fixed;
       left: 0;
@@ -48,42 +48,42 @@ export function showRecentScrapPreview(scrapData) {
     z-index: 1; /* 버튼보다 아래에 있도록 */
   `;
 
-// 1. 이미지 부분을 별도의 변수로 분리
-const imageElement = scrapData.image 
-  ? // 이미지가 있을 경우: <img> 태그
-    `<img src="${scrapData.image}" style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; object-fit: cover; border: 1px solid #eee;" referrerpolicy="no-referrer">`
-  : // 이미지가 없을 경우: 아이콘을 담은 <div> 태그
-    `<div style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; display: flex; align-items: center; justify-content: center; background-color: #f1f3f5;">
+  // 1. 이미지 부분을 별도의 변수로 분리
+  const imageElement = scrapData.image
+    ? // 이미지가 있을 경우: <img> 태그
+      `<img src="${scrapData.image}" style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; object-fit: cover; border: 1px solid #eee;" referrerpolicy="no-referrer">`
+    : // 이미지가 없을 경우: 아이콘을 담은 <div> 태그
+      `<div style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; display: flex; align-items: center; justify-content: center; background-color: #f1f3f5;">
       <span style="font-size: 24px; filter: grayscale(1);">📝</span>
     </div>`;
 
-// 2. 최종 HTML 조합
-// [신규] 저장된 채널 정보 표시 (체크리스트 1-A 점검, 패널 닫힘 상태 대응)
-// background.js에서 보낸 channelName 활용
-let channelIndicator = '';
-if (scrapData.channelId) {
+  // 2. 최종 HTML 조합
+  // [신규] 저장된 채널 정보 표시 (체크리스트 1-A 점검, 패널 닫힘 상태 대응)
   // background.js에서 보낸 channelName 활용
-  const channelName = scrapData.channelName || "현재 채널";
-  channelIndicator = `<div style="font-size: 11px; color: #1a73e8; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+  let channelIndicator = '';
+  if (scrapData.channelId) {
+    // background.js에서 보낸 channelName 활용
+    const channelName = scrapData.channelName || '현재 채널';
+    channelIndicator = `<div style="font-size: 11px; color: #1a73e8; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
     📂 <strong>${channelName}</strong>에 저장됨
   </div>`;
-} else {
-  channelIndicator = `<div style="font-size: 11px; color: #5f6368; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+  } else {
+    channelIndicator = `<div style="font-size: 11px; color: #5f6368; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
     🌐 <strong>공용 스크랩</strong>으로 저장됨
   </div>`;
-}
-
-// URL 호스트명 안전하게 추출
-let hostname = '';
-try {
-  if (scrapData.url) {
-    hostname = new URL(scrapData.url).hostname;
   }
-} catch (e) {
-  hostname = scrapData.url || '';
-}
 
-card.innerHTML = `
+  // URL 호스트명 안전하게 추출
+  let hostname = '';
+  try {
+    if (scrapData.url) {
+      hostname = new URL(scrapData.url).hostname;
+    }
+  } catch (e) {
+    hostname = scrapData.url || '';
+  }
+
+  card.innerHTML = `
   ${imageElement}
   <div style="display: flex; flex-direction: column; overflow: hidden;">
     <div style="font-weight: 600; font-size: 15px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${scrapData.text ? scrapData.text.substring(0, 30) : '제목 없음'}</div>

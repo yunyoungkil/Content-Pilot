@@ -1,7 +1,7 @@
 // js/ui/performanceReportMode.js
 // 성과 분석 및 리포트 모드 UI
 
-import { showToast } from "../utils.js";
+import { showToast } from '../utils.js';
 
 let allPerformanceData = [];
 let analysisReport = null;
@@ -12,10 +12,10 @@ let analysisReport = null;
 export function renderPerformanceReport(container) {
   // [체크리스트 6-1] 완전 초기화: 이전 채널의 모든 데이터 제거
   container.innerHTML = '';
-  
+
   // [체크리스트 6-3] 리포트 초기화: 채널 변경 시 리포트도 초기화
   analysisReport = null;
-  
+
   container.innerHTML = `
     <div class="performance-report-container">
       <div class="perf-report-header">
@@ -43,32 +43,32 @@ export function renderPerformanceReport(container) {
  * 이벤트 리스너 추가
  */
 function addPerformanceReportEventListeners(container) {
-  const startBtn = container.querySelector("#start-analysis-btn");
-  const generateBtn = container.querySelector("#generate-report-btn");
-  const refreshBtn = container.querySelector("#refresh-report-btn");
+  const startBtn = container.querySelector('#start-analysis-btn');
+  const generateBtn = container.querySelector('#generate-report-btn');
+  const refreshBtn = container.querySelector('#refresh-report-btn');
 
   if (startBtn) {
-    startBtn.addEventListener("click", () => {
+    startBtn.addEventListener('click', () => {
       generatePerformanceReport(container);
     });
   }
 
   if (generateBtn) {
-    generateBtn.addEventListener("click", () => {
+    generateBtn.addEventListener('click', () => {
       generatePerformanceReport(container);
     });
   }
 
   if (refreshBtn) {
-    refreshBtn.addEventListener("click", () => {
+    refreshBtn.addEventListener('click', () => {
       loadPerformanceData(container);
     });
   }
 
   // [신규] 채널 변경 감지 -> 성과 리포트 새로고침
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === "local" && changes.activeChannelId) {
-      console.log("[Performance Report] 채널 변경 감지, 데이터 다시 로드");
+    if (namespace === 'local' && changes.activeChannelId) {
+      console.log('[Performance Report] 채널 변경 감지, 데이터 다시 로드');
       // 리포트 초기화
       analysisReport = null;
       loadPerformanceData(container);
@@ -80,25 +80,25 @@ function addPerformanceReportEventListeners(container) {
  * Firebase에서 성과 데이터 로드
  */
 function loadPerformanceData(container) {
-  showToast("성과 데이터를 불러오는 중...");
+  showToast('성과 데이터를 불러오는 중...');
 
   // Firebase가 있으면 직접 접근, 없으면 background.js를 통해 데이터 가져오기
   const firebase = window.firebase;
-  
+
   if (firebase) {
     // Firebase 직접 접근
-    const kanbanRef = firebase.database().ref("kanban");
-    kanbanRef.once("value", async (snapshot) => {
+    const kanbanRef = firebase.database().ref('kanban');
+    kanbanRef.once('value', async (snapshot) => {
       await processPerformanceData(snapshot.val() || {}, container);
     });
   } else {
     // background.js를 통해 데이터 가져오기
-    chrome.runtime.sendMessage({ action: "get_kanban_data" });
-    
+    chrome.runtime.sendMessage({ action: 'get_kanban_data' });
+
     // 실시간 업데이트 리스너 등록 (한 번만)
     if (!window.performanceReportListenerAttached) {
       chrome.runtime.onMessage.addListener(async (msg) => {
-        if (msg.action === "kanban_data_updated") {
+        if (msg.action === 'kanban_data_updated') {
           await processPerformanceData(msg.data || {}, container);
         }
       });
@@ -114,13 +114,13 @@ async function processPerformanceData(allCards, container) {
   allPerformanceData = [];
 
   // [신규] 현재 활성 채널 ID 가져오기
-  const { activeChannelId } = await chrome.storage.local.get("activeChannelId");
+  const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
 
   // 모든 상태의 카드에서 성과 데이터가 있는 것만 추출
   for (const status in allCards) {
     for (const cardId in allCards[status]) {
       const card = allCards[status][cardId];
-      
+
       // [신규] 채널 필터링: 현재 활성 채널과 일치하는 카드만 포함
       if (activeChannelId && card.channelId !== activeChannelId) {
         // channelId가 undefined인 구버전 데이터는 일단 포함 (호환성)
@@ -128,12 +128,12 @@ async function processPerformanceData(allCards, container) {
           continue;
         }
       }
-      
+
       if (card.publishedUrl && card.performance && !card.performance.error) {
         allPerformanceData.push({
           id: cardId,
           status: status,
-          title: card.title || "제목 없음",
+          title: card.title || '제목 없음',
           publishedUrl: card.publishedUrl,
           performance: card.performance,
           tags: card.tags || [],
@@ -145,7 +145,7 @@ async function processPerformanceData(allCards, container) {
   }
 
   showToast(`성과 데이터 ${allPerformanceData.length}개를 불러왔습니다.`);
-  
+
   // 리포트가 있으면 다시 렌더링 (채널 변경 시 리포트는 초기화됨)
   if (analysisReport) {
     renderReport(container);
@@ -161,7 +161,7 @@ async function generatePerformanceReport(container) {
     // 데이터 로드 후 리포트 생성
     setTimeout(() => {
       if (allPerformanceData.length === 0) {
-        showToast("분석할 성과 데이터가 없습니다.", "error");
+        showToast('분석할 성과 데이터가 없습니다.', 'error');
         return;
       }
       performAnalysis(container);
@@ -176,7 +176,7 @@ async function generatePerformanceReport(container) {
  * 성과 분석 수행
  */
 async function performAnalysis(container) {
-  const contentEl = container.querySelector("#perf-report-content");
+  const contentEl = container.querySelector('#perf-report-content');
   contentEl.innerHTML = `
     <div class="perf-analysis-loading">
       <div class="loading-spinner">⏳</div>
@@ -200,8 +200,8 @@ async function performAnalysis(container) {
 
     renderReport(container);
   } catch (error) {
-    console.error("성과 분석 중 오류:", error);
-    showToast("성과 분석 중 오류가 발생했습니다.", "error");
+    console.error('성과 분석 중 오류:', error);
+    showToast('성과 분석 중 오류가 발생했습니다.', 'error');
     contentEl.innerHTML = `
       <div class="perf-error">
         <h3>오류 발생</h3>
@@ -209,10 +209,10 @@ async function performAnalysis(container) {
         <button id="retry-analysis-btn" class="perf-control-btn">다시 시도</button>
       </div>
     `;
-    
-    const retryBtn = contentEl.querySelector("#retry-analysis-btn");
+
+    const retryBtn = contentEl.querySelector('#retry-analysis-btn');
     if (retryBtn) {
-      retryBtn.addEventListener("click", () => performAnalysis(container));
+      retryBtn.addEventListener('click', () => performAnalysis(container));
     }
   }
 }
@@ -241,29 +241,33 @@ function analyzePerformanceData() {
   const avgEarnings = totalEarnings / allPerformanceData.length;
   const avgPageviews = totalPageviews / allPerformanceData.length;
   const avgSessions = totalSessions / allPerformanceData.length;
-  const avgDuration = allPerformanceData.reduce(
-    (sum, item) => sum + (item.performance.avgSessionDuration || 0),
-    0
-  ) / allPerformanceData.length;
-  const avgCTR = allPerformanceData.reduce(
-    (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
-    0
-  ) / allPerformanceData.length;
-  const avgBounceRate = allPerformanceData.reduce(
-    (sum, item) => sum + (item.performance.bounceRate || 0),
-    0
-  ) / allPerformanceData.length;
-  
+  const avgDuration =
+    allPerformanceData.reduce((sum, item) => sum + (item.performance.avgSessionDuration || 0), 0) /
+    allPerformanceData.length;
+  const avgCTR =
+    allPerformanceData.reduce(
+      (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
+      0
+    ) / allPerformanceData.length;
+  const avgBounceRate =
+    allPerformanceData.reduce((sum, item) => sum + (item.performance.bounceRate || 0), 0) /
+    allPerformanceData.length;
+
   // [추가] 평균 RPM 계산
   // 단순 평균으로 계산 (각 페이지의 RPM의 합 / 개수)
-  const avgRPM = allPerformanceData.reduce(
-    (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
-    0
-  ) / allPerformanceData.length;
+  const avgRPM =
+    allPerformanceData.reduce(
+      (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
+      0
+    ) / allPerformanceData.length;
 
   // [신규] 평균 참여율 및 신규 방문자 계산
-  const avgEngagementRate = allPerformanceData.reduce((sum, item) => sum + (item.performance.engagementRate || 0), 0) / allPerformanceData.length;
-  const avgNewUsers = allPerformanceData.reduce((sum, item) => sum + (item.performance.newUsers || 0), 0) / allPerformanceData.length;
+  const avgEngagementRate =
+    allPerformanceData.reduce((sum, item) => sum + (item.performance.engagementRate || 0), 0) /
+    allPerformanceData.length;
+  const avgNewUsers =
+    allPerformanceData.reduce((sum, item) => sum + (item.performance.newUsers || 0), 0) /
+    allPerformanceData.length;
 
   // 성공 콘텐츠 분석 (상위 20%)
   const successThreshold = Math.ceil(allPerformanceData.length * 0.2);
@@ -312,59 +316,55 @@ function analyzePerformanceData() {
 
   // 성공 패턴 분석
   const successPatterns = {
-    avgEarnings: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.estimatedEarnings || 0),
-      0
-    ) / topPerformers.length,
-    avgPageviews: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageviews || 0),
-      0
-    ) / topPerformers.length,
-    avgDuration: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.avgSessionDuration || 0),
-      0
-    ) / topPerformers.length,
-    avgCTR: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
-      0
-    ) / topPerformers.length,
-    avgBounceRate: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.bounceRate || 0),
-      0
-    ) / topPerformers.length,
-    avgRPM: topPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
-      0
-    ) / topPerformers.length,
+    avgEarnings:
+      topPerformers.reduce((sum, item) => sum + (item.performance.estimatedEarnings || 0), 0) /
+      topPerformers.length,
+    avgPageviews:
+      topPerformers.reduce((sum, item) => sum + (item.performance.pageviews || 0), 0) /
+      topPerformers.length,
+    avgDuration:
+      topPerformers.reduce((sum, item) => sum + (item.performance.avgSessionDuration || 0), 0) /
+      topPerformers.length,
+    avgCTR:
+      topPerformers.reduce(
+        (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
+        0
+      ) / topPerformers.length,
+    avgBounceRate:
+      topPerformers.reduce((sum, item) => sum + (item.performance.bounceRate || 0), 0) /
+      topPerformers.length,
+    avgRPM:
+      topPerformers.reduce(
+        (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
+        0
+      ) / topPerformers.length,
     tags: successTags,
   };
 
   // 실패 패턴 분석
   const failurePatterns = {
-    avgEarnings: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.estimatedEarnings || 0),
-      0
-    ) / bottomPerformers.length,
-    avgPageviews: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageviews || 0),
-      0
-    ) / bottomPerformers.length,
-    avgDuration: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.avgSessionDuration || 0),
-      0
-    ) / bottomPerformers.length,
-    avgCTR: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
-      0
-    ) / bottomPerformers.length,
-    avgBounceRate: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.bounceRate || 0),
-      0
-    ) / bottomPerformers.length,
-    avgRPM: bottomPerformers.reduce(
-      (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
-      0
-    ) / bottomPerformers.length,
+    avgEarnings:
+      bottomPerformers.reduce((sum, item) => sum + (item.performance.estimatedEarnings || 0), 0) /
+      bottomPerformers.length,
+    avgPageviews:
+      bottomPerformers.reduce((sum, item) => sum + (item.performance.pageviews || 0), 0) /
+      bottomPerformers.length,
+    avgDuration:
+      bottomPerformers.reduce((sum, item) => sum + (item.performance.avgSessionDuration || 0), 0) /
+      bottomPerformers.length,
+    avgCTR:
+      bottomPerformers.reduce(
+        (sum, item) => sum + (item.performance.pageCTR || item.performance.ctr || 0),
+        0
+      ) / bottomPerformers.length,
+    avgBounceRate:
+      bottomPerformers.reduce((sum, item) => sum + (item.performance.bounceRate || 0), 0) /
+      bottomPerformers.length,
+    avgRPM:
+      bottomPerformers.reduce(
+        (sum, item) => sum + (item.performance.pageRPM || item.performance.rpm || 0),
+        0
+      ) / bottomPerformers.length,
     tags: failureTags,
   };
 
@@ -416,7 +416,7 @@ async function generateAIInsights(analysis) {
 - 평균 체류 시간: ${Math.round(analysis.successPatterns.avgDuration)}초
 - 평균 RPM: $${analysis.successPatterns.avgRPM.toFixed(2)}
 - 평균 CTR: ${analysis.successPatterns.avgCTR.toFixed(2)}%
-- 성공 태그: ${analysis.successPatterns.tags.join(", ")}
+- 성공 태그: ${analysis.successPatterns.tags.join(', ')}
 
 **실패 콘텐츠 패턴:**
 - 평균 수익: $${analysis.failurePatterns.avgEarnings.toFixed(2)}
@@ -424,7 +424,7 @@ async function generateAIInsights(analysis) {
 - 평균 체류 시간: ${Math.round(analysis.failurePatterns.avgDuration)}초
 - 평균 RPM: $${analysis.failurePatterns.avgRPM.toFixed(2)}
 - 평균 CTR: ${analysis.failurePatterns.avgCTR.toFixed(2)}%
-- 실패 태그: ${analysis.failurePatterns.tags.join(", ")}
+- 실패 태그: ${analysis.failurePatterns.tags.join(', ')}
 
 다음 형식으로 응답해주세요:
 1. **성공 요인 분석**: 성공 콘텐츠의 공통점
@@ -433,23 +433,23 @@ async function generateAIInsights(analysis) {
 4. **태그 전략**: 성공 태그를 활용한 콘텐츠 기획 제안`;
 
     const response = await chrome.runtime.sendMessage({
-      action: "call_gemini",
+      action: 'call_gemini',
       prompt: prompt,
     });
 
     if (response && response.text) {
       return {
-        successFactors: extractSection(response.text, "성공 요인"),
-        improvements: extractSection(response.text, "개선점"),
-        optimization: extractSection(response.text, "수익 최적화"),
-        tagStrategy: extractSection(response.text, "태그 전략"),
+        successFactors: extractSection(response.text, '성공 요인'),
+        improvements: extractSection(response.text, '개선점'),
+        optimization: extractSection(response.text, '수익 최적화'),
+        tagStrategy: extractSection(response.text, '태그 전략'),
         fullText: response.text,
       };
     }
 
     return null;
   } catch (error) {
-    console.error("AI 인사이트 생성 실패:", error);
+    console.error('AI 인사이트 생성 실패:', error);
     return null;
   }
 }
@@ -458,12 +458,9 @@ async function generateAIInsights(analysis) {
  * 텍스트에서 섹션 추출
  */
 function extractSection(text, sectionName) {
-  const regex = new RegExp(
-    `\\*\\*${sectionName}[^:]*:\\*\\*\\s*([^*]+?)(?=\\*\\*|$)`,
-    "s"
-  );
+  const regex = new RegExp(`\\*\\*${sectionName}[^:]*:\\*\\*\\s*([^*]+?)(?=\\*\\*|$)`, 's');
   const match = text.match(regex);
-  return match ? match[1].trim() : "";
+  return match ? match[1].trim() : '';
 }
 
 /**
@@ -474,7 +471,7 @@ function renderReport(container) {
     return;
   }
 
-  const contentEl = container.querySelector("#perf-report-content");
+  const contentEl = container.querySelector('#perf-report-content');
   const analysis = analysisReport;
   const insights = analysis.insights || {};
 
@@ -552,15 +549,19 @@ function renderReport(container) {
           <div class="pattern-tags">
             <h4>성공 태그</h4>
             <div class="tag-list">
-              ${analysis.successPatterns.tags.map(tag => `<span class="tag success-tag">${tag}</span>`).join("")}
+              ${analysis.successPatterns.tags.map((tag) => `<span class="tag success-tag">${tag}</span>`).join('')}
             </div>
           </div>
-          ${insights.successFactors ? `
+          ${
+            insights.successFactors
+              ? `
             <div class="pattern-insights">
               <h4>AI 분석 인사이트</h4>
               <div class="insight-text">${formatInsightText(insights.successFactors)}</div>
             </div>
-          ` : ""}
+          `
+              : ''
+          }
         </div>
       </section>
 
@@ -593,43 +594,57 @@ function renderReport(container) {
           <div class="pattern-tags">
             <h4>실패 태그</h4>
             <div class="tag-list">
-              ${analysis.failurePatterns.tags.map(tag => `<span class="tag failure-tag">${tag}</span>`).join("")}
+              ${analysis.failurePatterns.tags.map((tag) => `<span class="tag failure-tag">${tag}</span>`).join('')}
             </div>
           </div>
-          ${insights.improvements ? `
+          ${
+            insights.improvements
+              ? `
             <div class="pattern-insights">
               <h4>개선점 제안</h4>
               <div class="insight-text">${formatInsightText(insights.improvements)}</div>
             </div>
-          ` : ""}
+          `
+              : ''
+          }
         </div>
       </section>
 
       <!-- 수익 최적화 제안 -->
-      ${insights.optimization ? `
+      ${
+        insights.optimization
+          ? `
         <section class="perf-report-section">
           <h3 class="section-title">💰 수익 최적화 제안</h3>
           <div class="perf-optimization">
             <div class="insight-text">${formatInsightText(insights.optimization)}</div>
           </div>
         </section>
-      ` : ""}
+      `
+          : ''
+      }
 
       <!-- 태그 전략 -->
-      ${insights.tagStrategy ? `
+      ${
+        insights.tagStrategy
+          ? `
         <section class="perf-report-section">
           <h3 class="section-title">🏷️ 태그 전략 제안</h3>
           <div class="perf-tag-strategy">
             <div class="insight-text">${formatInsightText(insights.tagStrategy)}</div>
           </div>
         </section>
-      ` : ""}
+      `
+          : ''
+      }
 
       <!-- 상위/하위 콘텐츠 목록 -->
       <section class="perf-report-section">
         <h3 class="section-title">📈 상위 성과 콘텐츠</h3>
         <div class="perf-content-list">
-          ${analysis.topPerformers.map((item, idx) => `
+          ${analysis.topPerformers
+            .map(
+              (item, idx) => `
             <div class="perf-content-item">
               <div class="content-rank">#${idx + 1}</div>
               <div class="content-info">
@@ -640,14 +655,18 @@ function renderReport(container) {
                 </div>
               </div>
             </div>
-          `).join("")}
+          `
+            )
+            .join('')}
         </div>
       </section>
 
       <section class="perf-report-section">
         <h3 class="section-title">📉 하위 성과 콘텐츠</h3>
         <div class="perf-content-list">
-          ${analysis.bottomPerformers.map((item, idx) => `
+          ${analysis.bottomPerformers
+            .map(
+              (item, idx) => `
             <div class="perf-content-item">
               <div class="content-rank">#${idx + 1}</div>
               <div class="content-info">
@@ -658,7 +677,9 @@ function renderReport(container) {
                 </div>
               </div>
             </div>
-          `).join("")}
+          `
+            )
+            .join('')}
         </div>
       </section>
 
@@ -673,14 +694,13 @@ function renderReport(container) {
  * 인사이트 텍스트 포맷팅
  */
 function formatInsightText(text) {
-  if (!text) return "";
+  if (!text) return '';
   // 마크다운 스타일을 HTML로 변환
   return text
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/\n/g, "<br>")
-    .replace(/^\d+\.\s/gm, "<li>")
-    .replace(/(<li>)/g, "<ul>$1")
-    .replace(/(<\/ul>)(<ul>)/g, "$1");
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>')
+    .replace(/^\d+\.\s/gm, '<li>')
+    .replace(/(<li>)/g, '<ul>$1')
+    .replace(/(<\/ul>)(<ul>)/g, '$1');
 }
-
