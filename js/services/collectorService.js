@@ -66,7 +66,8 @@ export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
     const normalizedUrl = normalizeUrlForComparison(originUrl);
     if (normalizedUrl) {
       const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/origin/${cardId}`;
+      const userId = await getCurrentUserId();
+      const path = `url_index/${userId}/${encodedKey}/origin/${cardId}`;
       updatePromises.push(
         update(path, { status, cardId }).catch((error) => {
           Logger.warn(`[updateUrlIndex] origin URL 인덱스 업데이트 실패 (${path}):`, error);
@@ -80,7 +81,8 @@ export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
     const normalizedUrl = normalizeUrlForComparison(publishedUrl);
     if (normalizedUrl) {
       const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
-      const path = `url_index/${CONSTANTS.USER_ID}/${encodedKey}/published/${cardId}`;
+      const userId = await getCurrentUserId();
+      const path = `url_index/${userId}/${encodedKey}/published/${cardId}`;
       updatePromises.push(
         update(path, { status, cardId }).catch((error) => {
           Logger.warn(`[updateUrlIndex] published URL 인덱스 업데이트 실패 (${path}):`, error);
@@ -99,7 +101,8 @@ export async function checkDuplicateUrl(url) {
   if (!url) return { exists: false };
   try {
     const key = encodeUrlForFirebaseKey(normalizeUrlForComparison(url));
-    const indexSnap = await get(ref(getDb(), `url_index/${CONSTANTS.USER_ID}/${key}`));
+    const userId = await getCurrentUserId();
+    const indexSnap = await get(ref(getDb(), `url_index/${userId}/${key}`));
     if (indexSnap.exists()) {
       const indexData = indexSnap.val();
 
@@ -118,7 +121,7 @@ export async function checkDuplicateUrl(url) {
 
       // 각 매치에 대해 실제 카드 존재 여부 확인
       for (const match of matches) {
-        const cardPath = `kanban/${CONSTANTS.USER_ID}/${match.status}/${match.cardId}`;
+        const cardPath = `kanban/${userId}/${match.status}/${match.cardId}`;
         const cardSnap = await get(ref(getDb(), cardPath));
 
         if (cardSnap.exists()) {
@@ -138,7 +141,7 @@ export async function checkDuplicateUrl(url) {
           Logger.warn(
             `[checkDuplicateUrl] 고아 인덱스 발견 - cardId: ${match.cardId}, 인덱스에서 제거`
           );
-          const orphanIndexPath = `url_index/${CONSTANTS.USER_ID}/${key}/${match.type}/${match.cardId}`;
+          const orphanIndexPath = `url_index/${userId}/${key}/${match.type}/${match.cardId}`;
           try {
             await remove(ref(getDb(), orphanIndexPath));
           } catch (removeError) {
@@ -198,7 +201,8 @@ async function processRssItem(itemText, sourceId, channelType) {
 
   const contentId = btoa(fullLink.split('?')[0]).replace(/=/g, '');
   const db = getDb();
-  const path = `channel_content/${CONSTANTS.USER_ID}/blogs/${contentId}`;
+  const userId = await getCurrentUserId();
+  const path = `channel_content/${userId}/blogs/${contentId}`;
 
   // 이미 존재하는지 확인 (가벼운 체크)
   const existSnap = await get(ref(db, path));
@@ -254,7 +258,8 @@ export async function fetchRssFeed(url, channelType) {
   try {
     const db = getDb();
     const sourceId = btoa(url).replace(/=/g, '');
-    const metaRef = ref(db, `channel_meta/${CONSTANTS.USER_ID}/${sourceId}`);
+    const userId = await getCurrentUserId();
+    const metaRef = ref(db, `channel_meta/${userId}/${sourceId}`);
 
     const metaSnap = await get(metaRef);
     const meta = metaSnap?.val() || {};
@@ -369,7 +374,7 @@ export async function fetchYoutubeChannel(channelId, channelType) {
   const details = await detailRes.json();
 
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
 
   for (const item of details.items || []) {
     const contentRef = ref(db, `channel_content/${userId}/youtubes/${item.id}`);
@@ -436,7 +441,8 @@ export async function fetchAllChannelData() {
   Logger.info('[fetchAllChannelData] 채널 데이터 수집 시작');
 
   const db = getDb();
-  const snap = await get(ref(db, `channels/${CONSTANTS.USER_ID}`));
+  const userId = await getCurrentUserId();
+  const snap = await get(ref(db, `channels/${userId}`));
   const channels = snap?.val();
   if (!channels) {
     Logger.warn('[fetchAllChannelData] 채널 데이터가 없습니다.');
@@ -632,7 +638,7 @@ export async function fetchAndSaveSinglePost(url, channelId, sourceId) {
     }
 
     // 3. 데이터 수집 및 저장
-    const userId = CONSTANTS.USER_ID;
+    const userId = await getCurrentUserId();
     const db = getDb();
 
     if (platform === 'youtube') {
