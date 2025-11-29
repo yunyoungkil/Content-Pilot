@@ -35,21 +35,21 @@ describe('analyticsService GA4 fallback', () => {
     jest.spyOn(require('../js/services/authService.js'), 'getValidToken').mockResolvedValue('fake-token');
   });
 
-  test('falls back to selectedGaPropertyId in storage when channel gaPropertyId missing', async () => {
-    // prepare storage mock
+  test('collects AdSense data even when GA4 ID is missing', async () => {
+    // prepare storage mock - no selectedGaPropertyId
     jest.spyOn(global.chrome.storage.local, 'get').mockImplementation(async (keys) => {
-      return { selectedGaPropertyId: '987654' , adSenseAccountId: 'pub-123'};
+      return { adSenseAccountId: 'pub-123' };
     });
 
     // spy on analytics functions to avoid real network calls
-    jest.spyOn(analyticsService, 'getAnalyticsData').mockResolvedValue({ pageviews: 10, gaEarnings: 1 });
+    jest.spyOn(analyticsService, 'getAnalyticsData').mockResolvedValue({ pageviews: 0, gaEarnings: 0 });
     jest.spyOn(analyticsService, 'getAdsenseData').mockResolvedValue({ estimatedEarnings: 0.5, pageViews: 8 });
 
     await analyticsService.updateSinglePerformanceMetric({ id: 'c1', path: 'kanban/user-123/ideas/c1', url: 'https://blog.example.com/post/1' });
 
     // Expect update called to write performance (collecting false after completion)
     expect(firebaseService.update).toHaveBeenCalled();
-    // Ensure we did not early-abort with GA4 missing error after fallback
+    // Ensure we did not early-abort with GA4 missing error
     const updates = firebaseService.update.mock.calls.map((c) => c[1] || c[0]);
     const hadGaMissingError = updates.some((u) => u && u.error === 'GA4 속성 ID 없음');
     expect(hadGaMissingError).toBe(false);

@@ -514,17 +514,13 @@ export async function updateSinglePerformanceMetric(contentInfo) {
     }
 
     if (!gaId) {
-      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — 스킵:', { path, userId, channelsCount: Object.keys(blogs).length });
-      await update(ref(db, `${path}/performance`), {
-        collecting: false,
-        error: 'GA4 속성 ID 없음',
-      });
-      return;
+      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — GA4 데이터 수집 스킵, AdSense/GSC만 수집:', { path, userId, channelsCount: Object.keys(blogs).length });
+      // GA4 ID가 없어도 AdSense와 GSC 데이터는 수집
     }
 
-    // 병렬 호출 (GA4, AdSense, GSC)
+    // 병렬 호출 (GA4, AdSense, GSC) - GA4가 없어도 나머지 수집
     const [gaData, adData, gscData] = await Promise.allSettled([
-      getAnalyticsData(token, gaId, contentInfo.url),
+      gaId ? getAnalyticsData(token, gaId, contentInfo.url) : Promise.resolve({ pageviews: 0, gaEarnings: 0 }),
       getAdsenseData(token, adSenseId, contentInfo.url),
       siteUrl ? getSearchConsoleData(token, siteUrl, contentInfo.url) : Promise.resolve({}),
     ]);
