@@ -1480,6 +1480,69 @@ export function renderChannelMode(container) {
 
       renderMyChannels();
       if (modal) modal.style.display = 'none';
+
+      // 즉시 저장: 상세 모달에서 적용을 누르면 백그라운드에 저장하고
+      // 후속 로직(헤더 갱신, 활성 채널 자동 선택 및 대시보드 이동)을 실행합니다.
+      saveChannelsToFirebase((response) => {
+        if (response && response.success) {
+          showToast('✅ 채널이 저장되었습니다.');
+
+          const shadowRoot =
+            container.closest('#content-pilot-host')?.shadowRoot ||
+            document.querySelector('#content-pilot-host')?.shadowRoot;
+          if (shadowRoot) {
+            import('./header.js').then((module) => {
+              module.addHeaderEventListeners(shadowRoot);
+            });
+          }
+
+          // 활성 채널이 없으면 첫 번째 채널을 활성화하고 대시보드로 이동
+          chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (channelResponse) => {
+            const myBlogs = channelResponse?.data?.myChannels?.blogs || [];
+            chrome.storage.local.get('activeChannelId', (res) => {
+              const activeChannelId = res.activeChannelId;
+              if (!activeChannelId && myBlogs.length > 0) {
+                const firstChannel = myBlogs[0];
+                const firstChannelId =
+                  firstChannel.id || (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '');
+
+                if (firstChannelId) {
+                  chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+                    const shadowRoot =
+                      container.closest('#content-pilot-host')?.shadowRoot ||
+                      document.querySelector('#content-pilot-host')?.shadowRoot;
+                    if (shadowRoot) {
+                      const mainArea = shadowRoot.querySelector('#cp-main-area');
+                      const dashboardTab = shadowRoot.querySelector('[data-key="dashboard"]');
+
+                      if (mainArea && dashboardTab) {
+                        shadowRoot
+                          .querySelectorAll('.cp-mode-tab')
+                          .forEach((tab) => tab.classList.remove('active'));
+                        dashboardTab.classList.add('active');
+
+                        import('./dashboardMode.js').then((module) => {
+                          module.renderDashboard(mainArea);
+                          module.addDashboardEventListeners(mainArea);
+                        });
+
+                        import('./header.js').then((module) => {
+                          module.addHeaderEventListeners(shadowRoot);
+                        });
+
+                        showToast('✅ 첫 번째 채널이 선택되었습니다. 대시보드로 이동합니다.');
+                      }
+                    }
+                  });
+                }
+              }
+            });
+          });
+        } else {
+          // 저장 실패시 간단하게 사용자에게 알림
+          showToast('❌ 채널 저장에 실패했습니다. 다시 시도해주세요.');
+        }
+      });
     });
   }
 
