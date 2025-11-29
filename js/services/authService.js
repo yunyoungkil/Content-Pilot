@@ -588,6 +588,25 @@ export async function restoreAuthSession() {
     const validation = await validateStoredToken();
 
     if (validation.valid && !validation.needsRefresh) {
+      // Ensure we have user info in storage. If a valid token exists but the
+      // chrome.storage doesn't contain googleUserEmail/googleUserId (possible
+      // when storage was cleared or we upgraded versions), fetch user info and
+      // persist it so other services that rely on getCurrentUserId() behave
+      // correctly and avoid falling back to `default_user`.
+      try {
+        const userInfo = await fetchUserInfo(validation.token);
+        if (userInfo && userInfo.email && userInfo.id) {
+          await chrome.storage.local.set({
+            googleUserEmail: userInfo.email,
+            googleUserId: userInfo.id,
+            googleUserName: userInfo.name || userInfo.email,
+          });
+          Logger.biz('[restoreAuthSession] 사용자 정보 복원 및 저장 완료');
+        }
+      } catch (e) {
+        Logger.warn('[restoreAuthSession] 사용자 정보 복원 실패 (무시):', e);
+      }
+
       // Firebase Auth에도 로그인 시도
       try {
         const { signInToFirebaseWithGoogleToken } = await import('./firebaseService.js');
