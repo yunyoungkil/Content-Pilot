@@ -18,7 +18,7 @@ js/services/
 ├── collectorService.js       # 콘텐츠 수집 (RSS, YouTube)
 ├── firebaseService.js        # Firebase 연동 (REST API)
 ├── kanbanService.js          # 칸반 보드 관리
-├── migrationService.js       # 데이터 마이그레이션
+├── (migrationService 삭제)   # 데이터 마이그레이션 기능은 현재 제거됨
 ├── offscreenService.js       # Offscreen Document 관리
 ├── promptService.js          # 프롬프트 빌더 (페르소나, 톤, 스킬)
 ├── scrapService.js           # 스크랩 관리
@@ -205,20 +205,10 @@ affiliate_links/{userId}/{linkKey}  # 제휴 링크 데이터
 
 ---
 
-### 8. Migration Service (`migrationService.js`)
+### 8. Migration Service
 
-**역할**: 채널 중심 아키텍처로의 데이터 마이그레이션.
-
-**주요 기능**:
-- 마이그레이션 필요 여부 확인
-- 데이터 마이그레이션 실행
-- 백업 및 롤백 지원
-
-**주요 함수**:
-- `checkMigrationNeeded()`: 마이그레이션 필요 여부 확인
-- `runDataMigration()`: 마이그레이션 실행
-
-**관련 문서**: [마이그레이션 서비스 가이드](../guides/MIGRATION_SERVICE_GUIDE.md)
+이전에는 마이그레이션 서비스가 존재했지만, 현재 개발 단계에서는 해당 기능이 제거되어 문서와 코드베이스에서 삭제되었습니다.
+필요 시 추후 재추진할 수 있습니다.
 
 ---
 
@@ -365,7 +355,7 @@ firebaseService (기본)
   ├── analyticsService
   ├── kanbanService
   ├── scrapService
-  ├── migrationService
+  ├── (migrationService removed)
   ├── thumbnailService
   ├── cascadeDeleteService
   └── collectorService
@@ -430,7 +420,7 @@ Logger.biz('비즈니스 로직 메시지');
 ## 🔗 관련 문서
 
 - [AI 서비스 가이드](../guides/AI_SERVICE_GUIDE.md)
-- [마이그레이션 서비스 가이드](../guides/MIGRATION_SERVICE_GUIDE.md)
+-- (마이그레이션 서비스 가이드는 제거됨)
 - [Firebase 채널 구조](../firebase/FIREBASE_CHANNELS_STRUCTURE.md)
 - [실제 저장 구조](./ACTUAL_SAVE_STRUCTURE.md)
 

@@ -358,31 +358,11 @@ function addAdminEventListeners(container) {
         }
       });
     } else if (checkId === 'data_orphan') {
-      // 데이터 마이그레이션 실행
-      addLog('info', '고아 데이터를 정리하는 중...');
-      chrome.runtime.sendMessage({ action: 'run_data_migration' }, (response) => {
-        if (response && response.success) {
-          const message = response.message || '데이터 마이그레이션이 완료되었습니다.';
-          addLog('success', `✅ ${message}`);
-          icon.textContent = '✅';
-          fixBtn.style.display = 'none';
-          // 진단 다시 실행하여 상태 확인
-          setTimeout(() => {
-            chrome.runtime.sendMessage({ action: 'run_system_diagnosis' }, (diagResponse) => {
-              if (diagResponse && diagResponse.success && diagResponse.data) {
-                const check = diagResponse.data.checks?.find((c) => c.id === checkId);
-                if (check) handleDiagnosticLog(check);
-              }
-            });
-          }, 1000);
-        } else {
-          addLog('error', response?.error || '마이그레이션 실패');
-          addLog('info', 'background.js 콘솔에서 runDataMigration()을 직접 실행해보세요.');
-          icon.textContent = '⚠️';
-          fixBtn.disabled = false;
-          fixBtn.textContent = getFixButtonText(checkId);
-        }
-      });
+      // 데이터 마이그레이션은 현재 비활성화되어 있습니다.
+      addLog('warn', '데이터 마이그레이션 기능은 현재 비활성화되어 있습니다. (개발 단계 단순화)');
+      icon.textContent = '⚠️';
+      fixBtn.disabled = false;
+      fixBtn.textContent = '비활성화됨';
     } else if (checkId === 'data_structure') {
       // 채널 데이터 구조 수정
       chrome.runtime.sendMessage({ action: 'fix_channel_structure' }, (response) => {

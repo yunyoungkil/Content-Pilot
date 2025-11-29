@@ -217,7 +217,7 @@ Content-Pilot/
     - `collectorService.js`: RSS 및 YouTube 콘텐츠 수집
     - `firebaseService.js`: Firebase REST API 연동
     - `kanbanService.js`: 칸반 보드 관리
-    - `migrationService.js`: 데이터 마이그레이션
+   - (마이그레이션 서비스 제거됨)
     - `offscreenService.js`: Offscreen Document 관리 및 HTML 정제
     - `scrapService.js`: 스크랩 관리
     - `thumbnailService.js`: 썸네일 생성
@@ -315,7 +315,7 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **`AI_SERVICE_GUIDE.md`**: AI 서비스 사용 가이드 (Gemini API, 브리핑 생성, 초안 생성, HTML 정제, 제휴 링크 삽입)
 - **`AFFILIATE_LINKS_GUIDE.md`**: 제휴 마케팅 링크 가이드 (문맥 인식 자동 삽입, AI 기반 CTA 생성, 스마트 필터링)
 - **`PROMPT_BUILDER_TEST_GUIDE.md`**: 프롬프트 빌더 시스템 검증 및 테스트 가이드
-- **`MIGRATION_SERVICE_GUIDE.md`**: 데이터 마이그레이션 서비스 가이드
+- **(마이그레이션 가이드 제거됨)**
 - **`DEVELOPMENT_GUIDE.md`**: 개발자를 위한 개발 환경 설정 및 코딩 가이드
 - **`AUTHENTICATION_FLOW.md`**: Google OAuth 인증 흐름 및 Service Worker에서의 Firebase 작업
 - **`CORS_SETUP_GUIDE.md`**: CORS 설정 가이드

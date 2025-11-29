@@ -61,7 +61,6 @@ Content-Pilot/
 │   │   ├── collectorService.js
 │   │   ├── firebaseService.js
 │   │   ├── kanbanService.js
-│   │   ├── migrationService.js
 │   │   ├── offscreenService.js
 │   │   ├── scrapService.js
 │   │   └── thumbnailService.js
@@ -354,7 +353,7 @@ await signInToFirebaseWithGoogleToken(token);
 
 - [서비스 아키텍처](../architecture/SERVICES_ARCHITECTURE.md)
 - [AI 서비스 가이드](./AI_SERVICE_GUIDE.md)
-- [마이그레이션 서비스 가이드](./MIGRATION_SERVICE_GUIDE.md)
+-- (마이그레이션 서비스 가이드: 제거됨)
 - [Firebase 채널 구조](../firebase/FIREBASE_CHANNELS_STRUCTURE.md)
 
 ---

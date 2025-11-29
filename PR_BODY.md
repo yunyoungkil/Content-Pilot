@@ -6,7 +6,7 @@ Summary:
   - Implemented `initializeFirebase()` in `js/services/firebaseService.js` and exported it.
   - Added `globalThis.initializeFirebase = initializeFirebase` as a temporary alias for callers that still call `initializeFirebase()` as a global function.
   - Fixed parse/exception issues (`parseCoupangText`), undefined error references in `scrapService.js`, and reduced several lint warnings.
-  - Removed/cleaned unused imports in `migrationService.js`, `thumbnailService.js`, etc.
+  - Removed/cleaned unused imports related to migrationService (migration feature removed)
 
 Tests:
 - `npm test` passes locally: 10 suites, 99 tests passed (8 skipped)

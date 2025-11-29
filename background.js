@@ -57,10 +57,7 @@ import {
   restoreAuthSession,
 } from "./js/services/authService.js";
 
-import {
-  runDataMigration,
-  checkMigrationNeeded,
-} from "./js/services/migrationService.js";
+// migrationService removed - migration features disabled/removed
 
 import {
   validateTemplateData,
@@ -209,58 +206,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 
     // [체크리스트 2-🅰️] 업데이트 시 마이그레이션 자동 실행
     // 마이그레이션 완료 상태 확인
-    chrome.storage.local.get("migration_completed", async (result) => {
-      if (!result.migration_completed) {
-        Logger.info("[Migration] 마이그레이션 필요 여부 확인 중...");
-        // [체크리스트 2-🅰️] 자동 실행: 백그라운드에서 조용히 실행
-        try {
-          // 마이그레이션 필요 여부 확인
-          const userId = await getCurrentUserId();
-          const channelsSnap = await get(
-            ref(getDb(), `channels/${userId}/myChannels/blogs`)
-          );
-          const myBlogs = channelsSnap?.val() || [];
-
-          if (myBlogs.length > 0) {
-            // [체크리스트 2-🅰️] 단일 채널 사용자: 모든 데이터를 그 1개 채널의 소유로 자동 변환
-            let targetChannelId = null;
-            if (myBlogs.length === 1) {
-              const blog = myBlogs[0];
-              targetChannelId =
-                blog.id ||
-                (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, "") : null);
-              Logger.info(
-                `[Migration] 단일 채널 감지. 자동 마이그레이션 실행: ${targetChannelId}`
-              );
-            } else {
-              // [체크리스트 2-🅰️] 다중 채널 사용자: 데이터를 '공용(null)'으로 안전하게 변환
-              targetChannelId = null;
-              Logger.info(
-                "[Migration] 다중 채널 감지. 기존 데이터를 '공용'으로 유지합니다."
-              );
-            }
-
-            // 마이그레이션 실행
-            await runDataMigration(userId, targetChannelId);
-            Logger.info("[Migration] 자동 마이그레이션 완료");
-
-            // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지
-            // UI가 로드된 후 표시하기 위해 storage 이벤트로 전달
-            chrome.storage.local.set({
-              migration_completed: true,
-              migration_toast_message: "✅ 데이터 구조가 업데이트되었습니다.",
-            });
-          } else {
-            Logger.info(
-              "[Migration] 등록된 채널이 없어 마이그레이션을 건너뜁니다."
-            );
-          }
-        } catch (error) {
-          Logger.error("[Migration] 자동 마이그레이션 실패:", error);
-          // 실패해도 UI에서 수동으로 실행할 수 있도록 상태를 저장하지 않음
-        }
-      }
-    });
+    // 마이그레이션 자동 실행: 현재 비활성화되어 있음.
+    // 이전에는 설치 시 자동 마이그레이션을 시도했으나, 현재 개발 단계에서는
+    // 데이터가 적고 수동 관리중이므로 해당 자동 실행을 제거합니다.
+    // 필요 시 추후에 마이그레이션 로직을 다시 추가할 수 있습니다.
   }
 });
 
@@ -1901,33 +1850,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // === [Migration & System Fix] 데이터 마이그레이션 및 시스템 수정 ===
-  if (msg.action === "run_data_migration") {
-    return handleAsync(
-      (async () => {
-        try {
-          const userId = await getCurrentUserId();
-          const targetChannelId = msg.targetChannelId || null;
-          await runDataMigration(userId, targetChannelId);
-          return {
-            success: true,
-            message: "데이터 마이그레이션이 완료되었습니다.",
-          };
-        } catch (error) {
-          Logger.error("[데이터 마이그레이션] 오류:", error);
-          throw error;
-        }
-      })()
-    );
-  }
-
-  if (msg.action === "check_migration_needed") {
-    return handleAsync(
-      (async () => {
-        const userId = await getCurrentUserId();
-        return await checkMigrationNeeded(userId);
-      })()
-    );
-  }
+  // Migration message handlers removed: migration flow has been deleted
 
   if (msg.action === "fix_active_channel_mismatch") {
     return handleAsync(

@@ -371,13 +371,7 @@ export function createAndShowPanel() {
     }
 
     // [수정] 초기 로드 로직 (온보딩 체크 + 마이그레이션 확인)
-    chrome.storage.local.get(['activeChannelId', 'migration_completed'], (res) => {
-      // 0. 마이그레이션 필요 여부 확인 (일회성)
-      if (!res.migration_completed) {
-        import('./migrationModal.js').then((module) => {
-          module.checkAndShowMigrationModal(shadowRoot);
-        });
-      }
+    chrome.storage.local.get(['activeChannelId'], (res) => {
 
       // 1. 활성 채널 ID가 있으면 -> 채널이 실제로 존재하는지 확인
       if (res.activeChannelId) {
@@ -477,18 +471,7 @@ export function createAndShowPanel() {
     });
 
     // [체크리스트 2-🅱️] 마이그레이션 완료 토스트 메시지 처리
-    chrome.storage.onChanged.addListener((changes, namespace) => {
-      if (namespace === 'local' && changes.migration_toast_message) {
-        const message = changes.migration_toast_message.newValue;
-        if (message) {
-          import('../utils.js').then((module) => {
-            module.showToast(message);
-          });
-          // 메시지 표시 후 제거
-          chrome.storage.local.remove('migration_toast_message');
-        }
-      }
-    });
+      // migration_toast_message listener removed - migration feature has been deleted
 
     // [체크리스트 1] 글로벌 채널 변경 감지 -> 현재 탭 새로고침
     chrome.storage.onChanged.addListener((changes, namespace) => {
