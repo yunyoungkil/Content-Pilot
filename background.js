@@ -262,6 +262,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         );
         const userId = await getCurrentUserId();
 
+        // Guard: avoid writing to default_user when unauthenticated
+        if (userId === CONSTANTS.USER_ID) {
+          Logger.warn('[link_published_url] No valid user ID (default_user) — aborting link_published_url to avoid creating default_user data');
+          // Notify the UI to prompt login
+          chrome.runtime.sendMessage({ action: 'show_error_toast', errorType: 'UNAUTHORIZED', message: '로그인이 필요합니다. 퍼포먼스 추적을 시작하려면 로그인해주세요.' }).catch(() => {});
+          return { success: false, error: '로그인이 필요합니다.' };
+        }
+
         // 1. Firebase에서 채널 목록에서 직접 제거
         const channelsRef = ref(getDb(), `channels/${userId}`);
         const channelsSnap = await get(channelsRef);

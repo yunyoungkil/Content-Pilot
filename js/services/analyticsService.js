@@ -381,6 +381,20 @@ export async function updateSinglePerformanceMetric(contentInfo) {
   const db = getDb();
   const userId = await getCurrentUserId();
 
+  // Guard: Avoid writing performance data under the default placeholder user.
+  // When userId is the default (unauthenticated state), abort to prevent creating
+  // records under `default_user` — this should only run for authenticated users.
+  if (userId === CONSTANTS.USER_ID) {
+    Logger.warn('[updateSinglePerformanceMetric] No valid user ID (default_user) — aborting performance update');
+    // Let the UI know to prompt for login/auth instead of silently creating default_user data
+    try {
+      await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 추적은 로그인 후 가능합니다.');
+    } catch (e) {
+      Logger.warn('[updateSinglePerformanceMetric] Failed to signal UI for login:', e);
+    }
+    return;
+  }
+
   let path = contentInfo.path;
   if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
 
@@ -493,6 +507,16 @@ export async function updateAllPerformanceMetrics() {
   if (!initializeFirebase()) return;
   const db = getDb();
   const userId = await getCurrentUserId();
+
+  if (userId === CONSTANTS.USER_ID) {
+    Logger.warn('[updateAllPerformanceMetrics] No valid user ID (default_user) — aborting batch performance update');
+    try {
+      await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 추적은 로그인 후에만 실행됩니다.');
+    } catch (e) {
+      Logger.warn('[updateAllPerformanceMetrics] Failed to notify UI for login:', e);
+    }
+    return;
+  }
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -546,6 +570,16 @@ export async function analyzePerformanceData(targetChannelId = null) {
   if (!initializeFirebase()) return { analysis: null, decayContent: null };
   const db = getDb();
   const userId = await getCurrentUserId();
+
+  if (userId === CONSTANTS.USER_ID) {
+    Logger.warn('[analyzePerformanceData] No valid user ID (default_user) — aborting analysis');
+    try {
+      await sendErrorToUI('UNAUTHORIZED', '로그인이 필요합니다. 성과 분석은 로그인 후에만 실행됩니다.');
+    } catch (e) {
+      Logger.warn('[analyzePerformanceData] Failed to notify UI for login:', e);
+    }
+    return { analysis: null, decayContent: null };
+  }
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 

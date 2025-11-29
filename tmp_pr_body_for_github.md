@@ -17,12 +17,16 @@ Lint:
 
 Additional change (this push):
 - `js/services/aiService.js`: switched the hard-coded `CONSTANTS.USER_ID` to the dynamic `getCurrentUserId()` when uploading AI-generated images so uploads go under the correct per-user path instead of `default_user`.
+
 Notes & Follow-up:
 - Remove `globalThis.initializeFirebase` alias and convert all callers to `import { initializeFirebase }`.
 - Address remaining `no-unused-vars` warnings via small PRs grouped by file.
 - Consider splitting large files (`workspaceMode.js`, `dashboardMode.js`) into smaller modules.
 
-Usage:
-- Create a draft PR from branch `feature/cascade-delete-improvements` to `Master` and reference this PR body.
+---
 
-PR created by Copilot (local tool) - please review details and CI results before merging.
+CI / Tests: 12 suites passed, 101 tests passed, 8 skipped
+
+Files modified in this branch (high level):
+- `js/services/aiService.js`
+- `js/services/analyticsService.js`
