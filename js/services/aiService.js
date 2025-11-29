@@ -1775,7 +1775,8 @@ export async function generateAiImage(prompt, count = 1) {
   }
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
-  const userId = CONSTANTS.USER_ID;
+  // Use dynamic user id to ensure per-user storage (avoid default_user hardcoding)
+  const userId = await getCurrentUserId();
 
   // 동시 요청 제한 설정 (API Rate Limit 고려)
   const MAX_CONCURRENT = 3;

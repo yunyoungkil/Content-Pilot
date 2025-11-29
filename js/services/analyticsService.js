@@ -1,6 +1,6 @@
 // js/services/analyticsService.js
 
-import { getDb, CONSTANTS, initializeFirebase } from './firebaseService.js';
+import { getDb, CONSTANTS, initializeFirebase, getCurrentUserId } from './firebaseService.js';
 import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
@@ -379,7 +379,7 @@ export async function getSearchConsoleData(token, siteUrl, pageUrl, retryCount =
 export async function updateSinglePerformanceMetric(contentInfo) {
   if (!initializeFirebase()) return;
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
 
   let path = contentInfo.path;
   if (!path.includes(userId)) path = path.replace('kanban/', `kanban/${userId}/`);
@@ -420,7 +420,14 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       siteUrl = blog.gscSiteUrl || blog.inputUrl || blog.url;
     }
 
-    if (!gaId) throw new Error('GA4 속성 ID 없음');
+    if (!gaId) {
+      Logger.warn('[updateSinglePerformanceMetric] GA4 속성 ID 없음 — 스킵:', { path });
+      await update(ref(db, `${path}/performance`), {
+        collecting: false,
+        error: 'GA4 속성 ID 없음',
+      });
+      return;
+    }
 
     // 병렬 호출 (GA4, AdSense, GSC)
     const [gaData, adData, gscData] = await Promise.allSettled([
@@ -485,7 +492,7 @@ export async function updateSinglePerformanceMetric(contentInfo) {
 export async function updateAllPerformanceMetrics() {
   if (!initializeFirebase()) return;
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -538,7 +545,7 @@ export async function runAutomatedRenewalChecks() {
 export async function analyzePerformanceData(targetChannelId = null) {
   if (!initializeFirebase()) return { analysis: null, decayContent: null };
   const db = getDb();
-  const userId = CONSTANTS.USER_ID;
+  const userId = await getCurrentUserId();
   const snap = await get(ref(db, `kanban/${userId}`));
   const cards = snap.val() || {};
 
@@ -744,7 +751,7 @@ export async function checkAdSenseRegistrationStatus(
 
     if (registeredUrls.size > 0) {
       const db = getDb();
-      const userId = CONSTANTS.USER_ID;
+      const userId = await getCurrentUserId();
       const snapshot = await get(ref(db, `kanban/${userId}`));
       const allCards = snapshot.val() || {};
       const updates = {};
