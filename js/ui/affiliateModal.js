@@ -7,7 +7,7 @@ import {
   deleteAffiliateLink,
 } from '../services/affiliateService.js';
 
-import { showToast } from '../utils.js';
+import { showToast, Logger } from '../utils.js';
 
 let currentLinks = [];
 
@@ -321,9 +321,9 @@ export function parseCoupangText(rawText) {
       );
       if (nameEl && nameEl.textContent.trim()) result.productName = nameEl.textContent.trim();
     }
-    } catch (e) {
-      Logger.warn('[AffiliateModal] DOMParser parseFromString failed', e);
-    }
+  } catch (e) {
+    Logger.warn('[AffiliateModal] DOMParser parseFromString failed', e);
+  }
 
   if (!result.productName && lines.length > 0) result.productName = lines[0];
 
@@ -499,10 +499,14 @@ export function parseCoupangText(rawText) {
         if (candidate) result.reviewCount = parseInt(candidate.replace(/,/g, ''), 10);
       }
     }
-    } catch (e) {
-      // fallback to scanning full text
-      Logger.warn('[AffiliateModal] price DOM scan failed, falling back to text parse', e);
-    }
+  } catch (e) {
+    // fallback to scanning full text
+    Logger.warn('[AffiliateModal] price DOM scan failed, falling back to text parse', e);
+  }
+
+  // 마지막 결과 반환
+  return result;
+}
 
 function bindEvents(container) {
   if (!container) {
@@ -772,8 +776,7 @@ function bindEvents(container) {
               if (el) return el;
             }
           } catch (e) {
-            discountMatch = text.match(/(\d{1,3})%/);
-            Logger.warn('[AffiliateModal] discount element scan failed, fallback to text', e);
+            Logger.warn('[AffiliateModal] root DOM query failed', e);
           }
           try {
             const host = container?.closest && container.closest('#content-pilot-host');
@@ -790,7 +793,9 @@ function bindEvents(container) {
           try {
             const el = document.querySelector(sel);
             if (el) return el;
-          } catch (e) {}
+          } catch (e) {
+            Logger.warn('[AffiliateModal] global document query failed', e);
+          }
 
           return null;
         };
