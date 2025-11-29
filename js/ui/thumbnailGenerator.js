@@ -35,7 +35,7 @@ function fitTextToCanvas(
     return { fontSize: initialFontSize, textWidth: 0, textHeight: 0, lines: [] };
   }
 
-  let fontSize = Math.min(initialFontSize, maxHeight * 0.8); // 최대 높이의 80%를 초기값으로
+  // let fontSize = Math.min(initialFontSize, maxHeight * 0.8); // Unused: initial font size computed but not used
   let textWidth = 0;
   let textHeight = 0;
   let lines = [];

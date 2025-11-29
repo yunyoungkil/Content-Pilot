@@ -1,6 +1,6 @@
 // js/ui/preview.js
 
-import { shortenLink, showToast } from '../utils.js';
+// shortenLink removed (unused)
 
 // 최근 스크랩 미리보기 카드를 화면에 보여주는 함수
 export function showRecentScrapPreview(scrapData) {

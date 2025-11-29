@@ -185,12 +185,13 @@ export function setupHighlighter() {
       if (isChannelOnly && channelName) {
         // 채널 이름이 길면 축약
         const maxLength = 20;
-        const displayName =
+        // channelName을 필요 시 축약하여 사용하지만 displayName 변수는 사용되지 않으므로 직접 사용
+        const shortChannelName =
           channelName.length > maxLength
             ? channelName.substring(0, maxLength) + '...'
             : channelName;
         btn.textContent = `전용 저장`;
-        btn.title = `이 스크랩을 '${channelName}' 채널에만 저장합니다`;
+        btn.title = `이 스크랩을 '${shortChannelName}' 채널에만 저장합니다`;
       } else {
         btn.textContent = '공용 저장';
         btn.title = '이 스크랩을 모든 채널에서 사용할 수 있도록 공용으로 저장합니다';

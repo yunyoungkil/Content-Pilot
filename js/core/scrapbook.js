@@ -13,9 +13,7 @@ import { Logger } from '../utils.js';
 export function extractContextualContent(element) {
   // HTML 문자열인 경우 DOM으로 변환
   let rootElement;
-  let isString = false;
   if (typeof element === 'string') {
-    isString = true;
     const parser = new DOMParser();
     const doc = parser.parseFromString(element, 'text/html');
     rootElement = doc.body || doc.documentElement;

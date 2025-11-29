@@ -435,7 +435,7 @@ export function renderChannelMode(container) {
   }
 
   // 채널 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.action === 'channel_data_updated' || msg.action === 'channels_data_updated') {
       console.log('[ChannelMode] 채널 데이터 업데이트 메시지 수신:', msg.data);
 

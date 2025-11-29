@@ -58,7 +58,7 @@ export function renderScrapbook(container) {
   });
 
   // 스크랩 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.action === 'scraps_data_updated') {
       console.log(
         '[ScrapbookMode] 스크랩 데이터 업데이트 메시지 수신:',
@@ -487,10 +487,10 @@ function renderDetailView(scrapId, container) {
   let detailText = formatDetailText(scrap.text);
   let highlightedText = detailText;
 
-  // 정규식 이스케이프 헬퍼 함수
-  function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
+  // 정규식 이스케이프 헬퍼 함수 (현재 사용되지 않음, 필요 시 재도입)
+  // function escapeRegex(str) {
+  //   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // }
 
   // 하이라이트 데이터 확인 및 디버깅
   console.log('[ScrapbookMode] 스크랩 데이터 확인:', {

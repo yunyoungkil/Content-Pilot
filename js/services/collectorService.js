@@ -3,7 +3,6 @@
 import { getDb, CONSTANTS, cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, set, update, remove } from './firebaseService.js';
-import { sendErrorToUI } from './analyticsService.js';
 import { Logger } from '../utils.js';
 
 let creating;
@@ -818,7 +817,7 @@ export async function deleteChannelData(urlToDelete) {
 
     let channelIdToDelete = null;
     let sourceIdToDelete = null;
-    let platformToDelete = null;
+    let _platformToDelete = null;
     let channelFound = false;
     let channelInfo = null;
 
@@ -842,7 +841,7 @@ export async function deleteChannelData(urlToDelete) {
                   ''
                 )
               : channelInfo.apiUrl || channelInfo.inputUrl || channelInfo.url;
-          platformToDelete = platform;
+          _platformToDelete = platform;
           list.splice(idx, 1); // 배열에서 제거
           channelFound = true;
           break;

@@ -1,6 +1,6 @@
 // js/services/promptService.js
 
-import { Logger } from '../utils.js';
+// Logger import removed (unused)
 
 /**
  * [PROMPT_CONFIG] 프롬프트 구성 요소 정의

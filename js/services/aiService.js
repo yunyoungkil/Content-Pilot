@@ -20,7 +20,7 @@ import {
 // [추가] PromptService 임포트
 import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 // [추가] 상수 임포트
-import { AI_MODELS, COLLECTIONS } from '../constants.js';
+import { AI_MODELS } from '../constants.js';
 
 // 1. Gemini API 호출 (Core)
 /**
@@ -408,14 +408,14 @@ export async function generateDraftFromIdea(ideaData) {
 
     // 데이터 준비 (analyticsService 활용)
     const performanceData = await analyzePerformanceData(ideaData.channelId);
-    const feedback = await getUserFeedbackPatterns();
+    const _feedback = await getUserFeedbackPatterns();
 
     // 1. 모든 키워드를 수집하고 중복을 제거합니다.
     const allKeywords = new Set([
       ...(ideaData.tags || []).filter((t) => t !== '#AI-추천'),
       ...(ideaData.longTailKeywords || []),
     ]);
-    const keywordsText = Array.from(allKeywords).join('\n- ');
+    const _keywordsText = Array.from(allKeywords).join('\n- ');
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
     const linkedScrapsText = (ideaData.linkedScrapsContent || [])
@@ -483,7 +483,7 @@ export async function generateDraftFromIdea(ideaData) {
     const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
 
     // 6. 프롬프트 구성
-    const performanceInfo =
+    const _performanceInfo =
       performanceData.decayContent && performanceData.decayContent.length > 0
         ? `재활용 후보 콘텐츠: ${performanceData.decayContent.length}개 발견 (과거 고성과 콘텐츠 재활용 가능)`
         : '';

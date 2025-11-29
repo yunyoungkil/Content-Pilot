@@ -352,7 +352,7 @@ export function createAndShowPanel() {
     // [Performance Fix] 에러 메시지 리스너 등록 (확장 프로그램 UI에서 직접 수신)
     // chrome.runtime.onMessage를 사용하여 background.js나 analyticsService.js에서 전송된 에러를 수신
     if (!window.__cp_error_listener_attached) {
-      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
         if (msg.action === 'show_error_toast') {
           // Shadow DOM 내부에서 showToast 함수 사용
           import('../utils.js')
