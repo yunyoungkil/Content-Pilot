@@ -6,14 +6,14 @@ import {
   renderDashboard,
   destroyDashboardMode,
 } from './dashboardMode.js';
-import { renderHeaderAndTabs, addHeaderEventListeners } from './header.js';
+import { renderHeaderAndTabs } from './header.js';
 import { renderScrapbook, destroyScrapbookMode } from './scrapbookMode.js';
 import { renderChannelMode } from './channelMode.js';
 import { renderKanban, addKanbanEventListeners, destroyKanbanMode } from './kanbanMode.js';
-import { renderWorkspace } from './workspaceMode.js';
+// renderWorkspace is loaded dynamically; keep as dynamic import in runtime
 import { renderPerformanceDashboard } from './performanceDashboardMode.js';
 import { renderPerformanceReport } from './performanceReportMode.js';
-import { renderAdminMode } from './adminMode.js';
+// Admin mode loaded dynamically when needed
 import { Logger } from '../utils.js';
 
 // 전역 TUI 에디터 리스너 강제 등록 (workspaceMode.js가 로드되기 전에도 작동)

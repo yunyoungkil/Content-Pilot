@@ -249,7 +249,7 @@ async function renderAnalysisResult(
 
       for (const status of statuses) {
         const cards = kanbanData[status] || {};
-        for (const [cardId, cardData] of Object.entries(cards)) {
+        for (const cardData of Object.values(cards)) {
           // AI 아이디어 제안: origin.type === "ai_generated"인 경우 제목으로 추적
           if (cardData.origin?.type === 'ai_generated' && cardData.title) {
             const normalizedTitle = normalizeTitleForMatching(cardData.title);
@@ -1133,7 +1133,7 @@ async function updateDashboardUIInternal(container) {
 
       for (const status of statuses) {
         const cards = kanbanData[status] || {};
-        for (const [cardId, cardData] of Object.entries(cards)) {
+        for (const cardData of Object.values(cards)) {
           // origin.postUrl: 리뉴얼 원본 URL
           if (cardData.origin?.postUrl) {
             const normalizedUrl = normalizeUrlForTracking(cardData.origin.postUrl);
@@ -1568,7 +1568,7 @@ function addDashboardEventListeners(container) {
   if (container.dataset.listenersAttached) return;
   container.dataset.listenersAttached = 'true';
 
-  const CACHE_KEY = getCacheKey();
+  // const CACHE_KEY removed: not used in this function to avoid lint warning
 
   // [수정] 중복 리스너 등록 방지
   if (!container.dataset.messageListenerAttached) {
@@ -1927,7 +1927,7 @@ function addDashboardEventListeners(container) {
       e.stopPropagation();
       const button = target.closest('.track-post-btn');
       const post = JSON.parse(button.dataset.postObject);
-      const channelType = button.dataset.channelType;
+      // const channelType = button.dataset.channelType; // unused
 
       // 채널 이름 추출: 메타데이터 우선, 없으면 도메인 사용
       let channelName = null;
@@ -2198,7 +2198,7 @@ function addDashboardEventListeners(container) {
     if (target.closest('.add-to-kanban-btn')) {
       const ideaCard = target.closest('.ai-idea-card');
       const ideaObjectString = ideaCard.dataset.ideaObject;
-      const ideaIndex = ideaCard.dataset.ideaIndex;
+      const ideaIndex = ideaCard.dataset.ideaIndex; // index may be used later
 
       // ▼▼▼ [수정] AI 아이디어 제안에 origin 필드 추가 ▼▼▼
       // AI 아이디어 제안은 ai_generated로 분류하여 브리핑 자동 생성되도록 함

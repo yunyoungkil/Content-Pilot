@@ -891,18 +891,7 @@ const renderHelpers = {
  * @param {number} canvasHeight - 캔버스 높이
  * @returns {Object} 황금비율 좌표 { x, y, width, height }
  */
-function _calculateGoldenRatio(canvasWidth, canvasHeight) {
-  const goldenRatio = 1.618;
-  const centerX = canvasWidth / 2;
-  const centerY = canvasHeight / goldenRatio; // 황금비율 지점
-
-  return {
-    x: centerX,
-    y: centerY,
-    width: canvasWidth * 0.8,
-    height: canvasHeight * 0.3,
-  };
-}
+// [Smart Templates] 황금비율 계산은 더이상 사용되지 않아 제거됨
 
 /**
  * [Smart Templates] 동적 템플릿 생성기

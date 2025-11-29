@@ -183,11 +183,11 @@ export function renderChannelMode(container) {
 
       // 호스트 기반 판별 (가장 정확한 방법)
       let rssUrl = null;
-      let _detectedPlatform = null;
+      // detectedPlatform removed (unused)
 
       if (host.includes('tistory.com')) {
         rssUrl = `${origin}/rss`;
-        _detectedPlatform = 'tistory';
+        // detectedPlatform = 'tistory'; // unused
       } else if (host.includes('blog.naver.com')) {
         const pathMatch = urlObj.pathname.match(/^\/([a-zA-Z0-9_-]+)/);
         if (pathMatch && pathMatch[1] && pathMatch[1] !== 'PostList.naver') {
@@ -200,13 +200,13 @@ export function renderChannelMode(container) {
             rssUrl = `${origin}/rss`;
           }
         }
-        _detectedPlatform = 'naver';
+        // detectedPlatform = 'naver'; // unused
       } else if (host.includes('wordpress.com') || host.includes('medium.com')) {
         rssUrl = url.endsWith('/') ? `${url}feed` : `${url}/feed`;
-        _detectedPlatform = 'wordpress';
+        // detectedPlatform = 'wordpress'; // unused
       } else if (host.includes('blogspot.com') || host.includes('blogger.com')) {
         rssUrl = `${origin}/feeds/posts/default?alt=rss`;
-        _detectedPlatform = 'blogger';
+        // detectedPlatform = 'blogger'; // unused
       } else {
         // 알 수 없는 호스트의 경우 플랫폼 선택에 따라 처리
         if (selectedPlatform && selectedPlatform !== 'direct') {
@@ -1536,7 +1536,7 @@ export function renderChannelMode(container) {
           // [체크리스트 3-🆎] 첫 채널 생성 후 자동 선택 및 대시보드 이동
           chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (channelResponse) => {
             const myBlogs = channelResponse?.data?.myChannels?.blogs || [];
-            const currentActiveChannelId = chrome.storage.local.get('activeChannelId', (res) => {
+            chrome.storage.local.get('activeChannelId', (res) => {
               const activeChannelId = res.activeChannelId;
 
               // 활성 채널이 없고, 채널이 1개 이상 있으면 첫 번째 채널 자동 선택

@@ -12,7 +12,7 @@ import { showToast } from '../utils.js';
  * @param {boolean} migrationInfo.autoAssign - 자동 할당 여부
  */
 export function showMigrationModal(shadowRoot, migrationInfo) {
-  const { orphanCount, channelCount, channelOptions, autoAssign } = migrationInfo;
+  const { orphanCount, channelOptions, autoAssign } = migrationInfo;
 
   // 모달이 이미 있으면 제거
   const existingModal = shadowRoot.querySelector('#migration-modal');

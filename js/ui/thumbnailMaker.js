@@ -9,7 +9,7 @@ import { showToast, Logger } from '../utils.js';
  * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
  * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
+export function openThumbnailMaker(draftData, onInsert, onSave, _onEditTui) {
   // 1. 기존 데이터에서 썸네일 정보 추출 (배열 지원)
   let thumbInfo = null;
   let thumbnailCandidates = []; // 3가지 컨셉 후보 저장
