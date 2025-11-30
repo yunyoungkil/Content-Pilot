@@ -26,7 +26,8 @@
     "documents": [
       {
         "url": "offscreen.html",
-        "contexts": ["OFFSCREEN_DOCUMENT"]
+        "contexts": ["OFFSCREEN_DOCUMENT"],
+        "reasons": ["DOM_SCRAPING", "WORKERS", "DOM_PARSER"]
       }
     ]
   },
