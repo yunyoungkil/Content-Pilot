@@ -854,26 +854,19 @@ function handleRequest(request, sendReply) {
     // to "channel closed" warnings).
     safeSendReply(sendReply, { action: 'sanitize_html_in_offscreen_ack' });
 
-    // Debug/echo mode: if caller sets debugEcho=true we short-circuit
-    // and immediately return the original rawText as the "cleanedHtml".
-    // This isolates transport/message delivery issues from CPU-heavy
-    // DOMPurify/marked processing.
-    try {
-      const echoMode = !!(request.debugEcho || window.__SANITIZE_ECHO_MODE);
-      if (echoMode) {
-        console.debug('[Offscreen] sanitize echo mode active - replying immediately', {
-          ts: Date.now(),
-        });
-        sendFinalResponse({
-          action: 'sanitize_html_in_offscreen_response',
-          success: true,
-          cleanedHtml: request.rawText || '',
-          debugEcho: true,
-        });
-        return false;
-      }
-    } catch (e) {
-      console.debug('[Offscreen] error checking echo mode', e && e.message);
+    // For debugging: support a fast echo path when request.debugEcho is set.
+    if (request.debugEcho) {
+      try {
+        console.debug(
+          '[Offscreen] sanitize_html_in_offscreen debugEcho -> immediate echo response'
+        );
+      } catch (e) {}
+      sendFinalResponse({
+        action: 'sanitize_html_in_offscreen_response',
+        success: true,
+        cleanedHtml: request.rawText || '',
+      });
+      return false;
     }
 
     sanitizeAndFormatHtml(request.rawText)
@@ -904,19 +897,6 @@ function handleRequest(request, sendReply) {
         });
       });
 
-    return false;
-  }
-  // Debug echo: immediate roundtrip test for port/runtime messaging
-  if (request.action === 'debug_echo') {
-    try {
-      console.debug('[Offscreen] debug_echo received — replying immediately', { ts: Date.now() });
-    } catch (e) {}
-    sendFinalResponse({
-      action: 'debug_echo_response',
-      success: true,
-      echo: request.payload || null,
-      ts: Date.now(),
-    });
     return false;
   }
   // parse_html_in_offscreen
@@ -1126,6 +1106,23 @@ function handleRequest(request, sendReply) {
     return false;
   }
 
+  // debug / validation: simple echo endpoint to verify port/runtimemessaging
+  if (request.action === 'debug_echo') {
+    try {
+      console.debug('[Offscreen] debug_echo received — replying with echo', {
+        ts: Date.now(),
+        payloadSize: request && typeof request === 'object' ? JSON.stringify(request).length : 0,
+      });
+    } catch (e) {}
+
+    // close channel immediately
+    safeSendReply(sendReply, { action: 'debug_echo_ack', ts: Date.now() });
+
+    // final reply uses sendFinalResponse so the background should receive via port
+    sendFinalResponse({ action: 'debug_echo_response', success: true, echo: request });
+    // fall through to the final return below
+  }
+
   return false;
 }
 
@@ -1173,42 +1170,21 @@ chrome.runtime.onConnect.addListener((port) => {
     // Immediately send a small handshake so background can observe
     // that this offscreen page connected and installed its port handlers.
     try {
-      // Send handshake several times (short intervals) to help background
-      // observe the attach even if there is a small race.
-      for (let i = 0; i < 3; i++) {
-        setTimeout(() => {
-          try {
-            port.postMessage({ action: 'offscreen_port_attached', ts: Date.now(), seq: i });
-            console.debug('[Offscreen] port handshake sent: offscreen_port_attached', { seq: i });
-          } catch (err) {
-            console.debug('[Offscreen] failed sending port handshake', err && err.message);
-          }
-        }, i * 120);
-      }
+      port.postMessage({ action: 'offscreen_port_attached', ts: Date.now() });
+      console.debug('[Offscreen] port handshake sent: offscreen_port_attached');
     } catch (e) {
-      console.debug('[Offscreen] failed scheduling port handshakes', e && e.message);
+      console.debug('[Offscreen] failed sending port handshake', e && e.message);
     }
 
     port.onMessage.addListener((msg) => {
       try {
         // Log receipt immediately with timestamp + action + rough payload size
         const payloadSize = msg && typeof msg === 'object' ? JSON.stringify(msg).length : 0;
-        let action = msg && msg.action;
-        try {
-          const preview = msg && msg.rawText ? String(msg.rawText).substring(0, 120) : null;
-          console.debug('[Offscreen] port.onMessage received', {
-            action,
-            ts: Date.now(),
-            size: payloadSize,
-            previewLength: preview ? preview.length : 0,
-          });
-        } catch (inner) {
-          console.debug('[Offscreen] port.onMessage received (no preview)', {
-            action,
-            ts: Date.now(),
-            size: payloadSize,
-          });
-        }
+        console.debug('[Offscreen] port.onMessage received', {
+          action: msg && msg.action,
+          ts: Date.now(),
+          size: payloadSize,
+        });
       } catch (e) {
         console.debug('[Offscreen] port.onMessage receipt log failed', e && e.message);
       }

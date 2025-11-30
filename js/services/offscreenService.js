@@ -6,7 +6,6 @@ import { Logger } from '../utils.js';
 let offscreenDocumentId = null;
 let offscreenCreationPromise = null;
 let offscreenPort = null; // 장기 연결용 포트 (offscreen -> background)
-let offscreenPortReady = false; // 포트 쪽에서 메시지 핸들러가 준비되었는지
 let offscreenBeaconSeenFromExtension = false; // observed offscreen_ready_beacon from offscreen.html
 
 // Helper: decide whether a runtime message should be treated as a full
@@ -404,55 +403,6 @@ export async function ensureOffscreenDocument() {
             } catch (e) {
               Logger.debug('[OffscreenService] 포트 연결 시도 중 오류', e && e.message);
             }
-            // If we have a port, do a quick debug echo to verify it reaches the offscreen page
-            try {
-              if (offscreenPort) {
-                Logger.debug('[OffscreenService] 포트 핸드셰이크 검증용 debug_echo 전송');
-                const debugListener = (m) => {
-                  try {
-                    Logger.debug(
-                      '[OffscreenService] debug_echo response received via port',
-                      m && m.action,
-                      m
-                    );
-                    if (m && m.action === 'debug_echo_response') {
-                      try {
-                        offscreenPort.onMessage.removeListener(debugListener);
-                      } catch (er) {}
-                    }
-                  } catch (e) {}
-                };
-                try {
-                  offscreenPort.onMessage.addListener(debugListener);
-                } catch (e) {
-                  Logger.debug('[OffscreenService] debugEcho attach failed', e && e.message);
-                }
-                try {
-                  offscreenPort.postMessage({
-                    action: 'debug_echo',
-                    payload: 'handshake-test',
-                    ts: Date.now(),
-                  });
-                } catch (e) {
-                  Logger.debug('[OffscreenService] debugEcho postMessage failed', e && e.message);
-                }
-
-                // also fallback to runtime.sendMessage to increase chance of delivery
-                setTimeout(() => {
-                  try {
-                    chrome.runtime
-                      .sendMessage({
-                        action: 'debug_echo',
-                        payload: 'handshake-test',
-                        ts: Date.now(),
-                      })
-                      .catch(() => {});
-                  } catch (e) {}
-                }, 1200);
-              }
-            } catch (e) {
-              Logger.debug('[OffscreenService] debug echo flow suppressed', e && e.message);
-            }
           }
         } else {
           await waitForOffscreenReady();
@@ -482,8 +432,6 @@ export function registerOffscreenPort(port) {
     if (!port) return false;
     if (port.name !== 'offscreen-init') return false;
     offscreenPort = port;
-    // reset ready flag when new port attached
-    offscreenPortReady = false;
     try {
       Logger.debug(
         '[OffscreenService] registerOffscreenPort: port registered',
@@ -514,7 +462,7 @@ export function registerOffscreenPort(port) {
       // Attach a simple onMessage logger so we can observe handshake
       // messages coming from the offscreen page (e.g. offscreen_port_attached).
       try {
-        const onPortMsg = (msg) => {
+        offscreenPort.onMessage.addListener((msg) => {
           try {
             Logger.debug(
               '[OffscreenService] registerOffscreenPort received port message',
@@ -522,51 +470,73 @@ export function registerOffscreenPort(port) {
             );
           } catch (e) {}
           try {
-            // Mark port-ready on any handshake/echo response we expect
-            if (
-              msg &&
-              (msg.action === 'offscreen_port_attached' || msg.action === 'debug_echo_response')
-            ) {
-              offscreenPortReady = true;
-              Logger.info('[OffscreenService] offscreen port is ready (handshake/echo)');
+            if (msg && msg.action === 'offscreen_port_attached') {
+              Logger.info('[OffscreenService] offscreen reported port attached (handshake)');
             }
           } catch (e) {}
-        };
-        offscreenPort.onMessage.addListener(onPortMsg);
-
-        // Send a small probe to encourage the offscreen page to respond
-        try {
-          offscreenPort.postMessage({ action: 'offscreen_probe', ts: Date.now() });
-        } catch (e) {
-          Logger.debug('[OffscreenService] probe postMessage failed', e && e.message);
-        }
-
-        // Also attempt a debug_echo and wait briefly for a response
-        try {
-          const probeTimeout = setTimeout(() => {
-            try {
-              if (!offscreenPortReady) {
-                Logger.debug(
-                  '[OffscreenService] offscreen port did not respond to probe within expected time'
-                );
-              }
-            } catch (e) {}
-          }, 1500);
-
-          try {
-            offscreenPort.postMessage({ action: 'debug_echo', payload: 'probe', ts: Date.now() });
-          } catch (e) {
-            Logger.debug('[OffscreenService] debug_echo postMessage failed', e && e.message);
-          }
-        } catch (e) {
-          Logger.debug('[OffscreenService] probe/echo flow suppressed', e && e.message);
-        }
+        });
       } catch (e) {
         Logger.debug(
           '[OffscreenService] failed to attach offscreenPort.onMessage listener',
           e && e.message
         );
       }
+
+      // Probe the port immediately so we don't consider it usable until
+      // the offscreen page actually responds. Some race conditions result
+      // in a stored port object that has no receiver attached yet which
+      // causes later postMessage() calls to throw "Receiving end does not exist".
+      try {
+        let probeTimer = null;
+        const probeListener = (m) => {
+          try {
+            if (!m) return false;
+            // Accept either the handshake or the debug echo response
+            if (m.action === 'offscreen_port_attached' || m.action === 'debug_echo_response') {
+              try {
+                if (probeTimer) clearTimeout(probeTimer);
+              } catch (e) {}
+              try {
+                offscreenPort.onMessage.removeListener(probeListener);
+              } catch (e) {}
+              Logger.info('[OffscreenService] registerOffscreenPort: probe succeeded');
+            }
+          } catch (e) {}
+          return false;
+        };
+
+        offscreenPort.onMessage.addListener(probeListener);
+
+        // If the port doesn't respond quickly, mark it as unreliable so
+        // callers will prefer runtime.sendMessage instead of repeatedly
+        // trying a broken port.
+        probeTimer = setTimeout(() => {
+          try {
+            Logger.debug(
+              '[OffscreenService] registerOffscreenPort: probe timed out — marking port unreliable'
+            );
+          } catch (e) {}
+          try {
+            // avoid reusing this port for future sends
+            offscreenPort = null;
+          } catch (e) {}
+          try {
+            offscreenPort && offscreenPort.onMessage.removeListener(probeListener);
+          } catch (e) {}
+        }, 1200);
+
+        // Try sending a lightweight debug echo to validate the receiver.
+        try {
+          offscreenPort.postMessage({ action: 'debug_echo', probe: true, ts: Date.now() });
+        } catch (e) {
+          try {
+            Logger.debug(
+              '[OffscreenService] registerOffscreenPort: probe postMessage threw',
+              e && e.message
+            );
+          } catch (err) {}
+        }
+      } catch (e) {}
     } catch (e) {
       Logger.debug(
         '[OffscreenService] registerOffscreenPort attach onMessage failed',
@@ -738,24 +708,6 @@ async function sendToOffscreen(action, data, timeout = 30000) {
     Logger.debug('[OffscreenService] waitForOffscreenPort failed', e && e.message);
   }
 
-  // If a persistent port exists but hasn't signaled readiness yet,
-  // wait briefly here (we are in an async function so we can await).
-  let usingPort = Boolean(offscreenPort);
-  if (usingPort && !offscreenPortReady) {
-    Logger.debug('[OffscreenService] 포트가 있지만 아직 준비되지 않음 — 최대 1500ms 대기');
-    const waitStart = Date.now();
-    while (!offscreenPortReady && Date.now() - waitStart < 1500) {
-      // small sleep
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (!offscreenPortReady) {
-      Logger.debug('[OffscreenService] 포트 준비 대기 실패 — 런타임 폴백을 계속 허용');
-    } else {
-      Logger.debug('[OffscreenService] 포트 준비 완료, 포트 채널로 전송 계속 진행');
-    }
-  }
-
   return new Promise((resolve, reject) => {
     const responseListener = (msg) => {
       try {
@@ -781,6 +733,7 @@ async function sendToOffscreen(action, data, timeout = 30000) {
 
     // Prefer using the persistent port if available - it's more reliable
     // than sendMessage for reaching the offscreen document.
+    const usingPort = Boolean(offscreenPort);
     if (usingPort) {
       try {
         const portResponse = (msg) => {
@@ -806,6 +759,13 @@ async function sendToOffscreen(action, data, timeout = 30000) {
           offscreenPort.postMessage({ action, ...data });
         } catch (e) {
           Logger.debug(`[OffscreenService] port.postMessage threw: ${e.message}`);
+          // If postMessage fails it's likely the remote side isn't
+          // available — mark the stored port as unreliable so we
+          // don't repeatedly try it for subsequent requests.
+          try {
+            Logger.debug('[OffscreenService] marking offscreenPort=null due to postMessage error');
+            offscreenPort = null;
+          } catch (err) {}
         }
 
         // If we don't hear a port response quickly, also attempt a runtime
@@ -816,6 +776,12 @@ async function sendToOffscreen(action, data, timeout = 30000) {
           Logger.debug(
             `[OffscreenService] no quick port response for ${action}, attempting runtime.sendMessage fallback`
           );
+          // Mark the persistent port unreliable — we didn't get a quick
+          // response on the port side and it's safer to prefer runtime
+          // sendMessage for now.
+          try {
+            offscreenPort = null;
+          } catch (e) {}
           try {
             chrome.runtime.sendMessage({ action, ...data }).catch(() => {});
           } catch (e) {
