@@ -22,12 +22,7 @@
   "background": {
     "service_worker": "dist/background.bundle.js"
   },
-  // Note: some Chrome versions don't yet recognise the `offscreen` manifest
-  // block. We rely on runtime APIs (chrome.offscreen.createDocument) at
-  // runtime; keeping the `offscreen` manifest block caused "Unrecognized
-  // manifest key 'offscreen'" warnings in older builds. If you run on a
-  // Chrome version that supports the explicit manifest entry, you can add
-  // it back. See README for minimum recommended Chrome version.
+  
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",
