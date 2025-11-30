@@ -130,10 +130,11 @@ describe("Constants", () => {
     test("should have all required limit values", () => {
       expect(LIMITS.MAX_SCRAPS).toBe(100);
       expect(LIMITS.MAX_HISTORY).toBe(50);
+      expect(LIMITS.ITEMS_PER_PAGE).toBe(5);
     });
 
-    test("should have exactly 2 limits", () => {
-      expect(Object.keys(LIMITS)).toHaveLength(2);
+    test("should have exactly 3 limits", () => {
+      expect(Object.keys(LIMITS)).toHaveLength(3);
     });
 
     test("should have positive limit values", () => {
