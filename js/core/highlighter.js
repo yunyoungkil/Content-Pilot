@@ -32,10 +32,16 @@ export function setupHighlighter() {
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
       if (changes.isScrapingActive) {
-        isScrapingActive = changes.isScrapingActive.newValue !== undefined ? changes.isScrapingActive.newValue : true;
+        isScrapingActive =
+          changes.isScrapingActive.newValue !== undefined
+            ? changes.isScrapingActive.newValue
+            : true;
       }
       if (changes.highlightToggleState) {
-        highlightToggleState = changes.highlightToggleState.newValue !== undefined ? changes.highlightToggleState.newValue : true;
+        highlightToggleState =
+          changes.highlightToggleState.newValue !== undefined
+            ? changes.highlightToggleState.newValue
+            : true;
       }
     }
   });

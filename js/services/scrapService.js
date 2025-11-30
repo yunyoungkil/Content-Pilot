@@ -2,7 +2,7 @@
 // 스크랩 관련 서비스
 
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { get, remove, push, writeBatch, getDb } from './firebaseService.js';
+import { get, remove, push, getDb } from './firebaseService.js';
 import { Logger } from '../utils.js';
 
 /**
@@ -75,10 +75,9 @@ export async function saveScrapElementsBatch(scrapDataArray, channelId = null) {
 
     const userId = await getCurrentUserId();
     const scrapPath = `scraps/${userId}`;
-    const batch = writeBatch(getDb());
     const results = [];
 
-    // 각 스크랩 데이터를 준비하고 배치에 추가
+    // 각 스크랩 데이터를 개별적으로 저장 (REST API에서는 batch가 지원되지 않음)
     for (const data of scrapDataArray) {
       const scrapPayload = {
         text: data.text || '',
@@ -107,9 +106,8 @@ export async function saveScrapElementsBatch(scrapDataArray, channelId = null) {
         delete scrapPayload.images;
       }
 
-      // 배치에 추가
-      const scrapRef = push(scrapPath);
-      batch.set(scrapRef, cleanDataForFirebase(scrapPayload));
+      // 개별 push로 저장
+      const scrapRef = await push(scrapPath, cleanDataForFirebase(scrapPayload));
 
       results.push({
         scrapId: scrapRef.key,
@@ -117,16 +115,13 @@ export async function saveScrapElementsBatch(scrapDataArray, channelId = null) {
       });
     }
 
-    // 배치 커밋
-    await batch.commit();
-
-    Logger.info(`[saveScrapElementsBatch] 배치 저장 완료 - ${scrapDataArray.length}개 스크랩`);
+    Logger.info(`[saveScrapElementsBatch] 개별 저장 완료 - ${scrapDataArray.length}개 스크랩`);
     return {
       success: true,
       results: results,
     };
   } catch (_error) {
-    Logger.error('[saveScrapElementsBatch] 배치 저장 실패:', _error);
+    Logger.error('[saveScrapElementsBatch] 저장 실패:', _error);
     return { success: false, error: _error.message };
   }
 }

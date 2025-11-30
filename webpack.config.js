@@ -1,12 +1,13 @@
 // webpack.config.js
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = {
   mode: 'production',
   entry: {
     content: './content.js',
-    background: './background.js',
+    background: './background.cjs', // Bundle the CommonJS background script
     offscreen: './offscreen.js',
     editor: './editor.js',
   },
@@ -18,6 +19,12 @@ module.exports = {
     clean: true,
   },
   optimization: {
+    minimize: true,
+    minimizer: [
+      new TerserPlugin({
+        test: /^(?!.*background\.bundle\.js$).*\.js$/i, // background.bundle.js 제외
+      }),
+    ],
     splitChunks: {
       chunks: (chunk) => {
         // content script와 background script는 코드 분할하지 않음 (동적 로딩 제한)
@@ -75,6 +82,7 @@ module.exports = {
       patterns: [
         { from: 'css', to: 'css' },
         { from: 'images', to: 'images', noErrorOnMissing: true },
+        // Removed background.cjs copy since we're bundling it now
       ],
     }),
   ],
@@ -82,11 +90,41 @@ module.exports = {
     rules: [
       {
         test: /\.js$/,
-        exclude: /node_modules/,
+        include: path.resolve(__dirname, 'background.cjs'), // background.cjs 절대 경로로 지정
         use: {
           loader: 'babel-loader',
           options: {
-            presets: ['@babel/preset-env'],
+            presets: [
+              [
+                '@babel/preset-env',
+                {
+                  targets: {
+                    chrome: '109',
+                  },
+                  modules: 'commonjs', // background는 CommonJS로 변환
+                },
+              ],
+            ],
+          },
+        },
+      },
+      {
+        test: /\.js$/,
+        exclude: /node_modules/, // node_modules 제외, 다른 JS 파일들은 ES modules 유지
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: [
+              [
+                '@babel/preset-env',
+                {
+                  targets: {
+                    chrome: '109',
+                  },
+                  modules: false, // ES modules 유지
+                },
+              ],
+            ],
           },
         },
       },

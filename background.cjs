@@ -2,9 +2,12 @@
 
 // Firebase 초기화 (가장 먼저 실행)
 try {
+  const { initializeFirebase } = require('./js/services/firebaseService.js');
   initializeFirebase();
+  const { Logger } = require('./js/utils.js');
   Logger.info('[Background] Firebase 초기화 완료');
 } catch (error) {
+  const { Logger } = require('./js/utils.js');
   Logger.error('[Background] Firebase 초기화 실패:', error);
 }
 
@@ -23,32 +26,34 @@ chrome.action.onClicked.addListener(async (tab) => {
       files: ['css/style.css']
     });
 
+    const { Logger } = require('./js/utils.js');
     Logger.info('[Background] Content Pilot activated via icon click');
   } catch (error) {
+    const { Logger } = require('./js/utils.js');
     Logger.error('[Background] Failed to activate Content Pilot:', error);
   }
 });
 
-import {
+const {
   getDb,
   CONSTANTS,
   initializeFirebase,
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
-} from './js/services/firebaseService.js';
-import { Logger } from './js/utils.js';
+} = require('./js/services/firebaseService.js');
+const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
-import { COLLECTIONS, KANBAN_STATUS } from './js/constants.js';
+const { COLLECTIONS, KANBAN_STATUS } = require('./js/constants.js');
 
-import {
+const {
   updateAllPerformanceMetrics,
   updateSinglePerformanceMetric,
   checkAdSenseRegistrationStatus,
   runFullSystemDiagnosis,
-} from './js/services/analyticsService.js';
+} = require('./js/services/analyticsService.js');
 
-import {
+const {
   fetchAllChannelData,
   fetchAndSaveSinglePost,
   deleteChannelData,
@@ -59,15 +64,15 @@ import {
   updateUrlIndex,
   normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
-} from './js/services/collectorService.js';
+} = require('./js/services/collectorService.js');
 
-import {
+const {
   deleteCompetitorData,
   deleteChannelDataCascade,
   findDeletedCompetitors,
-} from './js/services/cascadeDeleteService.js';
+} = require('./js/services/cascadeDeleteService.js');
 
-import {
+const {
   generateDraftFromIdea,
   generateIdeaBriefing,
   generateAiImage,
@@ -77,49 +82,49 @@ import {
   generateContentIdeas,
   generateAndSendKeywords,
   analyzeVideoComments,
-} from './js/services/aiService.js';
+} = require('./js/services/aiService.js');
 
-import {
+const {
   startGoogleAuth,
   revokeGoogleAuth,
   getValidToken,
   restoreAuthSession,
-} from './js/services/authService.js';
+} = require('./js/services/authService.js');
 
 // migrationService removed - migration features disabled/removed
 
-import {
+const {
   validateTemplateData,
   getThumbnailTemplates,
   deleteTemplate,
   generateThumbnailTexts,
-} from './js/services/thumbnailService.js';
+} = require('./js/services/thumbnailService.js');
 
-import {
+const {
   createAndSaveNewIdea,
   addIdeaToKanban,
   removeIdeaFromKanban,
   deleteKanbanCard,
-} from './js/services/kanbanService.js';
+} = require('./js/services/kanbanService.js');
 
-import {
+const {
   saveScrapElement,
   getFirebaseScraps,
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
-} from './js/services/scrapService.js';
+} = require('./js/services/scrapService.js');
 
-import {
+const {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
   renderTemplateInOffscreen,
   parseHtmlInOffscreen,
-} from './js/services/offscreenService.js';
+} = require('./js/services/offscreenService.js');
 
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 // import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
-import {
+const {
   ref,
   update,
   remove,
@@ -128,13 +133,23 @@ import {
   push,
   serverTimestamp,
   onValue,
-} from './js/services/firebaseService.js';
+} = require('./js/services/firebaseService.js');
 
 // Firebase 초기화
 initializeFirebase();
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
+
+// [캐시 최적화] get_channels_and_key 요청 캐시
+let channelsAndKeyCache = null;
+let channelsAndKeyCacheTimestamp = 0;
+const CHANNELS_CACHE_TTL = 5 * 60 * 1000; // 5분 TTL
+
+// [캐시 최적화] get_kanban_data 요청 캐시
+let kanbanDataCache = null;
+let kanbanDataCacheTimestamp = 0;
+const KANBAN_CACHE_TTL = 30 * 1000; // 30초 TTL
 
 // Service Worker 시작 시 세션 복원
 (async () => {
@@ -357,6 +372,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!result.success) {
           throw new Error(result.error);
         }
+
+        // [캐시 무효화] 채널 삭제 시 캐시 초기화
+        channelsAndKeyCache = null;
+        channelsAndKeyCacheTimestamp = 0;
+        Logger.debug(`[delete_channel] 캐시 무효화 완료`);
+
         return {
           success: true,
           count: result.deletedCount,
@@ -560,7 +581,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ideaData = JSON.parse(msg.data);
         const status = msg.status || 'ideas';
         const channelId = msg.channelId || null;
-        return await addIdeaToKanban(ideaData, status, channelId);
+        const result = await addIdeaToKanban(ideaData, status, channelId);
+
+        // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+        kanbanDataCache = null;
+        kanbanDataCacheTimestamp = 0;
+        Logger.debug(`[add_idea_to_kanban] 캐시 무효화 완료`);
+
+        return result;
       })()
     );
   }
@@ -764,7 +792,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { cardId, status } = msg.data;
-        return await deleteKanbanCard(cardId, status);
+        const result = await deleteKanbanCard(cardId, status);
+
+        // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+        kanbanDataCache = null;
+        kanbanDataCacheTimestamp = 0;
+        Logger.debug(`[delete_kanban_card] 캐시 무효화 완료`);
+
+        return result;
       })()
     );
   }
@@ -796,6 +831,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           await remove(originalRef);
 
           Logger.biz(`[Kanban] 카드 이동: ${cardId} (${originalStatus} → ${newStatus})`);
+
+          // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+          kanbanDataCache = null;
+          kanbanDataCacheTimestamp = 0;
+          Logger.debug(`[move_kanban_card] 캐시 무효화 완료`);
 
           // UI 갱신 메시지 전송
           try {
@@ -1080,7 +1120,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
-        Logger.info(`[get_kanban_data] 요청 수신 - userId: ${userId}`);
+        const now = Date.now();
+
+        // 캐시 확인 (30초 이내)
+        if (kanbanDataCache && (now - kanbanDataCacheTimestamp) < KANBAN_CACHE_TTL) {
+          Logger.debug(`[get_kanban_data] 캐시된 데이터 반환 - userId: ${userId}`);
+          return kanbanDataCache;
+        }
+
+        Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
         const dbRef = ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`);
 
         // 실시간 리스너 등록 (한 번만)
@@ -1115,6 +1163,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };
+
+        // 캐시에 저장
+        kanbanDataCache = responseData;
+        kanbanDataCacheTimestamp = now;
 
         // 즉시 UI에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
         if (sender.tab?.id) {
@@ -1365,7 +1417,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
-        Logger.info(`[get_channels_and_key] 요청 수신 - userId: ${userId}`);
+        const now = Date.now();
+
+        // 캐시 확인 (5분 이내)
+        if (channelsAndKeyCache && (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
+          Logger.debug(`[get_channels_and_key] 캐시된 데이터 반환 - userId: ${userId}`);
+          return channelsAndKeyCache;
+        }
+
+        Logger.info(`[get_channels_and_key] 새로운 데이터 조회 - userId: ${userId}`);
         const [storage, channelsSnap] = await Promise.all([
           chrome.storage.local.get(['youtubeApiKey', 'geminiApiKey']),
           get(ref(getDb(), `channels/${userId}`)),
@@ -1387,6 +1447,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ...channelsData,
           },
         };
+
+        // 캐시에 저장
+        channelsAndKeyCache = responseData;
+        channelsAndKeyCacheTimestamp = now;
 
         // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
         if (sender.tab?.id) {
@@ -1441,6 +1505,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // set()으로 덮어쓰기하여 빈 배열도 확실하게 저장
         await set(ref(getDb(), `channels/${userId}`), safeChannels);
+
+        // [캐시 무효화] 채널 데이터 변경 시 캐시 초기화
+        channelsAndKeyCache = null;
+        channelsAndKeyCacheTimestamp = 0;
+        Logger.debug(`[save_channels_and_key] 캐시 무효화 완료`);
 
         // 데이터 수집 트리거
         await fetchAllChannelData();
@@ -1611,6 +1680,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           Logger.debug(
             `[save_idea_draft] 초안 저장 완료 - ideaId: ${ideaId}, status: ${foundStatus}`
           );
+
+          // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+          kanbanDataCache = null;
+          kanbanDataCacheTimestamp = 0;
+          Logger.debug(`[save_idea_draft] 캐시 무효화 완료`);
+
           return { success: true, moved: false, newStatus: foundStatus };
         }
       })()
@@ -1744,6 +1819,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             });
           }
         }
+
+        // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+        kanbanDataCache = null;
+        kanbanDataCacheTimestamp = 0;
+        Logger.debug(`[link_scrap_to_idea] 캐시 무효화 완료`);
+
         return { success: true };
       })()
     );
@@ -1815,6 +1896,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         Logger.biz(
           `✅ [unlink_scrap_from_idea] 스크랩 연결 해제 완료 - ideaId: ${ideaId}, scrapId: ${scrapId}`
         );
+
+        // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
+        kanbanDataCache = null;
+        kanbanDataCacheTimestamp = 0;
+        Logger.debug(`[unlink_scrap_from_idea] 캐시 무효화 완료`);
 
         return { success: true };
       })()
@@ -2200,6 +2286,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           Logger.error('[알람 재등록] 오류:', error);
           throw error;
         }
+      })()
+    );
+  }
+
+  // === [Auth] 토큰 요청 ===
+  if (msg.action === 'getValidToken') {
+    return handleAsync(
+      (async () => {
+        const token = await getValidToken(false);
+        return { success: true, token };
       })()
     );
   }

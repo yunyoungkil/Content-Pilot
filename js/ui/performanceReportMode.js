@@ -82,29 +82,17 @@ function addPerformanceReportEventListeners(container) {
 function loadPerformanceData(container) {
   showToast('성과 데이터를 불러오는 중...');
 
-  // Firebase가 있으면 직접 접근, 없으면 background.js를 통해 데이터 가져오기
-  const firebase = window.firebase;
-
-  if (firebase) {
-    // Firebase 직접 접근
-    const kanbanRef = firebase.database().ref('kanban');
-    kanbanRef.once('value', async (snapshot) => {
-      await processPerformanceData(snapshot.val() || {}, container);
-    });
-  } else {
-    // background.js를 통해 데이터 가져오기
-    chrome.runtime.sendMessage({ action: 'get_kanban_data' });
-
-    // 실시간 업데이트 리스너 등록 (한 번만)
-    if (!window.performanceReportListenerAttached) {
-      chrome.runtime.onMessage.addListener(async (msg) => {
-        if (msg.action === 'kanban_data_updated') {
-          await processPerformanceData(msg.data || {}, container);
-        }
-      });
-      window.performanceReportListenerAttached = true;
+  // [최적화] 성능 최적화 서비스를 통한 데이터 로드
+  (async () => {
+    try {
+      const { loadKanbanData } = await import('../services/kanbanService.js');
+      const allCards = await loadKanbanData();
+      await processPerformanceData(allCards, container);
+    } catch (error) {
+      console.error('[PerformanceReport] 데이터 로드 실패:', error);
+      showToast('성과 데이터를 불러오는데 실패했습니다.', 'error');
     }
-  }
+  })();
 }
 
 /**

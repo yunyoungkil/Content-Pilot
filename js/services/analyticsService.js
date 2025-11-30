@@ -4,6 +4,8 @@ import { getDb, CONSTANTS, initializeFirebase, getCurrentUserId } from './fireba
 import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
+// [추가] 성능 최적화 서비스 임포트
+import { performanceOptimizer } from './performanceOptimizer.js';
 
 // 채널 정보 캐시 (메모리 캐시 + TTL)
 const channelCache = new Map();
@@ -85,23 +87,12 @@ function findMatchingChannel(contentUrl, channelMap) {
 // 캐시된 채널 정보 조회
 async function getCachedChannels(userId) {
   const cacheKey = `channels_${userId}`;
-  const cached = channelCache.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-
-  // 캐시 만료 또는 없음 - DB 조회
-  const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
-  const channels = channelsSnap.val() || {};
-
-  // 캐시 저장
-  channelCache.set(cacheKey, {
-    data: channels,
-    timestamp: Date.now(),
+  // 성능 최적화 서비스를 통한 캐싱
+  return await performanceOptimizer.getCachedData(cacheKey, async () => {
+    const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+    return channelsSnap.val() || {};
   });
-
-  return channels;
 }
 
 // 대체 채널 ID 조회 및 캐시
@@ -770,18 +761,22 @@ export async function updateAllPerformanceMetrics() {
 
       Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${batchStart + 1}-${batchEnd}`);
 
-      const batchPromise = Promise.allSettled(batch.map((t) => updateSinglePerformanceMetric(t)))
-        .then((results) => {
-          // 실패한 작업 로깅
-          const failed = results.filter((r) => r.status === 'rejected');
-          if (failed.length > 0) {
-            Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
-            failed.forEach((f, idx) => {
-              Logger.warn(`[updateAllPerformanceMetrics] 실패 ${idx + 1}:`, f.reason?.message || f.reason);
-            });
-          }
-          return results;
-        });
+      const batchPromise = Promise.allSettled(
+        batch.map((t) => updateSinglePerformanceMetric(t))
+      ).then((results) => {
+        // 실패한 작업 로깅
+        const failed = results.filter((r) => r.status === 'rejected');
+        if (failed.length > 0) {
+          Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
+          failed.forEach((f, idx) => {
+            Logger.warn(
+              `[updateAllPerformanceMetrics] 실패 ${idx + 1}:`,
+              f.reason?.message || f.reason
+            );
+          });
+        }
+        return results;
+      });
 
       batchPromises.push(batchPromise);
     }

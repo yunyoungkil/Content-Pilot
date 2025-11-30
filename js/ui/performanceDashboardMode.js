@@ -76,36 +76,39 @@ function loadPerformanceDataPaginated(container, page = 1, pageSize = 50) {
     contentEl.innerHTML = '<div class="perf-loading">성과 데이터를 불러오는 중...</div>';
   }
 
-  chrome.runtime.sendMessage({
-    action: 'get_paginated_performance_data',
-    page: page,
-    pageSize: pageSize
-  }, (response) => {
-    if (response && response.success) {
-      const { data, hasMore, total } = response;
+  chrome.runtime.sendMessage(
+    {
+      action: 'get_paginated_performance_data',
+      page: page,
+      pageSize: pageSize,
+    },
+    (response) => {
+      if (response && response.success) {
+        const { data, hasMore, total } = response;
 
-      if (page === 1) {
-        allPerformanceData = [];
-      }
+        if (page === 1) {
+          allPerformanceData = [];
+        }
 
-      // 데이터 누적
-      allPerformanceData = allPerformanceData.concat(data);
+        // 데이터 누적
+        allPerformanceData = allPerformanceData.concat(data);
 
-      // 첫 페이지거나 데이터가 있으면 렌더링
-      if (page === 1 || data.length > 0) {
-        renderPerformanceList(container);
+        // 첫 페이지거나 데이터가 있으면 렌더링
+        if (page === 1 || data.length > 0) {
+          renderPerformanceList(container);
 
-        // 더 많은 데이터가 있으면 다음 페이지 로드
-        if (hasMore) {
-          setTimeout(() => loadPerformanceDataPaginated(container, page + 1, pageSize), 100);
+          // 더 많은 데이터가 있으면 다음 페이지 로드
+          if (hasMore) {
+            setTimeout(() => loadPerformanceDataPaginated(container, page + 1, pageSize), 100);
+          }
+        }
+      } else {
+        if (page === 1) {
+          contentEl.innerHTML = '<div class="perf-loading">데이터를 불러올 수 없습니다.</div>';
         }
       }
-    } else {
-      if (page === 1) {
-        contentEl.innerHTML = '<div class="perf-loading">데이터를 불러올 수 없습니다.</div>';
-      }
     }
-  });
+  );
 }
 
 /**
@@ -211,13 +214,26 @@ function renderPerformanceList(container, sortBy = 'earnings-desc') {
   });
 
   // 통계 계산 (최적화: 메모이제이션 적용)
-  if (!window.performanceStats || window.performanceStats.lastUpdate !== allPerformanceData.length || window.performanceStats.lastSortBy !== sortBy) {
+  if (
+    !window.performanceStats ||
+    window.performanceStats.lastUpdate !== allPerformanceData.length ||
+    window.performanceStats.lastSortBy !== sortBy
+  ) {
     window.performanceStats = {
-      totalEarnings: sortedData.reduce((sum, item) => sum + (item.performance.estimatedEarnings || 0), 0),
-      totalPageviews: sortedData.reduce((sum, item) => sum + (item.performance.pageviews || item.performance.pageViews || 0), 0),
-      totalImpressions: sortedData.reduce((sum, item) => sum + (item.performance.pageImpressions || 0), 0),
+      totalEarnings: sortedData.reduce(
+        (sum, item) => sum + (item.performance.estimatedEarnings || 0),
+        0
+      ),
+      totalPageviews: sortedData.reduce(
+        (sum, item) => sum + (item.performance.pageviews || item.performance.pageViews || 0),
+        0
+      ),
+      totalImpressions: sortedData.reduce(
+        (sum, item) => sum + (item.performance.pageImpressions || 0),
+        0
+      ),
       lastUpdate: allPerformanceData.length,
-      lastSortBy: sortBy
+      lastSortBy: sortBy,
     };
   }
 

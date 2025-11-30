@@ -19,13 +19,18 @@ async function ensureOffscreenDocument() {
   // 이미 생성된 문서가 있는지 확인
   if (offscreenDocumentId) {
     try {
-      const clients = await chrome.offscreen.hasDocument();
-      if (clients) {
+      const hasDocument = await chrome.offscreen.hasDocument();
+      if (hasDocument) {
         Logger.debug('[OffscreenService] 문서가 이미 존재합니다.');
         return offscreenDocumentId;
+      } else {
+        Logger.warn(
+          '[OffscreenService] 문서 ID는 있지만 실제 문서가 존재하지 않습니다. 재생성합니다.'
+        );
+        offscreenDocumentId = null;
       }
     } catch (e) {
-      // 문서가 없거나 오류 발생
+      Logger.warn('[OffscreenService] 문서 존재 확인 중 오류:', e);
       offscreenDocumentId = null;
     }
   }
@@ -33,15 +38,27 @@ async function ensureOffscreenDocument() {
   // 문서 생성 시작
   offscreenCreationPromise = (async () => {
     try {
-      Logger.debug('[OffscreenService] 문서 생성 시작...');
+      Logger.info('[OffscreenService] 문서 생성 시작...');
+
+      // 기존 문서가 있다면 먼저 닫기 시도
+      try {
+        await chrome.offscreen.closeDocument();
+        Logger.debug('[OffscreenService] 기존 문서 닫기 완료');
+      } catch (e) {
+        // 기존 문서가 없어도 괜찮음
+      }
+
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
         reasons: ['DOM_SCRAPING', 'WORKERS', 'DOM_PARSER'],
         justification: 'HTML Sanitization, Image Resizing, and Template Rendering',
       });
 
+      // 생성 후 문서가 준비될 때까지 대기
+      await waitForOffscreenReady();
+
       offscreenDocumentId = 'offscreen-doc';
-      Logger.info('[OffscreenService] 문서 생성 완료');
+      Logger.info('[OffscreenService] 문서 생성 및 확인 완료');
       return offscreenDocumentId;
     } catch (error) {
       Logger.error('[OffscreenService] 문서 생성 실패:', error);
@@ -53,6 +70,55 @@ async function ensureOffscreenDocument() {
   })();
 
   return await offscreenCreationPromise;
+}
+
+/**
+ * Offscreen 문서가 준비될 때까지 대기 (핑퐁 방식)
+ */
+async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      Logger.debug(`[OffscreenService] 준비 확인 시도 ${i + 1}/${maxRetries}`);
+
+      // 핑 메시지 전송
+      const response = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('핑 타임아웃'));
+        }, 2000);
+
+        const listener = (msg) => {
+          if (msg.action === 'offscreen_ping_response') {
+            clearTimeout(timeout);
+            chrome.runtime.onMessage.removeListener(listener);
+            resolve(msg);
+            return true;
+          }
+          return false;
+        };
+
+        chrome.runtime.onMessage.addListener(listener);
+
+        chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch((err) => {
+          clearTimeout(timeout);
+          chrome.runtime.onMessage.removeListener(listener);
+          reject(err);
+        });
+      });
+
+      if (response.ready) {
+        Logger.debug('[OffscreenService] Offscreen 문서 준비 완료');
+        return;
+      }
+    } catch (error) {
+      Logger.debug(`[OffscreenService] 준비 확인 실패 ${i + 1}/${maxRetries}:`, error.message);
+    }
+
+    if (i < maxRetries - 1) {
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+  }
+
+  throw new Error('Offscreen 문서 준비 확인 실패');
 }
 
 /**
@@ -81,20 +147,29 @@ async function sendToOffscreen(action, data, timeout = 30000) {
 
     chrome.runtime.onMessage.addListener(responseListener);
 
-    // Offscreen 문서로 메시지 전송
+    // Offscreen 문서로 메시지 전송 시도
+    Logger.debug(`[OffscreenService] ${action} 메시지 전송 시도`);
     chrome.runtime.sendMessage({ action, ...data }).catch((err) => {
       chrome.runtime.onMessage.removeListener(responseListener);
+      Logger.error(`[OffscreenService] ${action} 메시지 전송 실패:`, err);
       // "message port closed"는 정상적인 상황일 수 있음
-      if (err?.message && !err.message.includes('message port closed')) {
+      if (
+        err?.message &&
+        !err.message.includes('message port closed') &&
+        !err.message.includes('Receiving end does not exist')
+      ) {
         reject(err);
       } else {
-        reject(new Error('Offscreen 문서 연결 실패'));
+        reject(
+          new Error('Offscreen 문서 연결 실패 - 문서가 존재하지 않거나 초기화되지 않았습니다')
+        );
       }
     });
 
     // 타임아웃 설정
     setTimeout(() => {
       chrome.runtime.onMessage.removeListener(responseListener);
+      Logger.warn(`[OffscreenService] ${action} 타임아웃 (${timeout}ms)`);
       reject(new Error(`${action} 타임아웃 (${timeout}ms)`));
     }, timeout);
   });
@@ -108,13 +183,29 @@ async function sendToOffscreen(action, data, timeout = 30000) {
 export async function sanitizeHtmlInOffscreen(rawText) {
   try {
     const startTime = performance.now();
+    Logger.debug('[OffscreenService] HTML 정제 요청 시작');
     const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 10000);
     const elapsed = Math.round(performance.now() - startTime);
     Logger.info(`⚡ [OffscreenService] HTML 정제 완료 (${elapsed}ms)`);
     return response.cleanedHtml;
   } catch (error) {
     Logger.error('[OffscreenService] HTML 정제 실패:', error);
-    // 실패 시 원본 반환보다는 빈 문자열이나 에러 처리가 안전함 (XSS 위험 때문)
+    // Offscreen 문서 문제인 경우 재시도
+    if (
+      error.message.includes('Offscreen 문서 연결 실패') ||
+      error.message.includes('Receiving end does not exist')
+    ) {
+      Logger.warn('[OffscreenService] Offscreen 문서 문제로 인한 실패, 재시도합니다');
+      // 문서 ID 리셋 후 재시도
+      offscreenDocumentId = null;
+      try {
+        const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 10000);
+        return response.cleanedHtml;
+      } catch (retryError) {
+        Logger.error('[OffscreenService] 재시도 실패:', retryError);
+        throw new Error(`HTML 정제 실패: ${retryError.message}`);
+      }
+    }
     throw error;
   }
 }

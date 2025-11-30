@@ -86,7 +86,31 @@ const getDbUrl = (path) => {
 // 2. 공통 Fetch 래퍼
 async function dbRequest(method, path, data = null) {
   try {
-    const token = await getValidToken(false);
+    let token = null;
+
+    // Content script에서는 background에 토큰 요청
+    if (typeof chrome !== 'undefined' && chrome.runtime && !chrome.action) {
+      // Content script에서 실행 중
+      try {
+        token = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ action: 'getValidToken' }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (response && response.success) {
+              resolve(response.token);
+            } else {
+              resolve(null);
+            }
+          });
+        });
+      } catch (e) {
+        Logger.warn('[Firebase REST] Content script 토큰 요청 실패:', e);
+        token = null;
+      }
+    } else {
+      // Background script에서 직접 가져오기
+      token = await getValidToken(false);
+    }
 
     let url = getDbUrl(path);
     if (token) {

@@ -734,40 +734,18 @@ function bindEvents(container) {
         // 카드 모드와 텍스트 모드 선택에 따른 패이로드
         let payloadHtml = '';
         if (insertMode === 'card') {
+          // 카드 모드: 간단한 HTML 구조로 변경 (Quill 호환성 향상)
           payloadHtml = `
-            <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
-              <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
-                ${
-                  cardImg
-                    ? `<img src="${cardImg}" style="width:100%;height:100%;object-fit:cover;"/>`
-                    : '<div style="color:#999;">이미지 없음</div>'
-                }
-              </div>
-              <div style="flex:1;">
-                <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${
-                  cardProductName || ''
-                }</div>
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                  <div style="font-weight:900;color:#ae0000;font-size:18px;">${
-                    cardSale ? Number(cardSale).toLocaleString() + '원' : ''
-                  }</div>
-                  ${
-                    cardOrig && Number(cardOrig) > Number(cardSale || 0)
-                      ? `<div style="text-decoration:line-through;color:#999;">${Number(
-                          cardOrig
-                        ).toLocaleString()}원</div>`
-                      : ''
-                  }
-                  ${
-                    cardDiscount
-                      ? `<div style="color:#ae0000;font-weight:700;">${cardDiscount}%</div>`
-                      : ''
-                  }
-                </div>
-                ${cardBadges ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>` : ''}
-                <div style="margin-top:12px;"><a href="${url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
-              </div>
-            </div>
+<div style="border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; background: #f9f9f9;">
+  <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${cardProductName || '상품명 없음'}</div>
+  ${cardImg ? `<img src="${cardImg}" style="max-width: 120px; height: auto; float: left; margin-right: 12px; border-radius: 4px;" onerror="this.style.display='none';" />` : ''}
+  <div style="font-size: 16px; color: #e74c3c; font-weight: bold; margin-bottom: 4px;">${cardSale ? Number(cardSale).toLocaleString() + '원' : '가격 정보 없음'}</div>
+  ${cardOrig && Number(cardOrig) > Number(cardSale || 0) ? `<div style="text-decoration: line-through; color: #999; font-size: 14px;">${Number(cardOrig).toLocaleString()}원</div>` : ''}
+  ${cardDiscount ? `<div style="color: #e74c3c; font-weight: bold;">${cardDiscount}% 할인</div>` : ''}
+  ${cardBadges ? `<div style="font-size: 12px; color: #666; margin: 4px 0;">${cardBadges}</div>` : ''}
+  <div style="clear: both;"></div>
+  <a href="${url}" target="_blank" rel="nofollow noopener" style="display: inline-block; background: #007bff; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; margin-top: 8px;">최저가 보러가기</a>
+</div>
           `;
         } else {
           // 텍스트 모드: 간단한 앵커 태그 삽입
@@ -781,7 +759,15 @@ function bindEvents(container) {
 
         // helper: search selector in multiple root contexts and return first iframe element
         const findIframeInRoots = (sel) => {
-          // 1) same root node as the container
+          // 1) Global document first (most reliable)
+          try {
+            const el = document.querySelector(sel);
+            if (el) return el;
+          } catch (e) {
+            Logger.warn('[AffiliateModal] global document query failed', e);
+          }
+
+          // 2) same root node as the container
           try {
             const rootNode = container?.getRootNode && container.getRootNode();
             if (rootNode && rootNode.querySelector) {
@@ -802,14 +788,6 @@ function bindEvents(container) {
             Logger.warn('[AffiliateModal] image extraction error', e);
           }
 
-          // 3) global document fallback
-          try {
-            const el = document.querySelector(sel);
-            if (el) return el;
-          } catch (e) {
-            Logger.warn('[AffiliateModal] global document query failed', e);
-          }
-
           return null;
         };
 
@@ -827,11 +805,14 @@ function bindEvents(container) {
             tryIframes.push(f.contentWindow);
         });
 
+        Logger.info('[AffiliateModal] Found iframes:', tryIframes.length);
         let sent = false;
         for (const win of tryIframes) {
           try {
+            Logger.info('[AffiliateModal] Sending to iframe:', win);
             win.postMessage({ action: 'insert-html', data: { html: payloadHtml } }, '*');
             sent = true;
+            Logger.info('[AffiliateModal] HTML insert message sent to editor');
           } catch (err) {
             console.warn('에디터 전송 실패 대상:', err);
           }

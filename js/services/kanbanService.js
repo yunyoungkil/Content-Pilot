@@ -15,6 +15,180 @@ import { updateSinglePerformanceMetric } from './analyticsService.js';
 import { Logger } from '../utils.js';
 // [추가] 상수 임포트
 import { COLLECTIONS } from '../constants.js';
+// [추가] 성능 최적화 서비스 임포트
+import { performanceOptimizer } from './performanceOptimizer.js';
+
+/**
+ * [최적화] 칸반 데이터를 로드하는 함수 - 페이징과 캐싱 적용
+ */
+export async function loadKanbanData(options = {}) {
+  console.log('[KanbanService] loadKanbanData 호출');
+
+  try {
+    const userId = await getCurrentUserId();
+    const cacheKey = `kanban_${userId}`;
+
+    // 성능 최적화 서비스를 통한 캐싱된 데이터 로드
+    const allData = await performanceOptimizer.getCachedData(cacheKey, async () => {
+      return await loadKanbanDataFromFirebase();
+    });
+
+    console.log('[KanbanService] loadKanbanData 완료:', Object.keys(allData).length);
+    return allData;
+  } catch (error) {
+    console.error('[KanbanService] loadKanbanData 실패:', error);
+    throw error;
+  }
+}
+
+/**
+ * [최적화] 캐시된 칸반 데이터 가져오기
+ */
+async function getCachedKanbanData() {
+  try {
+    const result = await chrome.storage.local.get('kanbanDataCache');
+    return result.kanbanDataCache;
+  } catch (error) {
+    console.warn('[KanbanService] 캐시 읽기 실패:', error);
+    return null;
+  }
+}
+
+/**
+ * [최적화] 칸반 데이터 캐시에 저장
+ */
+async function setCachedKanbanData(data) {
+  try {
+    await chrome.storage.local.set({
+      kanbanDataCache: {
+        data: data,
+        timestamp: Date.now(),
+      },
+    });
+  } catch (error) {
+    console.warn('[KanbanService] 캐시 저장 실패:', error);
+  }
+}
+
+/**
+ * [최적화] 캐시 유효성 확인 (5분)
+ */
+function isCacheValid(timestamp) {
+  const CACHE_DURATION = 5 * 60 * 1000; // 5분
+  return Date.now() - timestamp < CACHE_DURATION;
+}
+
+/**
+ * Firebase에서 칸반 데이터 로드 (페이징 적용)
+ */
+async function loadKanbanDataFromFirebase() {
+  console.log('[KanbanService] Firebase에서 데이터 로드 시작');
+
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.warn('[KanbanService] 사용자 ID 없음');
+    return {};
+  }
+
+  const allData = { ideas: {}, 'in-progress': {}, done: {} };
+  const loadPromises = [];
+
+  // 각 상태별로 병렬 로드 (성능 향상)
+  for (const status of ['ideas', 'in-progress', 'done']) {
+    loadPromises.push(
+      performanceOptimizer
+        .loadPagedData(`kanban/${userId}/${status}`, {
+          pageSize: 100, // 한 번에 100개씩 로드
+          sortBy: 'createdAt',
+          sortOrder: 'desc',
+        })
+        .then((result) => {
+          // 페이징 결과를 기존 형식으로 변환
+          const statusData = {};
+          result.items.forEach((item) => {
+            statusData[item.id] = item;
+          });
+          allData[status] = statusData;
+          console.log(
+            `[KanbanService] ${status} 데이터 로드 완료:`,
+            Object.keys(statusData).length
+          );
+        })
+        .catch((error) => {
+          console.error(`[KanbanService] ${status} 데이터 로드 실패:`, error);
+        })
+    );
+  }
+
+  await Promise.all(loadPromises);
+  console.log(
+    '[KanbanService] 전체 데이터 로드 완료:',
+    Object.keys(allData.ideas).length +
+      Object.keys(allData['in-progress']).length +
+      Object.keys(allData.done).length
+  );
+  return allData;
+}
+
+/**
+ * [최적화] 상태별 데이터 페이징 로드
+ */
+async function loadStatusDataPaged(userId, status, pageSize = 50) {
+  const statusData = {};
+  let lastKey = null;
+  let hasMore = true;
+
+  while (hasMore) {
+    try {
+      const batch = await loadStatusDataBatch(userId, status, lastKey, pageSize);
+      if (batch.length === 0) {
+        hasMore = false;
+      } else {
+        batch.forEach(([key, data]) => {
+          statusData[key] = data;
+          lastKey = key;
+        });
+        hasMore = batch.length === pageSize;
+      }
+    } catch (error) {
+      console.error(`[KanbanService] ${status} 배치 로드 실패:`, error);
+      hasMore = false;
+    }
+  }
+
+  return statusData;
+}
+
+/**
+ * 상태별 데이터 배치 로드
+ */
+async function loadStatusDataBatch(userId, status, startAfter = null, limit = 50) {
+  return new Promise((resolve, reject) => {
+    const dbRef = ref(getDb(), `kanban/${userId}/${status}`);
+
+    let query = dbRef.orderByKey().limitToFirst(limit);
+    if (startAfter) {
+      query = query.startAfter(startAfter);
+    }
+
+    get(query)
+      .then((snapshot) => {
+        const data = [];
+        snapshot.forEach((childSnapshot) => {
+          data.push([childSnapshot.key, childSnapshot.val()]);
+        });
+        resolve(data);
+      })
+      .catch(reject);
+  });
+}
+
+/**
+ * [최적화] 캐시 무효화 헬퍼 함수
+ */
+async function invalidateKanbanCache() {
+  await performanceOptimizer.invalidateCache('kanban');
+}
 
 /**
  * 새로운 아이디어 카드 생성 및 저장
@@ -246,6 +420,9 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     const cardId = pushResult.key;
     await pushResult.set(cleanDataForFirebase(finalData));
 
+    // [최적화] 캐시 무효화
+    await invalidateKanbanCache();
+
     // URL 인덱스 업데이트 (중복 검사를 위해 필수)
     if (ideaData.origin?.postUrl) {
       try {
@@ -379,6 +556,9 @@ export async function deleteKanbanCard(cardId, status) {
     Logger.info(`[deleteKanbanCard] 카드 삭제 시작 - cardId: ${cardId}, status: ${status}`);
     await remove(ref(getDb(), cardPath));
 
+    // [최적화] 캐시 무효화
+    await invalidateKanbanCache();
+
     // URL 인덱스에서도 제거 (origin.postUrl 또는 publishedUrl이 있는 경우)
     if (cardData.origin?.postUrl || cardData.publishedUrl) {
       try {
@@ -431,6 +611,42 @@ export async function deleteKanbanCard(cardId, status) {
     return { success: true };
   } catch (error) {
     Logger.error('[deleteKanbanCard] 카드 삭제 실패:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * [최적화] 칸반 카드 업데이트 - 캐시 무효화 추가
+ * @param {string} cardId - 카드 ID
+ * @param {string} status - 현재 상태
+ * @param {Object} updates - 업데이트할 데이터
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export async function updateKanbanCard(cardId, status, updates) {
+  if (!cardId || !status || !updates) {
+    return { success: false, error: '카드 ID, 상태, 업데이트 데이터가 필요합니다.' };
+  }
+
+  try {
+    const userId = await getCurrentUserId();
+    const cardPath = `kanban/${userId}/${status}/${cardId}`;
+
+    // 업데이트 데이터에 timestamp 추가
+    const updateData = {
+      ...updates,
+      updatedAt: Date.now(),
+    };
+
+    Logger.info(`[updateKanbanCard] 카드 업데이트 시작 - cardId: ${cardId}, status: ${status}`);
+    await set(ref(getDb(), cardPath), cleanDataForFirebase(updateData));
+
+    // [최적화] 캐시 무효화
+    await invalidateKanbanCache();
+
+    Logger.biz(`✅ [updateKanbanCard] 카드 업데이트 완료 - cardId: ${cardId}`);
+    return { success: true };
+  } catch (error) {
+    Logger.error('[updateKanbanCard] 카드 업데이트 실패:', error);
     return { success: false, error: error.message };
   }
 }

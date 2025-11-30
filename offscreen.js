@@ -818,6 +818,12 @@ async function cropImage(imageDataUrl, targetRatio) {
 
 // --- 메시지 리스너 (background.js로부터 요청 처리) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // [신규] 핑 메시지 처리 (Offscreen 문서 준비 확인용)
+  if (request.action === "offscreen_ping") {
+    sendResponse({ action: "offscreen_ping_response", ready: true });
+    return true;
+  }
+
   // [신규] HTML 정제 및 포매팅 요청 처리
   if (request.action === "sanitize_html_in_offscreen") {
     sanitizeAndFormatHtml(request.rawText)

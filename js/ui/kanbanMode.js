@@ -229,6 +229,7 @@ function addRealtimeUpdateListener() {
 
 /**
  * 전체 칸반 UI를 데이터에 따라 다시 그리는 함수
+ * [최적화] 증분 업데이트 방식으로 변경
  */
 async function updateKanbanUI(allCards) {
   console.log('[KanbanMode] updateKanbanUI 호출:', {
@@ -261,15 +262,9 @@ async function updateKanbanUI(allCards) {
     activeChannelId = null;
   }
 
-  // 각 컬럼의 카드 목록을 비움
-  rootEl.querySelectorAll('.kanban-col-cards').forEach((col) => (col.innerHTML = ''));
-
-  // [UI 모듈 독립성 강화] 카드 렌더링 후 이벤트 리스너가 등록되어 있는지 확인
-  // addKanbanEventListeners가 이미 호출되었는지 확인
-  if (rootEl && !rootEl.dataset.listenersAttached) {
-    // 이벤트 리스너가 아직 등록되지 않았다면 등록
-    addKanbanEventListeners(kanbanContainer);
-  }
+  // [최적화] 증분 업데이트: 이전 데이터와 비교하여 변경된 부분만 업데이트
+  const previousData = allKanbanData || {};
+  allKanbanData = allCards || {};
 
   // 채널이 선택되지 않았을 때 온보딩 메시지 표시
   if (!activeChannelId) {
@@ -326,76 +321,205 @@ async function updateKanbanUI(allCards) {
     Object.keys(allCards).length
   );
 
-  for (const status in allCards) {
+  // [최적화] 각 컬럼별로 증분 업데이트 수행
+  for (const status of ['ideas', 'in-progress', 'done']) {
     const colContainer = rootEl.querySelector(
       `.cp-kanban-col[data-status="${status}"] .kanban-col-cards`
     );
     if (colContainer) {
-      // [수정] 채널 ID로 데이터 필터링
-      const rawCards = allCards[status] || {};
-      const filteredCards = {};
-
-      console.log(
-        `[KanbanMode] updateKanbanUI - status: ${status}, rawCards 개수:`,
-        Object.keys(rawCards).length
+      await updateColumnIncremental(
+        colContainer,
+        status,
+        allCards[status] || {},
+        previousData[status] || {},
+        activeChannelId
       );
-
-      for (const [cardId, cardData] of Object.entries(rawCards)) {
-        // [수정] 채널 ID 필터링 로직
-        // 1. channelId가 현재 활성 채널과 일치하는 카드 표시
-        // 2. channelId가 undefined인 경우 (구버전 데이터)는 일단 포함 (마이그레이션 전까지 호환성 유지)
-        // 3. channelId가 null인 경우는 제외 (칸반은 채널별로 관리)
-        console.log(
-          `[KanbanMode] updateKanbanUI - 카드 필터링: cardId=${cardId}, cardData.channelId=${cardData.channelId}, activeChannelId=${activeChannelId}`
-        );
-
-        let shouldInclude = false;
-
-        if (cardData.channelId === undefined && activeChannelId) {
-          // 구버전 데이터 (channelId가 없는 경우)
-          shouldInclude = true;
-        } else if (cardData.channelId && activeChannelId) {
-          // channelId가 있는 경우 - 정확히 일치하거나 URL의 기본 경로가 일치하는지 확인
-          if (cardData.channelId === activeChannelId) {
-            shouldInclude = true;
-          } else {
-            // base64 디코딩하여 URL의 기본 경로 비교
-            try {
-              const cardUrl = atob(cardData.channelId.replace(/=/g, ''));
-              const activeUrl = atob(activeChannelId.replace(/=/g, ''));
-
-              // URL 객체로 변환하여 origin 비교
-              const cardUrlObj = new URL(cardUrl);
-              const activeUrlObj = new URL(activeUrl);
-
-              // origin이 같으면 같은 채널로 간주
-              if (cardUrlObj.origin === activeUrlObj.origin) {
-                shouldInclude = true;
-                console.log(
-                  `[KanbanMode] updateKanbanUI - URL origin 일치: ${cardUrlObj.origin} === ${activeUrlObj.origin}`
-                );
-              }
-            } catch (e) {
-              // base64 디코딩 실패 시 정확히 일치하는 경우만 포함
-              console.warn(`[KanbanMode] updateKanbanUI - channelId 디코딩 실패:`, e);
-            }
-          }
-        }
-
-        if (shouldInclude) {
-          filteredCards[cardId] = cardData;
-        }
-      }
-
-      console.log(
-        `[KanbanMode] updateKanbanUI - status: ${status}, filteredCards 개수:`,
-        Object.keys(filteredCards).length
-      );
-      renderCardsInColumn(colContainer, status, filteredCards);
     }
   }
 
   console.log('[KanbanMode] updateKanbanUI 완료');
+}
+
+/**
+ * [최적화] 컬럼별 증분 업데이트 함수
+ * 변경된 카드만 업데이트하여 성능 개선
+ */
+async function updateColumnIncremental(
+  columnEl,
+  status,
+  currentCards,
+  previousCards,
+  activeChannelId
+) {
+  const currentFiltered = {};
+  const previousFiltered = {};
+
+  // 현재 데이터 필터링
+  for (const [cardId, cardData] of Object.entries(currentCards)) {
+    if (shouldIncludeCard(cardData, activeChannelId)) {
+      currentFiltered[cardId] = cardData;
+    }
+  }
+
+  // 이전 데이터 필터링
+  for (const [cardId, cardData] of Object.entries(previousCards)) {
+    if (shouldIncludeCard(cardData, activeChannelId)) {
+      previousFiltered[cardId] = cardData;
+    }
+  }
+
+  // 변경 감지
+  const added = Object.keys(currentFiltered).filter((id) => !previousFiltered[id]);
+  const removed = Object.keys(previousFiltered).filter((id) => !currentFiltered[id]);
+  const updated = Object.keys(currentFiltered).filter(
+    (id) =>
+      previousFiltered[id] &&
+      JSON.stringify(currentFiltered[id]) !== JSON.stringify(previousFiltered[id])
+  );
+
+  console.log(`[KanbanMode] ${status} 컬럼 증분 업데이트:`, {
+    added: added.length,
+    removed: removed.length,
+    updated: updated.length,
+  });
+
+  // [최적화] 변경된 카드만 DOM 조작
+  if (added.length === 0 && removed.length === 0 && updated.length === 0) {
+    // 변경사항 없음 - 정렬만 확인
+    const needsResort = checkIfNeedsResort(currentFiltered, columnEl);
+    if (needsResort) {
+      await renderCardsInColumnIncremental(columnEl, status, currentFiltered);
+    }
+    return;
+  }
+
+  // 제거된 카드 삭제
+  removed.forEach((cardId) => {
+    const cardEl = columnEl.querySelector(`[data-id="${cardId}"]`);
+    if (cardEl) {
+      cardEl.remove();
+    }
+  });
+
+  // 추가/업데이트된 카드 처리
+  const cardsToRender = [...added, ...updated];
+  if (cardsToRender.length > 0) {
+    // 기존 카드들을 Map으로 저장
+    const existingCards = new Map();
+    columnEl.querySelectorAll('.cp-kanban-card').forEach((card) => {
+      existingCards.set(card.dataset.id, card);
+    });
+
+    // 변경된 카드들만 다시 렌더링
+    for (const cardId of cardsToRender) {
+      const cardData = currentFiltered[cardId];
+      const existingCard = existingCards.get(cardId);
+
+      if (existingCard) {
+        // 업데이트: 기존 카드 교체
+        const newCard = createKanbanCard(cardId, cardData, status);
+        existingCard.replaceWith(newCard);
+      } else {
+        // 추가: 새로운 카드 삽입
+        const newCard = createKanbanCard(cardId, cardData, status);
+        columnEl.appendChild(newCard);
+      }
+    }
+  }
+
+  // 정렬 적용
+  await applySortingToColumn(columnEl, currentFiltered);
+}
+
+/**
+ * [최적화] 증분 카드 렌더링 함수
+ */
+async function renderCardsInColumnIncremental(columnEl, status, cards) {
+  // DocumentFragment를 사용하여 효율적으로 렌더링
+  const fragment = document.createDocumentFragment();
+
+  for (const [cardId, cardData] of Object.entries(cards)) {
+    const cardEl = createKanbanCard(cardId, cardData, status);
+    fragment.appendChild(cardEl);
+  }
+
+  // 한 번에 DOM 업데이트
+  columnEl.innerHTML = '';
+  columnEl.appendChild(fragment);
+}
+
+/**
+ * [최적화] 카드가 포함되어야 하는지 확인
+ */
+function shouldIncludeCard(cardData, activeChannelId) {
+  if (!cardData) return false;
+
+  if (cardData.channelId === undefined && activeChannelId) {
+    return true; // 구버전 데이터
+  } else if (cardData.channelId && activeChannelId) {
+    if (cardData.channelId === activeChannelId) {
+      return true;
+    }
+    // URL origin 비교
+    try {
+      const cardUrl = atob(cardData.channelId.replace(/=/g, ''));
+      const activeUrl = atob(activeChannelId.replace(/=/g, ''));
+      const cardUrlObj = new URL(cardUrl);
+      const activeUrlObj = new URL(activeUrl);
+      return cardUrlObj.origin === activeUrlObj.origin;
+    } catch (e) {
+      return cardData.channelId === activeChannelId;
+    }
+  }
+  return false;
+}
+
+/**
+ * [최적화] 정렬이 필요한지 확인
+ */
+function checkIfNeedsResort(cards, columnEl) {
+  const currentOrder = Array.from(columnEl.querySelectorAll('.cp-kanban-card')).map(
+    (card) => card.dataset.id
+  );
+  const sortedOrder = Object.entries(cards)
+    .sort((a, b) => {
+      const timeA = a[1].createdAt || 0;
+      const timeB = b[1].createdAt || 0;
+      return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+    })
+    .map(([id]) => id);
+
+  return JSON.stringify(currentOrder) !== JSON.stringify(sortedOrder);
+}
+
+/**
+ * [최적화] 컬럼에 정렬 적용
+ */
+async function applySortingToColumn(columnEl, cards) {
+  const sortedCards = Object.entries(cards).sort((a, b) => {
+    const timeA = a[1].createdAt || 0;
+    const timeB = b[1].createdAt || 0;
+    return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+  });
+
+  // DocumentFragment를 사용하여 효율적으로 재정렬
+  const fragment = document.createDocumentFragment();
+  const existingCards = new Map();
+
+  columnEl.querySelectorAll('.cp-kanban-card').forEach((card) => {
+    existingCards.set(card.dataset.id, card);
+  });
+
+  for (const [cardId] of sortedCards) {
+    const cardEl = existingCards.get(cardId);
+    if (cardEl) {
+      fragment.appendChild(cardEl);
+    }
+  }
+
+  // 한 번에 DOM 업데이트
+  columnEl.innerHTML = '';
+  columnEl.appendChild(fragment);
 }
 
 function renderCardsInColumn(columnEl, status, cards) {
@@ -1983,12 +2107,12 @@ function showPerformanceDetailModal(container, cardId, cardData) {
 
   container.appendChild(modalWrap);
 
-  // 전체 데이터에서 최대값 계산 (비교 차트용)
-  const firebase = window.firebase;
-  if (firebase) {
-    const kanbanRef = firebase.database().ref('kanban');
-    kanbanRef.once('value', (snapshot) => {
-      const allCards = snapshot.val() || {};
+  // [최적화] 전체 데이터에서 최대값 계산 (비교 차트용)
+  (async () => {
+    try {
+      const { loadKanbanData } = await import('../services/kanbanService.js');
+      const allCards = await loadKanbanData();
+
       let allEarnings = [performance.estimatedEarnings || 0];
       let allPageviews = [performance.pageviews || 0];
       let allDurations = [performance.avgSessionDuration || 0];
@@ -2010,8 +2134,18 @@ function showPerformanceDetailModal(container, cardId, cardData) {
 
       // 차트 업데이트
       updateComparisonChart(modalWrap, performance, maxEarnings, maxPageviews, maxDuration);
-    });
-  }
+    } catch (error) {
+      console.error('[KanbanMode] 전체 데이터 로드 실패:', error);
+      // 기본값으로 차트 업데이트
+      updateComparisonChart(
+        modalWrap,
+        performance,
+        Math.max(performance.estimatedEarnings || 0, 1),
+        Math.max(performance.pageviews || 0, 1),
+        Math.max(performance.avgSessionDuration || 0, 1)
+      );
+    }
+  })();
 
   const closeBtn = modalWrap.querySelector('.cp-modal-close');
   const cancelBtn = modalWrap.querySelector('#close-detail-btn');
