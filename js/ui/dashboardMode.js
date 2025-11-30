@@ -2,10 +2,34 @@
 
 import { marked } from 'marked';
 import { showToast } from '../utils.js';
+import { LIMITS } from '../constants.js';
 
 // 대시보드 데이터 캐시 (메모리 캐시 + TTL)
 const dashboardCache = new Map();
 const DASHBOARD_CACHE_TTL = 3 * 60 * 1000; // 3분
+
+// 전역 cachedData 변수 선언
+let cachedData = null;
+
+// 캐시 키 생성 함수
+async function getCacheKey() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'get_user_id' }, (response) => {
+      const userId = response && response.userId ? response.userId : 'default';
+      resolve(`dashboard_cache_${userId}`);
+    });
+  });
+}
+
+// 대시보드 뷰 상태 관리 (정렬, 페이지네이션)
+let viewState = {
+  myChannels: { sortOrder: 'pubDate', currentPage: 0 },
+  competitorChannels: { sortOrder: 'pubDate', currentPage: 0 },
+};
+
+// 필터 상태 관리
+let activeTagFilter = null;
+let activeChannelFilter = null;
 
 // 캐시된 대시보드 데이터 조회
 async function getCachedDashboardData(activeChannelId) {
@@ -23,7 +47,7 @@ async function getCachedDashboardData(activeChannelId) {
         // 캐시 저장
         dashboardCache.set(cacheKey, {
           data: response.data,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
         resolve(response.data);
       } else {
@@ -709,11 +733,11 @@ function renderCompetitorPaginatedContent(
   });
 
   // 페이징
-  const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredContent.length / LIMITS.ITEMS_PER_PAGE);
   if (state.currentPage >= totalPages && totalPages > 0) state.currentPage = totalPages - 1;
   if (state.currentPage < 0) state.currentPage = 0;
-  const startIndex = state.currentPage * ITEMS_PER_PAGE;
-  const paginatedContent = filteredContent.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const startIndex = state.currentPage * LIMITS.ITEMS_PER_PAGE;
+  const paginatedContent = filteredContent.slice(startIndex, startIndex + LIMITS.ITEMS_PER_PAGE);
 
   // 정렬 옵션
   const sortOptions = isVideo
@@ -971,11 +995,11 @@ function renderPaginatedContent(
     const timeB = b[sortKey] || b.fetchedAt || b.pubDate || b.publishedAt || 0;
     return timeB - timeA;
   });
-  const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredContent.length / LIMITS.ITEMS_PER_PAGE);
   if (state.currentPage >= totalPages && totalPages > 0) state.currentPage = totalPages - 1;
   if (state.currentPage < 0) state.currentPage = 0;
-  const startIndex = state.currentPage * ITEMS_PER_PAGE;
-  const paginatedContent = filteredContent.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const startIndex = state.currentPage * LIMITS.ITEMS_PER_PAGE;
+  const paginatedContent = filteredContent.slice(startIndex, startIndex + LIMITS.ITEMS_PER_PAGE);
   const sortOptions = isVideo
     ? `
         <option value="fetchedAt" ${
@@ -1569,7 +1593,7 @@ function renderDashboard(container) {
   (async () => {
     const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
     cachedData = await getCachedDashboardData(activeChannelId);
-    
+
     if (cachedData) {
       await updateDashboardUI(container);
     } else {
@@ -1581,7 +1605,7 @@ function renderDashboard(container) {
         }
       });
     }
-    
+
     // 이벤트 리스너 추가
     addDashboardEventListeners(container);
   })();

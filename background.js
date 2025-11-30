@@ -1,5 +1,13 @@
 // background.js (Final Router Version)
 
+// Firebase 초기화 (가장 먼저 실행)
+try {
+  initializeFirebase();
+  Logger.info('[Background] Firebase 초기화 완료');
+} catch (error) {
+  Logger.error('[Background] Firebase 초기화 실패:', error);
+}
+
 import {
   getDb,
   CONSTANTS,
@@ -216,7 +224,9 @@ chrome.runtime.onInstalled.addListener((details) => {
  * 백그라운드 스크립트의 메인 메시지 핸들러입니다.
  * 모든 content script와 popup의 메시지를 라우팅하고 처리합니다.
  */
+console.log('[Background] 메시지 라우터 등록 시작');
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  console.log('[Background] 메시지 수신:', msg.action);
   // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
   if (msg.action.endsWith('_in_offscreen_response')) {
     return false; // 다른 리스너가 처리하도록 함
@@ -237,6 +247,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'ping') {
     sendResponse({ success: true, message: 'pong' });
     return true;
+  }
+
+  // === [System] 사용자 ID 조회 ===
+  if (msg.action === 'get_user_id') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        return { success: true, userId };
+      })()
+    );
   }
 
   // === [Collector Service] 데이터 수집 ===

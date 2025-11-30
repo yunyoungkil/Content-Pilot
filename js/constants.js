@@ -69,4 +69,5 @@ export const APP_CONFIG = {
 export const LIMITS = {
   MAX_SCRAPS: 100,
   MAX_HISTORY: 50,
+  ITEMS_PER_PAGE: 5, // 대시보드 페이지네이션용
 };
