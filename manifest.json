@@ -22,7 +22,7 @@
   "background": {
     "service_worker": "dist/background.bundle.js"
   },
-  
+
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",

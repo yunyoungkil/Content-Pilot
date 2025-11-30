@@ -5,21 +5,91 @@ import { Logger } from '../utils.js';
 
 let offscreenDocumentId = null;
 let offscreenCreationPromise = null;
+let offscreenPort = null; // 장기 연결용 포트 (offscreen -> background)
+let offscreenPortReady = false; // 포트 쪽에서 메시지 핸들러가 준비되었는지
+let offscreenBeaconSeenFromExtension = false; // observed offscreen_ready_beacon from offscreen.html
+
+// Helper: decide whether a runtime message should be treated as a full
+// 'ready' signal. This is exported so tests can assert the logic.
+export function isTrueReadyMessage(msg) {
+  return !!(msg && msg.action === 'offscreen_ready');
+}
+
+// Wait for the offscreen page to establish a persistent port.
+// This reduces races where the page is loaded but hasn't connected yet.
+async function waitForOffscreenPort(timeoutMs = 10000) {
+  if (offscreenPort) return true;
+
+  return new Promise((resolve) => {
+    const start = Date.now();
+    // Polling check; when onConnect runs it will set offscreenPort
+    const check = setInterval(() => {
+      if (offscreenPort) {
+        clearInterval(check);
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        clearInterval(check);
+        resolve(false);
+      }
+    }, 200);
+  });
+}
+
+// Browser compatibility helper: detect if an offscreen document exists.
+// Prefer `chrome.runtime.getContexts` (Chrome 116+), then `chrome.offscreen.hasDocument`,
+// then fallback to `clients.matchAll()` for older Chrome versions.
+async function hasOffscreenDocument() {
+  const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+
+  if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
+    try {
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl],
+      });
+      return Array.isArray(contexts) && contexts.length > 0;
+    } catch (e) {
+      Logger.debug('[OffscreenService] runtime.getContexts check failed', e && e.message);
+    }
+  }
+
+  if (chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function') {
+    try {
+      return await chrome.offscreen.hasDocument();
+    } catch (e) {
+      Logger.debug('[OffscreenService] chrome.offscreen.hasDocument check failed', e && e.message);
+    }
+  }
+
+  // Last resort: service worker clients match (older Chrome)
+  try {
+    const matchedClients =
+      globalThis?.clients && typeof globalThis.clients.matchAll === 'function'
+        ? await globalThis.clients.matchAll()
+        : [];
+    return matchedClients.some((c) => c && c.url && c.url.includes(offscreenUrl));
+  } catch (e) {
+    Logger.debug('[OffscreenService] clients.matchAll check failed', e && e.message);
+    return false;
+  }
+}
 
 /**
  * Offscreen 문서 생성 및 관리 (싱글톤 패턴 + 동시성 제어)
  */
-async function ensureOffscreenDocument() {
+export async function ensureOffscreenDocument() {
   // 이미 생성 중인 경우 대기
   if (offscreenCreationPromise) {
     Logger.debug('[OffscreenService] 문서 생성 중, 대기합니다.');
     return await offscreenCreationPromise;
   }
 
-  // 이미 생성된 문서가 있는지 확인
+  // 이미 생성된 문서가 있는지 확인 (호환성 체크 포함)
   if (offscreenDocumentId) {
     try {
-      const hasDocument = await chrome.offscreen.hasDocument();
+      const hasDocument = await hasOffscreenDocument();
       if (hasDocument) {
         Logger.debug('[OffscreenService] 문서가 이미 존재합니다.');
         return offscreenDocumentId;
@@ -45,8 +115,118 @@ async function ensureOffscreenDocument() {
         await chrome.offscreen.closeDocument();
         Logger.debug('[OffscreenService] 기존 문서 닫기 완료');
       } catch (e) {
-        // 기존 문서가 없어도 괜찮음
+        Logger.debug('[OffscreenService] closeDocument failed (ignored):', e && e.message);
       }
+
+      // Attach a one-time readiness listener BEFORE creating the offscreen
+      // document so we don't miss immediate readiness signals that the
+      // offscreen page may send right after it loads.
+      const readyPromise = new Promise((resolve, reject) => {
+        const maxWait = 60000; // 60s
+        const timeout = setTimeout(() => {
+          try {
+            chrome.runtime.onMessage.removeListener(onReadyMsg);
+            chrome.runtime.onConnect.removeListener(onConnect);
+          } catch (e) {
+            Logger.debug('[OffscreenService] readyPromise cleanup failed', e && e.message);
+          }
+          reject(new Error('Offscreen ready wait timed out'));
+        }, maxWait);
+
+        const onReadyMsg = (msg, sender) => {
+          // Log sender information to help diagnose beacon vs ready origin
+          try {
+            const src = sender && (sender.url || sender.id || (sender.tab && sender.tab.id));
+            Logger.debug(
+              '[OffscreenService] onReadyMsg received from',
+              src || '<unknown>',
+              msg && msg.action
+            );
+          } catch (e) {
+            Logger.debug('[OffscreenService] onReadyMsg sender log failed', e && e.message);
+          }
+
+          // Only accept an explicit 'offscreen_ready' message as a true
+          // readiness signal. The HTML beacon (offscreen_ready_beacon)
+          // indicates the offscreen page loaded, but does not guarantee
+          // that handlers are registered; treat it as informational only.
+          if (isTrueReadyMessage(msg)) {
+            clearTimeout(timeout);
+            try {
+              chrome.runtime.onMessage.removeListener(onReadyMsg);
+              chrome.runtime.onConnect.removeListener(onConnect);
+            } catch (e) {
+              Logger.debug('[OffscreenService] removeListener failed', e && e.message);
+            }
+            resolve(true);
+            return false;
+          }
+
+          if (msg && msg.action === 'offscreen_ready_beacon') {
+            Logger.debug('[OffscreenService] offscreen_ready_beacon received (early beacon)');
+            // If this beacon comes from the actual offscreen document, mark it.
+            try {
+              const senderUrl = sender && sender.url;
+              if (
+                senderUrl &&
+                senderUrl.startsWith('chrome-extension://') &&
+                senderUrl.includes('offscreen.html')
+              ) {
+                offscreenBeaconSeenFromExtension = true;
+                Logger.debug(
+                  '[OffscreenService] offscreen beacon observed from extension offscreen.html'
+                );
+              }
+            } catch (e) {
+              Logger.debug('[OffscreenService] beacon sender check failed', e && e.message);
+            }
+            // Do not treat this as a readiness signal; let verifyPing detect handler activation.
+            return false;
+          }
+          return false;
+        };
+
+        const onConnect = (port) => {
+          try {
+            // Only accept the canonical 'offscreen-init' persistent port
+            // as an indication that the offscreen document has fully
+            // installed handlers and is ready for port-based messaging.
+            if (port && port.name === 'offscreen-init') {
+              clearTimeout(timeout);
+              try {
+                chrome.runtime.onMessage.removeListener(onReadyMsg);
+                chrome.runtime.onConnect.removeListener(onConnect);
+              } catch (e) {
+                Logger.debug(
+                  '[OffscreenService] removeListener during onConnect failed',
+                  e && e.message
+                );
+              }
+
+              // store port for future use
+              try {
+                offscreenPort = port;
+                // clean up on disconnect
+                port.onDisconnect.addListener(() => {
+                  try {
+                    offscreenPort = null;
+                  } catch (e) {
+                    Logger.debug('[OffscreenService] onDisconnect handler error', e && e.message);
+                  }
+                });
+              } catch (e) {
+                Logger.debug('[OffscreenService] failed to store offscreen port', e && e.message);
+              }
+              resolve(true);
+            }
+          } catch (e) {
+            Logger.debug('[OffscreenService] onConnect handler error', e && e.message);
+          }
+        };
+
+        chrome.runtime.onMessage.addListener(onReadyMsg);
+        chrome.runtime.onConnect.addListener(onConnect);
+      });
 
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
@@ -54,8 +234,216 @@ async function ensureOffscreenDocument() {
         justification: 'HTML Sanitization, Image Resizing, and Template Rendering',
       });
 
-      // 생성 후 문서가 준비될 때까지 대기
-      await waitForOffscreenReady();
+      // Wait for the offscreen page to signal readiness (either via
+      // runtime.sendMessage or via a connected port).
+      // NOTE: the page might send an immediate "beacon" before its
+      // message handlers are registered. We therefore additionally
+      // verify we can communicate with the offscreen page by sending
+      // a lightweight ping and waiting for a ping response.
+      try {
+        await readyPromise;
+        Logger.debug('[OffscreenService] 오프스크린 페이지가 준비되었다는 신호 수신');
+
+        // Verify handlers are active by pinging the offscreen page.
+        // If a beacon arrived early (before listeners were installed)
+        // the ping will fail and we should wait/retry until a handler
+        // responds.
+        // Increase ping attempts and timeouts to reduce false negatives
+        const verifyPing = async (maxAttempts = 12, backoff = 500) => {
+          for (let a = 0; a < maxAttempts; a++) {
+            try {
+              const got = await new Promise((resolve, reject) => {
+                const t = setTimeout(() => {
+                  try {
+                    chrome.runtime.onMessage.removeListener(resp);
+                  } catch (e) {
+                    Logger.debug('[OffscreenService] removeListener(resp) failed', e && e.message);
+                  }
+                  reject(new Error('offscreen_ping 응답 타임아웃'));
+                }, 5000); // per-ping wait increased to 5s
+
+                const resp = (m) => {
+                  if (m && m.action === 'offscreen_ping_response') {
+                    clearTimeout(t);
+                    try {
+                      chrome.runtime.onMessage.removeListener(resp);
+                    } catch (e) {
+                      Logger.debug(
+                        '[OffscreenService] removeListener(resp) in resp handler failed',
+                        e && e.message
+                      );
+                    }
+                    resolve(true);
+                    // We're not using sendResponse in this listener,
+                    // so explicitly return false to avoid signaling async response.
+                    return false;
+                  }
+                  return false;
+                };
+
+                chrome.runtime.onMessage.addListener(resp);
+
+                // Prefer the persistent port when available
+                if (offscreenPort) {
+                  try {
+                    const portResp = (m) => {
+                      if (m && m.action === 'offscreen_ping_response') {
+                        clearTimeout(t);
+                        try {
+                          chrome.runtime.onMessage.removeListener(resp);
+                        } catch (e) {
+                          Logger.debug(
+                            '[OffscreenService] removeListener(resp) in portResp failed',
+                            e && e.message
+                          );
+                        }
+                        try {
+                          offscreenPort.onMessage.removeListener(portResp);
+                        } catch (e) {
+                          Logger.debug(
+                            '[OffscreenService] offscreenPort.removeListener(portResp) failed',
+                            e && e.message
+                          );
+                        }
+                        resolve(true);
+                        return false;
+                      }
+                      return false;
+                    };
+                    offscreenPort.onMessage.addListener(portResp);
+                    offscreenPort.postMessage({ action: 'offscreen_ping' });
+                  } catch (e) {
+                    try {
+                      chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch(() => {});
+                    } catch (se) {
+                      Logger.debug(
+                        '[OffscreenService] runtime ping fallback failed',
+                        se && se.message
+                      );
+                    }
+                  }
+                } else {
+                  try {
+                    chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch(() => {});
+                  } catch (e) {
+                    Logger.debug('[OffscreenService] suppressed error', e && e.message);
+                  }
+                }
+              });
+
+              if (got) return true;
+            } catch (e) {
+              await new Promise((r) => setTimeout(r, backoff * (a + 1)));
+            }
+          }
+          return false;
+        };
+
+        const ok = await verifyPing();
+        if (!ok) {
+          Logger.warn(
+            '[OffscreenService] offscreen_ping 응답을 받지 못했습니다. 5초 대기 후 재확인 시도합니다.'
+          );
+          // Give the page a little more time and try a more thorough check
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            await waitForOffscreenReady(6, 500);
+            Logger.info('[OffscreenService] 추가 대기 후 준비 확인 성공');
+          } catch (e) {
+            // If we've observed a beacon coming from the offscreen.html
+            // itself (extension origin), accept it as a last-resort
+            // readiness signal but log a warning. This mitigates cases
+            // where sendMessage/port race conditions prevent a strict
+            // ping response yet the offscreen page is actually usable.
+            if (offscreenBeaconSeenFromExtension) {
+              Logger.warn(
+                '[OffscreenService] ping 응답 없음 — 그러나 offscreen beacon이 관찰되어 폴백으로 준비로 간주합니다.'
+              );
+            } else {
+              Logger.error(
+                '[OffscreenService] 오프스크린 메시지 핸들러가 활성화되지 않았습니다 — 문서 초기화 실패로 처리합니다'
+              );
+              throw new Error('Offscreen message handlers did not activate');
+            }
+          }
+        }
+      } catch (e) {
+        // If readiness wasn't signaled, give the page a bit more time.
+        Logger.warn('[OffscreenService] readyPromise 타임아웃, 추가 대기 5초 후 체크');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        // If we've observed an offscreen_ready_beacon originating from the
+        // extension's offscreen.html, accept it as a conservative last-resort
+        // readiness signal. This mitigates races where the page sends a
+        // beacon before its handlers are registered but is otherwise usable.
+        if (offscreenBeaconSeenFromExtension) {
+          Logger.warn(
+            '[OffscreenService] readyPromise 타임아웃 — offscreen beacon 관찰되어 폴백으로 준비로 간주합니다.'
+          );
+          // Attempt to proactively establish a persistent port to the
+          // offscreen document so subsequent messages use the more
+          // reliable port channel instead of sendMessage fallbacks.
+          if (!offscreenPort) {
+            try {
+              Logger.debug('[OffscreenService] beacon 관찰 후 포트 연결 시도: offscreen-init');
+              const p = chrome.runtime.connect({ name: 'offscreen-init' });
+              // give the connect a moment to register via onConnect
+              try {
+                // registerOffscreenPort will attach handlers and store the port
+                registerOffscreenPort(p);
+              } catch (e) {
+                Logger.debug('[OffscreenService] registerOffscreenPort 실패', e && e.message);
+              }
+              // wait briefly for port to stabilize
+              await waitForOffscreenPort(3000);
+              if (offscreenPort) {
+                Logger.info('[OffscreenService] 폴백 후 포트 연결 성공');
+              } else {
+                Logger.warn('[OffscreenService] 폴백 후에도 포트가 설정되지 않았습니다');
+              }
+            } catch (e) {
+              Logger.debug('[OffscreenService] 포트 연결 시도 중 오류', e && e.message);
+            }
+            // If we have a port, do a quick debug echo to verify it reaches the offscreen page
+            try {
+              if (offscreenPort) {
+                Logger.debug('[OffscreenService] 포트 핸드셰이크 검증용 debug_echo 전송');
+                const debugListener = (m) => {
+                  try {
+                    Logger.debug('[OffscreenService] debug_echo response received via port', m && m.action, m);
+                    if (m && m.action === 'debug_echo_response') {
+                      try {
+                        offscreenPort.onMessage.removeListener(debugListener);
+                      } catch (er) {}
+                    }
+                  } catch (e) {}
+                };
+                try {
+                  offscreenPort.onMessage.addListener(debugListener);
+                } catch (e) {
+                  Logger.debug('[OffscreenService] debugEcho attach failed', e && e.message);
+                }
+                try {
+                  offscreenPort.postMessage({ action: 'debug_echo', payload: 'handshake-test', ts: Date.now() });
+                } catch (e) {
+                  Logger.debug('[OffscreenService] debugEcho postMessage failed', e && e.message);
+                }
+
+                // also fallback to runtime.sendMessage to increase chance of delivery
+                setTimeout(() => {
+                  try {
+                    chrome.runtime.sendMessage({ action: 'debug_echo', payload: 'handshake-test', ts: Date.now() }).catch(() => {});
+                  } catch (e) {}
+                }, 1200);
+              }
+            } catch (e) {
+              Logger.debug('[OffscreenService] debug echo flow suppressed', e && e.message);
+            }
+          }
+        } else {
+          await waitForOffscreenReady();
+        }
+      }
 
       offscreenDocumentId = 'offscreen-doc';
       Logger.info('[OffscreenService] 문서 생성 및 확인 완료');
@@ -72,42 +460,222 @@ async function ensureOffscreenDocument() {
   return await offscreenCreationPromise;
 }
 
+// 외부(예: background)에서 포트를 등록할 수 있도록 하는 헬퍼.
+// 이 함수는 서비스 워커의 전역 onConnect에서 호출되어
+// offscreen-init 포트를 중앙에서 잡아둘 때 사용됩니다.
+export function registerOffscreenPort(port) {
+  try {
+    if (!port) return false;
+    if (port.name !== 'offscreen-init') return false;
+    offscreenPort = port;
+    // reset ready flag when new port attached
+    offscreenPortReady = false;
+    try {
+      Logger.debug(
+        '[OffscreenService] registerOffscreenPort: port registered',
+        port?.sender?.url || port?.sender?.tab?.id || '<unknown>'
+      );
+    } catch (e) {
+      Logger.debug('[OffscreenService] registerOffscreenPort debug failed', e && e.message);
+    }
+    try {
+      offscreenPort.onDisconnect.addListener(() => {
+        try {
+          offscreenPort = null;
+        } catch (e) {
+          Logger.debug(
+            '[OffscreenService] registerOffscreenPort onDisconnect failed',
+            e && e.message
+          );
+        }
+      });
+    } catch (e) {
+      Logger.debug(
+        '[OffscreenService] registerOffscreenPort attach onDisconnect failed',
+        e && e.message
+      );
+    }
+    // attach a listener to pipe any incoming port messages
+    try {
+      // Attach a simple onMessage logger so we can observe handshake
+      // messages coming from the offscreen page (e.g. offscreen_port_attached).
+      try {
+        const onPortMsg = (msg) => {
+          try {
+            Logger.debug('[OffscreenService] registerOffscreenPort received port message', msg && msg.action);
+          } catch (e) {}
+          try {
+            // Mark port-ready on any handshake/echo response we expect
+            if (msg && (msg.action === 'offscreen_port_attached' || msg.action === 'debug_echo_response')) {
+              offscreenPortReady = true;
+              Logger.info('[OffscreenService] offscreen port is ready (handshake/echo)');
+            }
+          } catch (e) {}
+        };
+        offscreenPort.onMessage.addListener(onPortMsg);
+
+        // Send a small probe to encourage the offscreen page to respond
+        try {
+          offscreenPort.postMessage({ action: 'offscreen_probe', ts: Date.now() });
+        } catch (e) {
+          Logger.debug('[OffscreenService] probe postMessage failed', e && e.message);
+        }
+
+        // Also attempt a debug_echo and wait briefly for a response
+        try {
+          const probeTimeout = setTimeout(() => {
+            try {
+              if (!offscreenPortReady) {
+                Logger.debug('[OffscreenService] offscreen port did not respond to probe within expected time');
+              }
+            } catch (e) {}
+          }, 1500);
+
+          try {
+            offscreenPort.postMessage({ action: 'debug_echo', payload: 'probe', ts: Date.now() });
+          } catch (e) {
+            Logger.debug('[OffscreenService] debug_echo postMessage failed', e && e.message);
+          }
+        } catch (e) {
+          Logger.debug('[OffscreenService] probe/echo flow suppressed', e && e.message);
+        }
+      } catch (e) {
+        Logger.debug('[OffscreenService] failed to attach offscreenPort.onMessage listener', e && e.message);
+      }
+    } catch (e) {
+      Logger.debug('[OffscreenService] registerOffscreenPort attach onMessage failed', e && e.message);
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /**
- * Offscreen 문서가 준비될 때까지 대기 (핑퐁 방식)
+ * Offscreen 문서가 준비될 때까지 대기 (준비 완료 메시지 방식)
  */
-async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
+async function waitForOffscreenReady(maxRetries = 30, retryDelay = 2000) {
   Logger.debug(`[OffscreenService] 준비 확인 시작 - 최대 ${maxRetries}회 시도`);
 
   for (let i = 0; i < maxRetries; i++) {
     try {
       Logger.debug(`[OffscreenService] 준비 확인 시도 ${i + 1}/${maxRetries}`);
 
-      // 핑 메시지 전송
-      const response = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('핑 타임아웃'));
-        }, 2000);
+      // 먼저 문서가 존재하는지 확인
+      const hasDocument = await hasOffscreenDocument();
+      if (!hasDocument) {
+        Logger.debug(`[OffscreenService] 문서가 존재하지 않음, ${retryDelay}ms 후 재시도`);
+        if (i < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+        continue;
+      }
 
-        const listener = (msg) => {
-          if (msg.action === 'offscreen_ping_response') {
+      Logger.debug(`[OffscreenService] 문서 존재 확인, offscreen_ready 메시지 대기`);
+
+      // 오프스크린 문서가 로드되면 자체적으로 'offscreen_ready' 메시지를 보냅니다.
+      // sendMessage를 보내기 전에 offscreen이 onMessage 리스너를 등록할 때까지
+      // 기다리는 방식으로 안정성을 향상시킵니다.
+      const readyReceived = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(
+          () => {
+            chrome.runtime.onMessage.removeListener(onReadyMsg);
+            chrome.runtime.onConnect.removeListener(onConnect);
+            reject(new Error('offscreen_ready 타임아웃'));
+          },
+          Math.max(5000, retryDelay)
+        );
+
+        const onReadyMsg = (msg, sender) => {
+          try {
+            const src = sender && (sender.url || sender.id || (sender.tab && sender.tab.id));
+            Logger.debug(
+              '[OffscreenService] waitForOffscreenReady onReadyMsg from',
+              src || '<unknown>',
+              msg && msg.action
+            );
+          } catch (e) {
+            Logger.debug(
+              '[OffscreenService] waitForOffscreenReady onReadyMsg sender log failed',
+              e && e.message
+            );
+          }
+
+          // Only a true 'offscreen_ready' should be treated as readiness.
+          // The HTML fallback beacon is informational; don't accept it
+          // here because handlers may still be uninstalled.
+          if (isTrueReadyMessage(msg)) {
             clearTimeout(timeout);
-            chrome.runtime.onMessage.removeListener(listener);
-            resolve(msg);
-            return true;
+            chrome.runtime.onMessage.removeListener(onReadyMsg);
+            chrome.runtime.onConnect.removeListener(onConnect);
+            resolve(true);
+            return false;
+          }
+
+          if (msg && msg.action === 'offscreen_ready_beacon') {
+            Logger.debug(
+              '[OffscreenService] waitForOffscreenReady observed beacon, still waiting for handlers'
+            );
+            try {
+              const senderUrl = sender && sender.url;
+              if (
+                senderUrl &&
+                senderUrl.startsWith('chrome-extension://') &&
+                senderUrl.includes('offscreen.html')
+              ) {
+                offscreenBeaconSeenFromExtension = true;
+                Logger.debug(
+                  '[OffscreenService] waitForOffscreenReady observed extension offscreen beacon'
+                );
+              }
+            } catch (e) {
+              Logger.debug(
+                '[OffscreenService] waitForOffscreenReady beacon sender check failed',
+                e && e.message
+              );
+            }
+            // do not resolve — keep waiting for true ready or port connect
+            return false;
           }
           return false;
         };
 
-        chrome.runtime.onMessage.addListener(listener);
+        // 포트 연결(오프스크린에서 connect)로도 준비 여부 판단
+        const onConnect = (port) => {
+          try {
+            if (port.name === 'offscreen-init') {
+              clearTimeout(timeout);
+              chrome.runtime.onMessage.removeListener(onReadyMsg);
+              chrome.runtime.onConnect.removeListener(onConnect);
+              // 포트를 통해서도 메시지를 받을 수 있지만 포트를 여는 것 자체
+              // 의미가 있으므로 준비로 간주합니다.
+              // record persistent port for later messaging
+              try {
+                offscreenPort = port;
+                port.onDisconnect.addListener(() => {
+                  offscreenPort = null;
+                });
+              } catch (e) {
+                Logger.debug(
+                  '[OffscreenService] waitForOffscreenReady port onDisconnect attach failed',
+                  e && e.message
+                );
+              }
+              resolve(true);
+            }
+          } catch (e) {
+            Logger.debug(
+              '[OffscreenService] waitForOffscreenReady onConnect outer error',
+              e && e.message
+            );
+          }
+        };
 
-        chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch((err) => {
-          clearTimeout(timeout);
-          chrome.runtime.onMessage.removeListener(listener);
-          reject(err);
-        });
+        chrome.runtime.onMessage.addListener(onReadyMsg);
+        chrome.runtime.onConnect.addListener(onConnect);
       });
 
-      if (response.ready) {
+      if (readyReceived) {
         Logger.info(`[OffscreenService] 준비 확인 성공 (${i + 1}회 시도)`);
         return;
       }
@@ -116,11 +684,11 @@ async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
     }
 
     if (i < maxRetries - 1) {
-      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
     }
   }
 
-  throw new Error('Offscreen 문서 준비 확인 실패');
+  throw new Error('Offscreen 문서 준비 타임아웃');
 }
 
 /**
@@ -133,8 +701,44 @@ async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
 async function sendToOffscreen(action, data, timeout = 30000) {
   await ensureOffscreenDocument();
 
+  // Prefer waiting briefly for the persistent offscreen port so we can
+  // rely on port-based messaging (more reliable than runtime.sendMessage)
+  // especially for longer-running tasks like sanitization.
+  try {
+    await waitForOffscreenPort(10000);
+  } catch (e) {
+    Logger.debug('[OffscreenService] waitForOffscreenPort failed', e && e.message);
+  }
+
+  // If a persistent port exists but hasn't signaled readiness yet,
+  // wait briefly here (we are in an async function so we can await).
+  let usingPort = Boolean(offscreenPort);
+  if (usingPort && !offscreenPortReady) {
+    Logger.debug('[OffscreenService] 포트가 있지만 아직 준비되지 않음 — 최대 1500ms 대기');
+    const waitStart = Date.now();
+    while (!offscreenPortReady && Date.now() - waitStart < 1500) {
+      // small sleep
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!offscreenPortReady) {
+      Logger.debug('[OffscreenService] 포트 준비 대기 실패 — 런타임 폴백을 계속 허용');
+    } else {
+      Logger.debug('[OffscreenService] 포트 준비 완료, 포트 채널로 전송 계속 진행');
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const responseListener = (msg) => {
+      try {
+        Logger.debug(
+          '[OffscreenService] responseListener received message',
+          msg && msg.action,
+          msg
+        );
+      } catch (e) {
+        Logger.debug('[OffscreenService] responseListener debug failed', e && e.message);
+      }
       if (msg.action === `${action}_response`) {
         chrome.runtime.onMessage.removeListener(responseListener);
         if (msg.success) {
@@ -147,26 +751,223 @@ async function sendToOffscreen(action, data, timeout = 30000) {
       return false;
     };
 
+    // Prefer using the persistent port if available - it's more reliable
+    // than sendMessage for reaching the offscreen document.
+    if (usingPort) {
+      try {
+        const portResponse = (msg) => {
+          if (msg && msg.action === `${action}_response`) {
+            try {
+              offscreenPort.onMessage.removeListener(portResponse);
+            } catch (e) {
+              Logger.debug('[OffscreenService] suppressed error', e && e.message);
+            }
+            if (msg.success) {
+              resolve(msg);
+            } else {
+              reject(new Error(msg.error || `${action} 실패`));
+            }
+            return true;
+          }
+          return false;
+        };
+        offscreenPort.onMessage.addListener(portResponse);
+        Logger.debug(`[OffscreenService] using port to send ${action}`);
+        console.debug(`[OffscreenService] using port to send ${action}`);
+        try {
+          offscreenPort.postMessage({ action, ...data });
+        } catch (e) {
+          Logger.debug(`[OffscreenService] port.postMessage threw: ${e.message}`);
+        }
+
+        // If we don't hear a port response quickly, also attempt a runtime
+        // send as a secondary delivery channel to avoid silent loss.
+        // This reduces the chance of missing the message when the port
+        // exists but the other side hasn't attached its onMessage handler yet.
+        const runtimeFallbackTimeout = setTimeout(() => {
+          Logger.debug(
+            `[OffscreenService] no quick port response for ${action}, attempting runtime.sendMessage fallback`
+          );
+          try {
+            chrome.runtime.sendMessage({ action, ...data }).catch(() => {});
+          } catch (e) {
+            Logger.debug('[OffscreenService] suppressed error', e && e.message);
+          }
+        }, 1200);
+
+        // When we get the response via port, clear fallback timer
+        const originalPortResponse = portResponse;
+        const wrappedPortResponse = (m) => {
+          try {
+            clearTimeout(runtimeFallbackTimeout);
+          } catch (e) {
+            Logger.debug('[OffscreenService] suppressed error', e && e.message);
+          }
+          return originalPortResponse(m);
+        };
+        // replace listener to use wrapped
+        try {
+          offscreenPort.onMessage.removeListener(portResponse);
+        } catch (e) {
+          Logger.debug('[OffscreenService] remove portResponse listener failed', e && e.message);
+        }
+        try {
+          offscreenPort.onMessage.addListener(wrappedPortResponse);
+        } catch (e) {
+          Logger.debug('[OffscreenService] add wrappedPortResponse failed', e && e.message);
+        }
+      } catch (err) {
+        // fall back to runtime messaging path below
+        Logger.debug(`[OffscreenService] port postMessage failed, falling back: ${err.message}`);
+      }
+    } else {
+      // No persistent port available — create a short-lived port for this
+      // request. This helps when the offscreen page listens for connect
+      // but we don't have a stored port (e.g. previous port was removed).
+      try {
+        const tempPort = chrome.runtime.connect({ name: `offscreen-temp-${Date.now()}` });
+        const tempListener = (m) => {
+          if (m && m.action === `${action}_response`) {
+            try {
+              tempPort.onMessage.removeListener(tempListener);
+            } catch (e) {
+              Logger.debug('[OffscreenService] suppressed error', e && e.message);
+            }
+            clearTimeout(tempTimer);
+            if (m.success) resolve(m);
+            else reject(new Error(m.error || `${action} 실패`));
+            return true;
+          }
+          return false;
+        };
+
+        tempPort.onMessage.addListener(tempListener);
+        try {
+          tempPort.postMessage({ action, ...data });
+        } catch (e) {
+          Logger.debug(`[OffscreenService] tempPort.postMessage failed: ${e.message}`);
+        }
+
+        // If no response via port quickly, we will fallback to runtime
+        const tempTimer = setTimeout(() => {
+          try {
+            tempPort.onMessage.removeListener(tempListener);
+          } catch (e) {
+            Logger.debug('[OffscreenService] tempPort.removeListener failed', e && e.message);
+          }
+          try {
+            tempPort.disconnect();
+          } catch (e) {
+            Logger.debug('[OffscreenService] tempPort.disconnect failed', e && e.message);
+          }
+          // fallback to runtime send (attempt best-effort)
+          try {
+            chrome.runtime.sendMessage({ action, ...data }).catch(() => {});
+          } catch (e) {
+            Logger.debug(
+              '[OffscreenService] runtime.sendMessage in temp fallback failed',
+              e && e.message
+            );
+          }
+        }, 1200);
+      } catch (e) {
+        Logger.debug(
+          '[OffscreenService] failed to open temp port for offscreen request',
+          e && e.message
+        );
+      }
+    }
+
+    // Always attach runtime listener as a fallback (some contexts respond via runtime)
     chrome.runtime.onMessage.addListener(responseListener);
 
     // Offscreen 문서로 메시지 전송 시도
     Logger.debug(`[OffscreenService] ${action} 메시지 전송 시도`);
-    chrome.runtime.sendMessage({ action, ...data }).catch((err) => {
-      chrome.runtime.onMessage.removeListener(responseListener);
-      Logger.error(`[OffscreenService] ${action} 메시지 전송 실패:`, err);
-      // "message port closed"는 정상적인 상황일 수 있음
-      if (
-        err?.message &&
-        !err.message.includes('message port closed') &&
-        !err.message.includes('Receiving end does not exist')
-      ) {
-        reject(err);
-      } else {
-        reject(
-          new Error('Offscreen 문서 연결 실패 - 문서가 존재하지 않거나 초기화되지 않았습니다')
-        );
+    // Try to send the message. If there's no receiver yet, attempt a
+    // small retry sequence to give the offscreen page time to install
+    // its message handlers (this often happens when a beacon was used
+    // and the page hasn't finished evaluating the main bundle).
+    const attemptSend = async (tries = 5, backoff = 500) => {
+      let lastErr = null;
+      for (let i = 0; i <= tries; i++) {
+        try {
+          await new Promise((res, rej) => {
+            try {
+              chrome.runtime.sendMessage({ action, ...data }, (_resp) => {
+                // Note: sendMessage callback is optional; responseListener will
+                // handle the response via onMessage. We just resolve here to
+                // indicate the send didn't throw synchronously.
+                res(true);
+              });
+            } catch (e) {
+              rej(e);
+            }
+          });
+          return; // success sending
+        } catch (err) {
+          lastErr = err;
+          Logger.debug(
+            `[OffscreenService] ${action} send attempt ${i + 1} failed: ${err && err.message}`
+          );
+
+          const msg = err && err.message ? err.message : '';
+          // Log the raw send error message for diagnostics
+          try {
+            Logger.debug('[OffscreenService] sendToOffscreen send error message', msg);
+          } catch (e) {
+            Logger.debug('[OffscreenService] sendToOffscreen debug failed', e && e.message);
+          }
+          // If we got a channel error indicating the receiver isn't there,
+          // try resetting the offscreen document and re-ensure it before retry.
+          if (
+            msg.includes('Receiving end does not exist') ||
+            msg.includes('message port closed') ||
+            msg.includes('Could not establish connection')
+          ) {
+            Logger.warn(
+              '[OffscreenService] 메시지 수신자 없음 또는 포트 닫힘 감지 — 오프스크린 재생성 시도'
+            );
+            // clear existing state and re-create the offscreen document
+            offscreenDocumentId = null;
+            try {
+              await ensureOffscreenDocument();
+              Logger.debug('[OffscreenService] 오프스크린 재생성 완료, 재전송 시도');
+            } catch (recreateErr) {
+              Logger.warn(
+                '[OffscreenService] 오프스크린 재생성 실패',
+                recreateErr && recreateErr.message
+              );
+            }
+          }
+
+          // If this is the final attempt, rethrow
+          if (i === tries) throw lastErr || err;
+
+          // backoff before retry
+          await new Promise((r) => setTimeout(r, backoff * (i + 1)));
+        }
       }
-    });
+    };
+
+    attemptSend()
+      .catch((err) => {
+        chrome.runtime.onMessage.removeListener(responseListener);
+        Logger.error(`[OffscreenService] ${action} 메시지 전송 실패:`, err);
+        // "message port closed" 또는 'Receiving end does not exist' 같은
+        // 클라이언트 부재 오류는 문서 준비 상태 문제로 처리합니다.
+        if (
+          err?.message &&
+          !err.message.includes('message port closed') &&
+          !err.message.includes('Receiving end does not exist')
+        ) {
+          reject(err);
+        } else {
+          reject(
+            new Error('Offscreen 문서 연결 실패 - 문서가 존재하지 않거나 초기화되지 않았습니다')
+          );
+        }
+      })
+      .catch(() => {}); // swallowing any further errors handled above
 
     // 타임아웃 설정
     setTimeout(() => {
@@ -186,7 +987,7 @@ export async function sanitizeHtmlInOffscreen(rawText) {
   try {
     const startTime = performance.now();
     Logger.debug('[OffscreenService] HTML 정제 요청 시작');
-    const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 10000);
+    const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 60000);
     const elapsed = Math.round(performance.now() - startTime);
     Logger.info(`⚡ [OffscreenService] HTML 정제 완료 (${elapsed}ms)`);
     return response.cleanedHtml;
@@ -201,7 +1002,7 @@ export async function sanitizeHtmlInOffscreen(rawText) {
       // 문서 ID 리셋 후 재시도
       offscreenDocumentId = null;
       try {
-        const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 10000);
+        const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 30000);
         return response.cleanedHtml;
       } catch (retryError) {
         Logger.error('[OffscreenService] 재시도 실패:', retryError);

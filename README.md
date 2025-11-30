@@ -1,11 +1,12 @@
-Note: Offscreen documents and the `offscreen` manifest field
-----------------------------------------------------------
+## Note: Offscreen documents and the `offscreen` manifest field
+
 Some Chrome versions do not yet recognise the `offscreen` manifest block
 and will show a warning like "Unrecognized manifest key 'offscreen'".
 The runtime Offscreen API (chrome.offscreen.createDocument) still works
 without that manifest block on newer Chrome builds. For predictable
 behaviour in development/tests, we recommend using Chrome 116+ (or the
 latest stable / Canary) if you rely on the `offscreen` manifest field.
+
 # Content Pilot ✈️
 
 **Content Pilot**은 웹 콘텐츠 큐레이션부터 AI 기반 콘텐츠 기획, 작성, 성과 추적까지 전 과정을 지원하는 통합 콘텐츠 관리 플랫폼입니다. 모듈화된 JavaScript 코드와 Webpack 빌드 시스템, 그리고 최신 Manifest V3 아키텍처를 통해 체계적으로 개발되었습니다.
