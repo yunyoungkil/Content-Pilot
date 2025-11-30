@@ -1134,6 +1134,72 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  if (msg.action === 'get_paginated_performance_data') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const { page = 1, pageSize = 50 } = msg;
+        const offset = (page - 1) * pageSize;
+
+        Logger.info(`[get_paginated_performance_data] 요청 수신 - page: ${page}, pageSize: ${pageSize}`);
+
+        const snap = await get(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`));
+        const allCards = snap?.val() || {};
+
+        // 성과 데이터만 필터링 (done 상태의 카드 중 publishedUrl과 performance가 있는 것)
+        const performanceCards = [];
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+
+        for (const status in allCards) {
+          if (status !== 'done') continue;
+
+          for (const cardId in allCards[status]) {
+            const card = allCards[status][cardId];
+
+            // 채널 필터링
+            if (activeChannelId && card.channelId && card.channelId !== activeChannelId) {
+              try {
+                const cardUrl = atob(card.channelId.replace(/=/g, ''));
+                const activeUrl = atob(activeChannelId.replace(/=/g, ''));
+                if (new URL(cardUrl).origin !== new URL(activeUrl).origin) continue;
+              } catch (e) {
+                continue;
+              }
+            }
+
+            if (card.publishedUrl && card.performance && !card.performance.error) {
+              performanceCards.push({
+                id: cardId,
+                status: status,
+                title: card.title || '제목 없음',
+                publishedUrl: card.publishedUrl,
+                performance: card.performance,
+                createdAt: card.createdAt || 0,
+                lastUpdatedAt: card.performance.lastUpdatedAt || 0,
+              });
+            }
+          }
+        }
+
+        // 페이징 적용
+        const total = performanceCards.length;
+        const paginatedData = performanceCards.slice(offset, offset + pageSize);
+        const hasMore = offset + pageSize < total;
+
+        Logger.info(`[get_paginated_performance_data] 반환 - total: ${total}, page: ${page}, returned: ${paginatedData.length}, hasMore: ${hasMore}`);
+
+        return {
+          success: true,
+          data: paginatedData,
+          hasMore: hasMore,
+          total: total,
+          page: page,
+          pageSize: pageSize
+        };
+      })()
+    );
+  }
+
   if (msg.action === 'get_all_scraps') {
     return handleAsync(
       (async () => {

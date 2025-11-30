@@ -755,31 +755,43 @@ export async function updateAllPerformanceMetrics() {
 
   Logger.info(`[updateAllPerformanceMetrics] 업데이트 대상 카드: ${tasks.length}개`);
 
-  // 10개씩 배치 실행 (증가) + Promise.allSettled로 더 효율적 처리
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-    const batch = tasks.slice(i, i + BATCH_SIZE);
-    Logger.info(
-      `[updateAllPerformanceMetrics] 배치 처리 중: ${i + 1}-${Math.min(i + BATCH_SIZE, tasks.length)}`
-    );
+  // 최적화: 배치 크기 증가 및 병렬 처리 개선
+  const BATCH_SIZE = 15; // 10개에서 15개로 증가
+  const CONCURRENT_BATCHES = 3; // 동시에 3개 배치 처리
 
-    const results = await Promise.allSettled(batch.map((t) => updateSinglePerformanceMetric(t)));
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE * CONCURRENT_BATCHES) {
+    const batchPromises = [];
 
-    // 실패한 작업 로깅
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
-      Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
-      failed.forEach((f, idx) => {
-        Logger.warn(
-          `[updateAllPerformanceMetrics] 실패 ${idx + 1}:`,
-          f.reason?.message || f.reason
-        );
-      });
+    // CONCURRENT_BATCHES만큼 배치를 동시에 실행
+    for (let j = 0; j < CONCURRENT_BATCHES && i + j * BATCH_SIZE < tasks.length; j++) {
+      const batchStart = i + j * BATCH_SIZE;
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, tasks.length);
+      const batch = tasks.slice(batchStart, batchEnd);
+
+      Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${batchStart + 1}-${batchEnd}`);
+
+      const batchPromise = Promise.allSettled(batch.map((t) => updateSinglePerformanceMetric(t)))
+        .then((results) => {
+          // 실패한 작업 로깅
+          const failed = results.filter((r) => r.status === 'rejected');
+          if (failed.length > 0) {
+            Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
+            failed.forEach((f, idx) => {
+              Logger.warn(`[updateAllPerformanceMetrics] 실패 ${idx + 1}:`, f.reason?.message || f.reason);
+            });
+          }
+          return results;
+        });
+
+      batchPromises.push(batchPromise);
     }
 
-    // 배치 간 딜레이 (API rate limit 고려)
-    if (i + BATCH_SIZE < tasks.length) {
-      await new Promise((r) => setTimeout(r, 2000)); // 2초로 증가
+    // 모든 배치가 완료될 때까지 대기
+    await Promise.all(batchPromises);
+
+    // 배치 그룹 간 딜레이 (API rate limit 고려) - 1.5초로 감소
+    if (i + BATCH_SIZE * CONCURRENT_BATCHES < tasks.length) {
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
