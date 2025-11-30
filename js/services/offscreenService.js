@@ -76,6 +76,8 @@ async function ensureOffscreenDocument() {
  * Offscreen 문서가 준비될 때까지 대기 (핑퐁 방식)
  */
 async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
+  Logger.debug(`[OffscreenService] 준비 확인 시작 - 최대 ${maxRetries}회 시도`);
+
   for (let i = 0; i < maxRetries; i++) {
     try {
       Logger.debug(`[OffscreenService] 준비 확인 시도 ${i + 1}/${maxRetries}`);
@@ -106,7 +108,7 @@ async function waitForOffscreenReady(maxRetries = 10, retryDelay = 500) {
       });
 
       if (response.ready) {
-        Logger.debug('[OffscreenService] Offscreen 문서 준비 완료');
+        Logger.info(`[OffscreenService] 준비 확인 성공 (${i + 1}회 시도)`);
         return;
       }
     } catch (error) {
