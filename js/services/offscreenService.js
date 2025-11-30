@@ -410,7 +410,11 @@ export async function ensureOffscreenDocument() {
                 Logger.debug('[OffscreenService] 포트 핸드셰이크 검증용 debug_echo 전송');
                 const debugListener = (m) => {
                   try {
-                    Logger.debug('[OffscreenService] debug_echo response received via port', m && m.action, m);
+                    Logger.debug(
+                      '[OffscreenService] debug_echo response received via port',
+                      m && m.action,
+                      m
+                    );
                     if (m && m.action === 'debug_echo_response') {
                       try {
                         offscreenPort.onMessage.removeListener(debugListener);
@@ -424,7 +428,11 @@ export async function ensureOffscreenDocument() {
                   Logger.debug('[OffscreenService] debugEcho attach failed', e && e.message);
                 }
                 try {
-                  offscreenPort.postMessage({ action: 'debug_echo', payload: 'handshake-test', ts: Date.now() });
+                  offscreenPort.postMessage({
+                    action: 'debug_echo',
+                    payload: 'handshake-test',
+                    ts: Date.now(),
+                  });
                 } catch (e) {
                   Logger.debug('[OffscreenService] debugEcho postMessage failed', e && e.message);
                 }
@@ -432,7 +440,13 @@ export async function ensureOffscreenDocument() {
                 // also fallback to runtime.sendMessage to increase chance of delivery
                 setTimeout(() => {
                   try {
-                    chrome.runtime.sendMessage({ action: 'debug_echo', payload: 'handshake-test', ts: Date.now() }).catch(() => {});
+                    chrome.runtime
+                      .sendMessage({
+                        action: 'debug_echo',
+                        payload: 'handshake-test',
+                        ts: Date.now(),
+                      })
+                      .catch(() => {});
                   } catch (e) {}
                 }, 1200);
               }
@@ -502,11 +516,17 @@ export function registerOffscreenPort(port) {
       try {
         const onPortMsg = (msg) => {
           try {
-            Logger.debug('[OffscreenService] registerOffscreenPort received port message', msg && msg.action);
+            Logger.debug(
+              '[OffscreenService] registerOffscreenPort received port message',
+              msg && msg.action
+            );
           } catch (e) {}
           try {
             // Mark port-ready on any handshake/echo response we expect
-            if (msg && (msg.action === 'offscreen_port_attached' || msg.action === 'debug_echo_response')) {
+            if (
+              msg &&
+              (msg.action === 'offscreen_port_attached' || msg.action === 'debug_echo_response')
+            ) {
               offscreenPortReady = true;
               Logger.info('[OffscreenService] offscreen port is ready (handshake/echo)');
             }
@@ -526,7 +546,9 @@ export function registerOffscreenPort(port) {
           const probeTimeout = setTimeout(() => {
             try {
               if (!offscreenPortReady) {
-                Logger.debug('[OffscreenService] offscreen port did not respond to probe within expected time');
+                Logger.debug(
+                  '[OffscreenService] offscreen port did not respond to probe within expected time'
+                );
               }
             } catch (e) {}
           }, 1500);
@@ -540,10 +562,16 @@ export function registerOffscreenPort(port) {
           Logger.debug('[OffscreenService] probe/echo flow suppressed', e && e.message);
         }
       } catch (e) {
-        Logger.debug('[OffscreenService] failed to attach offscreenPort.onMessage listener', e && e.message);
+        Logger.debug(
+          '[OffscreenService] failed to attach offscreenPort.onMessage listener',
+          e && e.message
+        );
       }
     } catch (e) {
-      Logger.debug('[OffscreenService] registerOffscreenPort attach onMessage failed', e && e.message);
+      Logger.debug(
+        '[OffscreenService] registerOffscreenPort attach onMessage failed',
+        e && e.message
+      );
     }
     return true;
   } catch (e) {

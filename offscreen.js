@@ -861,7 +861,9 @@ function handleRequest(request, sendReply) {
     try {
       const echoMode = !!(request.debugEcho || window.__SANITIZE_ECHO_MODE);
       if (echoMode) {
-        console.debug('[Offscreen] sanitize echo mode active - replying immediately', { ts: Date.now() });
+        console.debug('[Offscreen] sanitize echo mode active - replying immediately', {
+          ts: Date.now(),
+        });
         sendFinalResponse({
           action: 'sanitize_html_in_offscreen_response',
           success: true,
@@ -909,7 +911,12 @@ function handleRequest(request, sendReply) {
     try {
       console.debug('[Offscreen] debug_echo received — replying immediately', { ts: Date.now() });
     } catch (e) {}
-    sendFinalResponse({ action: 'debug_echo_response', success: true, echo: request.payload || null, ts: Date.now() });
+    sendFinalResponse({
+      action: 'debug_echo_response',
+      success: true,
+      echo: request.payload || null,
+      ts: Date.now(),
+    });
     return false;
   }
   // parse_html_in_offscreen
@@ -1196,7 +1203,11 @@ chrome.runtime.onConnect.addListener((port) => {
             previewLength: preview ? preview.length : 0,
           });
         } catch (inner) {
-          console.debug('[Offscreen] port.onMessage received (no preview)', { action, ts: Date.now(), size: payloadSize });
+          console.debug('[Offscreen] port.onMessage received (no preview)', {
+            action,
+            ts: Date.now(),
+            size: payloadSize,
+          });
         }
       } catch (e) {
         console.debug('[Offscreen] port.onMessage receipt log failed', e && e.message);
