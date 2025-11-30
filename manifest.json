@@ -23,14 +23,6 @@
     "service_worker": "dist/background.bundle.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["dist/content.bundle.js"],
-      "css": ["css/style.css"],
-      "all_frames": true
-    }
-  ],
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",

@@ -8,6 +8,27 @@ try {
   Logger.error('[Background] Firebase 초기화 실패:', error);
 }
 
+// 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    // 현재 탭에 content script 삽입
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ['dist/content.bundle.js']
+    });
+
+    // CSS도 삽입
+    await chrome.scripting.insertCSS({
+      target: { tabId: tab.id, allFrames: true },
+      files: ['css/style.css']
+    });
+
+    Logger.info('[Background] Content Pilot activated via icon click');
+  } catch (error) {
+    Logger.error('[Background] Failed to activate Content Pilot:', error);
+  }
+});
+
 import {
   getDb,
   CONSTANTS,
