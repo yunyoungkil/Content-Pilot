@@ -173,7 +173,7 @@ async function getCachedScraps(userId, targetChannelId = null) {
   // 캐시 저장
   scrapCache.set(cacheKey, {
     data: filteredScraps,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   return filteredScraps;
@@ -193,7 +193,7 @@ export async function getFirebaseScraps(targetChannelId = null, limit = 50, star
     // 페이징 처리: startAfter가 있으면 해당 타임스탬프 이후부터 시작
     let filteredScraps = allScraps;
     if (startAfter) {
-      const startIndex = allScraps.findIndex(scrap => scrap.id === startAfter);
+      const startIndex = allScraps.findIndex((scrap) => scrap.id === startAfter);
       if (startIndex !== -1) {
         filteredScraps = allScraps.slice(startIndex + 1);
       }

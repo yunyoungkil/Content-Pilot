@@ -17,7 +17,10 @@ function createChannelMap(blogs) {
     const inputUrl = blog.inputUrl || blog.url;
     if (inputUrl) {
       // URL 정규화
-      const normalizedUrl = inputUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const normalizedUrl = inputUrl
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/$/, '');
       channelMap.set(normalizedUrl, { ...blog, index });
 
       // hostname도 저장
@@ -41,7 +44,10 @@ function findMatchingChannel(contentUrl, channelMap) {
 
   try {
     const contentHost = new URL(contentUrl).hostname.toLowerCase();
-    const normalizedContent = contentUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const normalizedContent = contentUrl
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
 
     // 1. 정확한 URL 매칭
     if (channelMap.has(normalizedContent)) {
@@ -62,15 +68,13 @@ function findMatchingChannel(contentUrl, channelMap) {
 
     // 4. hostname 기반 부분 매칭
     for (const [key, blog] of channelMap) {
-      if (key.includes('.') && (
-        contentHost === key ||
-        contentHost.endsWith('.' + key) ||
-        key.endsWith('.' + contentHost)
-      )) {
+      if (
+        key.includes('.') &&
+        (contentHost === key || contentHost.endsWith('.' + key) || key.endsWith('.' + contentHost))
+      ) {
         return blog;
       }
     }
-
   } catch (err) {
     Logger.warn('[findMatchingChannel] URL 파싱 실패:', contentUrl, err.message);
   }
@@ -94,7 +98,7 @@ async function getCachedChannels(userId) {
   // 캐시 저장
   channelCache.set(cacheKey, {
     data: channels,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   return channels;
@@ -161,16 +165,13 @@ async function getAlternativeChannels(userId) {
       }
     }
   } catch (err) {
-    Logger.warn(
-      '[getAlternativeChannels] 채널 대체 키 조회 중 에러:',
-      err && err.message
-    );
+    Logger.warn('[getAlternativeChannels] 채널 대체 키 조회 중 에러:', err && err.message);
   }
 
   // 캐시 저장
   channelCache.set(cacheKey, {
     data: altChannels,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   return altChannels;
@@ -758,18 +759,21 @@ export async function updateAllPerformanceMetrics() {
   const BATCH_SIZE = 10;
   for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
     const batch = tasks.slice(i, i + BATCH_SIZE);
-    Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${i + 1}-${Math.min(i + BATCH_SIZE, tasks.length)}`);
-
-    const results = await Promise.allSettled(
-      batch.map((t) => updateSinglePerformanceMetric(t))
+    Logger.info(
+      `[updateAllPerformanceMetrics] 배치 처리 중: ${i + 1}-${Math.min(i + BATCH_SIZE, tasks.length)}`
     );
 
+    const results = await Promise.allSettled(batch.map((t) => updateSinglePerformanceMetric(t)));
+
     // 실패한 작업 로깅
-    const failed = results.filter(r => r.status === 'rejected');
+    const failed = results.filter((r) => r.status === 'rejected');
     if (failed.length > 0) {
       Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
       failed.forEach((f, idx) => {
-        Logger.warn(`[updateAllPerformanceMetrics] 실패 ${idx + 1}:`, f.reason?.message || f.reason);
+        Logger.warn(
+          `[updateAllPerformanceMetrics] 실패 ${idx + 1}:`,
+          f.reason?.message || f.reason
+        );
       });
     }
 
