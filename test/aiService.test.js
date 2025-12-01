@@ -192,6 +192,153 @@ describe("AI Service", () => {
   });
 
   describe("generateDraftFromIdea", () => {
+    test("should succeed with draft and fallback thumbnails when crops fail", async () => {
+      jest.resetModules();
+
+      // mocks for dependencies
+      jest.doMock("../js/services/firebaseService.js", () => ({
+        getDb: jest.fn(() => "mock-db"),
+        ref: jest.fn(() => "mock-ref"),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => "test-user-id"),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+      }));
+
+      jest.doMock("../js/services/offscreenService.js", () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
+        cropImageInOffscreen: jest.fn(() => Promise.reject(new Error('crop timeout'))),
+        composeThumbnailInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,COMPOSED')),
+      }));
+
+      jest.doMock("../js/services/promptService.js", () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock("../js/constants.js", () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'img-model' } }));
+      jest.doMock("../js/utils.js", () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+
+      // set storage and fetch mock
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // Import the module fresh
+      const svc = require("../js/services/aiService.js");
+
+      // Save original fetch and install a temporary fetch mock used by callGeminiAPI and generateAiImage
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        // Text model -> return markdown draft
+        if (String(url).includes('models/t')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# 제목\n\n간단한 본문' }] } }] }) });
+        }
+        // Image model -> return inlineData with base64
+        if (String(url).includes('models/img-model')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+        }
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+      });
+
+      const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
+
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true });
+      // restore original fetch so we don't break other tests
+      global.fetch = originalFetch;
+      // debug
+      console.log('generateDraftFromIdea test response =>', res);
+
+      expect(res.success).toBe(true);
+      // draft content may vary depending on sanitization — main assertion here is that draft succeeded
+      // Because crop failed, we should have partialFailure flag set
+      expect(res.thumbnailPartialFailure).toBe(true);
+      // thumbnailUrls should still exist (uploaded URLs)
+      expect(res.thumbnailUrls).toBeTruthy();
+      expect(res.thumbnailUrls.url_16x9 || res.thumbnailUrls.url_1x1).toBeTruthy();
+    });
+
+    test("should fallback to source image when compose fails and still upload thumbnails", async () => {
+      jest.resetModules();
+
+      // mocks for dependencies
+      jest.doMock("../js/services/firebaseService.js", () => ({
+        getDb: jest.fn(() => "mock-db"),
+        ref: jest.fn(() => "mock-ref"),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => "test-user-id"),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+      }));
+
+      jest.doMock("../js/services/offscreenService.js", () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
+        // compose fails to force fallback
+        composeThumbnailInOffscreen: jest.fn(() => Promise.reject(new Error('compose timeout'))),
+        // cropping still works when given a dataURL fallback
+        cropImageInOffscreen: jest.fn(() => Promise.resolve('cropped-image-from-source')),
+      }));
+
+      jest.doMock("../js/services/promptService.js", () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock("../js/constants.js", () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'img-model' } }));
+      jest.doMock("../js/utils.js", () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+
+      // set storage and fetch mock
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // Import the module fresh
+      const svc = require("../js/services/aiService.js");
+
+      // Save original fetch and install a temporary fetch mock used by callGeminiAPI, generateAiImage and fetchImageAsBase64
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        // Text model -> return markdown draft
+        if (String(url).includes('models/t')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# 제목\n\n간단한 본문' }] } }] }) });
+        }
+        // Image model -> return inlineData with base64
+        if (String(url).includes('models/img-model')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+        }
+        // Image URL download -> return a blob
+        if (String(url).includes('images.test')) {
+          const blob = new Blob([Buffer.from('fake')], { type: 'image/png' });
+          return Promise.resolve({ ok: true, blob: async () => blob });
+        }
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+      });
+
+      const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
+
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true });
+      // restore original fetch so we don't break other tests
+      global.fetch = originalFetch;
+
+      expect(res.success).toBe(true);
+      // compose failed but fallback used -> should still report partial failure
+      expect(res.thumbnailPartialFailure).toBe(true);
+      expect(res.thumbnailUrls).toBeTruthy();
+    });
     test.skip("should generate draft with affiliate links", async () => {
       // 매우 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
     });

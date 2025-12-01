@@ -1337,6 +1337,28 @@ ${contentHtml}
 // 3. 메인 렌더링 함수 (renderWorkspace)
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// 워크스페이스 액션 버튼 업데이트 헬퍼 함수
+// -----------------------------------------------------------------------------
+function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
+  const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
+  if (!buttonContainer) return;
+
+  if (hasDraft) {
+    // 초안이 있을 때: 텍스트만/썸네일만 재생성 버튼
+    buttonContainer.innerHTML = `
+      <button id="regenerate-draft-btn" style="flex:1; min-width:140px;">📝 텍스트만 다시 쓰기</button>
+      <button id="regenerate-thumbnail-btn" style="flex:1; min-width:140px;">🎨 썸네일만 다시 그리기</button>
+      <button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>
+    `;
+  } else {
+    // 초안이 없을 때: 전체 생성 버튼
+    buttonContainer.innerHTML = `
+      <button id="generate-draft-btn" style="flex:1;">✨ AI 초안 생성</button>
+    `;
+  }
+}
+
 export function renderWorkspace(container, ideaData) {
   Logger.debug('[Workspace] renderWorkspace 함수 호출됨');
   Logger.debug('[Workspace] container:', container);
@@ -1463,6 +1485,10 @@ export function renderWorkspace(container, ideaData) {
     window.__cp_workspace_save_listener = true;
   }
 
+  // -----------------------------------------------------------------------------
+  // 워크스페이스 액션 버튼 업데이트 헬퍼 함수
+  // -----------------------------------------------------------------------------
+
   const outlineHtml =
     ideaData.outline?.length > 0
       ? ideaData.outline
@@ -1575,12 +1601,17 @@ export function renderWorkspace(container, ideaData) {
           isTrackingOnly
             ? trackingOnlyContent
             : `
-        <div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">
-            <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
+        <div id="workspace-action-buttons" style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
             ${
               hasDraft
-                ? `<button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>`
-                : ''
+                ? `
+            <button id="regenerate-draft-btn" style="flex:1; min-width:140px;">📝 텍스트만 다시 쓰기</button>
+            <button id="regenerate-thumbnail-btn" style="flex:1; min-width:140px;">🎨 썸네일만 다시 그리기</button>
+            <button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>
+            `
+                : `
+            <button id="generate-draft-btn" style="flex:1;">✨ AI 초안 생성</button>
+            `
             }
         </div>
         <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
@@ -2834,17 +2865,51 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         sendCommand('focus');
         showToast(`✅ "${keyword}" 목차를 본문에 추가했습니다.`);
       }
-    } else if (e.target.id === 'generate-draft-btn' || e.target.closest('#generate-draft-btn')) {
+    } else if (
+      e.target.id === 'generate-draft-btn' ||
+      e.target.closest('#generate-draft-btn') ||
+      e.target.id === 'regenerate-draft-btn' ||
+      e.target.closest('#regenerate-draft-btn') ||
+      e.target.id === 'regenerate-thumbnail-btn' ||
+      e.target.closest('#regenerate-thumbnail-btn')
+    ) {
       e.preventDefault();
       e.stopPropagation();
-      const btn =
-        e.target.id === 'generate-draft-btn' ? e.target : e.target.closest('#generate-draft-btn');
+      
+      // 어떤 버튼이 클릭되었는지 확인
+      let btn = null;
+      let actionType = 'full'; // 'full', 'draft-only', 'thumbnail-only'
+      
+      if (e.target.id === 'generate-draft-btn' || e.target.closest('#generate-draft-btn')) {
+        btn = e.target.id === 'generate-draft-btn' ? e.target : e.target.closest('#generate-draft-btn');
+        actionType = 'full';
+      } else if (e.target.id === 'regenerate-draft-btn' || e.target.closest('#regenerate-draft-btn')) {
+        btn = e.target.id === 'regenerate-draft-btn' ? e.target : e.target.closest('#regenerate-draft-btn');
+        actionType = 'draft-only';
+      } else if (e.target.id === 'regenerate-thumbnail-btn' || e.target.closest('#regenerate-thumbnail-btn')) {
+        btn = e.target.id === 'regenerate-thumbnail-btn' ? e.target : e.target.closest('#regenerate-thumbnail-btn');
+        actionType = 'thumbnail-only';
+      }
+      
       if (!btn) return;
 
       // 버튼 비활성화 및 로딩 표시
       btn.disabled = true;
       const originalText = btn.textContent;
-      btn.textContent = '⏳ 초안 생성 중...';
+      
+      if (actionType === 'full') {
+        btn.textContent = '⏳ 초안 생성 중...';
+      } else if (actionType === 'draft-only') {
+        btn.textContent = '⏳ 텍스트 재생성 중...';
+      } else {
+        btn.textContent = '⏳ 썸네일 생성 중...';
+      }
+      
+      // 옵션 설정
+      const generateOptions = {
+        generateDraft: actionType === 'full' || actionType === 'draft-only',
+        generateThumbnail: actionType === 'full' || actionType === 'thumbnail-only',
+      };
 
       // 현재 에디터 내용 가져오기
       const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
@@ -2985,11 +3050,12 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
           }
         }, TIMEOUT_MS);
 
-        // AI 초안 생성 요청
+        // AI 초안 생성 요청 (옵션 포함)
         chrome.runtime.sendMessage(
           {
             action: 'generate_draft_from_idea',
             data: draftData,
+            options: generateOptions, // 선택적 실행 옵션 전달
           },
           (response) => {
             clearTimeout(timeoutId); // 타임아웃 취소
@@ -3003,26 +3069,66 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
               return;
             }
 
-            if (response && response.success && response.draft) {
-              // 마크다운 코드 블록 제거 (```markdown ... ``` 형식)
-              let draftText = response.draft;
-              // 마크다운 코드 블록 제거
-              draftText = draftText.replace(/^```markdown\s*\n?/i, '');
-              draftText = draftText.replace(/^```\s*\n?/i, '');
-              draftText = draftText.replace(/\n?```\s*$/i, '');
-              draftText = draftText.trim();
+            if (response && response.success) {
+              // 초안이 생성되었으므로 텍스트만 업데이트하는 경우가 아니면 에디터 내용 설정
+              if (generateOptions.generateDraft) {
+                // 마크다운 코드 블록 제거 (```markdown ... ``` 형식)
+                let draftText = response.draft || '';
+                // 마크다운 코드 블록 제거
+                draftText = draftText.replace(/^```markdown\s*\n?/i, '');
+                draftText = draftText.replace(/^```\s*\n?/i, '');
+                draftText = draftText.replace(/\n?```\s*$/i, '');
+                draftText = draftText.trim();
 
-              // 마크다운을 HTML로 변환하여 에디터에 설정
-              const htmlContent = marked.parse(draftText);
-              sendCommand('set-content', { html: htmlContent });
-              sendCommand('focus');
+                // 초안 텍스트가 있는 경우에만 에디터에 설정
+                if (draftText) {
+                  console.log('[Workspace] draftText length:', draftText.length);
+                  console.log('[Workspace] draftText preview:', draftText.substring(0, 200));
+                  // 마크다운을 HTML로 변환하여 에디터에 설정
+                  const htmlContent = marked.parse(draftText);
+                  console.log('[Workspace] htmlContent length:', htmlContent.length);
+                  console.log('[Workspace] htmlContent preview:', htmlContent.substring(0, 200));
+                  sendCommand('set-content', { html: htmlContent });
+                  sendCommand('focus');
 
-              // 초안 저장
-              chrome.runtime.sendMessage({
-                action: 'save_idea_draft',
-                ideaId: ideaData.id,
-                draft: response.draft,
-              });
+                  // 초안 저장
+                  chrome.runtime.sendMessage({
+                    action: 'save_idea_draft',
+                    ideaId: ideaData.id,
+                    draft: response.draft,
+                  });
+                } else {
+                  console.warn('[Workspace] 초안 텍스트가 비어있어 에디터에 설정하지 않습니다.');
+                  // 빈 초안일 때 기본 템플릿 제공
+                  const defaultTemplate = `# ${ideaData.title || '콘텐츠 제목'}
+
+${ideaData.description || '이 콘텐츠에 대한 설명입니다.'}
+
+## 소개
+
+이 주제에 대해 알아보겠습니다.
+
+## 본론
+
+상세한 내용을 작성하는 부분입니다.
+
+## 결론
+
+마무리하는 내용입니다.`;
+
+                  const htmlContent = defaultTemplate;
+                  console.log('[Workspace] 빈 초안 대신 기본 템플릿 사용:', htmlContent.substring(0, 200));
+                  sendCommand('set-content', { html: htmlContent });
+                  sendCommand('focus');
+
+                  // 기본 템플릿도 저장
+                  chrome.runtime.sendMessage({
+                    action: 'save_idea_draft',
+                    ideaId: ideaData.id,
+                    draft: defaultTemplate,
+                  });
+                }
+              }
 
               // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo, jsonLdSchema)
               if (
@@ -3112,7 +3218,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
               // [수정] 중복 코드를 제거하고 헬퍼 함수 호출
               renderThumbnailButton(workspaceEl, ideaData);
 
-              showToast('✅ AI 초안이 생성되었습니다!');
+              // 버튼 UI 업데이트 (초안 생성 후에는 항상 재생성 버튼으로 변경)
+              updateWorkspaceActionButtons(workspaceEl, true);
+
+              // 성공 메시지 표시
+              if (actionType === 'full') {
+                showToast('✅ AI 초안이 생성되었습니다!');
+              } else if (actionType === 'draft-only') {
+                showToast('✅ 텍스트가 재생성되었습니다!');
+              } else {
+                showToast('✅ 썸네일이 재생성되었습니다!');
+              }
+
+              // 썸네일 생성이 불완전하게 실패(예: 오프스크린 크롭 타임아웃)한 경우
+              if (response.thumbnailPartialFailure) {
+                // 친절한 경고 메시지로 사용자 혼란을 줄입니다.
+                showToast('⚠️ 썸네일 생성 중 일부 작업이 실패하여 합성 이미지를 사용했습니다. (텍스트 초안은 정상 생성됨)');
+                console.warn('[Workspace] 썸네일 생성 일부 실패 - 폴백 이미지 사용');
+              }
             } else {
               const errorMsg = response?.error || '초안 생성에 실패했습니다.';
               alert(`❌ ${errorMsg}`);
@@ -3260,6 +3383,9 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                 deleteBtn.remove();
                 console.log('[Workspace] 초안 삭제 버튼이 UI에서 제거되었습니다.');
               }
+              
+              // 버튼 UI 업데이트 (초안 없음 상태로 변경)
+              updateWorkspaceActionButtons(workspaceEl, false);
 
               // 에디터가 정말 비워졌는지 최종 확인
               setTimeout(() => {

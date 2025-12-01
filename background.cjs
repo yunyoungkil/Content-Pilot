@@ -429,7 +429,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [AI Service] 생성 및 분석 ===
   if (msg.action === 'generate_draft_from_idea')
-    return handleAsync(generateDraftFromIdea(msg.data));
+    return handleAsync(generateDraftFromIdea(msg.data, msg.options || {}));
   if (msg.action === 'generate_idea_briefing') {
     const { cardId, title, description, ...opts } = msg.data;
     opts.onProgress = (p) => {

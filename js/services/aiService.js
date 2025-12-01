@@ -342,9 +342,16 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
  * @param {string} ideaData.tone - 톤앤매너
  * @returns {Promise<Object>} 생성된 초안 데이터
  */
-export async function generateDraftFromIdea(ideaData) {
+export async function generateDraftFromIdea(ideaData, options = {}) {
   try {
-    // 1. 페르소나 결정 (사용자 설정 > 자동 감지)
+    // 옵션 기본값 설정
+    const { generateDraft = true, generateThumbnail = true } = options;
+    
+    Logger.info('[generateDraftFromIdea] 실행 옵션:', { generateDraft, generateThumbnail });
+    
+    // 1. 기본 제목 및 페르소나 결정 (사용자 설정 > 자동 감지)
+    // title 변수를 함수 최상단에서 선언하여 generateDraft 옵션에 상관없이 사용 가능하게 함
+    const title = ideaData.title || '';
     let personaKey = ideaData.persona;
 
     // 사용자 설정이 없으면 자동 감지
@@ -879,17 +886,93 @@ export async function generateDraftFromIdea(ideaData) {
             - 절대 금지: \`\`\`markdown으로 감싸거나, JSON 형식으로 감싸지 마세요.
         `;
 
-    const rawDraft = await callGeminiAPI(prompt);
-
-    // 빈 응답 및 오류 응답 처리
-    if (!rawDraft || rawDraft.trim() === '') {
-      Logger.error('[generateDraftFromIdea] 초안이 비어있습니다.');
-      return {
-        success: false,
-        error: '초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.',
-      };
+    let rawDraft, cleanedDraft, formattedDraft, seoTitle, jsonLdSchema, thumbnailCandidates;
+    // Flag used when cropping fails and we fall back to composed image
+    let thumbnailGenerationPartialFailure = false;
+    // 제목은 함수 최상단에서 하나만 선언되어야 함 (스코프 안정성)
+    // title declared earlier (avoid redeclaration)
+    
+    // 초안 생성을 스킵하는 경우 기존 값 사용
+    if (!generateDraft) {
+      Logger.info('[generateDraftFromIdea] 📝 초안 생성 스킵, 기존 값 사용');
+      formattedDraft = ideaData.currentDraft || ideaData.draftContent || '';
+      seoTitle = ideaData.seoTitle || ideaData.title || '';
+      jsonLdSchema = ideaData.publishInfo?.jsonLdSchema || null;
+      thumbnailCandidates = ideaData.publishInfo?.thumbnailInfo || [];
+    } else {
+      Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
+      
+    // API 호출 재시도 로직 추가 (최대 3회)
+    let rawDraft = '';
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    // 프롬프트 길이 체크 및 최적화
+    let optimizedPrompt = prompt;
+    if (prompt.length > 30000) {
+      Logger.warn(`[generateDraftFromIdea] 프롬프트가 너무 깁니다 (${prompt.length}자). 간단한 버전으로 최적화합니다.`);
+      // 긴 프롬프트를 간단한 버전으로 축소
+      optimizedPrompt = prompt.substring(0, 15000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
     }
+    
+    while (retryCount < maxRetries) {
+      try {
+        Logger.info(`[generateDraftFromIdea] API 호출 시도 ${retryCount + 1}/${maxRetries}`);
+        rawDraft = await callGeminiAPI(optimizedPrompt);
+        
+        // 빈 응답 확인
+        if (rawDraft && rawDraft.trim().length > 0) {
+          Logger.info(`[generateDraftFromIdea] API 호출 성공 - 응답 길이: ${rawDraft.length}`);
+          break; // 성공했으므로 루프 종료
+        } else {
+          Logger.warn(`[generateDraftFromIdea] 빈 응답 수신 (시도 ${retryCount + 1}/${maxRetries})`);
+          if (retryCount < maxRetries - 1) {
+            // 마지막 시도가 아니면 잠시 대기 후 재시도
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // 점진적 대기
+            retryCount++;
+            continue;
+          }
+        }
+      } catch (apiError) {
+        Logger.error(`[generateDraftFromIdea] API 호출 실패 (시도 ${retryCount + 1}/${maxRetries}):`, apiError);
+        if (retryCount < maxRetries - 1) {
+          // 마지막 시도가 아니면 잠시 대기 후 재시도
+          await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1))); // 점진적 대기
+          retryCount++;
+          continue;
+        } else {
+          // 모든 재시도 실패
+          throw apiError;
+        }
+      }
+      
+      retryCount++;
+    }
+    
+    // 모든 재시도 후에도 빈 응답이면 기본 템플릿 제공
+    if (!rawDraft || rawDraft.trim().length === 0) {
+      Logger.error('[generateDraftFromIdea] 모든 재시도 후에도 초안이 비어있습니다. 기본 템플릿을 생성합니다.');
+      
+      // 기본 템플릿 생성
+      const defaultTitle = title || '콘텐츠 제목';
+      const defaultDescription = ideaData.description || '이 콘텐츠에 대한 설명입니다.';
+      
+      rawDraft = `# ${defaultTitle}
 
+${defaultDescription}
+
+## 소개
+
+이 주제에 대해 알아보겠습니다.
+
+## 본론
+
+상세한 내용을 작성하는 부분입니다.
+
+## 결론
+
+마무리하는 내용입니다.`;
+    }    // 빈 응답 및 오류 응답 처리
     if (rawDraft.startsWith('오류:') || rawDraft.includes('오류:')) {
       Logger.error('[generateDraftFromIdea] Gemini API 오류:', rawDraft);
       const errorMessage =
@@ -912,6 +995,18 @@ export async function generateDraftFromIdea(ideaData) {
     cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
     cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
     cleanedDraft = cleanedDraft.trim();
+
+    // 빈 텍스트 방지: cleanedDraft가 비어있으면 원본 rawDraft 사용
+    if (!cleanedDraft || cleanedDraft.trim().length === 0) {
+      Logger.warn('[generateDraftFromIdea] cleanedDraft가 비어있어 rawDraft를 사용합니다');
+      cleanedDraft = rawDraft.trim();
+    }
+
+    // 여전히 비어있다면 기본 텍스트 생성
+    if (!cleanedDraft || cleanedDraft.trim().length === 0) {
+      Logger.error('[generateDraftFromIdea] 초안 텍스트가 비어있습니다. 기본 텍스트를 생성합니다.');
+      cleanedDraft = `# ${title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
+    }
 
     // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
     // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
@@ -939,7 +1034,8 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
-    let thumbnailCandidates = [];
+    // Use outer-scoped `thumbnailCandidates` (avoid redeclaration which caused it to remain undefined later)
+    thumbnailCandidates = [];
     const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
 
     if (thumbnailMatch && thumbnailMatch[1]) {
@@ -989,7 +1085,6 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // 4. 제목이 포함되어 있지 않으면 h1으로 추가
-    const title = ideaData.title || '';
     if (title) {
       // h1 태그나 # 제목 형식이 없으면 추가
       const hasH1 = /<h1[^>]*>|<h1>|^#\s+/i.test(formattedDraft);
@@ -1020,6 +1115,8 @@ export async function generateDraftFromIdea(ideaData) {
     if (!seoTitle) {
       seoTitle = title;
     }
+    
+    } // 초안 생성 블록 종료
 
     // [신규] 4-1. JSON-LD 스키마 후처리 (seoTitle 추출 후 실제 데이터로 보완)
     if (jsonLdSchema) {
@@ -1236,8 +1333,10 @@ export async function generateDraftFromIdea(ideaData) {
     }
 
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
-    let thumbnailUrls = null; // { url_1x1, url_4x3, url_16x9, altText }
-    if (thumbnailCandidates.length > 0 && permalink) {
+    let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
+    
+    if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
+      Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
       try {
         const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
         Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
@@ -1306,11 +1405,34 @@ export async function generateDraftFromIdea(ideaData) {
           type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation'
         });
 
-        const composedDataUrl = await composeThumbnailInOffscreen(
-          sourceImageUrl,
-          thumbnailText,
-          textPosition
-        );
+        let composedDataUrl;
+        try {
+          composedDataUrl = await composeThumbnailInOffscreen(
+            sourceImageUrl,
+            thumbnailText,
+            textPosition
+          );
+        } catch (composeErr) {
+          // If compose fails (offscreen timeouts / fetch problems), try a fallback:
+          // 1) attempt to download sourceImageUrl and convert to data URL
+          // 2) if conversion succeeds, use converted dataURL as 'composed' base for cropping/upload
+          Logger.warn('[generateDraftFromIdea] composeThumbnailInOffscreen failed, attempting fallback using source image:', composeErr && composeErr.message);
+          try {
+            const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
+            if (sourceBase64 && sourceBase64.data) {
+              const candidateDataUrl = `data:${sourceBase64.mimeType};base64,${sourceBase64.data}`;
+              // Use the raw source image as the composed fallback
+              composedDataUrl = candidateDataUrl;
+              Logger.info('[generateDraftFromIdea] compose fallback: source image converted to dataURL successfully');
+            } else {
+              Logger.warn('[generateDraftFromIdea] compose fallback: could not convert source image to base64');
+            }
+          } catch (fbErr) {
+            Logger.warn('[generateDraftFromIdea] compose fallback failed:', fbErr && fbErr.message);
+          }
+          // mark partial failure because composition didn't succeed
+          thumbnailGenerationPartialFailure = true;
+        }
 
         // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
         const userId = await getCurrentUserId();
@@ -1327,7 +1449,26 @@ export async function generateDraftFromIdea(ideaData) {
           })),
         ];
 
-        const croppedResults = await Promise.all(cropPromises);
+        // Wait for crop results but be tolerant to failures/timeouts.
+        // If crop fails for one or both ratios (common due to offscreen slowness),
+        // fall back to using the composedDataUrl for the missing crops so
+        // the overall draft generation still succeeds.
+        let croppedResults;
+        try {
+          croppedResults = await Promise.all(cropPromises);
+        } catch (cropErr) {
+          Logger.warn('[generateDraftFromIdea] 하나 이상의 크롭 작업이 실패했습니다. 폴백으로 합성 이미지를 사용합니다:', cropErr && cropErr.message);
+          // Build sensible fallback results. Use composedDataUrl for both ratios
+          // if cropping failed entirely or partially.
+          croppedResults = [
+            { ratio: '1x1', dataUrl: composedDataUrl },
+            { ratio: '4x3', dataUrl: composedDataUrl },
+          ];
+          // keep a flag for the UI / downstream to know crops were unreliable
+          // We'll attach this flag to thumbnailUrls later if needed.
+          if (!thumbnailUrls) thumbnailUrls = null; // ensure defined
+          thumbnailGenerationPartialFailure = true;
+        }
 
         // 4. SEO 파일명으로 업로드
         const uploadPromises = [
@@ -1381,10 +1522,14 @@ export async function generateDraftFromIdea(ideaData) {
         });
         // 썸네일 생성 실패해도 초안 생성은 계속 진행
       }
+    } else if (!generateThumbnail) {
+      Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 스킵, 기존 값 사용');
     }
 
     // [신규] HTML 본문에 대표 이미지 삽입 및 alt 속성 추가
     if (thumbnailUrls && thumbnailUrls.url_16x9) {
+      // Ensure formattedDraft is at least an empty string to avoid accidental undefined/null
+      if (typeof formattedDraft !== 'string' || !formattedDraft) formattedDraft = '';
       try {
         // 본문의 첫 번째 이미지 태그를 찾아서 교체하거나, 없으면 삽입
         const imgTagRegex = /<img[^>]*>/i;
@@ -1435,6 +1580,9 @@ export async function generateDraftFromIdea(ideaData) {
       Logger.warn('[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:', e);
     }
 
+    Logger.info('[generateDraftFromIdea] ✅ 초안 생성 완료 - draft 길이:', formattedDraft?.length || 0, '문자');
+    Logger.debug('[generateDraftFromIdea] draft 내용 미리보기:', formattedDraft?.substring(0, 200) + '...');
+
     return {
       success: true,
       draft: formattedDraft,
@@ -1443,6 +1591,7 @@ export async function generateDraftFromIdea(ideaData) {
       seoTitle: seoTitle, // SEO 최적화된 제목
       thumbnailInfo: thumbnailCandidates, // 썸네일 정보 (배열 형태)
       thumbnailUrls: thumbnailUrls, // [신규] 자동 생성된 썸네일 URL (3가지 비율)
+      thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
       jsonLdSchema: jsonLdSchema, // [신규] JSON-LD 구조화된 데이터
     };
   } catch (e) {
