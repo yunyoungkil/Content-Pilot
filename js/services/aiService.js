@@ -505,9 +505,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     let rawDraft = null;
     let cleanedDraft = '';
     let formattedDraft = '';
+    let thumbnailCandidates = [];
+    let thumbnailUrls = [];
     let seoTitle = null;
     let jsonLdSchema = null;
-    let thumbnailCandidates = [];
+    let permalink = '';
+    let tagsForPublish = '';
 
     if (generateDraft) {
       // 백업 파일의 상세한 프롬프트 구성
@@ -1194,7 +1197,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       };
 
       // 퍼머링크 생성 (타임아웃 보호)
-      let permalink = '';
       try {
         permalink = await generatePermalink(seoTitle || title);
       } catch (e) {
@@ -1211,7 +1213,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       }
 
       // 6. 태그 생성 (쉼표 구분)
-      const tagsForPublish = tags
+      tagsForPublish = tags
         .map((t) => t.replace(/^#/, ''))
         .filter((t) => t && t !== 'AI-추천')
         .join(', ');
@@ -1243,7 +1245,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       }
 
       // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
-      let thumbnailUrls = null; // { url_1x1, url_4x3, url_16x9, altText }
+      // { url_1x1, url_4x3, url_16x9, altText }
       if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
         try {
           const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
