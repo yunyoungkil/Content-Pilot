@@ -1307,7 +1307,7 @@ export async function generateDraftFromIdea(ideaData) {
         });
 
         const composedDataUrl = await composeThumbnailInOffscreen(
-          originalImages[0],
+          sourceImageUrl,
           thumbnailText,
           textPosition
         );
