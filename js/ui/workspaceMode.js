@@ -1575,13 +1575,25 @@ export function renderWorkspace(container, ideaData) {
           isTrackingOnly
             ? trackingOnlyContent
             : `
-        <div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">
-            <button id="generate-draft-btn">📄 AI로 초안 생성하기</button>
-            ${
-              hasDraft
-                ? `<button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>`
-                : ''
+        <div style="padding:10px; border-bottom:1px solid #eee; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            ${!hasDraft ?
+                // Case 1: 초안 없음 -> 전체 생성 버튼
+                `<button id="generate-full-btn" class="cp-btn-primary" style="padding:8px 16px; background:#4285f4; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✨ AI 초안 생성 (전체)</button>`
+                :
+                // Case 2: 초안 있음 -> 부분 재생성 버튼들
+                `
+                <button id="regenerate-text-btn" class="cp-btn-secondary" style="padding:8px 12px; background:#fff; border:1px solid #ddd; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:4px;" title="스크랩 자료를 반영하여 텍스트만 다시 씁니다">
+                    <span>📝</span> 텍스트만 다시 쓰기
+                </button>
+                <button id="regenerate-thumb-btn" class="cp-btn-secondary" style="padding:8px 12px; background:#fff; border:1px solid #ddd; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:4px;" title="현재 내용을 바탕으로 썸네일 이미지만 다시 그립니다">
+                    <span>🎨</span> 썸네일만 다시 그리기
+                </button>
+                `
             }
+
+            <div style="margin-left:auto;">
+                ${hasDraft ? `<button id="delete-draft-in-workspace" class="draft-delete-btn" style="color:#e74c3c; background:none; border:none; cursor:pointer; text-decoration:underline; font-size:13px;">초안 삭제</button>` : ''}
+            </div>
         </div>
         <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
             <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
@@ -1672,216 +1684,15 @@ export function renderWorkspace(container, ideaData) {
   const workspaceEl = container.querySelector('.workspace-container');
   Logger.debug('[Workspace] workspaceEl 찾기:', workspaceEl);
 
+  // handleGenerateAction 함수는 addWorkspaceEventListeners에서 정의됨
+
   // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
+  // [수정] 전역 리스너가 있으므로 등록하지 않음
   try {
     const shadowWindow = container.ownerDocument?.defaultView || window;
     if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
-      Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 중...');
-      Logger.debug('🔧 [Workspace] Shadow window:', shadowWindow);
-      Logger.debug('🔧 [Workspace] Shadow window === window:', shadowWindow === window);
-
-      const shadowTuiEditorListener = (event) => {
-        if (event.data?.action === 'cp_open_tui_editor') {
-          console.log('🌐 [Workspace] ========================================');
-          console.log('🌐 [Workspace] 📨 Shadow DOM 리스너: cp_open_tui_editor 메시지 수신!');
-          console.log('🌐 [Workspace] ========================================');
-
-          const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
-          if (!imageUrl) {
-            Logger.error('❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음');
-            return;
-          }
-
-          // workspace 컨테이너 찾기
-          const workspaceContainer =
-            container.querySelector('.workspace-container') ||
-            document.querySelector('.workspace-container') ||
-            document.querySelector('.cp-workspace-container');
-
-          if (!workspaceContainer) {
-            Logger.error('❌ [Workspace] workspace 컨테이너를 찾을 수 없습니다!');
-            return;
-          }
-
-          Logger.debug('✅ [Workspace] workspace 컨테이너 확인 완료');
-
-          // TUI 에디터 iframe 생성 또는 재사용
-          let tuiEditorIframe = document.querySelector('#tui-editor-iframe');
-
-          if (!tuiEditorIframe) {
-            console.log('🔨 [Workspace] TUI 에디터 iframe 생성 중...');
-
-            // 기존 모달이 있으면 제거
-            const existingOverlay = document.querySelector('#tui-editor-overlay');
-            if (existingOverlay) existingOverlay.remove();
-
-            // 배경 오버레이 생성
-            const overlay = document.createElement('div');
-            overlay.id = 'tui-editor-overlay';
-            overlay.style.cssText =
-              'position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;';
-            overlay.onclick = () => {
-              if (confirm('편집을 종료하시겠습니까?')) {
-                overlay.remove();
-                if (tuiEditorIframe) tuiEditorIframe.remove();
-              }
-            };
-            // body의 마지막에 추가하여 최상위에 위치
-            document.body.appendChild(overlay);
-
-            // 모달 컨테이너 생성
-            const modalContainer = document.createElement('div');
-            modalContainer.id = 'tui-editor-modal-container';
-            modalContainer.style.cssText =
-              'position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;';
-            overlay.appendChild(modalContainer);
-
-            // 닫기 버튼 추가
-            const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '×';
-            closeBtn.style.cssText =
-              'position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;';
-            closeBtn.onmouseover = () => (closeBtn.style.background = 'rgba(255,255,255,0.2)');
-            closeBtn.onmouseout = () => (closeBtn.style.background = 'rgba(255,255,255,0.1)');
-            closeBtn.onclick = (e) => {
-              e.stopPropagation();
-              if (confirm('편집을 종료하시겠습니까?')) {
-                overlay.remove();
-                if (tuiEditorIframe) tuiEditorIframe.remove();
-              }
-            };
-            modalContainer.appendChild(closeBtn);
-
-            // iframe 생성
-            tuiEditorIframe = document.createElement('iframe');
-            tuiEditorIframe.id = 'tui-editor-iframe';
-            tuiEditorIframe.src = chrome.runtime.getURL('tui-editor.html');
-            tuiEditorIframe.style.cssText =
-              'width:100%;height:100%;border:none;background:#282828;';
-            modalContainer.appendChild(tuiEditorIframe);
-            Logger.debug('✅ [Workspace] TUI 에디터 iframe 생성 완료');
-
-            const sourceInfo = event.data.source || 'editor';
-            console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
-            const editorIframe = workspaceContainer.querySelector('#quill-editor-iframe');
-
-            const tuiEditorMessageHandler = function (e) {
-              if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
-                console.log('[Workspace] TUI 에디터 편집 완료, 결과 처리 중...');
-
-                if (
-                  sourceInfo === 'thumbnail_maker' ||
-                  !event.data.allDocumentImages ||
-                  event.data.allDocumentImages.length === 0
-                ) {
-                  const altText = '편집된 썸네일';
-                  if (editorIframe && editorIframe.contentWindow) {
-                    editorIframe.contentWindow.postMessage(
-                      {
-                        action: 'insert-image',
-                        data: {
-                          url: e.data.dataUrl,
-                          alt: altText,
-                        },
-                      },
-                      '*'
-                    );
-                  }
-                } else {
-                  if (editorIframe && editorIframe.contentWindow) {
-                    editorIframe.contentWindow.postMessage(
-                      {
-                        action: 'replace-edited-image',
-                        data: { dataUrl: e.data.dataUrl },
-                      },
-                      '*'
-                    );
-                  }
-                }
-
-                if (tuiEditorIframe) {
-                  tuiEditorIframe.remove();
-                }
-
-                shadowWindow.removeEventListener('message', tuiEditorMessageHandler);
-              }
-            };
-            shadowWindow.addEventListener('message', tuiEditorMessageHandler);
-
-            tuiEditorIframe.onload = () => {
-              console.log('[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...');
-              setTimeout(() => {
-                if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
-                  tuiEditorIframe.contentWindow.postMessage(
-                    {
-                      action: 'open-tui-editor',
-                      imageUrl: imageUrl,
-                    },
-                    '*'
-                  );
-
-                  if (
-                    event.data.allDocumentImages &&
-                    Array.isArray(event.data.allDocumentImages) &&
-                    event.data.allDocumentImages.length > 0
-                  ) {
-                    tuiEditorIframe.contentWindow.postMessage(
-                      {
-                        action: 'set-document-images',
-                        images: event.data.allDocumentImages,
-                      },
-                      '*'
-                    );
-                    console.log(
-                      '[Workspace] 문서 이미지 목록 전달 완료:',
-                      event.data.allDocumentImages.length,
-                      '개'
-                    );
-                  }
-
-                  console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
-                }
-              }, 500);
-            };
-          } else {
-            console.log('[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...');
-            if (tuiEditorIframe.contentWindow) {
-              tuiEditorIframe.contentWindow.postMessage(
-                {
-                  action: 'open-tui-editor',
-                  imageUrl: imageUrl,
-                },
-                '*'
-              );
-
-              if (
-                event.data.allDocumentImages &&
-                Array.isArray(event.data.allDocumentImages) &&
-                event.data.allDocumentImages.length > 0
-              ) {
-                tuiEditorIframe.contentWindow.postMessage(
-                  {
-                    action: 'set-document-images',
-                    images: event.data.allDocumentImages,
-                  },
-                  '*'
-                );
-                console.log(
-                  '[Workspace] 문서 이미지 목록 전달 완료:',
-                  event.data.allDocumentImages.length,
-                  '개'
-                );
-              }
-
-              console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
-            }
-          }
-        }
-      };
-
-      shadowWindow.addEventListener('message', shadowTuiEditorListener);
-      shadowWindow.__cp_tui_shadow_listener_attached = true;
-      Logger.debug('✅ [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 완료');
+      Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 생략 (전역 리스너 사용)');
+      // 리스너 등록 코드 제거됨
     } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
       Logger.info('ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.');
     }
@@ -1945,8 +1756,132 @@ export function renderWorkspace(container, ideaData) {
   }
 }
 
+
+
 function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
   console.log('[Workspace] addWorkspaceEventListeners 함수 호출됨');
+
+  // ✅ [추가] 공통 생성 핸들러 함수
+  function handleGenerateAction(btn, options) {
+    if (!btn) return;
+
+    // 버튼 비활성화 및 로딩 표시
+    btn.disabled = true;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '⏳ 작업 중...';
+
+    // 에디터 iframe 찾기
+    const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+    if (!editorIframe || !editorIframe.contentWindow) {
+      alert('에디터가 준비되지 않았습니다.');
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+      return;
+    }
+
+    // 에디터 내용 가져오기 (Promise)
+    const messageId = `get-content-${Date.now()}`;
+    const getContentPromise = new Promise((resolve) => {
+      const handler = (event) => {
+        if (event.data.action === 'content-response' && event.data.requestId === messageId) {
+          window.removeEventListener('message', handler);
+          resolve(event.data.data?.html || '');
+        }
+      };
+      window.addEventListener('message', handler);
+      editorIframe.contentWindow.postMessage({ action: 'get-content', requestId: messageId }, '*');
+      setTimeout(() => { window.removeEventListener('message', handler); resolve(''); }, 2000);
+    });
+
+    getContentPromise.then(async (currentDraftHtml) => {
+      // 필수 데이터 검증
+      const title = ideaData.title || '';
+      if (!title.trim()) {
+        alert('❌ 제목이 비어있습니다.');
+        btn.disabled = false; btn.innerHTML = originalText; return;
+      }
+
+      // HTML -> 텍스트 변환
+      let currentDraft = '';
+      if (currentDraftHtml) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = currentDraftHtml;
+        currentDraft = tempDiv.textContent || tempDiv.innerText || '';
+      }
+
+      // 연결된 스크랩 내용 가져오기
+      let linkedScrapsIds = Array.isArray(ideaData.linkedScraps) ? ideaData.linkedScraps : [];
+      if (!Array.isArray(ideaData.linkedScraps) && typeof ideaData.linkedScraps === 'object') {
+        linkedScrapsIds = Object.keys(ideaData.linkedScraps);
+      }
+      
+      const linkedScrapsContent = [];
+      if (linkedScrapsIds.length > 0) {
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'get_all_scraps', channelId: activeChannelId }, (r) => {
+             if (r && r.success && r.scraps) {
+               linkedScrapsIds.forEach(id => {
+                 const s = r.scraps.find(item => item.id === id);
+                 if(s) linkedScrapsContent.push({ title: s.title || '스크랩', text: s.text || '' });
+               });
+             }
+             resolve();
+          });
+        });
+      }
+
+      // 요청 데이터 구성
+      const draftData = {
+        title: title,
+        description: ideaData.description || '',
+        tags: ideaData.tags || [],
+        outline: ideaData.outline || [],
+        currentDraft: currentDraft || '',
+        linkedScrapsContent: linkedScrapsContent,
+        ...ideaData // 기타 필요한 데이터
+      };
+
+      // 백그라운드로 전송
+      chrome.runtime.sendMessage({
+        action: 'generate_draft_from_idea',
+        data: draftData,
+        options: options // { generateDraft, generateThumbnail }
+      }, (response) => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+
+        if (response && response.success) {
+          // 1. 텍스트가 생성된 경우 에디터 업데이트
+          if (options.generateDraft && response.draft) {
+            let draftText = response.draft.replace(/^```markdown\s*\n?/i, '').replace(/^```\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+            const htmlContent = marked.parse(draftText);
+            sendCommand('set-content', { html: htmlContent });
+            showToast('✅ 텍스트가 새롭게 작성되었습니다.');
+            
+            // 초안 저장 트리거
+            chrome.runtime.sendMessage({ action: 'save_idea_draft', ideaId: ideaData.id, draft: response.draft });
+          }
+
+          // 2. 썸네일이 생성된 경우
+          if (options.generateThumbnail && response.thumbnailUrls) {
+            showToast('✅ 새로운 썸네일이 생성되었습니다.');
+            renderThumbnailButton(workspaceEl, ideaData);
+          }
+
+          // 3. 데이터 동기화 및 UI 갱신 (발행 정보 등)
+           // ... (기존 showPublishInfo 호출 등 필요한 로직 추가) ...
+           if(response.permalink || response.tags) {
+              // 간단히 UI 리프레시를 위해 페이지 새로고침 대신 알림만
+              showToast('ℹ️ 정보가 갱신되었습니다.');
+           }
+
+        } else {
+          alert(`❌ 실패: ${response?.error || '오류 발생'}`);
+        }
+      });
+    });
+  }
 
   // "즉시 추적" 카드인지 확인
   const isTrackingOnly = ideaData.origin?.type === 'tracking_only';
@@ -3121,6 +3056,24 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
           }
         );
       });
+    } else if (e.target.closest('#generate-full-btn')) {
+      // [신규] 전체 생성 버튼
+      handleGenerateAction(e.target.closest('#generate-full-btn'), {
+        generateDraft: true,
+        generateThumbnail: true
+      });
+    } else if (e.target.closest('#regenerate-text-btn')) {
+      // [신규] 텍스트만 다시 쓰기 버튼
+      handleGenerateAction(e.target.closest('#regenerate-text-btn'), {
+        generateDraft: true,
+        generateThumbnail: false
+      });
+    } else if (e.target.closest('#regenerate-thumb-btn')) {
+      // [신규] 썸네일만 다시 그리기 버튼
+      handleGenerateAction(e.target.closest('#regenerate-thumb-btn'), {
+        generateDraft: false,
+        generateThumbnail: true
+      });
     } else if (
       e.target.id === 'delete-draft-in-workspace' ||
       e.target.closest('#delete-draft-in-workspace')
@@ -4172,12 +4125,15 @@ window.__cp_filterScraps = function (scraps, keyword, searchText) {
   });
 };
 window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData) {
+  // [수정] 전역 함수이므로 workspaceEl과 resourceLibrary를 직접 찾아야 합니다.
+  const workspaceEl = document.querySelector('.workspace-container') || document.querySelector('.cp-workspace-container');
+  const resourceLibrary = document.querySelector('#resource-library-panel');
+
   if (filtered.length > 0) {
     allCont.innerHTML = filtered.map((s) => createScrapCard(s, false)).join('');
 
-    // 삭제 버튼 이벤트 리스너 재등록 (동적 요소 대응)
+    // 삭제 버튼 이벤트 리스너 재등록
     allCont.querySelectorAll('.scrap-card-delete-btn').forEach((deleteBtn) => {
-      // 이미 이벤트 리스너가 등록되어 있으면 중복 등록 방지
       if (deleteBtn.dataset.listenerAttached) return;
       deleteBtn.dataset.listenerAttached = 'true';
 
@@ -4203,25 +4159,36 @@ window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData)
             }
             if (response && response.success) {
               showToast('✅ 스크랩이 삭제되었습니다.');
+
               // 스크랩 리스트 새로고침
               chrome.storage.local.get('activeChannelId', (res) => {
                 chrome.runtime.sendMessage(
-                  {
-                    action: 'get_all_scraps',
-                    channelId: res.activeChannelId,
-                  },
+                  { action: 'get_all_scraps', channelId: res.activeChannelId },
                   (r) => {
                     if (r && r.success) {
-                      const linkedScrapIds =
-                        ideaData && ideaData.linkedScraps
-                          ? Array.isArray(ideaData.linkedScraps)
-                            ? ideaData.linkedScraps
-                            : Object.keys(ideaData.linkedScraps)
-                          : [];
-                      const availableScraps = r.scraps.filter(
-                        (s) => !linkedScrapIds.includes(s.id)
-                      );
+                      const linkedScrapIds = ideaData && ideaData.linkedScraps
+                        ? Array.isArray(ideaData.linkedScraps)
+                          ? ideaData.linkedScraps
+                          : Object.keys(ideaData.linkedScraps)
+                        : [];
+                      const availableScraps = r.scraps.filter((s) => !linkedScrapIds.includes(s.id));
+
+                      // 리스트 갱신 (재귀 호출)
                       window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
+
+                      // [추가된 로직] 이미지 갤러리도 갱신 (여기서 workspaceEl이 필요했음)
+                      if (resourceLibrary && workspaceEl) {
+                        const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
+                        if (imageGalleryGrid) {
+                          const sendCommand = (action, data = {}) => {
+                            const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+                            if (editorIframe && editorIframe.contentWindow) {
+                              editorIframe.contentWindow.postMessage({ action, data }, '*');
+                            }
+                          };
+                          updateImageGalleryFromAllScraps(resourceLibrary, r.scraps, sendCommand, ideaData);
+                        }
+                      }
                     }
                   }
                 );

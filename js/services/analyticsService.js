@@ -4,6 +4,8 @@ import { getDb, CONSTANTS, initializeFirebase, getCurrentUserId } from './fireba
 import { ref, get, update } from './firebaseService.js';
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
+// [추가] 성능 최적화 서비스 임포트
+import { performanceOptimizer } from './performanceOptimizer.js';
 
 // 채널 정보 캐시 (메모리 캐시 + TTL)
 const channelCache = new Map();
@@ -17,7 +19,10 @@ function createChannelMap(blogs) {
     const inputUrl = blog.inputUrl || blog.url;
     if (inputUrl) {
       // URL 정규화
-      const normalizedUrl = inputUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const normalizedUrl = inputUrl
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/$/, '');
       channelMap.set(normalizedUrl, { ...blog, index });
 
       // hostname도 저장
@@ -41,7 +46,10 @@ function findMatchingChannel(contentUrl, channelMap) {
 
   try {
     const contentHost = new URL(contentUrl).hostname.toLowerCase();
-    const normalizedContent = contentUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const normalizedContent = contentUrl
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
 
     // 1. 정확한 URL 매칭
     if (channelMap.has(normalizedContent)) {
@@ -62,15 +70,13 @@ function findMatchingChannel(contentUrl, channelMap) {
 
     // 4. hostname 기반 부분 매칭
     for (const [key, blog] of channelMap) {
-      if (key.includes('.') && (
-        contentHost === key ||
-        contentHost.endsWith('.' + key) ||
-        key.endsWith('.' + contentHost)
-      )) {
+      if (
+        key.includes('.') &&
+        (contentHost === key || contentHost.endsWith('.' + key) || key.endsWith('.' + contentHost))
+      ) {
         return blog;
       }
     }
-
   } catch (err) {
     Logger.warn('[findMatchingChannel] URL 파싱 실패:', contentUrl, err.message);
   }
@@ -81,23 +87,12 @@ function findMatchingChannel(contentUrl, channelMap) {
 // 캐시된 채널 정보 조회
 async function getCachedChannels(userId) {
   const cacheKey = `channels_${userId}`;
-  const cached = channelCache.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-
-  // 캐시 만료 또는 없음 - DB 조회
-  const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
-  const channels = channelsSnap.val() || {};
-
-  // 캐시 저장
-  channelCache.set(cacheKey, {
-    data: channels,
-    timestamp: Date.now()
+  // 성능 최적화 서비스를 통한 캐싱
+  return await performanceOptimizer.getCachedData(cacheKey, async () => {
+    const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+    return channelsSnap.val() || {};
   });
-
-  return channels;
 }
 
 // 대체 채널 ID 조회 및 캐시
@@ -161,16 +156,13 @@ async function getAlternativeChannels(userId) {
       }
     }
   } catch (err) {
-    Logger.warn(
-      '[getAlternativeChannels] 채널 대체 키 조회 중 에러:',
-      err && err.message
-    );
+    Logger.warn('[getAlternativeChannels] 채널 대체 키 조회 중 에러:', err && err.message);
   }
 
   // 캐시 저장
   channelCache.set(cacheKey, {
     data: altChannels,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   return altChannels;
@@ -754,28 +746,47 @@ export async function updateAllPerformanceMetrics() {
 
   Logger.info(`[updateAllPerformanceMetrics] 업데이트 대상 카드: ${tasks.length}개`);
 
-  // 10개씩 배치 실행 (증가) + Promise.allSettled로 더 효율적 처리
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-    const batch = tasks.slice(i, i + BATCH_SIZE);
-    Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${i + 1}-${Math.min(i + BATCH_SIZE, tasks.length)}`);
+  // 최적화: 배치 크기 증가 및 병렬 처리 개선
+  const BATCH_SIZE = 15; // 10개에서 15개로 증가
+  const CONCURRENT_BATCHES = 3; // 동시에 3개 배치 처리
 
-    const results = await Promise.allSettled(
-      batch.map((t) => updateSinglePerformanceMetric(t))
-    );
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE * CONCURRENT_BATCHES) {
+    const batchPromises = [];
 
-    // 실패한 작업 로깅
-    const failed = results.filter(r => r.status === 'rejected');
-    if (failed.length > 0) {
-      Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
-      failed.forEach((f, idx) => {
-        Logger.warn(`[updateAllPerformanceMetrics] 실패 ${idx + 1}:`, f.reason?.message || f.reason);
+    // CONCURRENT_BATCHES만큼 배치를 동시에 실행
+    for (let j = 0; j < CONCURRENT_BATCHES && i + j * BATCH_SIZE < tasks.length; j++) {
+      const batchStart = i + j * BATCH_SIZE;
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, tasks.length);
+      const batch = tasks.slice(batchStart, batchEnd);
+
+      Logger.info(`[updateAllPerformanceMetrics] 배치 처리 중: ${batchStart + 1}-${batchEnd}`);
+
+      const batchPromise = Promise.allSettled(
+        batch.map((t) => updateSinglePerformanceMetric(t))
+      ).then((results) => {
+        // 실패한 작업 로깅
+        const failed = results.filter((r) => r.status === 'rejected');
+        if (failed.length > 0) {
+          Logger.warn(`[updateAllPerformanceMetrics] 배치에서 실패한 작업: ${failed.length}개`);
+          failed.forEach((f, idx) => {
+            Logger.warn(
+              `[updateAllPerformanceMetrics] 실패 ${idx + 1}:`,
+              f.reason?.message || f.reason
+            );
+          });
+        }
+        return results;
       });
+
+      batchPromises.push(batchPromise);
     }
 
-    // 배치 간 딜레이 (API rate limit 고려)
-    if (i + BATCH_SIZE < tasks.length) {
-      await new Promise((r) => setTimeout(r, 2000)); // 2초로 증가
+    // 모든 배치가 완료될 때까지 대기
+    await Promise.all(batchPromises);
+
+    // 배치 그룹 간 딜레이 (API rate limit 고려) - 1.5초로 감소
+    if (i + BATCH_SIZE * CONCURRENT_BATCHES < tasks.length) {
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 

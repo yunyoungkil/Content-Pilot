@@ -1,90 +1,47 @@
-# Content Pilot - AI Coding Agent Instructions
+# Content Pilot — AI agent quick reference (concise)
 
-## Project Overview
+This file gives an AI coding agent the minimal, high-value information needed to be productive working in Content Pilot.
 
-Content Pilot is a Chrome Extension (Manifest V3) for web content curation, AI-powered content planning, and performance tracking. It uses Firebase for data sync, Google Analytics/AdSense APIs, and Gemini AI.
+Core idea — Manifest V3 Chrome extension with 3 logical runtime roles:
 
-## Core Architecture (3-Layer)
+- background (service worker): dist/background.bundle.js (bundled from background.cjs; CommonJS runtime)
+- content: dist/content.bundle.js (UI + page integration; uses Shadow DOM)
+- offscreen: dist/offscreen.bundle.js (full DOM environment for HTML parsing/cleaning)
 
-- **Background Script** (`background.js`): Service worker handling Firebase, API calls, AI services. Delegates DOM parsing to offscreen.
-- **Content Script** (`content.js` → `dist/content.bundle.js`): Injected into web pages for UI rendering and user interactions. Uses Shadow DOM for isolation.
-- **Offscreen Document** (`offscreen.js`): Handles DOM parsing and HTML sanitization (DOMPurify, Marked) due to background script restrictions.
+Key developer flows / commands
 
-## Build & Debug Workflow
+- Build: `npm run build` (webpack production)
+- Dev watch: `npm run watch` (webpack --watch)
+- Tests: `npm test` (Jest)
+- Lint: `npm run lint` / `npm run lint:fix`
+- Required runtime: Node 18–22, Chrome 109+ (offscreen API)
 
-- **Build**: `npm run build` (Webpack bundles JS) or `npm run watch` (auto-rebuild)
-- **Reload Extension**: `chrome://extensions/` → Refresh Content Pilot
-- **Reload Webpage**: Test page refresh after content script changes
-- **Debug Background**: `chrome://extensions/` → Content Pilot → "Inspect service worker"
-- **Debug Content**: Webpage dev tools console
+Important implementation notes (copy these when editing code)
 
-## Critical Patterns
+- Background is bundled from `background.cjs` and intentionally compiled to CommonJS. Keep background-specific code there when you need service-worker semantics.
+- Offscreen document (`offscreen.js`) is the safe DOM parser: heavy DOM parsing / sanitization (DOMPurify, Marked) should run there; background delegates these jobs.
+- `cleanDataForFirebase(data)` must be used before writes (converts undefined → null) — see `js/services/firebaseService.js`.
 
-### Frame Execution Rules
+Patterns and places to look
 
-```javascript
-setupHighlighter(); // ✅ All frames (iframes included)
+- UI and interaction code: `js/ui/*` (panel, dashboard, kanban, workspace)
+- Business services: `js/services/*` (aiService, analyticsService, authService, offscreenService)
+- Core helpers: `js/core/*` and `js/utils/*`
+- Build entry points: `content.js`, `background.cjs`, `offscreen.js`, `editor.js` (see webpack config)
 
-if (window.self === window.top) {
-  createAndShowPanel(); // ✅ Top frame only for UI
-}
-```
+Inter-process / runtime signals
 
-### Firebase Data Sanitization
+- Cross-frame UI: highlighter runs in all frames; main panel only runs when `window.self === window.top`.
+- Storage & state sync: uses `chrome.storage.local` for toggles and shared state across frames.
+- iframe editors communicate via postMessage (see `editor.html` / `editor.js` and parent listeners).
 
-Always call `cleanDataForFirebase(data)` before Firebase saves to convert `undefined` to `null`.
+Testing & CI hints
 
-### iframe Editor Communication
+- Unit tests use Jest with jsdom (see `test/` folder). Tests exercise service logic (e.g., `analyticsService`, `authService`) — use them to validate logic changes quickly.
 
-Editors run in iframes for focus isolation. Use postMessage:
+Where to find deeper docs
 
-```javascript
-// Parent: Send command
-editorIframe.contentWindow.postMessage(
-  { action: "set-content", data: { html } },
-  "*"
-);
+- Detailed guides and architecture docs are under `docs/` (AI_SERVICE_GUIDE.md, SERVICES_ARCHITECTURE.md, FIREBASE_CHANNELS_STRUCTURE.md).
 
-// iframe: Receive and respond
-window.addEventListener("message", (event) => {
-  if (event.source !== parentWindow) return;
-  // Handle action, postMessage back if needed
-});
-```
-
-### Alt Key Toggle Highlighter
-
-State managed in `chrome.storage.local` for cross-frame sync:
-
-```javascript
-chrome.storage.local.get(["highlightToggleState"], (result) => {
-  if (result.highlightToggleState) {
-    /* highlight */
-  }
-});
-```
-
-### Shadow DOM UI
-
-All UI components use Shadow DOM to avoid webpage CSS conflicts:
-
-```javascript
-const shadowRoot = host.attachShadow({ mode: "open" });
-shadowRoot.appendChild(styleLink); // chrome.runtime.getURL('css/style.css')
-```
-
-## Key Files & Directories
-
-- `js/core/`: Highlighter, scrapbook logic
-- `js/ui/`: Mode-specific UI (dashboard, kanban, workspace, etc.)
-- `js/services/`: Firebase, AI, analytics, auth services
-- `manifest.json`: Extension config (permissions: storage, offscreen, identity)
-- `webpack.config.js`: Bundles content/background/offscreen to `dist/`
-
-## Development Notes
-
-- Chrome 109+ required for offscreen API
-- All Firebase ops via REST API (not SDK in background)
-- AI: Gemini Pro/Vision for content generation and image analysis
-- OAuth: Google for GA4/AdSense integration</content>
-  <parameter name="filePath">c:\Content-Pilot\.github\copilot-instructions.md
+If anything is unclear or you want more examples, ask for the specific area (build, background, offscreen parser, or a particular service) and I’ll expand examples or add tests. ✅
+<parameter name="filePath">c:\Content-Pilot\.github\copilot-instructions.md

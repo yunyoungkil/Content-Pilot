@@ -22,6 +22,31 @@ import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js'
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
+// [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
+async function fetchImageAsBase64(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
+        const base64data = reader.result.split(',')[1];
+        resolve({
+          data: base64data,
+          mimeType: blob.type || 'image/jpeg', // MIME 타입 자동 감지
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    Logger.error('[fetchImageAsBase64] 이미지 변환 실패:', e);
+    return null;
+  }
+}
+
 // 1. Gemini API 호출 (Core)
 /**
  * Gemini API를 호출하여 텍스트 생성을 수행합니다.
@@ -308,16 +333,14 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 // 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
 
 /**
- * 아이디어 데이터를 기반으로 AI 초안을 생성합니다.
+ * 아이디어 데이터를 기반으로 AI 초안을 생성합니다. (부분 생성 지원)
  * @param {Object} ideaData - 초안 생성에 필요한 데이터
- * @param {string} ideaData.title - 콘텐츠 제목
- * @param {string} ideaData.description - 콘텐츠 설명
- * @param {string} ideaData.keywords - 키워드
- * @param {string} ideaData.persona - 페르소나 키
- * @param {string} ideaData.tone - 톤앤매너
+ * @param {Object} options - { generateDraft: boolean, generateThumbnail: boolean }
  * @returns {Promise<Object>} 생성된 초안 데이터
  */
-export async function generateDraftFromIdea(ideaData) {
+export async function generateDraftFromIdea(ideaData, options = {}) {
+  // 기본값: 옵션이 없으면 둘 다 생성 (기존 동작 유지)
+  const { generateDraft = true, generateThumbnail = true } = options;
   try {
     // 1. 페르소나 결정 (사용자 설정 > 자동 감지)
     let personaKey = ideaData.persona;
@@ -478,13 +501,34 @@ export async function generateDraftFromIdea(ideaData) {
     const longTailKeywords = ideaData.longTailKeywords || [];
     const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
 
-    // 6. 프롬프트 구성
-    // performanceInfo prepared but not used directly in prompt at this time
+    // 초안 생성 (generateDraft 옵션에 따라 조건부 실행)
+    let rawDraft = null;
+    let cleanedDraft = '';
+    let formattedDraft = '';
+    let thumbnailCandidates = [];
+    let thumbnailUrls = [];
+    let seoTitle = null;
+    let jsonLdSchema = null;
+    let permalink = '';
+    let tagsForPublish = '';
 
-    // 백업 파일의 상세한 프롬프트 구성
-    const prompt = `
+    if (generateDraft) {
+      // 백업 파일의 상세한 프롬프트 구성
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const currentDateString = today.toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const prompt = `
             ${systemPrompt}
             
+            [현재 시점 정보]
+            - 오늘 날짜: ${currentDateString}
+            - **현재 연도: ${currentYear}년**
+            - 주의: 글을 작성할 때 반드시 **${currentYear}년**을 기준으로 최신 정보를 반영하고, 제목이나 본문에 연도가 들어갈 경우 **${currentYear}년**을 사용하세요. (과거 연도 사용 금지)
+
             [작성 요청]
             아래 정보를 바탕으로 블로그 포스트 초안을 작성해주세요.
             
@@ -495,6 +539,8 @@ export async function generateDraftFromIdea(ideaData) {
 
             ### 1-1. SEO 최적화된 실제 초안 제목 생성
             위 아이디어 제목을 참고하여, 검색 노출에 최적화되고 독자의 체류시간을 늘릴 수 있는 실제 초안 제목을 생성해주세요.
+            - **${currentYear}년**을 기준으로 최신 트렌드와 정보를 반영한 제목을 생성하세요.
+            - 제목에 연도가 들어갈 경우 반드시 **${currentYear}년**을 사용하세요. (예: "2023년" 같은 과거 연도 사용 금지)
             - 검색 키워드를 자연스럽게 포함
             - 클릭을 유도하는 제목
             - 독자의 문제를 해결하거나 유용한 정보를 제공한다는 것을 명확히 표현
@@ -736,6 +782,13 @@ export async function generateDraftFromIdea(ideaData) {
 
               초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
               
+              // ▼▼▼ [추가] 제휴 상품 반영 필수 규칙 시작 ▼▼▼
+              [제휴 상품 반영 필수 규칙]
+              - 앞서 제공된 **'제휴 마케팅 링크 (수익화)' 목록에 상품이 있는 경우**, 3가지 썸네일 프롬프트(thumbnailPromptEn) 중 최소 2개에는 **해당 상품의 구체적인 외형이나 상품명을 반드시 포함**시켜야 합니다.
+              - 예: 글 주제가 '청소기 추천'이고 제휴 상품이 '다이슨 V15'라면, 프롬프트에 "Dyson V15 vacuum cleaner standing in a modern living room..."과 같이 구체적으로 명시하세요.
+              - 단순히 "Vacuum cleaner"라고 하지 말고 "Specific Product Name"을 포함하여 AI가 해당 제품과 최대한 유사한 이미지를 생성하도록 유도하세요.
+              // ▲▲▲ [추가] 제휴 상품 반영 지침 끝 ▲▲▲
+              
               각 컨셉의 특징:
 
               1. **호기심 자극형 (curiosity)**: "이거 모르면 손해", "충격적인 사실" 등 강렬한 문구와 시선을 끄는 이미지.
@@ -806,6 +859,7 @@ export async function generateDraftFromIdea(ideaData) {
                 * 질문 형식, 감탄 형식, 혜택 강조 형식 등을 활용할 수 있습니다.
               - **썸네일 이미지 프롬프트 작성 요령**: 
                 * 커버 이미지는 글의 첫인상을 결정하는 만큼 눈에 확 들어오는 핵심 이미지를 사용해야 합니다.
+                * **제휴 상품이 있다면 해당 상품이 주인공이 되도록 묘사해주세요.** (추가됨)
                 * 전체적인 인상을 생생하게 느낄 수 있는 이미지라면 더더욱 좋습니다.
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
@@ -834,271 +888,272 @@ export async function generateDraftFromIdea(ideaData) {
             - 절대 금지: \`\`\`markdown으로 감싸거나, JSON 형식으로 감싸지 마세요.
         `;
 
-    const rawDraft = await callGeminiAPI(prompt);
+      const rawDraft = await callGeminiAPI(prompt);
 
-    // 빈 응답 및 오류 응답 처리
-    if (!rawDraft || rawDraft.trim() === '') {
-      Logger.error('[generateDraftFromIdea] 초안이 비어있습니다.');
-      return {
-        success: false,
-        error: '초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.',
-      };
-    }
-
-    if (rawDraft.startsWith('오류:') || rawDraft.includes('오류:')) {
-      Logger.error('[generateDraftFromIdea] Gemini API 오류:', rawDraft);
-      const errorMessage =
-        rawDraft.replace(/^오류:\s*/i, '').trim() || 'Gemini API에서 오류가 발생했습니다.';
-      return { success: false, error: errorMessage };
-    }
-
-    // 응답이 너무 짧거나 유효하지 않은 경우 체크
-    if (rawDraft.trim().length < 50) {
-      Logger.warn('[generateDraftFromIdea] 초안이 너무 짧습니다:', rawDraft);
-      // 너무 짧은 경우에도 경고만 하고 계속 진행 (사용자가 확인할 수 있도록)
-    }
-
-    // 1. 마크다운 클리닝: 코드 블록 태그 제거
-    let cleanedDraft = rawDraft;
-    cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
-    cleanedDraft = cleanedDraft.trim();
-
-    // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
-    // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
-    let jsonLdSchema = null;
-    // cleanedDraft에서 먼저 찾고, 없으면 rawDraft에서 찾기
-    const jsonLdMatch =
-      cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) ||
-      rawDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i);
-
-    if (jsonLdMatch && jsonLdMatch[1]) {
-      try {
-        // JSON 파싱 시도
-        jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
-
-        // 본문에서 태그 제거 (사용자에게는 보이지 않아야 함)
-        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
-
-        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)');
-      } catch (e) {
-        Logger.warn('[generateDraftFromIdea] JSON-LD 파싱 실패:', e);
-        // 파싱 실패 시 null 반환 (본문에는 영향 없음)
-        // 태그는 제거
-        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
+      // 빈 응답 및 오류 응답 처리
+      if (!rawDraft || rawDraft.trim() === '') {
+        Logger.error('[generateDraftFromIdea] 초안이 비어있습니다.');
+        return {
+          success: false,
+          error: '초안이 생성되지 않았습니다. Gemini API 응답이 비어있습니다. 다시 시도해주세요.',
+        };
       }
-    }
 
-    // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
-    let thumbnailCandidates = [];
-    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
-
-    if (thumbnailMatch && thumbnailMatch[1]) {
-      try {
-        const parsed = JSON.parse(thumbnailMatch[1].trim());
-        if (Array.isArray(parsed)) {
-          thumbnailCandidates = parsed;
-        } else {
-          // 배열이 아닌 단일 객체로 온 경우 (구버전 호환)
-          thumbnailCandidates = [parsed];
-        }
-
-        // 태그 제거 (HTML 변환 전에 제거하여 본문에 포함되지 않도록)
-        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
-        Logger.debug('[generateDraftFromIdea] 썸네일 정보 추출 완료:', {
-          count: thumbnailCandidates.length,
-          types: thumbnailCandidates.map((c) => c.type),
-        });
-      } catch (e) {
-        Logger.error('[generateDraftFromIdea] 썸네일 JSON 파싱 실패:', e);
-        // 파싱 실패 시에도 태그는 제거
-        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+      if (rawDraft.startsWith('오류:') || rawDraft.includes('오류:')) {
+        Logger.error('[generateDraftFromIdea] Gemini API 오류:', rawDraft);
+        const errorMessage =
+          rawDraft.replace(/^오류:\s*/i, '').trim() || 'Gemini API에서 오류가 발생했습니다.';
+        return { success: false, error: errorMessage };
       }
-    }
 
-    // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
-    Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
-    let formattedDraft;
-    try {
-      formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
-    } catch (sanitizationError) {
-      Logger.error(
-        '[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):',
-        sanitizationError
-      );
-      // 정제 실패 시 비상 대책: 최소한의 특수문자만이라도 이스케이프하거나 에러 반환
-      // 여기서는 안전을 위해 에러를 던지는 것이 맞음
-      throw new Error('보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.');
-    }
+      // 응답이 너무 짧거나 유효하지 않은 경우 체크
+      if (rawDraft.trim().length < 50) {
+        Logger.warn('[generateDraftFromIdea] 초안이 너무 짧습니다:', rawDraft);
+        // 너무 짧은 경우에도 경고만 하고 계속 진행 (사용자가 확인할 수 있도록)
+      }
 
-    // 3. SEO 최적화된 제목 추출 (h1 태그에서)
-    // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
-    let seoTitle = null;
-    const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-    if (h1Match && h1Match[1]) {
-      seoTitle = h1Match[1].trim();
-    }
+      // 1. 마크다운 클리닝: 코드 블록 태그 제거
+      let cleanedDraft = rawDraft;
+      cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
+      cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
+      cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
+      cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
+      cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
+      cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
+      cleanedDraft = cleanedDraft.trim();
 
-    // 4. 제목이 포함되어 있지 않으면 h1으로 추가
-    const title = ideaData.title || '';
-    if (title) {
-      // h1 태그나 # 제목 형식이 없으면 추가
-      const hasH1 = /<h1[^>]*>|<h1>|^#\s+/i.test(formattedDraft);
-      if (!hasH1) {
-        // 마크다운 형식이면 # 제목, HTML이면 <h1>제목</h1> 추가
-        if (formattedDraft.includes('<')) {
-          // HTML 형식
-          formattedDraft = `<h1>${title}</h1>\n${formattedDraft}`;
-          seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
-        } else {
-          // 마크다운 형식
-          formattedDraft = `# ${title}\n\n${formattedDraft}`;
-          seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
-        }
-      } else {
-        // h1이 이미 있었지만 seoTitle이 추출되지 않았다면 다시 시도
-        if (!seoTitle) {
-          const h1MatchRetry =
-            formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || formattedDraft.match(/^#\s+(.+)$/m);
-          if (h1MatchRetry && h1MatchRetry[1]) {
-            seoTitle = h1MatchRetry[1].trim();
-          }
+      // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
+      // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
+      let jsonLdSchema = null;
+      // cleanedDraft에서 먼저 찾고, 없으면 rawDraft에서 찾기
+      const jsonLdMatch =
+        cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) ||
+        rawDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i);
+
+      if (jsonLdMatch && jsonLdMatch[1]) {
+        try {
+          // JSON 파싱 시도
+          jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
+
+          // 본문에서 태그 제거 (사용자에게는 보이지 않아야 함)
+          cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
+
+          Logger.info('[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)');
+        } catch (e) {
+          Logger.warn('[generateDraftFromIdea] JSON-LD 파싱 실패:', e);
+          // 파싱 실패 시 null 반환 (본문에는 영향 없음)
+          // 태그는 제거
+          cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
         }
       }
-    }
 
-    // seoTitle이 여전히 없으면 기본 title 사용
-    if (!seoTitle) {
-      seoTitle = title;
-    }
+      // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
+      let thumbnailCandidates = [];
+      const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
 
-    // [신규] 4-1. JSON-LD 스키마 후처리 (seoTitle 추출 후 실제 데이터로 보완)
-    if (jsonLdSchema) {
-      try {
-        const now = new Date();
-        const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
-
-        // headline이 없거나 비어있으면 seoTitle 사용
-        if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === '') {
-          jsonLdSchema.headline = seoTitle || ideaData.title || '';
-        }
-
-        // description이 없거나 비어있으면 ideaData.description 사용
-        if (!jsonLdSchema.description || jsonLdSchema.description.trim() === '') {
-          jsonLdSchema.description = ideaData.description || '';
-          // description이 너무 길면 200자로 제한
-          if (jsonLdSchema.description.length > 200) {
-            jsonLdSchema.description = jsonLdSchema.description.substring(0, 197) + '...';
-          }
-        }
-
-        // datePublished가 없거나 잘못된 형식이면 현재 날짜 사용
-        if (
-          !jsonLdSchema.datePublished ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(jsonLdSchema.datePublished)
-        ) {
-          jsonLdSchema.datePublished = today;
-        }
-
-        // [신규] dateModified 필드 추가 (필수)
-        jsonLdSchema.dateModified = today;
-
-        // author가 없거나 비어있으면 채널 정보 또는 기본값 사용
-        if (
-          !jsonLdSchema.author ||
-          !jsonLdSchema.author.name ||
-          jsonLdSchema.author.name === 'Content Pilot'
-        ) {
-          const authorName = channelInfo?.inputUrl
-            ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
-            : 'Content Pilot';
-          jsonLdSchema.author = {
-            '@type': 'Person',
-            name: authorName,
-          };
-        }
-
-        // [신규] image 필드를 배열로 처리 (thumbnailUrls가 있으면 실제 URL 사용)
-        // thumbnailUrls는 나중에 설정되므로 여기서는 기본 처리만
-        if (
-          !jsonLdSchema.image ||
-          jsonLdSchema.image === 'https://example.com/image.jpg' ||
-          jsonLdSchema.image.includes('example.com')
-        ) {
-          // 채널의 대표 이미지가 있으면 사용, 없으면 제거 (선택 필드)
-          if (channelInfo?.thumbnail || channelInfo?.logo) {
-            // 배열 형태로 변환
-            const channelImage = channelInfo.thumbnail || channelInfo.logo;
-            jsonLdSchema.image = [channelImage, channelImage, channelImage]; // 3가지 비율 모두 동일 이미지
+      if (thumbnailMatch && thumbnailMatch[1]) {
+        try {
+          const parsed = JSON.parse(thumbnailMatch[1].trim());
+          if (Array.isArray(parsed)) {
+            thumbnailCandidates = parsed;
           } else {
-            // image 필드를 제거 (Google은 선택 필드로 처리)
-            delete jsonLdSchema.image;
+            // 배열이 아닌 단일 객체로 온 경우 (구버전 호환)
+            thumbnailCandidates = [parsed];
           }
-        } else if (typeof jsonLdSchema.image === 'string') {
-          // 문자열인 경우 배열로 변환
-          jsonLdSchema.image = [jsonLdSchema.image, jsonLdSchema.image, jsonLdSchema.image];
-        } else if (!Array.isArray(jsonLdSchema.image)) {
-          // 배열도 문자열도 아닌 경우 배열로 변환
-          jsonLdSchema.image = [
-            String(jsonLdSchema.image),
-            String(jsonLdSchema.image),
-            String(jsonLdSchema.image),
-          ];
-        }
 
-        // url이 없고 publishInfo에 permalink가 있으면 조합
-        if (!jsonLdSchema.url && ideaData.publishInfo?.permalink && channelInfo?.inputUrl) {
-          try {
-            const channelUrl = new URL(channelInfo.inputUrl);
-            const isTistory = channelUrl.hostname.includes('tistory.com');
-            if (isTistory) {
-              jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
-            } else {
-              jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
-            }
-          } catch (e) {
-            // URL 조합 실패 시 무시
-          }
+          // 태그 제거 (HTML 변환 전에 제거하여 본문에 포함되지 않도록)
+          cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+          Logger.debug('[generateDraftFromIdea] 썸네일 정보 추출 완료:', {
+            count: thumbnailCandidates.length,
+            types: thumbnailCandidates.map((c) => c.type),
+          });
+        } catch (e) {
+          Logger.error('[generateDraftFromIdea] 썸네일 JSON 파싱 실패:', e);
+          // 파싱 실패 시에도 태그는 제거
+          cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
         }
-
-        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 후처리 완료', {
-          headline: jsonLdSchema.headline?.substring(0, 50),
-          hasDescription: !!jsonLdSchema.description,
-          datePublished: jsonLdSchema.datePublished,
-          author: jsonLdSchema.author?.name,
-          hasImage: !!jsonLdSchema.image,
-          hasUrl: !!jsonLdSchema.url,
-        });
-      } catch (e) {
-        Logger.warn('[generateDraftFromIdea] JSON-LD 후처리 실패:', e);
-        // 후처리 실패해도 기본 스키마는 유지
       }
-    }
 
-    // 5. 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
-    const generatePermalink = async (title) => {
-      if (!title) return '';
+      // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
+      Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
+      let formattedDraft;
+      try {
+        formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
+      } catch (sanitizationError) {
+        Logger.error(
+          '[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):',
+          sanitizationError
+        );
+        // 정제 실패 시 비상 대책: 최소한의 특수문자만이라도 이스케이프하거나 에러 반환
+        // 여기서는 안전을 위해 에러를 던지는 것이 맞음
+        throw new Error('보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.');
+      }
 
-      // 기본 변환 함수 (빠른 폴백)
-      const defaultConversion = (text) => {
-        return text
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지 (한글 제거)
-          .replace(/\s+/g, '-') // 공백을 하이픈으로
-          .replace(/-+/g, '-') // 연속된 하이픈을 하나로
-          .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
-          .substring(0, 100); // 최대 100자
-      };
+      // 3. SEO 최적화된 제목 추출 (h1 태그에서)
+      // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
+      let seoTitle = null;
+      const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match && h1Match[1]) {
+        seoTitle = h1Match[1].trim();
+      }
 
-      // 타임아웃을 포함한 Promise로 래핑
-      const translationWithTimeout = Promise.race([
-        (async () => {
-          try {
-            const translationPrompt = `다음 한국어 제목을 SEO에 최적화된 영문 URL 슬러그로 변환해주세요. 
+      // 4. 제목이 포함되어 있지 않으면 h1으로 추가
+      const title = ideaData.title || '';
+      if (title) {
+        // h1 태그나 # 제목 형식이 없으면 추가
+        const hasH1 = /<h1[^>]*>|<h1>|^#\s+/i.test(formattedDraft);
+        if (!hasH1) {
+          // 마크다운 형식이면 # 제목, HTML이면 <h1>제목</h1> 추가
+          if (formattedDraft.includes('<')) {
+            // HTML 형식
+            formattedDraft = `<h1>${title}</h1>\n${formattedDraft}`;
+            seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
+          } else {
+            // 마크다운 형식
+            formattedDraft = `# ${title}\n\n${formattedDraft}`;
+            seoTitle = title; // 새로 추가된 제목을 seoTitle로 설정
+          }
+        } else {
+          // h1이 이미 있었지만 seoTitle이 추출되지 않았다면 다시 시도
+          if (!seoTitle) {
+            const h1MatchRetry =
+              formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) ||
+              formattedDraft.match(/^#\s+(.+)$/m);
+            if (h1MatchRetry && h1MatchRetry[1]) {
+              seoTitle = h1MatchRetry[1].trim();
+            }
+          }
+        }
+      }
+
+      // seoTitle이 여전히 없으면 기본 title 사용
+      if (!seoTitle) {
+        seoTitle = title;
+      }
+
+      // [신규] 4-1. JSON-LD 스키마 후처리 (seoTitle 추출 후 실제 데이터로 보완)
+      if (jsonLdSchema) {
+        try {
+          const now = new Date();
+          const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+
+          // headline이 없거나 비어있으면 seoTitle 사용
+          if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === '') {
+            jsonLdSchema.headline = seoTitle || ideaData.title || '';
+          }
+
+          // description이 없거나 비어있으면 ideaData.description 사용
+          if (!jsonLdSchema.description || jsonLdSchema.description.trim() === '') {
+            jsonLdSchema.description = ideaData.description || '';
+            // description이 너무 길면 200자로 제한
+            if (jsonLdSchema.description.length > 200) {
+              jsonLdSchema.description = jsonLdSchema.description.substring(0, 197) + '...';
+            }
+          }
+
+          // datePublished가 없거나 잘못된 형식이면 현재 날짜 사용
+          if (
+            !jsonLdSchema.datePublished ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(jsonLdSchema.datePublished)
+          ) {
+            jsonLdSchema.datePublished = today;
+          }
+
+          // [신규] dateModified 필드 추가 (필수)
+          jsonLdSchema.dateModified = today;
+
+          // author가 없거나 비어있으면 채널 정보 또는 기본값 사용
+          if (
+            !jsonLdSchema.author ||
+            !jsonLdSchema.author.name ||
+            jsonLdSchema.author.name === 'Content Pilot'
+          ) {
+            const authorName = channelInfo?.inputUrl
+              ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+              : 'Content Pilot';
+            jsonLdSchema.author = {
+              '@type': 'Person',
+              name: authorName,
+            };
+          }
+
+          // [신규] image 필드를 배열로 처리 (thumbnailUrls가 있으면 실제 URL 사용)
+          // thumbnailUrls는 나중에 설정되므로 여기서는 기본 처리만
+          if (
+            !jsonLdSchema.image ||
+            jsonLdSchema.image === 'https://example.com/image.jpg' ||
+            jsonLdSchema.image.includes('example.com')
+          ) {
+            // 채널의 대표 이미지가 있으면 사용, 없으면 제거 (선택 필드)
+            if (channelInfo?.thumbnail || channelInfo?.logo) {
+              // 배열 형태로 변환
+              const channelImage = channelInfo.thumbnail || channelInfo.logo;
+              jsonLdSchema.image = [channelImage, channelImage, channelImage]; // 3가지 비율 모두 동일 이미지
+            } else {
+              // image 필드를 제거 (Google은 선택 필드로 처리)
+              delete jsonLdSchema.image;
+            }
+          } else if (typeof jsonLdSchema.image === 'string') {
+            // 문자열인 경우 배열로 변환
+            jsonLdSchema.image = [jsonLdSchema.image, jsonLdSchema.image, jsonLdSchema.image];
+          } else if (!Array.isArray(jsonLdSchema.image)) {
+            // 배열도 문자열도 아닌 경우 배열로 변환
+            jsonLdSchema.image = [
+              String(jsonLdSchema.image),
+              String(jsonLdSchema.image),
+              String(jsonLdSchema.image),
+            ];
+          }
+
+          // url이 없고 publishInfo에 permalink가 있으면 조합
+          if (!jsonLdSchema.url && ideaData.publishInfo?.permalink && channelInfo?.inputUrl) {
+            try {
+              const channelUrl = new URL(channelInfo.inputUrl);
+              const isTistory = channelUrl.hostname.includes('tistory.com');
+              if (isTistory) {
+                jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
+              } else {
+                jsonLdSchema.url = `${channelUrl.origin}/${ideaData.publishInfo.permalink}`;
+              }
+            } catch (e) {
+              // URL 조합 실패 시 무시
+            }
+          }
+
+          Logger.info('[generateDraftFromIdea] JSON-LD 스키마 후처리 완료', {
+            headline: jsonLdSchema.headline?.substring(0, 50),
+            hasDescription: !!jsonLdSchema.description,
+            datePublished: jsonLdSchema.datePublished,
+            author: jsonLdSchema.author?.name,
+            hasImage: !!jsonLdSchema.image,
+            hasUrl: !!jsonLdSchema.url,
+          });
+        } catch (e) {
+          Logger.warn('[generateDraftFromIdea] JSON-LD 후처리 실패:', e);
+          // 후처리 실패해도 기본 스키마는 유지
+        }
+      }
+
+      // 5. 퍼머링크 생성 (영문만, URL-safe) - 한글을 영문으로 변환
+      const generatePermalink = async (title) => {
+        if (!title) return '';
+
+        // 기본 변환 함수 (빠른 폴백)
+        const defaultConversion = (text) => {
+          return text
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지 (한글 제거)
+            .replace(/\s+/g, '-') // 공백을 하이픈으로
+            .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+            .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
+            .substring(0, 100); // 최대 100자
+        };
+
+        // 타임아웃을 포함한 Promise로 래핑
+        const translationWithTimeout = Promise.race([
+          (async () => {
+            try {
+              const translationPrompt = `다음 한국어 제목을 SEO에 최적화된 영문 URL 슬러그로 변환해주세요. 
 - 영문, 숫자, 하이픈만 사용
 - 소문자로 변환
 - 공백은 하이픈으로
@@ -1109,222 +1164,267 @@ export async function generateDraftFromIdea(ideaData) {
 
 영문 슬러그만 반환해주세요 (설명 없이):`;
 
-            const translated = await callGeminiAPI(translationPrompt);
-            if (translated && !translated.startsWith('오류:')) {
-              return translated
-                .trim()
-                .toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지
-                .replace(/\s+/g, '-') // 공백을 하이픈으로
-                .replace(/-+/g, '-') // 연속된 하이픈을 하나로
-                .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
-                .substring(0, 100); // 최대 100자
+              const translated = await callGeminiAPI(translationPrompt);
+              if (translated && !translated.startsWith('오류:')) {
+                return translated
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[^a-z0-9\s-]/g, '') // 영문, 숫자, 공백, 하이픈만 유지
+                  .replace(/\s+/g, '-') // 공백을 하이픈으로
+                  .replace(/-+/g, '-') // 연속된 하이픈을 하나로
+                  .replace(/^-|-$/g, '') // 앞뒤 하이픈 제거
+                  .substring(0, 100); // 최대 100자
+              }
+            } catch (e) {
+              Logger.error('퍼머링크 번역 실패:', e);
             }
-          } catch (e) {
-            Logger.error('퍼머링크 번역 실패:', e);
-          }
-          return null;
-        })(),
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000)), // 5초 타임아웃
-      ]);
+            return null;
+          })(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 5000)), // 5초 타임아웃
+        ]);
 
-      try {
-        const translated = await translationWithTimeout;
-        if (translated) {
-          return translated;
+        try {
+          const translated = await translationWithTimeout;
+          if (translated) {
+            return translated;
+          }
+        } catch (e) {
+          Logger.error('퍼머링크 생성 중 오류:', e);
         }
+
+        // 번역 실패 또는 타임아웃 시 기본 변환 반환
+        return defaultConversion(title);
+      };
+
+      // 퍼머링크 생성 (타임아웃 보호)
+      try {
+        permalink = await generatePermalink(seoTitle || title);
       } catch (e) {
-        Logger.error('퍼머링크 생성 중 오류:', e);
+        Logger.error('퍼머링크 생성 실패, 기본값 사용:', e);
+        // 기본 변환 사용
+        const titleForPermalink = seoTitle || title || '';
+        permalink = titleForPermalink
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          .substring(0, 100);
       }
 
-      // 번역 실패 또는 타임아웃 시 기본 변환 반환
-      return defaultConversion(title);
-    };
+      // 6. 태그 생성 (쉼표 구분)
+      tagsForPublish = tags
+        .map((t) => t.replace(/^#/, ''))
+        .filter((t) => t && t !== 'AI-추천')
+        .join(', ');
 
-    // 퍼머링크 생성 (타임아웃 보호)
-    let permalink = '';
-    try {
-      permalink = await generatePermalink(seoTitle || title);
-    } catch (e) {
-      Logger.error('퍼머링크 생성 실패, 기본값 사용:', e);
-      // 기본 변환 사용
-      const titleForPermalink = seoTitle || title || '';
-      permalink = titleForPermalink
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 100);
-    }
-
-    // 6. 태그 생성 (쉼표 구분)
-    const tagsForPublish = tags
-      .map((t) => t.replace(/^#/, ''))
-      .filter((t) => t && t !== 'AI-추천')
-      .join(', ');
-
-    // 7. 썸네일 정보가 없거나 실패 시 기본값 생성 (3가지 컨셉 강제 생성)
-    // (썸네일 정보는 이미 위에서 추출되었으므로, 여기서는 기본값 생성만 처리)
-    if (thumbnailCandidates.length === 0) {
-      const baseTitle = seoTitle || title || '콘텐츠';
-      thumbnailCandidates = [
-        {
-          type: 'curiosity',
-          thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-          thumbnailText: '이거 실화냐?',
-        },
-        {
-          type: 'informative',
-          thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
-          thumbnailText: '완벽 정리',
-        },
-        {
-          type: 'emotional',
-          thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
-          thumbnailText: '당신을 위한',
-        },
-      ];
-    }
-
-    // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
-    let thumbnailUrls = null; // { url_1x1, url_4x3, url_16x9, altText }
-    if (thumbnailCandidates.length > 0 && permalink) {
-      try {
-        const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
-        Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
-          type: selectedThumbnail.type,
-          permalink: permalink.substring(0, 30),
-        });
-
-        // 1. 16:9 원본 배경 이미지 생성 (AI - 텍스트 없이)
-        const originalImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
-        if (originalImages.length === 0) {
-          throw new Error('썸네일 이미지 생성 실패');
-        }
-
-        // 2. [신규] 텍스트 합성 (하이브리드 합성)
-        const thumbnailText =
-          selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
-        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
-          text: thumbnailText,
-        });
-
-        const textPosition = selectedThumbnail.textPosition || 'bottom'; // AI가 결정한 위치 또는 기본값
-        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
-          text: thumbnailText,
-          position: textPosition,
-        });
-
-        const composedDataUrl = await composeThumbnailInOffscreen(
-          originalImages[0],
-          thumbnailText,
-          textPosition
-        );
-
-        // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
-        const userId = await getCurrentUserId();
-        const cropPromises = [
-          // 1:1 비율
-          cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({
-            ratio: '1x1',
-            dataUrl,
-          })),
-          // 4:3 비율
-          cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({
-            ratio: '4x3',
-            dataUrl,
-          })),
+      // 7. 썸네일 정보가 없거나 실패 시 기본값 생성 (3가지 컨셉 강제 생성)
+      // (썸네일 정보는 이미 위에서 추출되었으므로, 여기서는 기본값 생성만 처리)
+      if (thumbnailCandidates.length === 0) {
+        const baseTitle = seoTitle || title || '콘텐츠';
+        thumbnailCandidates = [
+          {
+            type: 'curiosity',
+            thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+            thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
+            thumbnailText: '이거 실화냐?',
+          },
+          {
+            type: 'informative',
+            thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
+            thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
+            thumbnailText: '완벽 정리',
+          },
+          {
+            type: 'emotional',
+            thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
+            thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
+            thumbnailText: '당신을 위한',
+          },
         ];
-
-        const croppedResults = await Promise.all(cropPromises);
-
-        // 4. SEO 파일명으로 업로드
-        const uploadPromises = [
-          // 1:1 업로드
-          uploadImageToFirebaseStorage(
-            croppedResults[0].dataUrl,
-            `thumbnails/${userId}/${permalink}-1x1.png`,
-            userId
-          ),
-          // 4:3 업로드
-          uploadImageToFirebaseStorage(
-            croppedResults[1].dataUrl,
-            `thumbnails/${userId}/${permalink}-4x3.png`,
-            userId
-          ),
-          // 16:9 업로드 (합성된 이미지)
-          uploadImageToFirebaseStorage(
-            composedDataUrl,
-            `thumbnails/${userId}/${permalink}-16x9.png`,
-            userId
-          ),
-        ];
-
-        const [url_1x1, url_4x3, url_16x9] = await Promise.all(uploadPromises);
-
-        thumbnailUrls = {
-          url_1x1,
-          url_4x3,
-          url_16x9,
-          altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
-        };
-
-        Logger.info('[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:', {
-          url_1x1: url_1x1.substring(0, 50) + '...',
-          url_4x3: url_4x3.substring(0, 50) + '...',
-          url_16x9: url_16x9.substring(0, 50) + '...',
-        });
-
-        // [신규] JSON-LD image 배열을 실제 Firebase URL로 교체
-        if (jsonLdSchema) {
-          jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
-          Logger.info('[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료');
-        }
-      } catch (error) {
-        Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
-        Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
-          errorMessage: error.message,
-          errorStack: error.stack,
-          permalink: permalink?.substring(0, 30),
-          hasThumbnailCandidates: thumbnailCandidates.length > 0,
-        });
-        // 썸네일 생성 실패해도 초안 생성은 계속 진행
       }
-    }
 
-    // [신규] HTML 본문에 대표 이미지 삽입 및 alt 속성 추가
-    if (thumbnailUrls && thumbnailUrls.url_16x9) {
-      try {
-        // 본문의 첫 번째 이미지 태그를 찾아서 교체하거나, 없으면 삽입
-        const imgTagRegex = /<img[^>]*>/i;
-        const firstImgMatch = formattedDraft.match(imgTagRegex);
+      // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
+      // { url_1x1, url_4x3, url_16x9, altText }
+      if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
+        try {
+          const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
+          Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
+            type: selectedThumbnail.type,
+            permalink: permalink.substring(0, 30),
+          });
 
-        if (firstImgMatch) {
-          // 첫 번째 이미지 태그를 교체
-          const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${
-            thumbnailUrls.altText || seoTitle || ideaData.title
-          }" style="max-width: 100%; height: auto; display: block;">`;
-          formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
-        } else {
-          // 이미지 태그가 없으면 제목 바로 아래에 삽입
-          const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-          if (h1Match) {
-            const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
-            const imgTag = `\n<img src="${thumbnailUrls.url_16x9}" alt="${
-              thumbnailUrls.altText || seoTitle || ideaData.title
-            }" style="max-width: 100%; height: auto; display: block;">\n`;
-            formattedDraft =
-              formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
+          // 1. 이미지 소스 결정 (제휴 제품 이미지 기반 합성 vs 순수 AI 생성)
+          let generatedImages = [];
+          let isProductSynthesis = false;
+
+          // 제휴 링크 중 이미지가 있는 항목 찾기
+          const productLink =
+            affiliateLinks &&
+            affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
+
+          if (productLink) {
+            Logger.info(
+              '[generateDraftFromIdea] 🛍️ 제휴 상품 이미지 발견, AI 합성을 시도합니다:',
+              productLink.cardData.productName
+            );
+
+            // 1-1. 제품 이미지 다운로드 및 Base64 변환
+            const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
+
+            if (productBase64) {
+              // 1-2. 합성용 프롬프트 생성 (제품을 강조하는 배경 생성 요청)
+              // 예: "Professional product photography of [Product] on a [Concept] background..."
+              const synthesisPrompt = `
+              [Instruction]
+              Create a professional product photograph featuring the object from the [Provided Reference Image].
+              
+              [Composition]
+              Place the object seamlessly into the following scene: "${selectedThumbnail.thumbnailPromptEn}".
+              
+              [Constraints]
+              - Use the [Provided Reference Image] as the main subject. Do NOT generate a new product.
+              - If the text description conflicts with the reference image, prioritize the visual details of the reference image.
+              - Ensure natural lighting, shadows, and reflections matching the background.
+              - Style: 4k, photorealistic, cinematic lighting.
+            `.trim();
+
+              Logger.debug('[generateDraftFromIdea] 합성 프롬프트:', synthesisPrompt);
+
+              // 1-3. 이미지 + 프롬프트로 AI 생성 요청
+              try {
+                generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+                isProductSynthesis = true;
+              } catch (err) {
+                Logger.warn('[generateDraftFromIdea] 합성 실패, 순수 AI 생성으로 전환합니다:', err);
+              }
+            }
           }
-        }
 
-        Logger.info('[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료');
-      } catch (error) {
-        Logger.warn('[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:', error);
+          // 합성이 실패했거나 제품 이미지가 없으면 일반 AI 생성 시도
+          if (generatedImages.length === 0) {
+            generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+          }
+
+          const sourceImageUrl = generatedImages[0];
+
+          // 2. [신규] 텍스트 합성 (하이브리드 합성)
+          const thumbnailText =
+            selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+          const textPosition = selectedThumbnail.textPosition || 'bottom';
+          Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
+            text: thumbnailText,
+            position: textPosition,
+            type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation',
+          });
+
+          const composedDataUrl = await composeThumbnailInOffscreen(
+            sourceImageUrl,
+            thumbnailText,
+            textPosition
+          );
+
+          // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
+          const userId = await getCurrentUserId();
+          const cropPromises = [
+            // 1:1 비율
+            cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({
+              ratio: '1x1',
+              dataUrl,
+            })),
+            // 4:3 비율
+            cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({
+              ratio: '4x3',
+              dataUrl,
+            })),
+          ];
+
+          const croppedResults = await Promise.all(cropPromises);
+
+          // 4. SEO 파일명으로 업로드
+          const uploadPromises = [
+            // 1:1 업로드
+            uploadImageToFirebaseStorage(
+              croppedResults[0].dataUrl,
+              `thumbnails/${userId}/${permalink}-1x1.png`,
+              userId
+            ),
+            // 4:3 업로드
+            uploadImageToFirebaseStorage(
+              croppedResults[1].dataUrl,
+              `thumbnails/${userId}/${permalink}-4x3.png`,
+              userId
+            ),
+            // 16:9 업로드 (합성된 이미지)
+            uploadImageToFirebaseStorage(
+              composedDataUrl,
+              `thumbnails/${userId}/${permalink}-16x9.png`,
+              userId
+            ),
+          ];
+
+          const [url_1x1, url_4x3, url_16x9] = await Promise.all(uploadPromises);
+
+          thumbnailUrls = {
+            url_1x1,
+            url_4x3,
+            url_16x9,
+            altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
+          };
+
+          Logger.info('[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:', {
+            url_1x1: url_1x1.substring(0, 50) + '...',
+            url_4x3: url_4x3.substring(0, 50) + '...',
+            url_16x9: url_16x9.substring(0, 50) + '...',
+          });
+
+          // [신규] JSON-LD image 배열을 실제 Firebase URL로 교체
+          if (jsonLdSchema) {
+            jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
+            Logger.info('[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료');
+          }
+        } catch (error) {
+          Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
+          Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            permalink: permalink?.substring(0, 30),
+            hasThumbnailCandidates: thumbnailCandidates.length > 0,
+          });
+          // 썸네일 생성 실패해도 초안 생성은 계속 진행
+        }
+      }
+
+      // [신규] HTML 본문에 대표 이미지 삽입 및 alt 속성 추가
+      if (thumbnailUrls && thumbnailUrls.url_16x9) {
+        try {
+          // 본문의 첫 번째 이미지 태그를 찾아서 교체하거나, 없으면 삽입
+          const imgTagRegex = /<img[^>]*>/i;
+          const firstImgMatch = formattedDraft.match(imgTagRegex);
+
+          if (firstImgMatch) {
+            // 첫 번째 이미지 태그를 교체
+            const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${
+              thumbnailUrls.altText || seoTitle || ideaData.title
+            }" style="max-width: 100%; height: auto; display: block;">`;
+            formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
+          } else {
+            // 이미지 태그가 없으면 제목 바로 아래에 삽입
+            const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+            if (h1Match) {
+              const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
+              const imgTag = `\n<img src="${thumbnailUrls.url_16x9}" alt="${
+                thumbnailUrls.altText || seoTitle || ideaData.title
+              }" style="max-width: 100%; height: auto; display: block;">\n`;
+              formattedDraft =
+                formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
+            }
+          }
+
+          Logger.info('[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료');
+        } catch (error) {
+          Logger.warn('[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:', error);
+        }
       }
     }
 
@@ -1768,7 +1868,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
 // 7. 이미지 생성
 // 7. 이미지 생성 (병렬 처리 적용)
-export async function generateAiImage(prompt, count = 1) {
+export async function generateAiImage(prompt, count = 1, referenceImage = null) {
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
     throw new Error('Gemini API 키가 없습니다.');
@@ -1784,10 +1884,24 @@ export async function generateAiImage(prompt, count = 1) {
   // 단일 이미지 생성 함수
   const generateSingleImage = async (index) => {
     try {
+      // [핵심] 페이로드 구성: 참조 이미지가 있으면 포함
+      const parts = [{ text: prompt }];
+
+      // 참조 이미지(제품 이미지)가 있으면 페이로드에 추가 (고급 합성/편집 모드 트리거)
+      if (referenceImage && referenceImage.data) {
+        parts.push({
+          inlineData: {
+            mimeType: referenceImage.mimeType,
+            data: referenceImage.data,
+          },
+        });
+        Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
+      }
+
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({ contents: [{ parts: parts }] }),
       });
 
       if (!res.ok) {

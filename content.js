@@ -65,6 +65,11 @@ if (window.self === window.top) {
   // 페이지 로드 시간 기록 (웹 페이지를 처음 열었을 때 감지용)
   window.__cp_pageLoadTime = Date.now();
 
+  // 초기화 시 자동으로 패널 표시 (테스트용)
+  setTimeout(() => {
+    createAndShowPanel();
+  }, 1000);
+
   // [최적화] 이벤트 기반 연결 상태 모니터링 (폴링 제거)
   function setupExtensionConnection() {
     let port = null;

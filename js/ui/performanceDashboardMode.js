@@ -43,7 +43,7 @@ export function renderPerformanceDashboard(container) {
 }
 
 /**
- * Firebase에서 성과 데이터 로드
+ * Firebase에서 성과 데이터 로드 (최적화 버전)
  */
 function loadPerformanceData(container, retryCount = 0) {
   const MAX_RETRY_COUNT = 10;
@@ -59,39 +59,56 @@ function loadPerformanceData(container, retryCount = 0) {
       return;
     }
 
-    chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
-      if (response && response.success && response.data) {
-        processPerformanceData(response.data || {}, container);
-      } else {
-        const contentEl = container.querySelector('#perf-dashboard-content');
-        if (contentEl)
-          contentEl.innerHTML = '<div class="perf-loading">데이터를 불러올 수 없습니다.</div>';
-      }
-    });
-
-    // 안전 장치: 응답 지연 시 재요청
-    setTimeout(() => {
-      if (allPerformanceData.length === 0 && !isProcessingData) {
-        chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
-          if (response && response.success && response.data) {
-            processPerformanceData(response.data || {}, container);
-          }
-        });
-      }
-    }, 1500);
-
-    if (!window.performanceDashboardListenerAttached) {
-      chrome.runtime.onMessage.addListener(async (msg) => {
-        if (msg.action === 'kanban_data_updated') {
-          const contentEl = container.querySelector('#perf-dashboard-content');
-          if (!contentEl) return false;
-          await processPerformanceData(msg.data || {}, container);
-        }
-        return false;
-      });
-      window.performanceDashboardListenerAttached = true;
-    }
+    // 최적화: 페이징된 데이터 로드
+    loadPerformanceDataPaginated(container);
   });
+}
+
+/**
+ * 페이징된 성과 데이터 로드 (최적화)
+ */
+function loadPerformanceDataPaginated(container, page = 1, pageSize = 50) {
+  const contentEl = container.querySelector('#perf-dashboard-content');
+  if (!contentEl) return;
+
+  // 로딩 표시
+  if (page === 1) {
+    contentEl.innerHTML = '<div class="perf-loading">성과 데이터를 불러오는 중...</div>';
+  }
+
+  chrome.runtime.sendMessage(
+    {
+      action: 'get_paginated_performance_data',
+      page: page,
+      pageSize: pageSize,
+    },
+    (response) => {
+      if (response && response.success) {
+        const { data, hasMore, total } = response;
+
+        if (page === 1) {
+          allPerformanceData = [];
+        }
+
+        // 데이터 누적
+        allPerformanceData = allPerformanceData.concat(data);
+
+        // 첫 페이지거나 데이터가 있으면 렌더링
+        if (page === 1 || data.length > 0) {
+          renderPerformanceList(container);
+
+          // 더 많은 데이터가 있으면 다음 페이지 로드
+          if (hasMore) {
+            setTimeout(() => loadPerformanceDataPaginated(container, page + 1, pageSize), 100);
+          }
+        }
+      } else {
+        if (page === 1) {
+          contentEl.innerHTML = '<div class="perf-loading">데이터를 불러올 수 없습니다.</div>';
+        }
+      }
+    }
+  );
 }
 
 /**
@@ -196,19 +213,33 @@ function renderPerformanceList(container, sortBy = 'earnings-desc') {
     }
   });
 
-  // 통계 계산
-  const totalEarnings = sortedData.reduce(
-    (sum, item) => sum + (item.performance.estimatedEarnings || 0),
-    0
-  );
-  const totalPageviews = sortedData.reduce(
-    (sum, item) => sum + (item.performance.pageviews || item.performance.pageViews || 0),
-    0
-  );
-  const totalImpressions = sortedData.reduce(
-    (sum, item) => sum + (item.performance.pageImpressions || 0),
-    0
-  );
+  // 통계 계산 (최적화: 메모이제이션 적용)
+  if (
+    !window.performanceStats ||
+    window.performanceStats.lastUpdate !== allPerformanceData.length ||
+    window.performanceStats.lastSortBy !== sortBy
+  ) {
+    window.performanceStats = {
+      totalEarnings: sortedData.reduce(
+        (sum, item) => sum + (item.performance.estimatedEarnings || 0),
+        0
+      ),
+      totalPageviews: sortedData.reduce(
+        (sum, item) => sum + (item.performance.pageviews || item.performance.pageViews || 0),
+        0
+      ),
+      totalImpressions: sortedData.reduce(
+        (sum, item) => sum + (item.performance.pageImpressions || 0),
+        0
+      ),
+      lastUpdate: allPerformanceData.length,
+      lastSortBy: sortBy,
+    };
+  }
+
+  const totalEarnings = window.performanceStats.totalEarnings;
+  const totalPageviews = window.performanceStats.totalPageviews;
+  const totalImpressions = window.performanceStats.totalImpressions;
 
   // [복원] 오늘 발행된 콘텐츠 수 계산 (목표 달성 체크용)
   const today = new Date();

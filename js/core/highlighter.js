@@ -11,7 +11,7 @@ export function setupHighlighter() {
 
   // 로컬 변수로 상태 동기화 (성능 최적화)
   let isScrapingActive = false;
-  let highlightToggleState = false;
+  let highlightToggleState = true; // 기본적으로 활성화
 
   // 헬퍼 함수: 하이라이트 제거
   function clearHighlight() {
@@ -23,18 +23,25 @@ export function setupHighlighter() {
 
   // 초기 상태 로드 (한 번만 호출)
   chrome.storage.local.get(['isScrapingActive', 'highlightToggleState'], function (result) {
-    isScrapingActive = result.isScrapingActive || false;
-    highlightToggleState = result.highlightToggleState || false;
+    isScrapingActive = result.isScrapingActive !== undefined ? result.isScrapingActive : true; // 기본값 true
+    highlightToggleState =
+      result.highlightToggleState !== undefined ? result.highlightToggleState : true; // 기본값 true
   });
 
   // chrome.storage.onChanged 리스너로 상태 동기화
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
       if (changes.isScrapingActive) {
-        isScrapingActive = changes.isScrapingActive.newValue || false;
+        isScrapingActive =
+          changes.isScrapingActive.newValue !== undefined
+            ? changes.isScrapingActive.newValue
+            : true;
       }
       if (changes.highlightToggleState) {
-        highlightToggleState = changes.highlightToggleState.newValue || false;
+        highlightToggleState =
+          changes.highlightToggleState.newValue !== undefined
+            ? changes.highlightToggleState.newValue
+            : true;
       }
     }
   });

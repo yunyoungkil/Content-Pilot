@@ -4,6 +4,8 @@ import { getDb, CONSTANTS, cleanDataForFirebase, getCurrentUserId } from './fire
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 import { ref, get, set, update, remove } from './firebaseService.js';
 import { Logger } from '../utils.js';
+// [추가] 성능 최적화 서비스 임포트
+import { performanceOptimizer } from './performanceOptimizer.js';
 
 let creating;
 
@@ -99,61 +101,70 @@ export async function updateUrlIndex(cardId, status, originUrl, publishedUrl) {
 
 export async function checkDuplicateUrl(url) {
   if (!url) return { exists: false };
-  try {
-    const key = encodeUrlForFirebaseKey(normalizeUrlForComparison(url));
-    const userId = await getCurrentUserId();
-    const indexSnap = await get(ref(getDb(), `url_index/${userId}/${key}`));
-    if (indexSnap.exists()) {
-      const indexData = indexSnap.val();
 
-      // origin과 published 모두 확인
-      const matches = [];
-      if (indexData.origin) {
-        Object.entries(indexData.origin).forEach(([cardId, info]) => {
-          matches.push({ cardId, status: info.status, type: 'origin' });
-        });
-      }
-      if (indexData.published) {
-        Object.entries(indexData.published).forEach(([cardId, info]) => {
-          matches.push({ cardId, status: info.status, type: 'published' });
-        });
-      }
+  // [최적화] 캐싱 적용
+  const cacheKey = `duplicate_check_${btoa(url).replace(/=/g, '')}`;
+  return await performanceOptimizer.getCachedData(
+    cacheKey,
+    async () => {
+      try {
+        const key = encodeUrlForFirebaseKey(normalizeUrlForComparison(url));
+        const userId = await getCurrentUserId();
+        const indexSnap = await get(ref(getDb(), `url_index/${userId}/${key}`));
+        if (indexSnap.exists()) {
+          const indexData = indexSnap.val();
 
-      // 각 매치에 대해 실제 카드 존재 여부 확인
-      for (const match of matches) {
-        const cardPath = `kanban/${userId}/${match.status}/${match.cardId}`;
-        const cardSnap = await get(ref(getDb(), cardPath));
+          // origin과 published 모두 확인
+          const matches = [];
+          if (indexData.origin) {
+            Object.entries(indexData.origin).forEach(([cardId, info]) => {
+              matches.push({ cardId, status: info.status, type: 'origin' });
+            });
+          }
+          if (indexData.published) {
+            Object.entries(indexData.published).forEach(([cardId, info]) => {
+              matches.push({ cardId, status: info.status, type: 'published' });
+            });
+          }
 
-        if (cardSnap.exists()) {
-          const cardData = cardSnap.val();
-          // 실제 카드가 존재하면 중복으로 판단
-          Logger.debug(
-            `[checkDuplicateUrl] 중복 발견 - cardId: ${match.cardId}, status: ${match.status}, title: ${cardData.title}`
-          );
-          return {
-            exists: true,
-            status: match.status,
-            cardId: match.cardId,
-            title: cardData.title || '제목 없음',
-          };
-        } else {
-          // 실제 카드가 없으면 인덱스에서 제거 (고아 인덱스 정리)
-          Logger.warn(
-            `[checkDuplicateUrl] 고아 인덱스 발견 - cardId: ${match.cardId}, 인덱스에서 제거`
-          );
-          const orphanIndexPath = `url_index/${userId}/${key}/${match.type}/${match.cardId}`;
-          try {
-            await remove(ref(getDb(), orphanIndexPath));
-          } catch (removeError) {
-            Logger.warn(`[checkDuplicateUrl] 고아 인덱스 제거 실패:`, removeError);
+          // 각 매치에 대해 실제 카드 존재 여부 확인
+          for (const match of matches) {
+            const cardPath = `kanban/${userId}/${match.status}/${match.cardId}`;
+            const cardSnap = await get(ref(getDb(), cardPath));
+
+            if (cardSnap.exists()) {
+              const cardData = cardSnap.val();
+              // 실제 카드가 존재하면 중복으로 판단
+              Logger.debug(
+                `[checkDuplicateUrl] 중복 발견 - cardId: ${match.cardId}, status: ${match.status}, title: ${cardData.title}`
+              );
+              return {
+                exists: true,
+                status: match.status,
+                cardId: match.cardId,
+                title: cardData.title || '제목 없음',
+              };
+            } else {
+              // 실제 카드가 없으면 인덱스에서 제거 (고아 인덱스 정리)
+              Logger.warn(
+                `[checkDuplicateUrl] 고아 인덱스 발견 - cardId: ${match.cardId}, 인덱스에서 제거`
+              );
+              const orphanIndexPath = `url_index/${userId}/${key}/${match.type}/${match.cardId}`;
+              try {
+                await remove(ref(getDb(), orphanIndexPath));
+              } catch (removeError) {
+                Logger.warn(`[checkDuplicateUrl] 고아 인덱스 제거 실패:`, removeError);
+              }
+            }
           }
         }
+      } catch (e) {
+        Logger.error(`[checkDuplicateUrl] 오류:`, e);
       }
-    }
-  } catch (e) {
-    Logger.error(`[checkDuplicateUrl] 오류:`, e);
-  }
-  return { exists: false };
+      return { exists: false };
+    },
+    300000
+  ); // 5분 캐시
 }
 
 // 2. RSS 수집

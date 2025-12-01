@@ -2,11 +2,30 @@
 
 // Firebase 초기화 (가장 먼저 실행)
 try {
+  const { initializeFirebase } = require('./js/services/firebaseService.js');
   initializeFirebase();
+  const { Logger } = require('./js/utils.js');
   Logger.info('[Background] Firebase 초기화 완료');
 } catch (error) {
+  const { Logger } = require('./js/utils.js');
   Logger.error('[Background] Firebase 초기화 실패:', error);
 }
+
+// 오프스크린 문서 미리 생성 (성능 향상 및 안정성 확보)
+(async () => {
+  try {
+    const { ensureOffscreenDocument } = require('./js/services/offscreenService.js');
+    await ensureOffscreenDocument();
+    const { Logger } = require('./js/utils.js');
+    Logger.info('[Background] 오프스크린 문서 미리 생성 완료');
+  } catch (error) {
+    const { Logger } = require('./js/utils.js');
+    Logger.warn(
+      '[Background] 오프스크린 문서 미리 생성 실패 (정상 동작에 영향 없음):',
+      error.message
+    );
+  }
+})();
 
 // 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
 chrome.action.onClicked.addListener(async (tab) => {
@@ -14,41 +33,43 @@ chrome.action.onClicked.addListener(async (tab) => {
     // 현재 탭에 content script 삽입
     await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
-      files: ['dist/content.bundle.js']
+      files: ['dist/content.bundle.js'],
     });
 
     // CSS도 삽입
     await chrome.scripting.insertCSS({
       target: { tabId: tab.id, allFrames: true },
-      files: ['css/style.css']
+      files: ['css/style.css'],
     });
 
+    const { Logger } = require('./js/utils.js');
     Logger.info('[Background] Content Pilot activated via icon click');
   } catch (error) {
+    const { Logger } = require('./js/utils.js');
     Logger.error('[Background] Failed to activate Content Pilot:', error);
   }
 });
 
-import {
+const {
   getDb,
   CONSTANTS,
   initializeFirebase,
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
-} from './js/services/firebaseService.js';
-import { Logger } from './js/utils.js';
+} = require('./js/services/firebaseService.js');
+const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
-import { COLLECTIONS, KANBAN_STATUS } from './js/constants.js';
+const { COLLECTIONS, KANBAN_STATUS } = require('./js/constants.js');
 
-import {
+const {
   updateAllPerformanceMetrics,
   updateSinglePerformanceMetric,
   checkAdSenseRegistrationStatus,
   runFullSystemDiagnosis,
-} from './js/services/analyticsService.js';
+} = require('./js/services/analyticsService.js');
 
-import {
+const {
   fetchAllChannelData,
   fetchAndSaveSinglePost,
   deleteChannelData,
@@ -59,15 +80,15 @@ import {
   updateUrlIndex,
   normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
-} from './js/services/collectorService.js';
+} = require('./js/services/collectorService.js');
 
-import {
+const {
   deleteCompetitorData,
   deleteChannelDataCascade,
   findDeletedCompetitors,
-} from './js/services/cascadeDeleteService.js';
+} = require('./js/services/cascadeDeleteService.js');
 
-import {
+const {
   generateDraftFromIdea,
   generateIdeaBriefing,
   generateAiImage,
@@ -77,50 +98,49 @@ import {
   generateContentIdeas,
   generateAndSendKeywords,
   analyzeVideoComments,
-} from './js/services/aiService.js';
+} = require('./js/services/aiService.js');
 
-import {
+const {
   startGoogleAuth,
   revokeGoogleAuth,
   getValidToken,
   restoreAuthSession,
-} from './js/services/authService.js';
+} = require('./js/services/authService.js');
 
 // migrationService removed - migration features disabled/removed
 
-import {
+const {
   validateTemplateData,
   getThumbnailTemplates,
   deleteTemplate,
   generateThumbnailTexts,
-} from './js/services/thumbnailService.js';
+} = require('./js/services/thumbnailService.js');
 
-import {
+const {
   createAndSaveNewIdea,
   addIdeaToKanban,
   removeIdeaFromKanban,
   deleteKanbanCard,
-} from './js/services/kanbanService.js';
+} = require('./js/services/kanbanService.js');
 
-import {
+const {
   saveScrapElement,
   getFirebaseScraps,
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
-} from './js/services/scrapService.js';
+} = require('./js/services/scrapService.js');
 
-import {
+const {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
   renderTemplateInOffscreen,
   parseHtmlInOffscreen,
-  registerOffscreenPort,
-} from './js/services/offscreenService.js';
+} = require('./js/services/offscreenService.js');
 
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
 // import { ref, update, remove, set, get, push, serverTimestamp, onValue } from 'firebase/database';
-import {
+const {
   ref,
   update,
   remove,
@@ -129,7 +149,7 @@ import {
   push,
   serverTimestamp,
   onValue,
-} from './js/services/firebaseService.js';
+} = require('./js/services/firebaseService.js');
 
 // Firebase 초기화
 initializeFirebase();
@@ -211,23 +231,6 @@ chrome.runtime.onConnect.addListener((port) => {
       );
     });
   }
-
-  // Offscreen document persistent init port - register globally so the
-  // service worker doesn't miss the connection when it occurs outside
-  // the local ensureOffscreenDocument lifecycle window.
-  if (port.name === 'offscreen-init') {
-    Logger.debug('[Background] offscreen-init 포트 연결 수신, 오프스크린 등록 시도');
-    try {
-      const ok = registerOffscreenPort(port);
-      if (ok) {
-        Logger.debug('[Background] offscreen-init 포트 등록 성공');
-      } else {
-        Logger.warn('[Background] offscreen-init 포트 등록 실패 (모듈 헬퍼 반환 false)');
-      }
-    } catch (e) {
-      Logger.warn('[Background] offscreen-init 포트 등록 중 예외 발생', e && e.message);
-    }
-  }
 });
 
 // 2. 설치/업데이트 리스너
@@ -276,9 +279,13 @@ chrome.runtime.onInstalled.addListener((details) => {
 console.log('[Background] 메시지 라우터 등록 시작');
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log('[Background] 메시지 수신:', msg.action);
-  // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
-  if (msg.action.endsWith('_in_offscreen_response')) {
-    return false; // 다른 리스너가 처리하도록 함
+  // Offscreen 관련 메시지(ready / beacon / responses)는 라우터에서 제외
+  // (OffscreenService 내부 Promise가 처리하거나 별도 경로로 처리됨).
+  if (
+    msg.action &&
+    (msg.action.startsWith('offscreen_') || msg.action.endsWith('_in_offscreen_response'))
+  ) {
+    return false; // 다른 리스너가 처리하도록 함 / 라우터 경고 제거
   }
 
   // [추가] Keep-Alive 핑은 조용히 무시 (서비스 워커를 깨우는 용도)
@@ -299,9 +306,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [System] 연결 확인 ===
   if (msg.action === 'ping') {
-    // synchronous reply — do NOT return true (which indicates async response)
     sendResponse({ success: true, message: 'pong' });
-    return false;
+    return true;
   }
 
   // === [System] 사용자 ID 조회 ===
@@ -423,7 +429,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [AI Service] 생성 및 분석 ===
   if (msg.action === 'generate_draft_from_idea')
-    return handleAsync(generateDraftFromIdea(msg.data, msg.options));
+    return handleAsync(generateDraftFromIdea(msg.data));
   if (msg.action === 'generate_idea_briefing') {
     const { cardId, title, description, ...opts } = msg.data;
     opts.onProgress = (p) => {
@@ -1136,6 +1142,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'get_kanban_data' || msg.action === 'get_all_kanban_data') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const now = Date.now();
+
+        // 캐시 확인 (30초 이내)
+        if (kanbanDataCache && now - kanbanDataCacheTimestamp < KANBAN_CACHE_TTL) {
+          Logger.debug(`[get_kanban_data] 캐시된 데이터 반환 - userId: ${userId}`);
+          return kanbanDataCache;
+        }
 
         Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
         const dbRef = ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`);
@@ -1202,7 +1218,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { page = 1, pageSize = 50 } = msg;
         const offset = (page - 1) * pageSize;
 
-        Logger.info(`[get_paginated_performance_data] 요청 수신 - page: ${page}, pageSize: ${pageSize}`);
+        Logger.info(
+          `[get_paginated_performance_data] 요청 수신 - page: ${page}, pageSize: ${pageSize}`
+        );
 
         const snap = await get(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`));
         const allCards = snap?.val() || {};
@@ -1247,7 +1265,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const paginatedData = performanceCards.slice(offset, offset + pageSize);
         const hasMore = offset + pageSize < total;
 
-        Logger.info(`[get_paginated_performance_data] 반환 - total: ${total}, page: ${page}, returned: ${paginatedData.length}, hasMore: ${hasMore}`);
+        Logger.info(
+          `[get_paginated_performance_data] 반환 - total: ${total}, page: ${page}, returned: ${paginatedData.length}, hasMore: ${hasMore}`
+        );
 
         return {
           success: true,
@@ -1255,7 +1275,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           hasMore: hasMore,
           total: total,
           page: page,
-          pageSize: pageSize
+          pageSize: pageSize,
         };
       })()
     );
@@ -1429,7 +1449,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const now = Date.now();
 
         // 캐시 확인 (5분 이내)
-        if (channelsAndKeyCache && (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
+        if (channelsAndKeyCache && now - channelsAndKeyCacheTimestamp < CHANNELS_CACHE_TTL) {
           Logger.debug(`[get_channels_and_key] 캐시된 데이터 반환 - userId: ${userId}`);
           return channelsAndKeyCache;
         }
