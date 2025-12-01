@@ -1299,6 +1299,7 @@ export async function generateDraftFromIdea(ideaData) {
         // 2. [신규] 텍스트 합성 (하이브리드 합성)
         const thumbnailText =
           selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+        const textPosition = selectedThumbnail.textPosition || 'bottom';
         Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
           text: thumbnailText,
           position: textPosition,
