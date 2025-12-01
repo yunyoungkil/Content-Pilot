@@ -1684,7 +1684,82 @@ export function renderWorkspace(container, ideaData) {
   const workspaceEl = container.querySelector('.workspace-container');
   Logger.debug('[Workspace] workspaceEl 찾기:', workspaceEl);
 
-  // handleGenerateAction 함수를 renderWorkspace 내부에서 정의하여 workspaceEl과 ideaData에 접근할 수 있도록 함
+  // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
+  // [수정] 전역 리스너가 있으므로 등록하지 않음
+  try {
+    const shadowWindow = container.ownerDocument?.defaultView || window;
+    if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
+      Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 생략 (전역 리스너 사용)');
+      // 리스너 등록 코드 제거됨
+    } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
+      Logger.info('ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.');
+    }
+  } catch (err) {
+    console.warn('⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:', err.message);
+  }
+
+  addWorkspaceEventListeners(workspaceEl, ideaData, container);
+
+  // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
+  renderThumbnailButton(workspaceEl, ideaData);
+
+  // tracking_only 카드인 경우 publishedUrl에서 permalink 추출
+  if (isTrackingOnly && ideaData.publishedUrl && !ideaData.publishInfo?.permalink) {
+    const extractedPermalink = extractPermalinkFromUrl(ideaData.publishedUrl);
+    if (extractedPermalink) {
+      // publishInfo 객체가 없으면 생성
+      if (!ideaData.publishInfo) {
+        ideaData.publishInfo = {};
+      }
+      ideaData.publishInfo.permalink = extractedPermalink;
+
+      // Firebase에 저장 (비동기, 실패해도 계속 진행)
+      chrome.runtime
+        .sendMessage({
+          action: 'update_kanban_card',
+          data: {
+            cardId: ideaData.id,
+            status: ideaData.status || 'done',
+            updates: {
+              publishInfo: {
+                ...ideaData.publishInfo,
+                permalink: extractedPermalink,
+              },
+            },
+          },
+        })
+        .catch((err) => {
+          Logger.warn('[Workspace] permalink 저장 실패:', err);
+        });
+    }
+  }
+
+  if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
+    // tags가 배열인 경우 쉼표로 조인
+    let tagsForDisplay = ideaData.publishInfo?.tags || '';
+    if (Array.isArray(tagsForDisplay)) {
+      tagsForDisplay = tagsForDisplay.join(', ');
+    }
+    setTimeout(
+      () =>
+        showPublishInfo(
+          container.querySelector('.workspace-container'),
+          ideaData.publishInfo?.permalink,
+          tagsForDisplay,
+          ideaData.seoTitle,
+          ideaData
+        ),
+      200
+    );
+  }
+}
+
+
+
+function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
+  console.log('[Workspace] addWorkspaceEventListeners 함수 호출됨');
+
+  // handleGenerateAction 함수를 addWorkspaceEventListeners 내부에서 정의하여 workspaceEl과 ideaData에 접근할 수 있도록 함
   function handleGenerateAction(btn, options) {
     if (!btn) return;
 
@@ -1982,81 +2057,6 @@ export function renderWorkspace(container, ideaData) {
       );
     });
   }
-
-  // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
-  // [수정] 전역 리스너가 있으므로 등록하지 않음
-  try {
-    const shadowWindow = container.ownerDocument?.defaultView || window;
-    if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
-      Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 생략 (전역 리스너 사용)');
-      // 리스너 등록 코드 제거됨
-    } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
-      Logger.info('ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.');
-    }
-  } catch (err) {
-    console.warn('⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:', err.message);
-  }
-
-  addWorkspaceEventListeners(workspaceEl, ideaData, container);
-
-  // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
-  renderThumbnailButton(workspaceEl, ideaData);
-
-  // tracking_only 카드인 경우 publishedUrl에서 permalink 추출
-  if (isTrackingOnly && ideaData.publishedUrl && !ideaData.publishInfo?.permalink) {
-    const extractedPermalink = extractPermalinkFromUrl(ideaData.publishedUrl);
-    if (extractedPermalink) {
-      // publishInfo 객체가 없으면 생성
-      if (!ideaData.publishInfo) {
-        ideaData.publishInfo = {};
-      }
-      ideaData.publishInfo.permalink = extractedPermalink;
-
-      // Firebase에 저장 (비동기, 실패해도 계속 진행)
-      chrome.runtime
-        .sendMessage({
-          action: 'update_kanban_card',
-          data: {
-            cardId: ideaData.id,
-            status: ideaData.status || 'done',
-            updates: {
-              publishInfo: {
-                ...ideaData.publishInfo,
-                permalink: extractedPermalink,
-              },
-            },
-          },
-        })
-        .catch((err) => {
-          Logger.warn('[Workspace] permalink 저장 실패:', err);
-        });
-    }
-  }
-
-  if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
-    // tags가 배열인 경우 쉼표로 조인
-    let tagsForDisplay = ideaData.publishInfo?.tags || '';
-    if (Array.isArray(tagsForDisplay)) {
-      tagsForDisplay = tagsForDisplay.join(', ');
-    }
-    setTimeout(
-      () =>
-        showPublishInfo(
-          container.querySelector('.workspace-container'),
-          ideaData.publishInfo?.permalink,
-          tagsForDisplay,
-          ideaData.seoTitle,
-          ideaData
-        ),
-      200
-    );
-  }
-}
-
-
-
-function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
-  console.log('[Workspace] addWorkspaceEventListeners 함수 호출됨');
 
   // "즉시 추적" 카드인지 확인
   const isTrackingOnly = ideaData.origin?.type === 'tracking_only';
