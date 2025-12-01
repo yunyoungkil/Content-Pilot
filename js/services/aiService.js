@@ -341,6 +341,16 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 export async function generateDraftFromIdea(ideaData, options = {}) {
   // 기본값: 옵션이 없으면 둘 다 생성 (기존 동작 유지)
   const { generateDraft = true, generateThumbnail = true } = options;
+
+  // 주요 변수 선언 (함수 시작 부분)
+  let formattedDraft = '';
+  let thumbnailCandidates = [];
+  let thumbnailUrls = null;
+  let seoTitle = null;
+  let jsonLdSchema = null;
+  let permalink = '';
+  let tagsForPublish = '';
+
   try {
     // 1. 페르소나 결정 (사용자 설정 > 자동 감지)
     let personaKey = ideaData.persona;
@@ -504,10 +514,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // 초안 생성 (generateDraft 옵션에 따라 조건부 실행)
     let rawDraft = null;
     let cleanedDraft = '';
-    let formattedDraft = '';
-    let seoTitle = null;
-    let jsonLdSchema = null;
-    let thumbnailCandidates = [];
 
     if (generateDraft) {
       // 백업 파일의 상세한 프롬프트 구성
@@ -914,7 +920,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
       // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
       // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
-      let jsonLdSchema = null;
       // cleanedDraft에서 먼저 찾고, 없으면 rawDraft에서 찾기
       const jsonLdMatch =
         cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) ||
@@ -938,7 +943,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       }
 
       // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
-      let thumbnailCandidates = [];
       const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
 
       if (thumbnailMatch && thumbnailMatch[1]) {
@@ -981,7 +985,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
       // 3. SEO 최적화된 제목 추출 (h1 태그에서)
       // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
-      let seoTitle = null;
       const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
       if (h1Match && h1Match[1]) {
         seoTitle = h1Match[1].trim();
@@ -1187,7 +1190,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       };
 
       // 퍼머링크 생성 (타임아웃 보호)
-      let permalink = '';
       try {
         permalink = await generatePermalink(seoTitle || title);
       } catch (e) {
@@ -1204,7 +1206,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       }
 
       // 6. 태그 생성 (쉼표 구분)
-      const tagsForPublish = tags
+      tagsForPublish = tags
         .map((t) => t.replace(/^#/, ''))
         .filter((t) => t && t !== 'AI-추천')
         .join(', ');
@@ -1852,6 +1854,27 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       `[generateIdeaBriefing] 전체 오류 - cardId: ${cardId}, title: ${title}, userId: ${userId}:`,
       error
     );
+
+    // 사용자에게 에러 알림 전송
+    try {
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs
+              .sendMessage(tab.id, {
+                action: 'briefing_generation_error',
+                message: `브리핑 데이터 생성에 실패했습니다: ${error.message}`,
+                cardId: cardId,
+                title: title,
+              })
+              .catch(() => {});
+          }
+        });
+      });
+    } catch (notifyError) {
+      Logger.warn('[generateIdeaBriefing] 에러 알림 전송 실패:', notifyError);
+    }
+
     // 에러를 다시 throw하여 상위에서 처리할 수 있도록 함
     throw error;
   }
