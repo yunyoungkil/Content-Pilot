@@ -22,6 +22,31 @@ import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js'
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
+// [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
+async function fetchImageAsBase64(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
+        const base64data = reader.result.split(',')[1];
+        resolve({
+          data: base64data,
+          mimeType: blob.type || 'image/jpeg' // MIME 타입 자동 감지
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    Logger.error('[fetchImageAsBase64] 이미지 변환 실패:', e);
+    return null;
+  }
+}
+
 // 1. Gemini API 호출 (Core)
 /**
  * Gemini API를 호출하여 텍스트 생성을 수행합니다.
@@ -481,10 +506,20 @@ export async function generateDraftFromIdea(ideaData) {
     // 6. 프롬프트 구성
     // performanceInfo prepared but not used directly in prompt at this time
 
+    // [추가] 현재 날짜 및 연도 정보 생성
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentDateString = today.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
     // 백업 파일의 상세한 프롬프트 구성
     const prompt = `
             ${systemPrompt}
             
+            [현재 시점 정보]
+            - 오늘 날짜: ${currentDateString}
+            - **현재 연도: ${currentYear}년**
+            - 주의: 글을 작성할 때 반드시 **${currentYear}년**을 기준으로 최신 정보를 반영하고, 제목이나 본문에 연도가 들어갈 경우 **${currentYear}년**을 사용하세요. (과거 연도 사용 금지)
+
             [작성 요청]
             아래 정보를 바탕으로 블로그 포스트 초안을 작성해주세요.
             
@@ -495,6 +530,8 @@ export async function generateDraftFromIdea(ideaData) {
 
             ### 1-1. SEO 최적화된 실제 초안 제목 생성
             위 아이디어 제목을 참고하여, 검색 노출에 최적화되고 독자의 체류시간을 늘릴 수 있는 실제 초안 제목을 생성해주세요.
+            - **${currentYear}년**을 기준으로 최신 트렌드와 정보를 반영한 제목을 생성하세요.
+            - 제목에 연도가 들어갈 경우 반드시 **${currentYear}년**을 사용하세요. (예: "2023년" 같은 과거 연도 사용 금지)
             - 검색 키워드를 자연스럽게 포함
             - 클릭을 유도하는 제목
             - 독자의 문제를 해결하거나 유용한 정보를 제공한다는 것을 명확히 표현
@@ -736,6 +773,13 @@ export async function generateDraftFromIdea(ideaData) {
 
               초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
               
+              // ▼▼▼ [추가] 제휴 상품 반영 필수 규칙 시작 ▼▼▼
+              [제휴 상품 반영 필수 규칙]
+              - 앞서 제공된 **'제휴 마케팅 링크 (수익화)' 목록에 상품이 있는 경우**, 3가지 썸네일 프롬프트(thumbnailPromptEn) 중 최소 2개에는 **해당 상품의 구체적인 외형이나 상품명을 반드시 포함**시켜야 합니다.
+              - 예: 글 주제가 '청소기 추천'이고 제휴 상품이 '다이슨 V15'라면, 프롬프트에 "Dyson V15 vacuum cleaner standing in a modern living room..."과 같이 구체적으로 명시하세요.
+              - 단순히 "Vacuum cleaner"라고 하지 말고 "Specific Product Name"을 포함하여 AI가 해당 제품과 최대한 유사한 이미지를 생성하도록 유도하세요.
+              // ▲▲▲ [추가] 제휴 상품 반영 지침 끝 ▲▲▲
+              
               각 컨셉의 특징:
 
               1. **호기심 자극형 (curiosity)**: "이거 모르면 손해", "충격적인 사실" 등 강렬한 문구와 시선을 끄는 이미지.
@@ -806,6 +850,7 @@ export async function generateDraftFromIdea(ideaData) {
                 * 질문 형식, 감탄 형식, 혜택 강조 형식 등을 활용할 수 있습니다.
               - **썸네일 이미지 프롬프트 작성 요령**: 
                 * 커버 이미지는 글의 첫인상을 결정하는 만큼 눈에 확 들어오는 핵심 이미지를 사용해야 합니다.
+                * **제휴 상품이 있다면 해당 상품이 주인공이 되도록 묘사해주세요.** (추가됨)
                 * 전체적인 인상을 생생하게 느낄 수 있는 이미지라면 더더욱 좋습니다.
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
@@ -1200,23 +1245,64 @@ export async function generateDraftFromIdea(ideaData) {
           permalink: permalink.substring(0, 30),
         });
 
-        // 1. 16:9 원본 배경 이미지 생성 (AI - 텍스트 없이)
-        const originalImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
-        if (originalImages.length === 0) {
-          throw new Error('썸네일 이미지 생성 실패');
+        // 1. 이미지 소스 결정 (제휴 제품 이미지 기반 합성 vs 순수 AI 생성)
+        let generatedImages = [];
+        let isProductSynthesis = false;
+
+        // 제휴 링크 중 이미지가 있는 항목 찾기
+        const productLink = affiliateLinks && affiliateLinks.find(
+          (link) => link.cardData && link.cardData.imageUrl
+        );
+
+        if (productLink) {
+          Logger.info('[generateDraftFromIdea] 🛍️ 제휴 상품 이미지 발견, AI 합성을 시도합니다:', productLink.cardData.productName);
+          
+          // 1-1. 제품 이미지 다운로드 및 Base64 변환
+          const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
+          
+          if (productBase64) {
+            // 1-2. 합성용 프롬프트 생성 (제품을 강조하는 배경 생성 요청)
+            // 예: "Professional product photography of [Product] on a [Concept] background..."
+            const synthesisPrompt = `
+              [Instruction]
+              Create a professional product photograph featuring the object from the [Provided Reference Image].
+              
+              [Composition]
+              Place the object seamlessly into the following scene: "${selectedThumbnail.thumbnailPromptEn}".
+              
+              [Constraints]
+              - Use the [Provided Reference Image] as the main subject. Do NOT generate a new product.
+              - If the text description conflicts with the reference image, prioritize the visual details of the reference image.
+              - Ensure natural lighting, shadows, and reflections matching the background.
+              - Style: 4k, photorealistic, cinematic lighting.
+            `.trim();
+
+            Logger.debug('[generateDraftFromIdea] 합성 프롬프트:', synthesisPrompt);
+
+            // 1-3. 이미지 + 프롬프트로 AI 생성 요청
+            try {
+              generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+              isProductSynthesis = true;
+            } catch (err) {
+              Logger.warn('[generateDraftFromIdea] 합성 실패, 순수 AI 생성으로 전환합니다:', err);
+            }
+          }
         }
+
+        // 합성이 실패했거나 제품 이미지가 없으면 일반 AI 생성 시도
+        if (generatedImages.length === 0) {
+          generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+        }
+
+        const sourceImageUrl = generatedImages[0];
 
         // 2. [신규] 텍스트 합성 (하이브리드 합성)
         const thumbnailText =
           selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
         Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
           text: thumbnailText,
-        });
-
-        const textPosition = selectedThumbnail.textPosition || 'bottom'; // AI가 결정한 위치 또는 기본값
-        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
-          text: thumbnailText,
           position: textPosition,
+          type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation'
         });
 
         const composedDataUrl = await composeThumbnailInOffscreen(
@@ -1768,7 +1854,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
 // 7. 이미지 생성
 // 7. 이미지 생성 (병렬 처리 적용)
-export async function generateAiImage(prompt, count = 1) {
+export async function generateAiImage(prompt, count = 1, referenceImage = null) {
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
     throw new Error('Gemini API 키가 없습니다.');
@@ -1784,10 +1870,24 @@ export async function generateAiImage(prompt, count = 1) {
   // 단일 이미지 생성 함수
   const generateSingleImage = async (index) => {
     try {
+      // [핵심] 페이로드 구성: 참조 이미지가 있으면 포함
+      const parts = [{ text: prompt }];
+      
+      // 참조 이미지(제품 이미지)가 있으면 페이로드에 추가 (고급 합성/편집 모드 트리거)
+      if (referenceImage && referenceImage.data) {
+        parts.push({
+          inlineData: {
+            mimeType: referenceImage.mimeType,
+            data: referenceImage.data
+          }
+        });
+        Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
+      }
+
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({ contents: [{ parts: parts }] }),
       });
 
       if (!res.ok) {
