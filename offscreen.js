@@ -11,6 +11,10 @@ try {
   console.debug('[Offscreen] offscreen.js loaded - console unavailable', e);
 }
 
+// [추가] Heartbeat interval 변수
+let keepAliveInterval;
+let activeOffscreenPort = null;
+
 // --- 유틸리티 함수 ---
 
 /**
@@ -784,7 +788,6 @@ function safeSendReply(sendReply, payload) {
 // When we want to send the final response for long-running tasks we
 // prefer posting back over an active port (if connected) and fall back
 // to runtime.sendMessage if needed.
-let activeOffscreenPort = null;
 
 function sendFinalResponse(response) {
   try {
@@ -1246,85 +1249,59 @@ function sendReadyMessage() {
 // be missed because listeners haven't been registered yet.
 function connectAndSendReady() {
   try {
+    // 1. 서비스 워커와 연결 시도
     const port = chrome.runtime.connect({ name: 'offscreen-init' });
-    // record as active port
     activeOffscreenPort = port;
-    port.onDisconnect.addListener(() => {
+
+    console.debug('[Offscreen] Connected to background via port');
+
+    // 2. 연결 즉시 "준비 완료" 신호 전송
+    port.postMessage({ action: 'offscreen_ready', ts: Date.now() });
+
+    // 3. [Heartbeat] 20초마다 생존 신호 전송 (서비스 워커 수면 방지)
+    if (keepAliveInterval) clearInterval(keepAliveInterval);
+    keepAliveInterval = setInterval(() => {
       try {
-        activeOffscreenPort = null;
-      } catch (e) {}
+        if (activeOffscreenPort) {
+          activeOffscreenPort.postMessage({ action: 'keep_alive_ping' });
+        }
+      } catch (e) {
+        console.debug('[Offscreen] Ping failed, connection lost?');
+        clearInterval(keepAliveInterval);
+      }
+    }, 20000); // 20초 주기
+
+    // 4. [재연결] 서비스 워커가 죽거나 끊어지면 즉시 재연결
+    port.onDisconnect.addListener(() => {
+      console.warn('[Offscreen] Port disconnected. Attempting to reconnect...');
+      activeOffscreenPort = null;
+      clearInterval(keepAliveInterval);
+
+      // 즉시 재연결하면 루프가 돌 수 있으므로 1초 후 재시도
+      setTimeout(connectAndSendReady, 1000);
     });
-    // send ready beacon on the port and also listen on the port for
-    // incoming requests from background (so background can use port.postMessage)
-    try {
-      port.postMessage({ action: 'offscreen_ready', ts: Date.now() });
-      console.debug('[Offscreen] connectAndSendReady: port.postMessage sent');
-    } catch (e) {
-      console.error(
-        '[Offscreen] connectAndSendReady port.postMessage failed:',
-        e && e.stack ? e.stack : e
-      );
-    }
-    try {
-      port.onMessage.addListener((msg) => {
-        console.debug('[Offscreen] port.onMessage received', msg && msg.action);
-        // respond to messages coming over the port using the same handler
+
+    // 5. 메시지 수신 핸들러 (기존 handleRequest 사용)
+    port.onMessage.addListener((msg) => {
+      if (typeof handleRequest === 'function') {
         handleRequest(msg, (resp) => {
           try {
             port.postMessage(resp);
-          } catch (e) {}
+          } catch (e) {
+            console.error(e);
+          }
         });
-      });
-    } catch (e) {
-      console.error(
-        '[Offscreen] failed to attach port.onMessage listener',
-        e && e.stack ? e.stack : e
-      );
-    }
-    console.debug(
-      '[Offscreen] connected to background via port and sent ready',
-      new Date().toISOString()
-    );
+      }
+    });
   } catch (e) {
-    console.error('[Offscreen] connectAndSendReady failed', e && e.stack ? e.stack : e);
+    console.error('[Offscreen] Connection failed, retrying in 1s...', e);
+    setTimeout(connectAndSendReady, 1000);
   }
 }
 
-// DOM 로드 완료 이벤트
-// Also fire immediately (attempt, may fail if runtime listener not active yet)
-try {
-  sendReadyMessage();
-  connectAndSendReady();
-} catch (e) {
-  console.error(
-    '[Offscreen] initial sendReadyMessage/connect failed (non-fatal)',
-    e && e.stack ? e.stack : e
-  );
+// 초기 실행
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => setTimeout(connectAndSendReady, 500));
+} else {
+  setTimeout(connectAndSendReady, 500);
 }
-
-// DOM 로드 완료 이벤트
-document.addEventListener('DOMContentLoaded', () => {
-  // 추가 지연으로 안전하게
-  setTimeout(() => {
-    try {
-      console.debug('[Offscreen] DOMContentLoaded -> sending ready');
-      sendReadyMessage();
-      connectAndSendReady();
-    } catch (e) {
-      console.error('[Offscreen] DOMContentLoaded handlers failed', e && e.stack ? e.stack : e);
-    }
-  }, 1000);
-});
-
-// window load 이벤트
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    try {
-      console.debug('[Offscreen] window.load -> sending ready');
-      sendReadyMessage();
-      connectAndSendReady();
-    } catch (e) {
-      console.error('[Offscreen] window.load handlers failed', e && e.stack ? e.stack : e);
-    }
-  }, 1000);
-});

@@ -705,7 +705,17 @@ async function sendToOffscreen(action, data, timeout = 30000) {
   try {
     await waitForOffscreenPort(10000);
   } catch (e) {
-    Logger.debug('[OffscreenService] waitForOffscreenPort failed', e && e.message);
+    Logger.debug(
+      '[OffscreenService] waitForOffscreenPort failed, retrying with fresh offscreen document',
+      e && e.message
+    );
+    // [추가] 포트가 없으면 오프스크린 문서를 다시 생성하여 연결 재시도
+    await ensureOffscreenDocument();
+    try {
+      await waitForOffscreenPort(10000);
+    } catch (e2) {
+      Logger.debug('[OffscreenService] Second waitForOffscreenPort also failed', e2 && e2.message);
+    }
   }
 
   return new Promise((resolve, reject) => {

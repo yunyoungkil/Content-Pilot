@@ -281,6 +281,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false; // 다른 리스너가 처리하도록 함
   }
 
+  // [추가] Keep-Alive 핑은 조용히 무시 (서비스 워커를 깨우는 용도)
+  if (msg.action === 'keep_alive_ping') {
+    return false; 
+  }
+
   // 비동기 응답 처리를 위한 헬퍼
   const handleAsync = (promise) => {
     promise
