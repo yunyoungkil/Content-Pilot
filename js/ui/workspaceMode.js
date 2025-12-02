@@ -4538,7 +4538,7 @@ export function updateWorkspaceScraps(container, ideaData) {
   }
 })();
 
-// ✅ [수정된 함수] handleGenerateAction: 타임아웃 방지를 위해 텍스트와 썸네일 생성을 분리하여 순차 실행
+// ✅ [재수정] handleGenerateAction: Shadow DOM 호환성 개선 및 타임아웃 방지
 function handleGenerateAction(btn, options) {
   if (!btn) return;
 
@@ -4549,9 +4549,23 @@ function handleGenerateAction(btn, options) {
   btn.disabled = true;
   btn.innerHTML = '⏳ 텍스트 작성 중...';
 
-  const editorIframe = document.querySelector('#quill-editor-iframe'); // workspaceEl 변수 범위 문제 방지를 위해 document 사용 권장
+  // 1. [핵심 수정] 에디터 iframe 찾기 (Shadow DOM 호환)
+  // document.querySelector 대신 버튼(btn)이 속한 컨테이너 내부에서 찾아야 합니다.
+  let workspaceContainer = btn.closest('.workspace-container');
+  
+  // 만약 컨테이너를 못 찾으면 Shadow Root 전체에서 검색 (Fallback)
+  if (!workspaceContainer) {
+      const host = document.getElementById('content-pilot-host');
+      if (host && host.shadowRoot) {
+          workspaceContainer = host.shadowRoot;
+      }
+  }
+
+  const editorIframe = workspaceContainer ? workspaceContainer.querySelector('#quill-editor-iframe') : null;
+
   if (!editorIframe || !editorIframe.contentWindow) {
-    alert('에디터가 준비되지 않았습니다.');
+    console.error('[Workspace] 에디터 iframe을 찾을 수 없습니다.', { workspaceContainer, editorIframe });
+    alert('에디터가 준비되지 않았습니다. (요소를 찾을 수 없음)');
     btn.disabled = false;
     btn.innerHTML = originalText;
     return;
@@ -4619,7 +4633,7 @@ function handleGenerateAction(btn, options) {
       ...ideaData
     };
 
-    // 🚀 [핵심 수정] 텍스트와 썸네일을 모두 생성해야 하는 경우 분리해서 실행
+    // 텍스트와 썸네일을 모두 생성해야 하는 경우 분리해서 실행
     const shouldSplitRequest = options.generateDraft && options.generateThumbnail;
 
     // 1단계: 텍스트 생성 (또는 전체 생성 시도)
@@ -4691,7 +4705,8 @@ function handleGenerateAction(btn, options) {
           });
           
           // UI 갱신 (발행 정보 패널)
-          const workspaceEl = btn.closest('.workspace-container') || document.querySelector('.workspace-container');
+          // 여기에서도 workspaceEl을 다시 찾을 때 btn을 기준으로 찾습니다.
+          const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;
           if(workspaceEl) {
              let tagsForDisplay = ideaData.publishInfo.tags;
              if (Array.isArray(tagsForDisplay)) tagsForDisplay = tagsForDisplay.join(', ');
@@ -4708,8 +4723,7 @@ function handleGenerateAction(btn, options) {
         btn.innerHTML = originalText;
         if (options.generateThumbnail && response.thumbnailUrls) {
            showToast('✅ 썸네일도 생성되었습니다.');
-           // renderThumbnailButton 함수가 있다면 호출 (새로고침)
-           const workspaceEl = btn.closest('.workspace-container');
+           const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;
            if (typeof renderThumbnailButton === 'function' && workspaceEl) {
                renderThumbnailButton(workspaceEl, ideaData);
            }
@@ -4763,9 +4777,8 @@ function handleGenerateAction(btn, options) {
                });
 
                // 썸네일 버튼 표시 갱신
-               const workspaceEl = btn.closest('.workspace-container');
+               const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;
                if (typeof renderThumbnailButton === 'function' && workspaceEl) {
-                   // 기존 버튼 제거 후 다시 렌더링
                    const oldBtn = workspaceEl.querySelector('#btn-create-thumbnail');
                    if(oldBtn) oldBtn.remove();
                    renderThumbnailButton(workspaceEl, ideaData);
@@ -4773,12 +4786,6 @@ function handleGenerateAction(btn, options) {
                
                // 본문에 이미지 삽입 (옵션)
                if (thumbResponse.thumbnailUrls && thumbResponse.thumbnailUrls.url_16x9 && editorIframe.contentWindow) {
-                   // 이미지가 아직 없다면 삽입 (사용자 경험 고려)
-                   // 여기서는 자동 삽입보다는 버튼을 통해 넣도록 유도하거나, 
-                   // aiService에서 이미 draft에 넣어서 반환했다면 2단계에서는 draft 텍스트 자체는 바뀌지 않으므로 
-                   // 별도로 이미지만 삽입하는 메시지를 보낼 수도 있습니다.
-                   // 하지만 generateDraft: false일 때 aiService는 draft 텍스트를 반환함 (이미지가 포함된).
-                   // 따라서 에디터 내용을 다시 업데이트 해주는 것이 좋습니다.
                    if (thumbResponse.draft) {
                        editorIframe.contentWindow.postMessage({ action: 'set-content', data: { html: thumbResponse.draft } }, '*');
                    }
