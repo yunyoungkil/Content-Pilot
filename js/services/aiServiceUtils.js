@@ -27,9 +27,7 @@ export class Result {
   }
 
   static fromPromise(promise) {
-    return promise
-      .then(data => Result.success(data))
-      .catch(error => Result.failure(error));
+    return promise.then((data) => Result.success(data)).catch((error) => Result.failure(error));
   }
 }
 
@@ -58,7 +56,7 @@ export async function retryWithBackoff(fn, options = {}) {
       if (attempt < maxRetries && shouldRetry(error)) {
         const delay = baseDelay * Math.pow(multiplier, attempt);
         Logger.debug(`[retryWithBackoff] 재시도 ${attempt + 1}/${maxRetries} - ${delay}ms 대기`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -82,7 +80,7 @@ export async function retryApiCall(apiCall, operationName = 'API call') {
         'Please pass a valid API key',
       ];
 
-      return !nonRetryableErrors.some(msg => error.message?.includes(msg));
+      return !nonRetryableErrors.some((msg) => error.message?.includes(msg));
     },
   });
 }
@@ -144,7 +142,7 @@ export function safeJsonParse(jsonString, options = {}) {
  * @param {Object} options - 옵션
  * @returns {Array} 변환된 배열
  */
-export function safeArrayTransform(array, mapper = x => x, filter = x => true, options = {}) {
+export function safeArrayTransform(array, mapper = (x) => x, filter = (x) => true, options = {}) {
   const { maxLength = Infinity, context = 'array transform' } = options;
 
   if (!Array.isArray(array)) {
@@ -185,11 +183,7 @@ export function safeArrayTransform(array, mapper = x => x, filter = x => true, o
  * @returns {string} 정리된 텍스트
  */
 export function sanitizeText(text, options = {}) {
-  const {
-    trim = true,
-    removeMarkdownCodeBlocks = true,
-    context = 'text sanitization',
-  } = options;
+  const { trim = true, removeMarkdownCodeBlocks = true, context = 'text sanitization' } = options;
 
   if (!text || typeof text !== 'string') {
     Logger.warn(`[${context}] 입력이 문자열이 아닙니다:`, typeof text);
@@ -242,7 +236,8 @@ export function optimizePrompt(prompt, options = {}) {
   Logger.warn(`[${context}] 프롬프트가 너무 깁니다 (${prompt.length}자). 요약합니다.`);
 
   // 간단한 요약: 앞부분만 유지하고 축소 표시 추가
-  const optimized = prompt.substring(0, summaryLength) +
+  const optimized =
+    prompt.substring(0, summaryLength) +
     '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
 
   return optimized;
@@ -306,7 +301,7 @@ export async function limitConcurrency(tasks, maxConcurrent = API_CONFIG.MAX_CON
   const executing = [];
 
   for (const task of tasks) {
-    const promise = task().then(result => {
+    const promise = task().then((result) => {
       results.push(result);
       return result;
     });
