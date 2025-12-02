@@ -2143,7 +2143,13 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: parts }] }),
+        body: JSON.stringify({
+          contents: [{ parts: parts }],
+          // [추가] 텍스트가 아닌 이미지를 강제로 반환하도록 설정
+          generationConfig: {
+            responseModalities: ["IMAGE"]
+          }
+        }),
       });
 
       if (!res.ok) {
