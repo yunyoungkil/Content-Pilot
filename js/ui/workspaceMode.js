@@ -1246,11 +1246,28 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             }
           }
 
-          // JSON-LD 스키마 가져오기 (최신 데이터 참조)
+          // [핵심 수정] JSON-LD 스키마 가져오기 (없으면 자동 생성)
           let jsonLdSchema = null;
           const currentPublishInfo = currentIdeaData?.publishInfo;
+          
           if (currentPublishInfo && currentPublishInfo.jsonLdSchema) {
             jsonLdSchema = currentPublishInfo.jsonLdSchema;
+          } else {
+            // Fallback: 저장된 JSON-LD가 없으면 기본값 생성
+            console.log('[Workspace] JSON-LD가 없어 기본 스키마를 생성합니다.');
+            const today = new Date().toISOString().split('T')[0];
+            jsonLdSchema = {
+                "@context": "https://schema.org",
+                "@type": "BlogPosting",
+                "headline": currentIdeaData.seoTitle || currentIdeaData.title || "제목 없음",
+                "description": currentIdeaData.description || "콘텐츠 설명이 없습니다.",
+                "author": {
+                    "@type": "Person",
+                    "name": "Content Pilot"
+                },
+                "datePublished": today,
+                "dateModified": today
+            };
           }
 
           // 최신 seoTitle 가져오기
