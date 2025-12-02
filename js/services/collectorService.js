@@ -580,7 +580,7 @@ export async function fetchAllChannelData() {
 export async function parseBlogPage(url, html) {
   try {
     let content = html;
-    
+
     // HTML 내용이 없으면 직접 가져오기
     if (!content) {
       const res = await fetch(url);
@@ -591,14 +591,13 @@ export async function parseBlogPage(url, html) {
     // [핵심 변경] 직접 메시지를 보내지 말고, offscreenService의 함수를 사용합니다.
     // 이 함수는 ACK를 무시하고 진짜 데이터가 올 때까지 기다려줍니다.
     const result = await parseHtmlInOffscreen(content, url);
-    
+
     // offscreenService는 성공 시 필요한 데이터를 담아 반환합니다.
     // 실패 시 에러를 throw하므로 catch에서 잡힙니다.
-    return { 
-      success: true, 
-      ...result 
+    return {
+      success: true,
+      ...result,
     };
-
   } catch (e) {
     Logger.error(`[parseBlogPage] 파싱 실패 (${url}):`, e);
     return { success: false, error: e.message };

@@ -28,59 +28,24 @@ async function fetchImageAsBase64(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
     const blob = await response.blob();
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
-        const base64data = reader.result.split(',')[1];
-        resolve({
-          data: base64data,
-          mimeType: blob.type || 'image/jpeg' // MIME 타입 자동 감지
-        });
+        try {
+          // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
+          const dataUrl = reader.result || '';
+          const base64 = dataUrl.split(',')[1] || '';
+          resolve(base64);
+        } catch (err) {
+          reject(err);
+        }
       };
-      reader.onerror = reject;
+      reader.onerror = (err) => reject(err);
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    Logger.error('[fetchImageAsBase64] 이미지 변환 실패:', e);
+    Logger.warn('[fetchImageAsBase64] 이미지 변환 실패:', e);
     return null;
-  }
-}
-
-// 1. Gemini API 호출 (Core)
-/**
- * Gemini API를 호출하여 텍스트 생성을 수행합니다.
- * @param {string} prompt - AI에게 전달할 프롬프트 텍스트
- * @returns {Promise<string>} 생성된 텍스트 응답
- * @throws {Error} API 키가 없거나 API 호출 실패 시 에러 발생
- */
-export async function callGeminiAPI(prompt) {
-  const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
-  if (!geminiApiKey) {
-    Logger.error('[callGeminiAPI] Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.');
-    throw new Error('Gemini API 키가 없습니다. 설정에서 API 키를 입력해주세요.');
-  }
-
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.TEXT}:generateContent?key=${geminiApiKey}`;
-
-  try {
-    Logger.debug(`[callGeminiAPI] API 호출 시작 - prompt 길이: ${prompt.length}`);
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      Logger.error(`[callGeminiAPI] API 오류 (${response.status}):`, data);
-      throw new Error(data.error?.message || `API Error (${response.status})`);
-    }
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    Logger.debug(`[callGeminiAPI] API 호출 성공 - 응답 길이: ${result.length}`);
-    return result;
-  } catch (e) {
-    Logger.error('[callGeminiAPI] Gemini API 호출 실패:', e);
-    throw e; // 에러를 다시 throw하여 상위에서 처리할 수 있도록
   }
 }
 
@@ -123,11 +88,318 @@ export async function analyzeKeywordGap(myContent, competitorContent) {
   return { gapKeywords, gapCount: gapKeywords.length };
 }
 
+// 프롬프트 빌드 헬퍼: 작은 테스트 가능한 조각으로 분리
+export function buildDraftPrompt(context = {}, ideaData = {}) {
+  const parts = [];
+  if (context.systemPrompt) parts.push(context.systemPrompt);
+  parts.push(`Title: ${ideaData.title || context.title || ''}`);
+  if (ideaData.description) parts.push(`Description: ${ideaData.description}`);
+  if (context.keywords && context.keywords.length) parts.push(`Keywords: ${context.keywords.join(', ')}`);
+  // Add a short instruction asking for a full draft in markdown
+  parts.push('Please write a complete draft in markdown format. Include clear headings and an SEO-friendly title.');
+  // Return simple concatenated prompt — detailed template lives elsewhere (keeps file small & testable)
+  return parts.join('\n\n');
+}
+
 // 4. 트렌드 분석 (AI 추론)
 export async function getEmergingTopics(channelContext) {
   if (!channelContext) return null;
   const prompt = `다음 채널 맥락을 바탕으로 최신 트렌드 주제 5개를 제안해줘:\n${channelContext}`;
   return await callGeminiAPI(prompt);
+}
+
+// Gemini 텍스트 모델 호출 유틸
+export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
+  // 검사: API 키가 반드시 있어야 함
+  const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
+  if (!geminiApiKey || !String(geminiApiKey).trim()) {
+    throw new Error('Gemini API 키가 없습니다');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta2/models/${model}:generateText`;
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt }),
+    });
+
+    if (!resp.ok) {
+      // 가능한한 유의미한 오류 메시지 추출
+      const body = await resp.json().catch(() => ({}));
+      const msg = body?.error?.message || `HTTP ${resp.status}`;
+      throw new Error(msg);
+    }
+
+    const json = await resp.json().catch(() => ({}));
+    // 기대 구조: { candidates: [{ content: { parts: [{ text: '...' }] } }] }
+    const candidate = Array.isArray(json?.candidates) && json.candidates[0];
+    if (!candidate) return '';
+    const parts = candidate?.content?.parts || [];
+    // parts는 배열, 각 항목에 text가 있을 수 있음
+    for (const p of parts) {
+      if (p && typeof p.text === 'string') return p.text;
+      if (p && p.inlineData && p.inlineData.data) return p.inlineData.data; // 이미지용 폼
+    }
+
+    return '';
+  } catch (err) {
+    // 네트워크 에러는 그대로 전파
+    throw err;
+  }
+}
+
+// Higher-level helper wrapping callGeminiAPI with retry/backoff and prompt optimization
+export async function callDraftAPI(prompt, opts = {}) {
+  const { maxRetries = 3, initialBackoffMs = 1000, backoffMultiplier = 2, model = AI_MODELS.TEXT } = opts || {};
+
+  // 프롬프트 길이 보호 / 최적화
+  let optimizedPrompt = prompt;
+  if (typeof prompt === 'string' && prompt.length > 30000) {
+    Logger.warn(`[callDraftAPI] 프롬프트가 너무 깁니다 (${prompt.length}자). 압축된 버전으로 시도합니다.`);
+    optimizedPrompt = prompt.substring(0, 15000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
+  }
+
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      Logger.info(`[callDraftAPI] API 호출 시도 ${attempt + 1}/${maxRetries}`);
+      const result = await callGeminiAPI(optimizedPrompt, model);
+
+      if (result && String(result).trim().length > 0) {
+        Logger.info(`[callDraftAPI] 응답 수신 - 길이 ${String(result).length}`);
+        return result;
+      }
+
+      // 빈 응답일 경우 재시도 준비
+      Logger.warn(`[callDraftAPI] 빈 응답 (시도 ${attempt + 1}/${maxRetries})`);
+      if (attempt < maxRetries - 1) {
+        const wait = initialBackoffMs * Math.pow(backoffMultiplier, attempt);
+        await new Promise((r) => setTimeout(r, wait));
+        attempt++;
+        continue;
+      }
+    } catch (err) {
+      Logger.error(`[callDraftAPI] 호출 중 오류 (시도 ${attempt + 1}/${maxRetries}):`, err);
+      if (attempt < maxRetries - 1) {
+        const wait = initialBackoffMs * 2 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, wait));
+        attempt++;
+        continue;
+      }
+      // 마지막 시도에서 실패하면 에러를 전파
+      throw err;
+    }
+
+    attempt++;
+  }
+
+  // 모든 시도 후에도 응답이 없으면 빈 문자열 반환 (상위 로직에서 기본 템플릿 처리)
+  return '';
+}
+
+// Process a raw draft text from the model into cleanedDraft, parsed JSON-LD and thumbnailCandidates
+export function processDraftResponse(rawDraft = '', ideaData = {}) {
+  let cleanedDraft = String(rawDraft || '');
+  // Remove common fenced code wrappers added by models
+  cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
+  cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
+  cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
+  cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
+  cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
+  cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
+  cleanedDraft = cleanedDraft.trim();
+
+  if (!cleanedDraft || cleanedDraft.trim().length === 0) {
+    // fallback to raw value (trimmed)
+    cleanedDraft = String(rawDraft || '').trim();
+  }
+
+  if (!cleanedDraft || cleanedDraft.trim().length === 0) {
+    // last fallback - minimal placeholder
+    cleanedDraft = `# ${ideaData.title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
+  }
+
+  // JSON-LD parsing (prefer cleanedDraft, fall back to rawDraft)
+  let jsonLdSchema = null;
+  try {
+    const jsonLdMatch =
+      cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) ||
+      String(rawDraft || '').match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i);
+
+    if (jsonLdMatch && jsonLdMatch[1]) {
+      try {
+        jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
+      } catch (e) {
+        Logger.warn('[processDraftResponse] JSON-LD 파싱 실패:', e);
+        jsonLdSchema = null;
+      }
+
+      // Remove tag from cleanedDraft regardless
+      cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '').trim();
+    }
+  } catch (e) {
+    Logger.warn('[processDraftResponse] JSON-LD 탐색 시 예외:', e);
+  }
+
+  // Thumbnail candidates extraction
+  let thumbnailCandidates = [];
+  try {
+    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
+    if (thumbnailMatch && thumbnailMatch[1]) {
+      try {
+        const parsed = JSON.parse(thumbnailMatch[1].trim());
+        thumbnailCandidates = Array.isArray(parsed) ? parsed : [parsed];
+      } catch (e) {
+        Logger.warn('[processDraftResponse] 썸네일정보 파싱 실패:', e);
+        thumbnailCandidates = [];
+      }
+
+      // Remove the thumbnail tag from the draft
+      cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+    }
+  } catch (e) {
+    Logger.warn('[processDraftResponse] 썸네일정보 탐색 중 예외:', e);
+  }
+
+  return { cleanedDraft, jsonLdSchema, thumbnailCandidates };
+}
+
+// Enhance a draft with visual features: auto-generate thumbnails, crop, upload and insert to HTML
+export async function enhanceDraftWithFeatures({
+  thumbnailCandidates = [],
+  affiliateLinks = [],
+  permalink = '',
+  composeThumbnailText = false,
+  seoTitle = '',
+  ideaData = {},
+  jsonLdSchema = null,
+  formattedDraft = '',
+} = {}) {
+  let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null;
+  let thumbnailGenerationPartialFailure = false;
+
+  if (!thumbnailCandidates || thumbnailCandidates.length === 0 || !permalink) {
+    return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
+  }
+
+  try {
+    const selectedThumbnail = thumbnailCandidates[0];
+    Logger.info('[enhanceDraftWithFeatures] 썸네일 자동 생성 시작', { type: selectedThumbnail.type, permalink: permalink.substring(0, 30) });
+
+    // Image source selection
+    let generatedImages = [];
+    let isProductSynthesis = false;
+
+    const productLink = Array.isArray(affiliateLinks)
+      ? affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl)
+      : null;
+
+    if (productLink) {
+      const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
+      if (productBase64) {
+        const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
+        try {
+          generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+          isProductSynthesis = true;
+        } catch (err) {
+          Logger.warn('[enhanceDraftWithFeatures] product synthesis failed, falling back to pure AI generate', err);
+        }
+      }
+    }
+
+    if (!generatedImages || generatedImages.length === 0) {
+      generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+    }
+
+    const sourceImageUrl = generatedImages[0];
+
+    // Compose text overlay if requested
+    let composedDataUrl = sourceImageUrl;
+    if (composeThumbnailText) {
+      const thumbnailText = selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+      const textPosition = selectedThumbnail.textPosition || 'bottom';
+      try {
+        composedDataUrl = await composeThumbnailInOffscreen(sourceImageUrl, thumbnailText, textPosition);
+      } catch (composeErr) {
+        Logger.warn('[enhanceDraftWithFeatures] compose failed, will try fallback to source image dataUrl', composeErr && composeErr.message);
+        try {
+          const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
+          if (sourceBase64) {
+            // fetchImageAsBase64 returns base64 string; construct a data URL as a safe fallback (assume png)
+            const candidateDataUrl = `data:image/png;base64,${sourceBase64}`;
+            composedDataUrl = candidateDataUrl;
+            Logger.info('[enhanceDraftWithFeatures] compose fallback: source image converted to dataURL');
+          }
+        } catch (fbErr) {
+          Logger.warn('[enhanceDraftWithFeatures] compose fallback failed:', fbErr && fbErr.message);
+        }
+        thumbnailGenerationPartialFailure = true;
+      }
+    }
+
+    // Cropping
+    const userId = await getCurrentUserId();
+    const cropPromises = [
+      cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
+      cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
+    ];
+
+    let croppedResults;
+    try {
+      croppedResults = await Promise.all(cropPromises);
+    } catch (cropErr) {
+      Logger.warn('[enhanceDraftWithFeatures] one or more crop tasks failed, using fallback composed image', cropErr && cropErr.message);
+      croppedResults = [{ ratio: '1x1', dataUrl: composedDataUrl }, { ratio: '4x3', dataUrl: composedDataUrl }];
+      thumbnailGenerationPartialFailure = true;
+    }
+
+    // Upload
+    const [url_1x1, url_4x3, url_16x9] = await Promise.all([
+      uploadImageToFirebaseStorage(croppedResults[0].dataUrl, `thumbnails/${userId}/${permalink}-1x1.png`, userId),
+      uploadImageToFirebaseStorage(croppedResults[1].dataUrl, `thumbnails/${userId}/${permalink}-4x3.png`, userId),
+      uploadImageToFirebaseStorage(composedDataUrl, `thumbnails/${userId}/${permalink}-16x9.png`, userId),
+    ]);
+
+    thumbnailUrls = { url_1x1, url_4x3, url_16x9, altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지` };
+
+    // Update jsonLdSchema if present
+    if (jsonLdSchema) {
+      jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
+    }
+
+    // Insert into formattedDraft (first image or after h1)
+    try {
+      if (thumbnailUrls && thumbnailUrls.url_16x9) {
+        if (typeof formattedDraft !== 'string' || !formattedDraft) formattedDraft = '';
+        const imgTagRegex = /<img[^>]*>/i;
+        const firstImgMatch = formattedDraft.match(imgTagRegex);
+        const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${thumbnailUrls.altText || seoTitle || ideaData.title}" style="max-width: 100%; height: auto; display: block;">`;
+
+        if (firstImgMatch) {
+          formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
+        } else {
+          const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+          if (h1Match) {
+            const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
+            formattedDraft = formattedDraft.slice(0, h1EndIndex) + '\n' + newImgTag + '\n' + formattedDraft.slice(h1EndIndex);
+          }
+        }
+      }
+    } catch (insertErr) {
+      Logger.warn('[enhanceDraftWithFeatures] HTML insertion failed:', insertErr);
+    }
+
+    Logger.info('[enhanceDraftWithFeatures] 썸네일 생성 및 업로드 완료');
+    return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
+  } catch (e) {
+    Logger.error('[enhanceDraftWithFeatures] 썸네일 자동 생성 실패:', e);
+    // Return best-effort values and mark partial failure
+    return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure: true, jsonLdSchema };
+  }
 }
 
 // [신규] 제휴 링크 조회 및 필터링 헬퍼 함수
@@ -931,51 +1203,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     } else {
       Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
       
-    // API 호출 재시도 로직 추가 (최대 3회)
-    let rawDraft = '';
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    // 프롬프트 길이 체크 및 최적화
-    let optimizedPrompt = prompt;
-    if (prompt.length > 30000) {
-      Logger.warn(`[generateDraftFromIdea] 프롬프트가 너무 깁니다 (${prompt.length}자). 간단한 버전으로 최적화합니다.`);
-      // 긴 프롬프트를 간단한 버전으로 축소
-      optimizedPrompt = prompt.substring(0, 15000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
-    }
-    
-    while (retryCount < maxRetries) {
-      try {
-        Logger.info(`[generateDraftFromIdea] API 호출 시도 ${retryCount + 1}/${maxRetries}`);
-        rawDraft = await callGeminiAPI(optimizedPrompt);
-        
-        // 빈 응답 확인
-        if (rawDraft && rawDraft.trim().length > 0) {
-          Logger.info(`[generateDraftFromIdea] API 호출 성공 - 응답 길이: ${rawDraft.length}`);
-          break; // 성공했으므로 루프 종료
-        } else {
-          Logger.warn(`[generateDraftFromIdea] 빈 응답 수신 (시도 ${retryCount + 1}/${maxRetries})`);
-          if (retryCount < maxRetries - 1) {
-            // 마지막 시도가 아니면 잠시 대기 후 재시도
-            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // 점진적 대기
-            retryCount++;
-            continue;
-          }
-        }
-      } catch (apiError) {
-        Logger.error(`[generateDraftFromIdea] API 호출 실패 (시도 ${retryCount + 1}/${maxRetries}):`, apiError);
-        if (retryCount < maxRetries - 1) {
-          // 마지막 시도가 아니면 잠시 대기 후 재시도
-          await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1))); // 점진적 대기
-          retryCount++;
-          continue;
-        } else {
-          // 모든 재시도 실패
-          throw apiError;
-        }
-      }
-      
-      retryCount++;
+    // API 호출을 helper로 분리 (재시도, 백오프 포함)
+    try {
+      rawDraft = await callDraftAPI(prompt);
+    } catch (apiError) {
+      // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
+      throw apiError;
     }
     
     // 모든 재시도 후에도 빈 응답이면 기본 템플릿 제공
@@ -1009,86 +1242,11 @@ ${defaultDescription}
       return { success: false, error: errorMessage };
     }
 
-    // 응답이 너무 짧거나 유효하지 않은 경우 체크
-    if (rawDraft.trim().length < 50) {
-      Logger.warn('[generateDraftFromIdea] 초안이 너무 짧습니다:', rawDraft);
-      // 너무 짧은 경우에도 경고만 하고 계속 진행 (사용자가 확인할 수 있도록)
-    }
-
-    // 1. 마크다운 클리닝: 코드 블록 태그 제거
-    let cleanedDraft = rawDraft;
-    cleanedDraft = cleanedDraft.replace(/^```markdown\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/^```md\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/^```\s*\n?/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```\s*$/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```markdown\s*$/i, '');
-    cleanedDraft = cleanedDraft.replace(/\n?```md\s*$/i, '');
-    cleanedDraft = cleanedDraft.trim();
-
-    // 빈 텍스트 방지: cleanedDraft가 비어있으면 원본 rawDraft 사용
-    if (!cleanedDraft || cleanedDraft.trim().length === 0) {
-      Logger.warn('[generateDraftFromIdea] cleanedDraft가 비어있어 rawDraft를 사용합니다');
-      cleanedDraft = rawDraft.trim();
-    }
-
-    // 여전히 비어있다면 기본 텍스트 생성
-    if (!cleanedDraft || cleanedDraft.trim().length === 0) {
-      Logger.error('[generateDraftFromIdea] 초안 텍스트가 비어있습니다. 기본 텍스트를 생성합니다.');
-      cleanedDraft = `# ${title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
-    }
-
-    // [신규] 1-1. JSON-LD 스키마 추출 및 파싱 (HTML 변환 전에 먼저 처리)
-    // 주의: seoTitle은 나중에 추출되므로, 여기서는 기본 추출만 하고 나중에 보완
-    let jsonLdSchema = null;
-    // cleanedDraft에서 먼저 찾고, 없으면 rawDraft에서 찾기
-    const jsonLdMatch =
-      cleanedDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i) ||
-      rawDraft.match(/<JSON-LD>([\s\S]*?)<\/JSON-LD>/i);
-
-    if (jsonLdMatch && jsonLdMatch[1]) {
-      try {
-        // JSON 파싱 시도
-        jsonLdSchema = JSON.parse(jsonLdMatch[1].trim());
-
-        // 본문에서 태그 제거 (사용자에게는 보이지 않아야 함)
-        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
-
-        Logger.info('[generateDraftFromIdea] JSON-LD 스키마 생성 및 파싱 성공 (후처리 대기)');
-      } catch (e) {
-        Logger.warn('[generateDraftFromIdea] JSON-LD 파싱 실패:', e);
-        // 파싱 실패 시 null 반환 (본문에는 영향 없음)
-        // 태그는 제거
-        cleanedDraft = cleanedDraft.replace(/<JSON-LD>[\s\S]*?<\/JSON-LD>/gi, '');
-      }
-    }
-
-    // [신규] 1-2. 썸네일 정보 추출 및 제거 (HTML 변환 전에 먼저 처리)
-    // Use outer-scoped `thumbnailCandidates` (avoid redeclaration which caused it to remain undefined later)
-    thumbnailCandidates = [];
-    const thumbnailMatch = cleanedDraft.match(/<썸네일정보>([\s\S]*?)<\/썸네일정보>/);
-
-    if (thumbnailMatch && thumbnailMatch[1]) {
-      try {
-        const parsed = JSON.parse(thumbnailMatch[1].trim());
-        if (Array.isArray(parsed)) {
-          thumbnailCandidates = parsed;
-        } else {
-          // 배열이 아닌 단일 객체로 온 경우 (구버전 호환)
-          thumbnailCandidates = [parsed];
-        }
-
-        // 태그 제거 (HTML 변환 전에 제거하여 본문에 포함되지 않도록)
-        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
-        Logger.debug('[generateDraftFromIdea] 썸네일 정보 추출 완료:', {
-          count: thumbnailCandidates.length,
-          types: thumbnailCandidates.map((c) => c.type),
-        });
-      } catch (e) {
-        Logger.error('[generateDraftFromIdea] 썸네일 JSON 파싱 실패:', e);
-        // 파싱 실패 시에도 태그는 제거
-        cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
-      }
-    }
+    // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
+    const processed = processDraftResponse(rawDraft, ideaData);
+    cleanedDraft = processed.cleanedDraft;
+    jsonLdSchema = processed.jsonLdSchema;
+    thumbnailCandidates = processed.thumbnailCandidates;
 
     // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
     Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
@@ -1362,187 +1520,27 @@ ${defaultDescription}
 
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
-    
+
     const composeThumbnailText = !!options.composeThumbnailText; // default false unless explicitly true
     if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
       try {
-        const selectedThumbnail = thumbnailCandidates[0]; // 첫 번째 컨셉 사용
-        Logger.info('[generateDraftFromIdea] 썸네일 자동 생성 시작:', {
-          type: selectedThumbnail.type,
-          permalink: permalink.substring(0, 30),
+        const enhanced = await enhanceDraftWithFeatures({
+          thumbnailCandidates,
+          affiliateLinks,
+          permalink,
+          composeThumbnailText,
+          seoTitle,
+          ideaData,
+          jsonLdSchema,
+          formattedDraft,
         });
 
-        // 1. 이미지 소스 결정 (제휴 제품 이미지 기반 합성 vs 순수 AI 생성)
-        let generatedImages = [];
-        let isProductSynthesis = false;
-
-        // 제휴 링크 중 이미지가 있는 항목 찾기
-        const productLink = affiliateLinks && affiliateLinks.find(
-          (link) => link.cardData && link.cardData.imageUrl
-        );
-
-        if (productLink) {
-          Logger.info('[generateDraftFromIdea] 🛍️ 제휴 상품 이미지 발견, AI 합성을 시도합니다:', productLink.cardData.productName);
-          
-          // 1-1. 제품 이미지 다운로드 및 Base64 변환
-          const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
-          
-          if (productBase64) {
-            // 1-2. 합성용 프롬프트 생성 (제품을 강조하는 배경 생성 요청)
-            // 예: "Professional product photography of [Product] on a [Concept] background..."
-            const synthesisPrompt = `
-              [Instruction]
-              Create a professional product photograph featuring the object from the [Provided Reference Image].
-              
-              [Composition]
-              Place the object seamlessly into the following scene: "${selectedThumbnail.thumbnailPromptEn}".
-              
-              [Constraints]
-              - Use the [Provided Reference Image] as the main subject. Do NOT generate a new product.
-              - If the text description conflicts with the reference image, prioritize the visual details of the reference image.
-              - Ensure natural lighting, shadows, and reflections matching the background.
-              - Style: 4k, photorealistic, cinematic lighting.
-            `.trim();
-
-            Logger.debug('[generateDraftFromIdea] 합성 프롬프트:', synthesisPrompt);
-
-            // 1-3. 이미지 + 프롬프트로 AI 생성 요청
-            try {
-              generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
-              isProductSynthesis = true;
-            } catch (err) {
-              Logger.warn('[generateDraftFromIdea] 합성 실패, 순수 AI 생성으로 전환합니다:', err);
-            }
-          }
-        }
-
-        // 합성이 실패했거나 제품 이미지가 없으면 일반 AI 생성 시도
-        if (generatedImages.length === 0) {
-          generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
-        }
-
-        const sourceImageUrl = generatedImages[0];
-
-        // 2. [신규] 텍스트 합성 (하이브리드 합성) - compose only when explicitly requested
-        let composedDataUrl = sourceImageUrl;
-        if (composeThumbnailText) {
-          const thumbnailText =
-            selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
-          const textPosition = selectedThumbnail.textPosition || 'bottom';
-          Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
-            text: thumbnailText,
-            position: textPosition,
-            type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation',
-          });
-
-          try {
-            composedDataUrl = await composeThumbnailInOffscreen(
-              sourceImageUrl,
-              thumbnailText,
-              textPosition
-            );
-          } catch (composeErr) {
-            // If compose fails (offscreen timeouts / fetch problems), try a fallback:
-            // 1) attempt to download sourceImageUrl and convert to data URL
-            // 2) if conversion succeeds, use converted dataURL as 'composed' base for cropping/upload
-            Logger.warn('[generateDraftFromIdea] composeThumbnailInOffscreen failed, attempting fallback using source image:', composeErr && composeErr.message);
-            try {
-              const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
-              if (sourceBase64 && sourceBase64.data) {
-                const candidateDataUrl = `data:${sourceBase64.mimeType};base64,${sourceBase64.data}`;
-                // Use the raw source image as the composed fallback
-                composedDataUrl = candidateDataUrl;
-                Logger.info('[generateDraftFromIdea] compose fallback: source image converted to dataURL successfully');
-              } else {
-                Logger.warn('[generateDraftFromIdea] compose fallback: could not convert source image to base64');
-              }
-            } catch (fbErr) {
-              Logger.warn('[generateDraftFromIdea] compose fallback failed:', fbErr && fbErr.message);
-            }
-            // mark partial failure because composition didn't succeed
-            thumbnailGenerationPartialFailure = true;
-          }
-        }
-
-        // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
-        const userId = await getCurrentUserId();
-        const cropPromises = [
-          // 1:1 비율
-          cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({
-            ratio: '1x1',
-            dataUrl,
-          })),
-          // 4:3 비율
-          cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({
-            ratio: '4x3',
-            dataUrl,
-          })),
-        ];
-
-        // Wait for crop results but be tolerant to failures/timeouts.
-        // If crop fails for one or both ratios (common due to offscreen slowness),
-        // fall back to using the composedDataUrl for the missing crops so
-        // the overall draft generation still succeeds.
-        let croppedResults;
-        try {
-          croppedResults = await Promise.all(cropPromises);
-        } catch (cropErr) {
-          Logger.warn('[generateDraftFromIdea] 하나 이상의 크롭 작업이 실패했습니다. 폴백으로 합성 이미지를 사용합니다:', cropErr && cropErr.message);
-          // Build sensible fallback results. Use composedDataUrl for both ratios
-          // if cropping failed entirely or partially.
-          croppedResults = [
-            { ratio: '1x1', dataUrl: composedDataUrl },
-            { ratio: '4x3', dataUrl: composedDataUrl },
-          ];
-          // keep a flag for the UI / downstream to know crops were unreliable
-          // We'll attach this flag to thumbnailUrls later if needed.
-          if (!thumbnailUrls) thumbnailUrls = null; // ensure defined
-          thumbnailGenerationPartialFailure = true;
-        }
-
-        // 4. SEO 파일명으로 업로드
-        const uploadPromises = [
-          // 1:1 업로드
-          uploadImageToFirebaseStorage(
-            croppedResults[0].dataUrl,
-            `thumbnails/${userId}/${permalink}-1x1.png`,
-            userId
-          ),
-          // 4:3 업로드
-          uploadImageToFirebaseStorage(
-            croppedResults[1].dataUrl,
-            `thumbnails/${userId}/${permalink}-4x3.png`,
-            userId
-          ),
-          // 16:9 업로드 (합성된 이미지)
-          uploadImageToFirebaseStorage(
-            composedDataUrl,
-            `thumbnails/${userId}/${permalink}-16x9.png`,
-            userId
-          ),
-        ];
-
-        const [url_1x1, url_4x3, url_16x9] = await Promise.all(uploadPromises);
-
-        thumbnailUrls = {
-          url_1x1,
-          url_4x3,
-          url_16x9,
-          altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
-        };
-
-        Logger.info('[generateDraftFromIdea] ✅ 썸네일 자동 생성 및 업로드 완료:', {
-          url_1x1: url_1x1.substring(0, 50) + '...',
-          url_4x3: url_4x3.substring(0, 50) + '...',
-          url_16x9: url_16x9.substring(0, 50) + '...',
-        });
-
-        // [신규] JSON-LD image 배열을 실제 Firebase URL로 교체
-        if (jsonLdSchema) {
-          jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
-          Logger.info('[generateDraftFromIdea] JSON-LD image 배열 업데이트 완료');
-        }
+        // merge results back into local variables
+        formattedDraft = enhanced.formattedDraft;
+        thumbnailUrls = enhanced.thumbnailUrls;
+        thumbnailGenerationPartialFailure = enhanced.thumbnailGenerationPartialFailure;
+        jsonLdSchema = enhanced.jsonLdSchema;
       } catch (error) {
         Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
         Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
@@ -1551,7 +1549,6 @@ ${defaultDescription}
           permalink: permalink?.substring(0, 30),
           hasThumbnailCandidates: thumbnailCandidates.length > 0,
         });
-        // 썸네일 생성 실패해도 초안 생성은 계속 진행
       }
     } else if (!generateThumbnail) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 스킵, 기존 값 사용');

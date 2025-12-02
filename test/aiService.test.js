@@ -191,6 +191,71 @@ describe("AI Service", () => {
     });
   });
 
+  describe('callDraftAPI', () => {
+    test('retries until a successful non-empty response', async () => {
+      jest.resetModules();
+      // rely on network/fetch behavior which callGeminiAPI uses internally
+      const svc = require('../js/services/aiService.js');
+
+      // Ensure storage returns API key
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // First attempt -> network error, second attempt -> successful response
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn()
+        .mockRejectedValueOnce(new Error('network'))
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }) });
+
+      const res = await svc.callDraftAPI('prompt', { maxRetries: 3, initialBackoffMs: 1, backoffMultiplier: 1 });
+      expect(res).toBe('OK');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      global.fetch = originalFetch;
+    });
+
+    test('returns empty string when model returns empty responses', async () => {
+      jest.resetModules();
+      const svc = require('../js/services/aiService.js');
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ candidates: [] }) })
+        .mockResolvedValue({ ok: true, json: async () => ({ candidates: [] }) });
+
+      const res = await svc.callDraftAPI('prompt', { maxRetries: 2, initialBackoffMs: 1, backoffMultiplier: 1 });
+      expect(res).toBe('');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      global.fetch = originalFetch;
+    });
+
+    test('throws when final attempt errors', async () => {
+      jest.resetModules();
+      const svc = require('../js/services/aiService.js');
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockRejectedValue(new Error('boom'));
+
+      await expect(svc.callDraftAPI('prompt', { maxRetries: 1, initialBackoffMs: 1 })).rejects.toThrow('boom');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      global.fetch = originalFetch;
+    });
+  });
+
+  describe('processDraftResponse', () => {
+    test('cleans fences and extracts JSON-LD and thumbnail info', () => {
+      const svc = require('../js/services/aiService.js');
+      const raw = '```markdown\n# Title\n```\n<JSON-LD>{"headline":"H","datePublished":"2020-01-01"}</JSON-LD>\nContent here\n<썸네일정보>[{"type":"curiosity","thumbnailText":"txt"}]</썸네일정보>';
+      const { cleanedDraft, jsonLdSchema, thumbnailCandidates } = svc.processDraftResponse(raw, { title: 'T' });
+
+      expect(cleanedDraft).not.toContain('<JSON-LD>');
+      expect(cleanedDraft).not.toContain('<썸네일정보>');
+      expect(jsonLdSchema).toBeTruthy();
+      expect(jsonLdSchema.headline).toBe('H');
+      expect(Array.isArray(thumbnailCandidates)).toBe(true);
+      expect(thumbnailCandidates[0].type).toBe('curiosity');
+    });
+  });
+
   describe("generateDraftFromIdea", () => {
     test("should succeed with draft and fallback thumbnails when crops fail", async () => {
       jest.resetModules();
@@ -284,7 +349,7 @@ describe("AI Service", () => {
         // compose fails to force fallback
         composeThumbnailInOffscreen: jest.fn(() => Promise.reject(new Error('compose timeout'))),
         // cropping still works when given a dataURL fallback
-        cropImageInOffscreen: jest.fn(() => Promise.resolve('cropped-image-from-source')),
+        cropImageInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,cropped-image-data')),
       }));
 
       jest.doMock("../js/services/promptService.js", () => ({
@@ -321,7 +386,7 @@ describe("AI Service", () => {
           return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
         }
         // Image URL download -> return a blob
-        if (String(url).includes('images.test')) {
+        if (String(url).includes('storage.test') || String(url).includes('images.test')) {
           const blob = new Blob([Buffer.from('fake')], { type: 'image/png' });
           return Promise.resolve({ ok: true, blob: async () => blob });
         }
