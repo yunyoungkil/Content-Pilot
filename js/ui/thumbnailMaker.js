@@ -51,7 +51,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       },
       {
         type: 'informative',
-        thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", text overlay style, bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
+        // Avoid explicit 'text overlay' instruction in the AI prompt; request a clean layout suitable for overlay but no text
+        thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", clean layout suitable for text overlay (DO NOT include any text in the image), bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
         thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
         thumbnailText: '완벽 정리',
         fontFamily: "'Pretendard', sans-serif",
@@ -857,11 +858,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         // 프롬프트에 메인 타이틀 텍스트를 포함하여 이미지에 텍스트가 렌더링되도록 함
         let textPrompt = '';
         if (mainTitle) {
-          textPrompt = `, with text "${mainTitle}" rendered in high-quality, readable font, properly positioned`;
+          // We will not include the text in the generated image. Instead, request visual metaphors or icons
+          // that represent the title. UI overlays will render the actual text separately.
+          textPrompt = `, visually representing the idea of "${mainTitle}" with icons/illustrations, DO NOT render the title as text in the image`;
         }
 
-        // 기본 프롬프트 + 스타일 프롬프트 + 텍스트 렌더링 지시 결합
-        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, high-quality text rendering, 16:9 aspect ratio`;
+        // 기본 프롬프트 + 스타일 프롬프트 (explicitly remove high-quality text rendering to avoid textual overlays)
+        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, 16:9 aspect ratio`;
 
         // background.js에 이미지 생성 요청
         const response = await chrome.runtime.sendMessage({

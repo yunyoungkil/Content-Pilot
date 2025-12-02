@@ -1363,6 +1363,7 @@ ${defaultDescription}
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
     
+    const composeThumbnailText = !!options.composeThumbnailText; // default false unless explicitly true
     if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
       try {
@@ -1423,43 +1424,45 @@ ${defaultDescription}
 
         const sourceImageUrl = generatedImages[0];
 
-        // 2. [신규] 텍스트 합성 (하이브리드 합성)
-        const thumbnailText =
-          selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
-        const textPosition = selectedThumbnail.textPosition || 'bottom';
-        Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
-          text: thumbnailText,
-          position: textPosition,
-          type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation'
-        });
+        // 2. [신규] 텍스트 합성 (하이브리드 합성) - compose only when explicitly requested
+        let composedDataUrl = sourceImageUrl;
+        if (composeThumbnailText) {
+          const thumbnailText =
+            selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+          const textPosition = selectedThumbnail.textPosition || 'bottom';
+          Logger.info('[generateDraftFromIdea] 썸네일 텍스트 합성 시작:', {
+            text: thumbnailText,
+            position: textPosition,
+            type: isProductSynthesis ? 'Product Synthesis' : 'Pure AI Generation',
+          });
 
-        let composedDataUrl;
-        try {
-          composedDataUrl = await composeThumbnailInOffscreen(
-            sourceImageUrl,
-            thumbnailText,
-            textPosition
-          );
-        } catch (composeErr) {
-          // If compose fails (offscreen timeouts / fetch problems), try a fallback:
-          // 1) attempt to download sourceImageUrl and convert to data URL
-          // 2) if conversion succeeds, use converted dataURL as 'composed' base for cropping/upload
-          Logger.warn('[generateDraftFromIdea] composeThumbnailInOffscreen failed, attempting fallback using source image:', composeErr && composeErr.message);
           try {
-            const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
-            if (sourceBase64 && sourceBase64.data) {
-              const candidateDataUrl = `data:${sourceBase64.mimeType};base64,${sourceBase64.data}`;
-              // Use the raw source image as the composed fallback
-              composedDataUrl = candidateDataUrl;
-              Logger.info('[generateDraftFromIdea] compose fallback: source image converted to dataURL successfully');
-            } else {
-              Logger.warn('[generateDraftFromIdea] compose fallback: could not convert source image to base64');
+            composedDataUrl = await composeThumbnailInOffscreen(
+              sourceImageUrl,
+              thumbnailText,
+              textPosition
+            );
+          } catch (composeErr) {
+            // If compose fails (offscreen timeouts / fetch problems), try a fallback:
+            // 1) attempt to download sourceImageUrl and convert to data URL
+            // 2) if conversion succeeds, use converted dataURL as 'composed' base for cropping/upload
+            Logger.warn('[generateDraftFromIdea] composeThumbnailInOffscreen failed, attempting fallback using source image:', composeErr && composeErr.message);
+            try {
+              const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
+              if (sourceBase64 && sourceBase64.data) {
+                const candidateDataUrl = `data:${sourceBase64.mimeType};base64,${sourceBase64.data}`;
+                // Use the raw source image as the composed fallback
+                composedDataUrl = candidateDataUrl;
+                Logger.info('[generateDraftFromIdea] compose fallback: source image converted to dataURL successfully');
+              } else {
+                Logger.warn('[generateDraftFromIdea] compose fallback: could not convert source image to base64');
+              }
+            } catch (fbErr) {
+              Logger.warn('[generateDraftFromIdea] compose fallback failed:', fbErr && fbErr.message);
             }
-          } catch (fbErr) {
-            Logger.warn('[generateDraftFromIdea] compose fallback failed:', fbErr && fbErr.message);
+            // mark partial failure because composition didn't succeed
+            thumbnailGenerationPartialFailure = true;
           }
-          // mark partial failure because composition didn't succeed
-          thumbnailGenerationPartialFailure = true;
         }
 
         // 3. 병렬 크롭 처리 (1:1, 4:3) - 합성된 이미지 사용
@@ -2048,8 +2051,9 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
   // 단일 이미지 생성 함수
   const generateSingleImage = async (index) => {
     try {
-      // [핵심] 페이로드 구성: 참조 이미지가 있으면 포함
-      const parts = [{ text: prompt }];
+      // [핵심] 페이로드 구성: 항상 텍스트 금지 시스템 지시문을 포함하여 No-Text를 강제
+      const finalPrompt = `${THUMBNAIL_SYSTEM_PROMPT}\n${prompt}`;
+      const parts = [{ text: finalPrompt }];
       
       // 참조 이미지(제품 이미지)가 있으면 페이로드에 추가 (고급 합성/편집 모드 트리거)
       if (referenceImage && referenceImage.data) {

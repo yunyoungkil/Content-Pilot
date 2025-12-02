@@ -250,7 +250,7 @@ describe("AI Service", () => {
 
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
 
-      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true });
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true, composeThumbnailText: true });
       // restore original fetch so we don't break other tests
       global.fetch = originalFetch;
       // debug
@@ -330,7 +330,7 @@ describe("AI Service", () => {
 
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
 
-      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true });
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true, composeThumbnailText: true });
       // restore original fetch so we don't break other tests
       global.fetch = originalFetch;
 
