@@ -88,6 +88,26 @@ export async function callGeminiAPI(prompt) {
 // [삭제] selectPersona 함수 삭제 (detectPersona로 대체 및 generateDraftFromIdea 내부로 통합)
 // [삭제] logPersona 함수 삭제 (PromptBuilder의 getPersonaName/getToneName으로 대체)
 
+// 썸네일 프롬프트 생성 시스템 메시지
+// [핵심 수정] 텍스트 금지 명령을 최상단에 영문/한글로 강력하게 추가
+const THUMBNAIL_SYSTEM_PROMPT = `
+CRITICAL INSTRUCTION: THE FINAL IMAGE MUST NOT CONTAIN ANY WRITTEN TEXT, LETTERS, CHARACTERS, OR NUMBERS. NO EXCEPTIONS.
+
+당신은 블로그 썸네일 이미지 생성을 위한 프롬프트 작성 전문가입니다.
+주어진 정보(제목, 설명)를 바탕으로 이미지를 생성할 때, 입력된 텍스트 내용 자체가 이미지 안에 글자로 나타나서는 절대 안 됩니다.
+오직 내용을 시각적으로 상징하는 그래픽, 아이콘, 일러스트레이션 요소로만 구성된 DALL-E 3용 영어 프롬프트를 작성하십시오.
+
+스타일 가이드:
+- 현대적이고 트렌디한 플랫 디자인 일러스트레이션 스타일
+- 밝고 긍정적인 컬러 팔레트 (파스텔 톤 위주 + 포인트 컬러)
+- 추상적이고 은유적인 시각화 (텍스트 내용을 직관적인 아이콘이나 그래픽으로 표현)
+- 깔끔하고 미니멀한 구성, 여백의 미 활용
+- 웹/모바일 환경에 최적화된 시인성 높은 디자인
+- 유튜브 썸네일 느낌의 매력적인 아트워크
+
+중요: 결과물은 오직 DALL-E 3에 입력할 영어 프롬프트 텍스트만 출력해야 합니다. 설명이나 다른 말은 필요 없습니다.
+`;
+
 // 3. 키워드 갭 분석 (AI 분석)
 export async function analyzeKeywordGap(myContent, competitorContent) {
   // (단순화를 위해 Set 연산만 수행, 필요시 AI 필터링 추가)
