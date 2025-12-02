@@ -1072,7 +1072,6 @@ ${defaultDescription}
 
     // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
     Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
-    let formattedDraft;
     try {
       formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
     } catch (sanitizationError) {
