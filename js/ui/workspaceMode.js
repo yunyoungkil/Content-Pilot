@@ -3097,6 +3097,18 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                     ideaId: ideaData.id,
                     draft: response.draft,
                   });
+
+                  // 🔥 [핵심 수정] 메모리 상의 데이터도 즉시 갱신해야 "HTML 복사" 시 반영됨 🔥
+                  ideaData.draftContent = response.draft;
+                  if (!ideaData.workspace) ideaData.workspace = {};
+                  ideaData.workspace.draft = response.draft;
+                  
+                  // 전역 데이터도 동기화
+                  if (window.__cp_workspace_idea_data) {
+                      window.__cp_workspace_idea_data.draftContent = response.draft;
+                      if (!window.__cp_workspace_idea_data.workspace) window.__cp_workspace_idea_data.workspace = {};
+                      window.__cp_workspace_idea_data.workspace.draft = response.draft;
+                  }
                 } else {
                   console.warn('[Workspace] 초안 텍스트가 비어있어 에디터에 설정하지 않습니다.');
                   // 빈 초안일 때 기본 템플릿 제공

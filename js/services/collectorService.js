@@ -7,21 +7,10 @@ import { Logger } from '../utils.js';
 // [추가] 성능 최적화 서비스 임포트
 import { performanceOptimizer } from './performanceOptimizer.js';
 
-let creating;
+// ▼▼▼ [추가] 오프스크린 서비스에서 검증된 파싱 함수 가져오기 ▼▼▼
+import { parseHtmlInOffscreen } from './offscreenService.js';
 
-export async function getOffscreenDocument() {
-  if (await chrome.offscreen.hasDocument()) return;
-  if (creating) await creating;
-  else {
-    creating = chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['DOM_PARSER'],
-      justification: 'HTML 파싱',
-    });
-    await creating;
-    creating = null;
-  }
-}
+let creating;
 
 async function limitConcurrency(items, fn, limit = 5) {
   const results = [],
@@ -585,24 +574,33 @@ export async function fetchAllChannelData() {
   }
 }
 
-// 5. HTML 파싱 (오프스크린)
+// [수정] 5. HTML 파싱 (OffscreenService 위임)
+// 기존 getOffscreenDocument 함수는 삭제해도 됩니다 (offscreenService 내부에서 처리함)
+
 export async function parseBlogPage(url, html) {
   try {
     let content = html;
+    
+    // HTML 내용이 없으면 직접 가져오기
     if (!content) {
       const res = await fetch(url);
-      if (!res.ok) throw new Error('Fetch Fail');
+      if (!res.ok) throw new Error(`Fetch Fail: ${res.status}`);
       content = await res.text();
     }
 
-    await getOffscreenDocument();
-    return await new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { action: 'parse_html_in_offscreen', html: content, baseUrl: url },
-        resolve
-      );
-    });
+    // [핵심 변경] 직접 메시지를 보내지 말고, offscreenService의 함수를 사용합니다.
+    // 이 함수는 ACK를 무시하고 진짜 데이터가 올 때까지 기다려줍니다.
+    const result = await parseHtmlInOffscreen(content, url);
+    
+    // offscreenService는 성공 시 필요한 데이터를 담아 반환합니다.
+    // 실패 시 에러를 throw하므로 catch에서 잡힙니다.
+    return { 
+      success: true, 
+      ...result 
+    };
+
   } catch (e) {
+    Logger.error(`[parseBlogPage] 파싱 실패 (${url}):`, e);
     return { success: false, error: e.message };
   }
 }
