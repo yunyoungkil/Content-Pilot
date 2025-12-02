@@ -1256,6 +1256,31 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             // Fallback: 저장된 JSON-LD가 없으면 기본값 생성
             console.log('[Workspace] JSON-LD가 없어 기본 스키마를 생성합니다.');
             const today = new Date().toISOString().split('T')[0];
+            
+            // 썸네일 이미지 URL들 수집
+            const imageUrls = [];
+            if (currentIdeaData?.thumbnailUrls) {
+              if (currentIdeaData.thumbnailUrls.url_1x1) imageUrls.push(currentIdeaData.thumbnailUrls.url_1x1);
+              if (currentIdeaData.thumbnailUrls.url_4x3) imageUrls.push(currentIdeaData.thumbnailUrls.url_4x3);
+              if (currentIdeaData.thumbnailUrls.url_16x9) imageUrls.push(currentIdeaData.thumbnailUrls.url_16x9);
+            } else if (currentIdeaData?.thumbnail) {
+              imageUrls.push(currentIdeaData.thumbnail);
+            }
+            
+            // 퍼머링크 URL (전체 URL)
+            const permalinkUrl = fullUrl || '';
+            
+            // Publisher 정보 (채널 URL에서 도메인 추출 또는 기본값)
+            let publisherName = 'Content Pilot';
+            try {
+              if (channelUrl) {
+                const url = new URL(channelUrl);
+                publisherName = url.hostname;
+              }
+            } catch (e) {
+              // URL 파싱 실패 시 기본값 유지
+            }
+            
             jsonLdSchema = {
                 "@context": "https://schema.org",
                 "@type": "BlogPosting",
@@ -1263,11 +1288,31 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
                 "description": currentIdeaData.description || "콘텐츠 설명이 없습니다.",
                 "author": {
                     "@type": "Person",
-                    "name": "Content Pilot"
+                    "name": publisherName
                 },
                 "datePublished": today,
-                "dateModified": today
+                "dateModified": today,
+                "image": imageUrls.length > 0 ? imageUrls : undefined,
+                "mainEntityOfPage": permalinkUrl ? {
+                    "@type": "WebPage",
+                    "@id": permalinkUrl
+                } : undefined,
+                "publisher": {
+                    "@type": "Organization",
+                    "name": publisherName,
+                    "logo": {
+                        "@type": "ImageObject",
+                        "url": "https://via.placeholder.com/120x60"
+                    }
+                }
             };
+            
+            // undefined 값 제거
+            Object.keys(jsonLdSchema).forEach(key => {
+              if (jsonLdSchema[key] === undefined) {
+                delete jsonLdSchema[key];
+              }
+            });
           }
 
           // 최신 seoTitle 가져오기
