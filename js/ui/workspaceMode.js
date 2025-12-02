@@ -2882,380 +2882,129 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
       
       if (e.target.id === 'generate-draft-btn' || e.target.closest('#generate-draft-btn')) {
         btn = e.target.id === 'generate-draft-btn' ? e.target : e.target.closest('#generate-draft-btn');
-        actionType = 'full';
+        const options = { generateDraft: true, generateThumbnail: true };
+        handleGenerateAction(btn, options);
       } else if (e.target.id === 'regenerate-draft-btn' || e.target.closest('#regenerate-draft-btn')) {
         btn = e.target.id === 'regenerate-draft-btn' ? e.target : e.target.closest('#regenerate-draft-btn');
-        actionType = 'draft-only';
+        const options = { generateDraft: true, generateThumbnail: false };
+        handleGenerateAction(btn, options);
       } else if (e.target.id === 'regenerate-thumbnail-btn' || e.target.closest('#regenerate-thumbnail-btn')) {
         btn = e.target.id === 'regenerate-thumbnail-btn' ? e.target : e.target.closest('#regenerate-thumbnail-btn');
-        actionType = 'thumbnail-only';
+        const options = { generateDraft: false, generateThumbnail: true };
+        handleGenerateAction(btn, options);
       }
-      
-      if (!btn) return;
+    } else if (e.target.closest('.scrap-card-item')) {
+      // 스크랩 카드 클릭 시
+      const card = e.target.closest('.scrap-card-item');
+      if (!card) return;
 
-      // 버튼 비활성화 및 로딩 표시
-      btn.disabled = true;
-      const originalText = btn.textContent;
-      
-      if (actionType === 'full') {
-        btn.textContent = '⏳ 초안 생성 중...';
-      } else if (actionType === 'draft-only') {
-        btn.textContent = '⏳ 텍스트 재생성 중...';
-      } else {
-        btn.textContent = '⏳ 썸네일 생성 중...';
-      }
-      
-      // 옵션 설정
-      const generateOptions = {
-        generateDraft: actionType === 'full' || actionType === 'draft-only',
-        generateThumbnail: actionType === 'full' || actionType === 'thumbnail-only',
-      };
-
-      // 현재 에디터 내용 가져오기
-      const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
-      if (!editorIframe || !editorIframe.contentWindow) {
-        alert('에디터가 준비되지 않았습니다.');
-        btn.disabled = false;
-        btn.textContent = originalText;
+      // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
+      if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
         return;
       }
 
-      // 에디터에서 현재 내용 가져오기
-      const messageId = `get-content-${Date.now()}`;
-      const getContentPromise = new Promise((resolve) => {
-        const handler = (event) => {
-          if (event.data.action === 'content-response' && event.data.requestId === messageId) {
-            window.removeEventListener('message', handler);
-            resolve(event.data.data?.html || '');
-          }
-        };
-        window.addEventListener('message', handler);
-        editorIframe.contentWindow.postMessage(
-          { action: 'get-content', requestId: messageId },
-          '*'
-        );
-        setTimeout(() => {
-          window.removeEventListener('message', handler);
-          resolve('');
-        }, 2000);
-      });
-
-      getContentPromise.then(async (currentDraftHtml) => {
-        // [체크리스트 1-1] 필수 데이터 유효성 검사
-        const title = ideaData.title || '';
-        const outline = ideaData.outline || ideaData.workspace?.outline || [];
-
-        if (!title || title.trim() === '') {
-          alert('❌ 제목이 비어있습니다. 제목을 입력해주세요.');
-          btn.disabled = false;
-          btn.textContent = originalText;
-          return;
+      // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
+      if (
+        e.target.classList.contains('scrap-card-snippet') ||
+        e.target.closest('.scrap-card-snippet') ||
+        e.target.classList.contains('scrap-link-btn') ||
+        e.target.closest('.scrap-link-btn')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const url = card.dataset.previewUrl || card.dataset.url;
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+          window.open(url, '_blank');
+          showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
+        } else {
+          showToast('❌ 유효한 URL이 없습니다.');
         }
+        return;
+      }
 
-        if (!outline || outline.length === 0) {
-          const proceed = confirm(
-            '⚠️ 목차가 없습니다. 목차 없이 초안을 생성하면 글 구조가 엉성할 수 있습니다.\n\n그래도 계속하시겠습니까?'
-          );
-          if (!proceed) {
-            btn.disabled = false;
-            btn.textContent = originalText;
-            return;
+      // 3. 태그 클릭은 무시
+      if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
+        return;
+      }
+
+      // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
+      e.preventDefault();
+      e.stopPropagation();
+
+      const scrapId = card.dataset.scrapId;
+      if (!scrapId) {
+        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+        return;
+      }
+
+      // 스크랩 상세 정보 가져오기
+      chrome.runtime.sendMessage(
+        { action: 'get_scrap_detail', scrapId: scrapId },
+        (response) => {
+          if (response && response.success && response.scrap) {
+            const scrap = response.scrap;
+
+            // 모달 생성
+            const modal = document.createElement('div');
+            modal.className = 'scrap-detail-modal';
+            modal.style.cssText = `
+              position: fixed;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              background: rgba(0,0,0,0.7);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              z-index: 10000;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            `;
+
+            modal.innerHTML = `
+              <div style="background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+                <div style="padding: 24px; border-bottom: 1px solid #e1e5e9;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div style="flex: 1;">
+                      <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 600; color: #1a1a1a;">${scrap.title || '제목 없음'}</h2>
+                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <a href="${scrap.url}" target="_blank" style="color: #0066cc; text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 4px;">
+                          🔗 ${scrap.url}
+                        </a>
+                      </div>
+                      ${scrap.tags && scrap.tags.length > 0 ? `
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                          ${scrap.tags.map(tag => `<span style="background: #f0f4f8; color: #475569; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${tag}</span>`).join('')}
+                        </div>
+                      ` : ''}
+                    </div>
+                    <button class="modal-close-btn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; hover: background: #f5f5f5;">×</button>
+                  </div>
+                </div>
+                <div style="padding: 24px;">
+                  <div style="color: #374151; line-height: 1.6; font-size: 15px;">${scrap.text || scrap.cleanText || '내용이 없습니다.'}</div>
+                </div>
+              </div>
+            `;
+
+            // 닫기 버튼 이벤트
+            modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+              modal.remove();
+            });
+
+            // 배경 클릭으로 닫기
+            modal.addEventListener('click', (e) => {
+              if (e.target === modal) {
+                modal.remove();
+              }
+            });
+
+            document.body.appendChild(modal);
+          } else {
+            showToast('❌ 스크랩 정보를 불러올 수 없습니다.');
           }
         }
-
-        // HTML을 텍스트로 변환 (HTML 태그 제거)
-        let currentDraft = '';
-        if (currentDraftHtml) {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = currentDraftHtml;
-          currentDraft = tempDiv.textContent || tempDiv.innerText || '';
-        }
-
-        // [체크리스트 1-2] 연결된 스크랩 데이터 가져오기 및 텍스트 truncation
-        // linkedScraps는 Firebase에서 객체로 저장되지만, 코드에서는 배열로도 사용 가능
-        let linkedScrapsIds = [];
-        if (ideaData.linkedScraps) {
-          if (Array.isArray(ideaData.linkedScraps)) {
-            linkedScrapsIds = ideaData.linkedScraps;
-          } else if (typeof ideaData.linkedScraps === 'object') {
-            linkedScrapsIds = Object.keys(ideaData.linkedScraps);
-          }
-        } else if (ideaData.workspace?.linkedScraps) {
-          if (Array.isArray(ideaData.workspace.linkedScraps)) {
-            linkedScrapsIds = ideaData.workspace.linkedScraps;
-          } else if (typeof ideaData.workspace.linkedScraps === 'object') {
-            linkedScrapsIds = Object.keys(ideaData.workspace.linkedScraps);
-          }
-        }
-        const linkedScrapsContent = [];
-
-        // 스크랩 텍스트 최대 길이 제한 (토큰 절약)
-        const MAX_SCRAP_TEXT_LENGTH = 2000; // 각 스크랩당 최대 2000자
-
-        if (linkedScrapsIds.length > 0) {
-          // 모든 스크랩 가져오기
-          const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
-          await new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-              { action: 'get_all_scraps', channelId: activeChannelId },
-              (response) => {
-                if (response && response.success && response.scraps) {
-                  // 연결된 스크랩만 필터링
-                  linkedScrapsIds.forEach((scrapId) => {
-                    const scrap = response.scraps.find((s) => s.id === scrapId);
-                    if (scrap) {
-                      let scrapText = scrap.text || scrap.cleanText || '';
-                      // 텍스트가 너무 길면 truncation (토큰 절약)
-                      if (scrapText.length > MAX_SCRAP_TEXT_LENGTH) {
-                        scrapText =
-                          scrapText.substring(0, MAX_SCRAP_TEXT_LENGTH) +
-                          '... [내용이 길어 일부만 포함됨]';
-                      }
-                      linkedScrapsContent.push({
-                        title: scrap.title || scrap.text?.substring(0, 50) || '스크랩',
-                        url: scrap.url || '',
-                        text: scrapText,
-                      });
-                    }
-                  });
-                }
-                resolve();
-              }
-            );
-          });
-        }
-
-        // 아이디어 데이터 준비
-        const draftData = {
-          title: title,
-          description: ideaData.description || '',
-          tags: ideaData.tags || ideaData.workspace?.keywords || [],
-          outline: outline,
-          longTailKeywords: ideaData.longTailKeywords || [],
-          recommendedSearches: ideaData.recommendedKeywords || [],
-          currentDraft: currentDraft || '',
-          linkedScrapsContent: linkedScrapsContent,
-        };
-
-        // [체크리스트 4-3] 타임아웃 처리 (썸네일 생성 포함하여 120초로 증가)
-        const TIMEOUT_MS = 120000; // 120초 (2분) - 썸네일 생성 포함
-        let timeoutId = setTimeout(() => {
-          if (btn.disabled) {
-            btn.disabled = false;
-            btn.textContent = originalText;
-            alert(
-              '⏱️ 초안 생성이 2분을 초과했습니다. 네트워크 상태를 확인하거나 다시 시도해주세요.'
-            );
-            console.error('[Workspace] AI 초안 생성 타임아웃 (120초 초과)');
-          }
-        }, TIMEOUT_MS);
-
-        // AI 초안 생성 요청 (옵션 포함)
-        chrome.runtime.sendMessage(
-          {
-            action: 'generate_draft_from_idea',
-            data: draftData,
-            options: generateOptions, // 선택적 실행 옵션 전달
-          },
-          (response) => {
-            clearTimeout(timeoutId); // 타임아웃 취소
-            btn.disabled = false;
-            btn.textContent = originalText;
-
-            // [체크리스트 4-2] 응답 오류 처리 강화
-            if (!response) {
-              alert('❌ 초안 생성에 실패했습니다. 응답을 받지 못했습니다.');
-              console.error('[Workspace] AI 초안 생성: 응답 없음');
-              return;
-            }
-
-            if (response && response.success) {
-              // 초안이 생성되었으므로 텍스트만 업데이트하는 경우가 아니면 에디터 내용 설정
-              if (generateOptions.generateDraft) {
-                // 마크다운 코드 블록 제거 (```markdown ... ``` 형식)
-                let draftText = response.draft || '';
-                // 마크다운 코드 블록 제거
-                draftText = draftText.replace(/^```markdown\s*\n?/i, '');
-                draftText = draftText.replace(/^```\s*\n?/i, '');
-                draftText = draftText.replace(/\n?```\s*$/i, '');
-                draftText = draftText.trim();
-
-                // 초안 텍스트가 있는 경우에만 에디터에 설정
-                if (draftText) {
-                  console.log('[Workspace] draftText length:', draftText.length);
-                  console.log('[Workspace] draftText preview:', draftText.substring(0, 200));
-                  // 마크다운을 HTML로 변환하여 에디터에 설정
-                  const htmlContent = marked.parse(draftText);
-                  console.log('[Workspace] htmlContent length:', htmlContent.length);
-                  console.log('[Workspace] htmlContent preview:', htmlContent.substring(0, 200));
-                  sendCommand('set-content', { html: htmlContent });
-                  sendCommand('focus');
-
-                  // 초안 저장
-                  chrome.runtime.sendMessage({
-                    action: 'save_idea_draft',
-                    ideaId: ideaData.id,
-                    draft: response.draft,
-                  });
-
-                  // 🔥 [핵심 수정] 메모리 상의 데이터도 즉시 갱신해야 "HTML 복사" 시 반영됨 🔥
-                  ideaData.draftContent = response.draft;
-                  if (!ideaData.workspace) ideaData.workspace = {};
-                  ideaData.workspace.draft = response.draft;
-                  
-                  // 전역 데이터도 동기화
-                  if (window.__cp_workspace_idea_data) {
-                      window.__cp_workspace_idea_data.draftContent = response.draft;
-                      if (!window.__cp_workspace_idea_data.workspace) window.__cp_workspace_idea_data.workspace = {};
-                      window.__cp_workspace_idea_data.workspace.draft = response.draft;
-                  }
-                } else {
-                  console.warn('[Workspace] 초안 텍스트가 비어있어 에디터에 설정하지 않습니다.');
-                  // 빈 초안일 때 기본 템플릿 제공
-                  const defaultTemplate = `# ${ideaData.title || '콘텐츠 제목'}
-
-${ideaData.description || '이 콘텐츠에 대한 설명입니다.'}
-
-## 소개
-
-이 주제에 대해 알아보겠습니다.
-
-## 본론
-
-상세한 내용을 작성하는 부분입니다.
-
-## 결론
-
-마무리하는 내용입니다.`;
-
-                  const htmlContent = defaultTemplate;
-                  console.log('[Workspace] 빈 초안 대신 기본 템플릿 사용:', htmlContent.substring(0, 200));
-                  sendCommand('set-content', { html: htmlContent });
-                  sendCommand('focus');
-
-                  // 기본 템플릿도 저장
-                  chrome.runtime.sendMessage({
-                    action: 'save_idea_draft',
-                    ideaId: ideaData.id,
-                    draft: defaultTemplate,
-                  });
-                }
-              }
-
-              // 발행 정보 업데이트 (permalink, tags, seoTitle, thumbnailInfo, jsonLdSchema)
-              if (
-                response.permalink ||
-                response.tags ||
-                response.seoTitle ||
-                response.thumbnailInfo ||
-                response.jsonLdSchema
-              ) {
-                const updates = {};
-                const publishInfoUpdates = {};
-
-                if (response.permalink) publishInfoUpdates.permalink = response.permalink;
-                if (response.tags) publishInfoUpdates.tags = response.tags;
-                if (response.seoTitle) updates.seoTitle = response.seoTitle;
-                if (response.seoTitle) publishInfoUpdates.seoTitle = response.seoTitle;
-                if (response.thumbnailInfo)
-                  publishInfoUpdates.thumbnailInfo = response.thumbnailInfo;
-                if (response.jsonLdSchema) publishInfoUpdates.jsonLdSchema = response.jsonLdSchema;
-
-                if (Object.keys(publishInfoUpdates).length > 0) {
-                  updates.publishInfo = publishInfoUpdates;
-                }
-
-                // Firebase에 업데이트 전송
-                if (Object.keys(updates).length > 0) {
-                  chrome.runtime.sendMessage(
-                    {
-                      action: 'update_kanban_card',
-                      data: {
-                        cardId: ideaData.id,
-                        status: ideaData.status || 'ideas',
-                        updates: updates,
-                      },
-                    },
-                    (updateResponse) => {
-                      if (updateResponse && !updateResponse.success) {
-                        console.error('[Workspace] 발행 정보 Firebase 저장 실패:', updateResponse);
-                      }
-                    }
-                  );
-                }
-
-                // ideaData 먼저 업데이트
-                if (!ideaData.publishInfo) ideaData.publishInfo = {};
-                if (response.permalink) ideaData.publishInfo.permalink = response.permalink;
-                if (response.tags) ideaData.publishInfo.tags = response.tags;
-                if (response.thumbnailInfo)
-                  ideaData.publishInfo.thumbnailInfo = response.thumbnailInfo;
-                if (response.seoTitle) ideaData.seoTitle = response.seoTitle;
-                if (response.jsonLdSchema)
-                  ideaData.publishInfo.jsonLdSchema = response.jsonLdSchema;
-
-                // 발행 정보 UI 업데이트 (Firebase 업데이트와 독립적으로)
-                setTimeout(() => {
-                  const publishInfo = {
-                    permalink: response.permalink || ideaData.publishInfo?.permalink || '',
-                    tags: response.tags || ideaData.publishInfo?.tags || '',
-                    thumbnailInfo: response.thumbnailInfo || ideaData.publishInfo?.thumbnailInfo,
-                  };
-                  // tags가 문자열이 아닌 배열인 경우 쉼표로 조인
-                  let tagsForDisplay = publishInfo.tags;
-                  if (Array.isArray(tagsForDisplay)) {
-                    tagsForDisplay = tagsForDisplay.join(', ');
-                  }
-                  showPublishInfo(
-                    workspaceEl,
-                    publishInfo.permalink,
-                    tagsForDisplay || '',
-                    response.seoTitle || ideaData.seoTitle || '',
-                    ideaData
-                  );
-                }, 200);
-              }
-
-              // 초안 삭제 버튼 동적 추가
-              const buttonContainer =
-                workspaceEl.querySelector('#workspace-title-header').nextElementSibling;
-              if (buttonContainer && !buttonContainer.querySelector('#delete-draft-in-workspace')) {
-                const deleteBtn = document.createElement('button');
-                deleteBtn.id = 'delete-draft-in-workspace';
-                deleteBtn.className = 'draft-delete-btn';
-                deleteBtn.textContent = '❌ 초안 삭제';
-                buttonContainer.appendChild(deleteBtn);
-              }
-
-              // [수정] 중복 코드를 제거하고 헬퍼 함수 호출
-              renderThumbnailButton(workspaceEl, ideaData);
-
-              // 버튼 UI 업데이트 (초안 생성 후에는 항상 재생성 버튼으로 변경)
-              updateWorkspaceActionButtons(workspaceEl, true);
-
-              // 성공 메시지 표시
-              if (actionType === 'full') {
-                showToast('✅ AI 초안이 생성되었습니다!');
-              } else if (actionType === 'draft-only') {
-                showToast('✅ 텍스트가 재생성되었습니다!');
-              } else {
-                showToast('✅ 썸네일이 재생성되었습니다!');
-              }
-
-              // 썸네일 생성이 불완전하게 실패(예: 오프스크린 크롭 타임아웃)한 경우
-              if (response.thumbnailPartialFailure) {
-                // 친절한 경고 메시지로 사용자 혼란을 줄입니다.
-                showToast('⚠️ 썸네일 생성 중 일부 작업이 실패하여 합성 이미지를 사용했습니다. (텍스트 초안은 정상 생성됨)');
-                console.warn('[Workspace] 썸네일 생성 일부 실패 - 폴백 이미지 사용');
-              }
-            } else {
-              const errorMsg = response?.error || '초안 생성에 실패했습니다.';
-              alert(`❌ ${errorMsg}`);
-              console.error('[Workspace] AI 초안 생성 실패:', response);
-            }
-          }
-        );
-      });
+      );
     } else if (
       e.target.id === 'delete-draft-in-workspace' ||
       e.target.closest('#delete-draft-in-workspace')
@@ -4788,3 +4537,191 @@ export function updateWorkspaceScraps(container, ideaData) {
     );
   }
 })();
+
+// ✅ [수정 완료] handleGenerateAction (저장 순서 동기화 및 데이터 보존 로직 강화)
+function handleGenerateAction(btn, options) {
+  if (!btn) return;
+
+  btn.disabled = true;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '⏳ 작업 중...';
+
+  const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+  if (!editorIframe || !editorIframe.contentWindow) {
+    alert('에디터가 준비되지 않았습니다.');
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+    return;
+  }
+
+  // 에디터 내용 가져오기 (Promise)
+  const messageId = `get-content-${Date.now()}`;
+  const getContentPromise = new Promise((resolve) => {
+    const handler = (event) => {
+      if (event.data.action === 'content-response' && event.data.requestId === messageId) {
+        window.removeEventListener('message', handler);
+        resolve(event.data.data?.html || '');
+      }
+    };
+    window.addEventListener('message', handler);
+    editorIframe.contentWindow.postMessage({ action: 'get-content', requestId: messageId }, '*');
+    setTimeout(() => { window.removeEventListener('message', handler); resolve(''); }, 2000);
+  });
+
+  getContentPromise.then(async (currentDraftHtml) => {
+    const title = ideaData.title || '';
+    if (!title.trim()) {
+      alert('❌ 제목이 비어있습니다.');
+      btn.disabled = false; btn.innerHTML = originalText; return;
+    }
+
+    let currentDraft = '';
+    if (currentDraftHtml) {
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = currentDraftHtml;
+      currentDraft = tempDiv.textContent || tempDiv.innerText || '';
+    }
+
+    let linkedScrapsIds = Array.isArray(ideaData.linkedScraps) ? ideaData.linkedScraps : [];
+    if (!Array.isArray(ideaData.linkedScraps) && typeof ideaData.linkedScraps === 'object') {
+      linkedScrapsIds = Object.keys(ideaData.linkedScraps);
+    }
+    
+    const linkedScrapsContent = [];
+    if (linkedScrapsIds.length > 0) {
+      const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'get_all_scraps', channelId: activeChannelId }, (r) => {
+           if (r && r.success && r.scraps) {
+             linkedScrapsIds.forEach(id => {
+               const s = r.scraps.find(item => item.id === id);
+               if(s) linkedScrapsContent.push({ title: s.title || '스크랩', text: s.text || '' });
+             });
+           }
+           resolve();
+        });
+      });
+    }
+
+    const draftData = {
+      title: title,
+      description: ideaData.description || '',
+      tags: ideaData.tags || [],
+      outline: ideaData.outline || [],
+      currentDraft: currentDraft || '',
+      linkedScrapsContent: linkedScrapsContent,
+      ...ideaData
+    };
+
+    chrome.runtime.sendMessage({
+      action: 'generate_draft_from_idea',
+      data: draftData,
+      options: options
+    }, (response) => {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+
+      if (response && response.success) {
+        // 1. [순서 중요] 텍스트가 생성되었다면 먼저 저장하고, 카드 이동 여부를 확인해야 함
+        const saveDraftPromise = new Promise((resolve) => {
+          if (options.generateDraft && response.draft) {
+              const htmlContent = response.draft;
+              sendCommand('set-content', { html: htmlContent });
+              showToast('✅ 텍스트가 새롭게 작성되었습니다.');
+              
+              // 메모리 갱신 (복사 기능용)
+              ideaData.draftContent = htmlContent;
+              if (!ideaData.workspace) ideaData.workspace = {};
+              ideaData.workspace.draft = htmlContent;
+              
+              // Firebase 저장 요청
+              chrome.runtime.sendMessage(
+                  { action: 'save_idea_draft', ideaId: ideaData.id, draft: response.draft }, 
+                  (saveRes) => {
+                      // [핵심] 카드가 'in-progress'로 이동했다면, 로컬 status도 업데이트해야 함!
+                      if (saveRes && saveRes.success && saveRes.moved) {
+                          ideaData.status = saveRes.newStatus;
+                          if(window.__cp_workspace_idea_data) window.__cp_workspace_idea_data.status = saveRes.newStatus;
+                          console.log('[Workspace] 카드 상태 업데이트됨:', saveRes.newStatus);
+                      }
+                      resolve();
+                  }
+              );
+          } else {
+              resolve();
+          }
+        });
+
+        // 2. 썸네일 생성 확인
+        if (options.generateThumbnail && response.thumbnailUrls) {
+          showToast('✅ 새로운 썸네일이 생성되었습니다.');
+          renderThumbnailButton(workspaceEl, ideaData);
+        }
+
+        // 3. 저장 로직 완료 후, 발행 정보(JSON-LD 등) 업데이트
+        saveDraftPromise.then(() => {
+            if (response.permalink || response.tags || response.seoTitle || response.thumbnailInfo || response.jsonLdSchema) {
+               const publishInfoUpdates = {};
+               const updates = {};
+
+               if (response.permalink) publishInfoUpdates.permalink = response.permalink;
+               if (response.tags) publishInfoUpdates.tags = response.tags;
+               if (response.seoTitle) {
+                   updates.seoTitle = response.seoTitle;
+                   publishInfoUpdates.seoTitle = response.seoTitle;
+               }
+               if (response.thumbnailInfo) publishInfoUpdates.thumbnailInfo = response.thumbnailInfo;
+               
+               // [복사 문제 해결] JSON-LD가 왔다면 반드시 업데이트
+               if (response.jsonLdSchema) {
+                   publishInfoUpdates.jsonLdSchema = response.jsonLdSchema;
+               }
+
+               // 로컬 객체 즉시 동기화 (Copy 버튼이 바로 작동하도록)
+               if (!ideaData.publishInfo) ideaData.publishInfo = {};
+               Object.assign(ideaData.publishInfo, publishInfoUpdates);
+               if (response.seoTitle) ideaData.seoTitle = response.seoTitle;
+               
+               // 전역 객체도 동기화
+               if (window.__cp_workspace_idea_data) {
+                  if (!window.__cp_workspace_idea_data.publishInfo) window.__cp_workspace_idea_data.publishInfo = {};
+                  Object.assign(window.__cp_workspace_idea_data.publishInfo, publishInfoUpdates);
+               }
+
+               // [핵심] 업데이트된 올바른 status 위치에 정보 저장
+               if (Object.keys(publishInfoUpdates).length > 0) {
+                   updates.publishInfo = publishInfoUpdates;
+                   chrome.runtime.sendMessage({
+                       action: 'update_kanban_card',
+                       data: {
+                           cardId: ideaData.id,
+                           status: ideaData.status, // ✅ 업데이트된 status 사용 (in-progress)
+                           updates: updates
+                       }
+                   }, (res) => {
+                       if(res && res.success) console.log('[Workspace] 발행 정보 저장 완료');
+                   });
+               }
+
+               // UI 갱신
+               setTimeout(() => {
+                   let tagsForDisplay = ideaData.publishInfo.tags;
+                   if (Array.isArray(tagsForDisplay)) tagsForDisplay = tagsForDisplay.join(', ');
+                   
+                   showPublishInfo(
+                       workspaceEl,
+                       ideaData.publishInfo.permalink,
+                       tagsForDisplay,
+                       ideaData.seoTitle,
+                       ideaData
+                   );
+               }, 200);
+            }
+        });
+
+      } else {
+        alert(`❌ 실패: ${response?.error || '오류 발생'}`);
+      }
+    });
+  });
+}
