@@ -699,285 +699,54 @@ async function waitForOffscreenReady(maxRetries = 30, retryDelay = 2000) {
 async function sendToOffscreen(action, data, timeout = 30000) {
   await ensureOffscreenDocument();
 
-  // Prefer waiting briefly for the persistent offscreen port so we can
-  // rely on port-based messaging (more reliable than runtime.sendMessage)
-  // especially for longer-running tasks like sanitization.
-  try {
-    await waitForOffscreenPort(10000);
-  } catch (e) {
-    Logger.debug(
-      '[OffscreenService] waitForOffscreenPort failed, retrying with fresh offscreen document',
-      e && e.message
-    );
-    // [추가] 포트가 없으면 오프스크린 문서를 다시 생성하여 연결 재시도
-    await ensureOffscreenDocument();
-    try {
-      await waitForOffscreenPort(10000);
-    } catch (e2) {
-      Logger.debug('[OffscreenService] Second waitForOffscreenPort also failed', e2 && e2.message);
-    }
-  }
+  // 포트 안정화 대기
+  try { await waitForOffscreenPort(5000); } catch (e) {}
 
   return new Promise((resolve, reject) => {
+    // 1. 고유 ID 생성
+    const requestId = `${action}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     const responseListener = (msg) => {
-      try {
-        Logger.debug(
-          '[OffscreenService] responseListener received message',
-          msg && msg.action,
-          msg
-        );
-      } catch (e) {
-        Logger.debug('[OffscreenService] responseListener debug failed', e && e.message);
-      }
-      if (msg.action === `${action}_response`) {
+      // 2. 액션명과 ID가 모두 일치해야 내 응답임
+      if (msg.action === `${action}_response` && msg.requestId === requestId) {
         chrome.runtime.onMessage.removeListener(responseListener);
-        if (msg.success) {
-          resolve(msg);
-        } else {
-          reject(new Error(msg.error || `${action} 실패`));
-        }
+        if (msg.success) resolve(msg);
+        else reject(new Error(msg.error || `${action} 실패`));
         return true;
       }
       return false;
     };
 
-    // Prefer using the persistent port if available - it's more reliable
-    // than sendMessage for reaching the offscreen document.
     const usingPort = Boolean(offscreenPort);
     if (usingPort) {
       try {
         const portResponse = (msg) => {
-          if (msg && msg.action === `${action}_response`) {
-            try {
-              offscreenPort.onMessage.removeListener(portResponse);
-            } catch (e) {
-              Logger.debug('[OffscreenService] suppressed error', e && e.message);
-            }
-            if (msg.success) {
-              resolve(msg);
-            } else {
-              reject(new Error(msg.error || `${action} 실패`));
-            }
+          // 3. 포트 메시지도 ID 확인
+          if (msg && msg.action === `${action}_response` && msg.requestId === requestId) {
+            try { offscreenPort.onMessage.removeListener(portResponse); } catch (e) {}
+            if (msg.success) resolve(msg);
+            else reject(new Error(msg.error || `${action} 실패`));
             return true;
           }
           return false;
         };
         offscreenPort.onMessage.addListener(portResponse);
-        Logger.debug(`[OffscreenService] using port to send ${action}`);
-        console.debug(`[OffscreenService] using port to send ${action}`);
-        try {
-          offscreenPort.postMessage({ action, ...data });
-        } catch (e) {
-          Logger.debug(`[OffscreenService] port.postMessage threw: ${e.message}`);
-          // If postMessage fails it's likely the remote side isn't
-          // available — mark the stored port as unreliable so we
-          // don't repeatedly try it for subsequent requests.
-          try {
-            Logger.debug('[OffscreenService] marking offscreenPort=null due to postMessage error');
-            offscreenPort = null;
-          } catch (err) {}
-        }
-
-        // If we don't hear a port response quickly, also attempt a runtime
-        // send as a secondary delivery channel to avoid silent loss.
-        // This reduces the chance of missing the message when the port
-        // exists but the other side hasn't attached its onMessage handler yet.
-        const runtimeFallbackTimeout = setTimeout(() => {
-          Logger.debug(
-            `[OffscreenService] no quick port response for ${action}, attempting runtime.sendMessage fallback`
-          );
-          // Mark the persistent port unreliable — we didn't get a quick
-          // response on the port side and it's safer to prefer runtime
-          // sendMessage for now.
-          try {
-            offscreenPort = null;
-          } catch (e) {}
-          try {
-            chrome.runtime.sendMessage({ action, ...data }).catch(() => {});
-          } catch (e) {
-            Logger.debug('[OffscreenService] suppressed error', e && e.message);
-          }
-        }, 1200);
-
-        // When we get the response via port, clear fallback timer
-        const originalPortResponse = portResponse;
-        const wrappedPortResponse = (m) => {
-          try {
-            clearTimeout(runtimeFallbackTimeout);
-          } catch (e) {
-            Logger.debug('[OffscreenService] suppressed error', e && e.message);
-          }
-          return originalPortResponse(m);
-        };
-        // replace listener to use wrapped
-        try {
-          offscreenPort.onMessage.removeListener(portResponse);
-        } catch (e) {
-          Logger.debug('[OffscreenService] remove portResponse listener failed', e && e.message);
-        }
-        try {
-          offscreenPort.onMessage.addListener(wrappedPortResponse);
-        } catch (e) {
-          Logger.debug('[OffscreenService] add wrappedPortResponse failed', e && e.message);
-        }
+        // 4. 요청 보낼 때 requestId 포함
+        offscreenPort.postMessage({ action, requestId, ...data });
       } catch (err) {
-        // fall back to runtime messaging path below
-        Logger.debug(`[OffscreenService] port postMessage failed, falling back: ${err.message}`);
+        // 실패 시 런타임으로 폴백
+        chrome.runtime.sendMessage({ action, requestId, ...data }).catch(() => {});
       }
     } else {
-      // No persistent port available — create a short-lived port for this
-      // request. This helps when the offscreen page listens for connect
-      // but we don't have a stored port (e.g. previous port was removed).
-      try {
-        const tempPort = chrome.runtime.connect({ name: `offscreen-temp-${Date.now()}` });
-        const tempListener = (m) => {
-          if (m && m.action === `${action}_response`) {
-            try {
-              tempPort.onMessage.removeListener(tempListener);
-            } catch (e) {
-              Logger.debug('[OffscreenService] suppressed error', e && e.message);
-            }
-            clearTimeout(tempTimer);
-            if (m.success) resolve(m);
-            else reject(new Error(m.error || `${action} 실패`));
-            return true;
-          }
-          return false;
-        };
-
-        tempPort.onMessage.addListener(tempListener);
-        try {
-          tempPort.postMessage({ action, ...data });
-        } catch (e) {
-          Logger.debug(`[OffscreenService] tempPort.postMessage failed: ${e.message}`);
-        }
-
-        // If no response via port quickly, we will fallback to runtime
-        const tempTimer = setTimeout(() => {
-          try {
-            tempPort.onMessage.removeListener(tempListener);
-          } catch (e) {
-            Logger.debug('[OffscreenService] tempPort.removeListener failed', e && e.message);
-          }
-          try {
-            tempPort.disconnect();
-          } catch (e) {
-            Logger.debug('[OffscreenService] tempPort.disconnect failed', e && e.message);
-          }
-          // fallback to runtime send (attempt best-effort)
-          try {
-            chrome.runtime.sendMessage({ action, ...data }).catch(() => {});
-          } catch (e) {
-            Logger.debug(
-              '[OffscreenService] runtime.sendMessage in temp fallback failed',
-              e && e.message
-            );
-          }
-        }, 1200);
-      } catch (e) {
-        Logger.debug(
-          '[OffscreenService] failed to open temp port for offscreen request',
-          e && e.message
-        );
-      }
+      chrome.runtime.sendMessage({ action, requestId, ...data }).catch(() => {});
     }
 
-    // Always attach runtime listener as a fallback (some contexts respond via runtime)
     chrome.runtime.onMessage.addListener(responseListener);
 
-    // Offscreen 문서로 메시지 전송 시도
-    Logger.debug(`[OffscreenService] ${action} 메시지 전송 시도`);
-    // Try to send the message. If there's no receiver yet, attempt a
-    // small retry sequence to give the offscreen page time to install
-    // its message handlers (this often happens when a beacon was used
-    // and the page hasn't finished evaluating the main bundle).
-    const attemptSend = async (tries = 5, backoff = 500) => {
-      let lastErr = null;
-      for (let i = 0; i <= tries; i++) {
-        try {
-          await new Promise((res, rej) => {
-            try {
-              chrome.runtime.sendMessage({ action, ...data }, (_resp) => {
-                // Note: sendMessage callback is optional; responseListener will
-                // handle the response via onMessage. We just resolve here to
-                // indicate the send didn't throw synchronously.
-                res(true);
-              });
-            } catch (e) {
-              rej(e);
-            }
-          });
-          return; // success sending
-        } catch (err) {
-          lastErr = err;
-          Logger.debug(
-            `[OffscreenService] ${action} send attempt ${i + 1} failed: ${err && err.message}`
-          );
-
-          const msg = err && err.message ? err.message : '';
-          // Log the raw send error message for diagnostics
-          try {
-            Logger.debug('[OffscreenService] sendToOffscreen send error message', msg);
-          } catch (e) {
-            Logger.debug('[OffscreenService] sendToOffscreen debug failed', e && e.message);
-          }
-          // If we got a channel error indicating the receiver isn't there,
-          // try resetting the offscreen document and re-ensure it before retry.
-          if (
-            msg.includes('Receiving end does not exist') ||
-            msg.includes('message port closed') ||
-            msg.includes('Could not establish connection')
-          ) {
-            Logger.warn(
-              '[OffscreenService] 메시지 수신자 없음 또는 포트 닫힘 감지 — 오프스크린 재생성 시도'
-            );
-            // clear existing state and re-create the offscreen document
-            offscreenDocumentId = null;
-            try {
-              await ensureOffscreenDocument();
-              Logger.debug('[OffscreenService] 오프스크린 재생성 완료, 재전송 시도');
-            } catch (recreateErr) {
-              Logger.warn(
-                '[OffscreenService] 오프스크린 재생성 실패',
-                recreateErr && recreateErr.message
-              );
-            }
-          }
-
-          // If this is the final attempt, rethrow
-          if (i === tries) throw lastErr || err;
-
-          // backoff before retry
-          await new Promise((r) => setTimeout(r, backoff * (i + 1)));
-        }
-      }
-    };
-
-    attemptSend()
-      .catch((err) => {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        Logger.error(`[OffscreenService] ${action} 메시지 전송 실패:`, err);
-        // "message port closed" 또는 'Receiving end does not exist' 같은
-        // 클라이언트 부재 오류는 문서 준비 상태 문제로 처리합니다.
-        if (
-          err?.message &&
-          !err.message.includes('message port closed') &&
-          !err.message.includes('Receiving end does not exist')
-        ) {
-          reject(err);
-        } else {
-          reject(
-            new Error('Offscreen 문서 연결 실패 - 문서가 존재하지 않거나 초기화되지 않았습니다')
-          );
-        }
-      })
-      .catch(() => {}); // swallowing any further errors handled above
-
-    // 타임아웃 설정
     setTimeout(() => {
       chrome.runtime.onMessage.removeListener(responseListener);
-      Logger.warn(`[OffscreenService] ${action} 타임아웃 (${timeout}ms)`);
-      reject(new Error(`${action} 타임아웃 (${timeout}ms)`));
+      // 이미 완료된 경우 reject 무시되므로 안전
+      reject(new Error(`${action} 타임아웃 (${timeout}ms) - ID: ${requestId}`));
     }, timeout);
   });
 }
