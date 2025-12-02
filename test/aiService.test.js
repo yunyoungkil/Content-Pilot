@@ -348,7 +348,7 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'img-model' } }));
+      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
       jest.doMock('../js/utils.js', () => ({
         Logger: {
           debug: jest.fn(),
@@ -377,8 +377,8 @@ describe('AI Service', () => {
             }),
           });
         }
-        // Image model -> return inlineData with base64
-        if (String(url).includes('models/img-model')) {
+        // Image model -> return Gemini API response with inlineData
+        if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -461,7 +461,7 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'img-model' } }));
+      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
       jest.doMock('../js/utils.js', () => ({
         Logger: {
           debug: jest.fn(),
@@ -490,8 +490,8 @@ describe('AI Service', () => {
             }),
           });
         }
-        // Image model -> return inlineData with base64
-        if (String(url).includes('models/img-model')) {
+        // Image model -> return Gemini API response with inlineData
+        if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({

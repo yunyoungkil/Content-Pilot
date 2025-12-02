@@ -2108,13 +2108,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
   }
 }
 
-// 7. 이미지 생성 (병렬 처리 적용)
+// 7. 이미지 생성 (병렬 처리 적용) - Imagen 3 API 적용
 export async function generateAiImage(prompt, count = 1, referenceImage = null) {
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
     throw new Error('Gemini API 키가 없습니다.');
   }
 
+  // [수정] Gemini 2.0 모델 사용 (generateContent 엔드포인트)
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODELS.IMAGE}:generateContent?key=${geminiApiKey}`;
   const userId = await getCurrentUserId();
 
@@ -2122,15 +2123,19 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
   const generateSingleImage = async (index) => {
     try {
-      const finalPrompt = `${THUMBNAIL_SYSTEM_PROMPT}\n${prompt}`;
-      const parts = [{ text: finalPrompt }];
-
+      // [핵심 수정] 시스템 프롬프트(THUMBNAIL_SYSTEM_PROMPT) 제거!
+      // 대신 "이미지를 생성하라"는 명확한 지시어를 추가합니다.
+      const imageGenerationPrompt = `Generate a high-quality blog thumbnail image based on the following description: ${prompt}`;
+      
+      const parts = [{ text: imageGenerationPrompt }];
+      
+      // 참조 이미지(제품)가 있는 경우 추가
       if (referenceImage && referenceImage.data) {
         parts.push({
           inlineData: {
             mimeType: referenceImage.mimeType,
-            data: referenceImage.data,
-          },
+            data: referenceImage.data
+          }
         });
         Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
       }
@@ -2154,48 +2159,29 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       if (!data.candidates || data.candidates.length === 0) {
         if (data.promptFeedback && data.promptFeedback.blockReason) {
-          throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
+             throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
         }
         throw new Error('이미지 생성 응답에 candidates가 없습니다.');
       }
 
       const candidate = data.candidates[0];
 
-      // 중단 사유 체크
+      // 안전 차단 확인
       if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-        let detail = '';
-        if (candidate.safetyRatings) {
-          const blockedRatings = candidate.safetyRatings.filter(
-            (r) =>
-              r.probability !== 'NEGLIGIBLE' && r.probability !== 'LOW' && r.probability !== 'NONE'
-          );
-          if (blockedRatings.length > 0) {
-            detail = blockedRatings.map((r) => `${r.category}(${r.probability})`).join(', ');
-          }
-        }
-        throw new Error(
-          `AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason} ${detail ? `\n상세: ${detail}` : ''}`
-        );
+          throw new Error(`AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason}`);
       }
 
       let base64 = null;
       let mimeType = 'image/png';
 
+      // [수정] Gemini 2.0의 이미지 응답(Inline Data) 찾기
       if (candidate.content?.parts) {
         for (const part of candidate.content.parts) {
+          // Gemini가 이미지를 생성하면 inlineData에 담겨 옵니다.
           if (part.inlineData?.data) {
             base64 = part.inlineData.data;
             mimeType = part.inlineData.mimeType || 'image/png';
             break;
-          }
-          if (part.text) {
-            const base64Match = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
-            if (base64Match) {
-              base64 = base64Match[1];
-              const mimeMatch = part.text.match(/data:image\/([^;]+);base64/);
-              if (mimeMatch) mimeType = `image/${mimeMatch[1]}`;
-              break;
-            }
           }
         }
       }
@@ -2210,11 +2196,11 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
         Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`);
         return url;
       } else {
-        // [핵심 수정] 이미지가 없고 텍스트만 온 경우, 그 내용을 에러 메시지로 보여줌
+        // 이미지가 없고 텍스트만 온 경우 (거부 메시지 등)
         if (candidate.content?.parts?.[0]?.text) {
-          const textResponse = candidate.content.parts[0].text;
-          Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
-          throw new Error(`AI 거부 메시지: "${textResponse.substring(0, 100)}..."`);
+            const textResponse = candidate.content.parts[0].text;
+            Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
+            throw new Error(`AI가 이미지를 생성하지 않고 텍스트로 응답했습니다. (내용: "${textResponse.substring(0, 50)}...")`);
         }
         throw new Error('base64 데이터를 찾을 수 없습니다. (API 응답에 이미지 데이터 누락)');
       }

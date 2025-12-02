@@ -30,7 +30,8 @@ export const KANBAN_STATUS = {
 // AI 모델 버전 (중앙 관리)
 export const AI_MODELS = {
   TEXT: 'gemini-2.0-flash', // 텍스트 생성용 최신 모델
-  IMAGE: 'gemini-2.5-flash-image', // 이미지 생성용 모델
+  // [수정] 이미지 생성 가능한 최신 Gemini 2.0 모델로 변경
+  IMAGE: 'gemini-2.0-flash-exp',
   VISION: 'gemini-2.0-flash', // 이미지 분석용 멀티모달 모델
 };
 
