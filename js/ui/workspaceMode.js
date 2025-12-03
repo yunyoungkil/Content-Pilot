@@ -4775,13 +4775,14 @@ function handleGenerateAction(btn, options) {
     btn.innerHTML = '✍️ 텍스트 작성 중...';
 
     const baseDraftData = {
+      ...ideaData, // ✅ [수정] ideaData를 맨 위로 올려야 합니다!
       title: title,
       description: ideaData.description || '',
       tags: ideaData.tags || [],
       outline: ideaData.outline || [],
       currentDraft: currentDraft || '',
-      linkedScrapsContent: linkedScrapsContent,
-      ...ideaData,
+      linkedScrapsContent: linkedScrapsContent, // ✅ 그래야 이 최신 데이터(URL 포함)가 덮어씌워지지 않고 유지됩니다.
+      // ...ideaData, // ❌ (기존 위치) 여기에 있으면 linkedScrapsContent를 옛날 데이터(빈 URL)로 덮어버립니다. 지워주세요.
     };
 
     const shouldSplitRequest = options.generateDraft && options.generateThumbnail;

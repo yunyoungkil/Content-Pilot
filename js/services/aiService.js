@@ -174,12 +174,12 @@ export async function callDraftAPI(prompt, opts = {}) {
 
   // 프롬프트 길이 보호 / 최적화
   let optimizedPrompt = prompt;
-  if (typeof prompt === 'string' && prompt.length > 30000) {
+  if (typeof prompt === 'string' && prompt.length > 300000) {
     Logger.warn(
       `[callDraftAPI] 프롬프트가 너무 깁니다 (${prompt.length}자). 압축된 버전으로 시도합니다.`
     );
     optimizedPrompt =
-      prompt.substring(0, 15000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
+      prompt.substring(0, 150000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
   }
 
   let attempt = 0;
