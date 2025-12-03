@@ -96,6 +96,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
   }
   console.log('[ThumbnailMaker] 초기화 데이터:', logThumbInfo);
 
+  // [수정 1] initialOptions에서 initialShowText 추출 (변수 선언 누락 수정)
+  const initialShowText = initialOptions.showText !== undefined ? initialOptions.showText : true;
+
+  // [수정 2] modal 변수 선언 및 엘리먼트 생성 (누락된 코드 추가)
+  const modal = document.createElement('div');
+  modal.id = 'cp-thumbnail-modal';
+
   // [핵심 수정] Z-Index를 브라우저 최대 허용값(2147483647)으로 수정
   // 기존 2147483648은 무효화되어 패널 뒤로 숨겨짐
   modal.style.cssText =
