@@ -337,7 +337,21 @@ export async function enhanceDraftWithFeatures({
     }
 
     if (!generatedImages || generatedImages.length === 0) {
-      generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+      // [수정] 이중 안전장치: 오버레이 모드일 경우 프롬프트 강제 보정
+      let finalImagePrompt = selectedThumbnail.thumbnailPromptEn;
+
+      if (composeThumbnailText) {
+        // 1. 기존 프롬프트에서 텍스트 렌더링 관련 지시어가 있다면 무력화 (선택적)
+        // finalImagePrompt = finalImagePrompt.replace(/render text|typography|write/gi, '');
+
+        // 2. [핵심] 강력한 텍스트 금지 명령을 프롬프트 끝에 강제로 추가
+        finalImagePrompt += " . CRITICAL: Do NOT render any text, letters, words, or typography in this image. Keep the background clean and clutter-free.";
+
+        Logger.debug('[enhanceDraftWithFeatures] 텍스트 오버레이 모드: 텍스트 금지 프롬프트 강제 주입됨');
+      }
+
+      // 수정된 프롬프트로 이미지 생성 요청
+      generatedImages = await generateAiImage(finalImagePrompt, 1);
     }
 
     const sourceImageUrl = generatedImages[0];
@@ -346,7 +360,8 @@ export async function enhanceDraftWithFeatures({
     let composedDataUrl = sourceImageUrl;
     if (composeThumbnailText) {
       const thumbnailText =
-        selectedThumbnail.thumbnailText || (ideaData.title.length > 10 ? ideaData.title.substring(0, 8) + "..." : ideaData.title);
+        selectedThumbnail.thumbnailText ||
+        (ideaData.title.length > 10 ? ideaData.title.substring(0, 8) + '...' : ideaData.title);
       const textPosition = selectedThumbnail.textPosition || 'bottom';
       try {
         composedDataUrl = await composeThumbnailInOffscreen(
@@ -381,7 +396,10 @@ export async function enhanceDraftWithFeatures({
 
     // [수정] 16:9 이미지 업로드를 위해 composedDataUrl이 웹 URL(http...)인 경우 Data URL(Base64)로 변환
     // 원본 이미지를 그대로 사용할 때 이 변환이 없으면 uploadImageToFirebaseStorage에서 오류 발생
-    if (composedDataUrl && (composedDataUrl.startsWith('http') || composedDataUrl.startsWith('https'))) {
+    if (
+      composedDataUrl &&
+      (composedDataUrl.startsWith('http') || composedDataUrl.startsWith('https'))
+    ) {
       try {
         Logger.debug('[enhanceDraftWithFeatures] 16:9 이미지 업로드를 위해 Base64 변환 시도');
         const base64 = await fetchImageAsBase64(composedDataUrl);
@@ -722,20 +740,24 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // 1. 옵션 및 체크박스 상태 확인 [수정]
     // options에서 composeThumbnailText 값을 명확히 가져옵니다.
     const { generateDraft = true, generateThumbnail = true } = options;
-    
+
     // 사용자 설정 로드 (options에 값이 없으면 저장소에서 확인)
     let composeThumbnailText = options.composeThumbnailText;
     if (composeThumbnailText === undefined) {
-       // 비동기 함수 내부이므로 await 사용 가능
-       try {
-         const storage = await chrome.storage.local.get('composeThumbnailText');
-         composeThumbnailText = !!storage.composeThumbnailText;
-       } catch (e) {
-         composeThumbnailText = false;
-       }
+      // 비동기 함수 내부이므로 await 사용 가능
+      try {
+        const storage = await chrome.storage.local.get('composeThumbnailText');
+        composeThumbnailText = !!storage.composeThumbnailText;
+      } catch (e) {
+        composeThumbnailText = false;
+      }
     }
 
-    Logger.info('[generateDraftFromIdea] 실행 옵션:', { generateDraft, generateThumbnail, composeThumbnailText });
+    Logger.info('[generateDraftFromIdea] 실행 옵션:', {
+      generateDraft,
+      generateThumbnail,
+      composeThumbnailText,
+    });
 
     // 1. 기본 제목 및 페르소나 결정 (사용자 설정 > 자동 감지)
     // title 변수를 함수 최상단에서 선언하여 generateDraft 옵션에 상관없이 사용 가능하게 함
@@ -2173,16 +2195,16 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       // [핵심 수정] 시스템 프롬프트(THUMBNAIL_SYSTEM_PROMPT) 제거!
       // 대신 "이미지를 생성하라"는 명확한 지시어를 추가합니다.
       const imageGenerationPrompt = `Generate a high-quality blog thumbnail image based on the following description: ${prompt}`;
-      
+
       const parts = [{ text: imageGenerationPrompt }];
-      
+
       // 참조 이미지(제품)가 있는 경우 추가
       if (referenceImage && referenceImage.data) {
         parts.push({
           inlineData: {
             mimeType: referenceImage.mimeType,
-            data: referenceImage.data
-          }
+            data: referenceImage.data,
+          },
         });
         Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
       }
@@ -2194,8 +2216,8 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
           contents: [{ parts: parts }],
           // [추가] 텍스트가 아닌 이미지를 강제로 반환하도록 설정
           generationConfig: {
-            responseModalities: ["IMAGE"]
-          }
+            responseModalities: ['IMAGE'],
+          },
         }),
       });
 
@@ -2212,7 +2234,7 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       if (!data.candidates || data.candidates.length === 0) {
         if (data.promptFeedback && data.promptFeedback.blockReason) {
-             throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
+          throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
         }
         throw new Error('이미지 생성 응답에 candidates가 없습니다.');
       }
@@ -2221,7 +2243,7 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       // 안전 차단 확인
       if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-          throw new Error(`AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason}`);
+        throw new Error(`AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason}`);
       }
 
       let base64 = null;
@@ -2251,9 +2273,11 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       } else {
         // 이미지가 없고 텍스트만 온 경우 (거부 메시지 등)
         if (candidate.content?.parts?.[0]?.text) {
-            const textResponse = candidate.content.parts[0].text;
-            Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
-            throw new Error(`AI가 이미지를 생성하지 않고 텍스트로 응답했습니다. (내용: "${textResponse.substring(0, 50)}...")`);
+          const textResponse = candidate.content.parts[0].text;
+          Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
+          throw new Error(
+            `AI가 이미지를 생성하지 않고 텍스트로 응답했습니다. (내용: "${textResponse.substring(0, 50)}...")`
+          );
         }
         throw new Error('base64 데이터를 찾을 수 없습니다. (API 응답에 이미지 데이터 누락)');
       }
