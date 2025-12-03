@@ -410,6 +410,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       textColor: modal.querySelector('#tm-text-color')?.value || 'auto',
       ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
       bgImage: currentBgImage,
+      // [추가] 텍스트 표시 여부 상태 저장
+      showText: modal.querySelector('#tm-show-text')?.checked ?? true,
       timestamp: Date.now(),
     };
 
@@ -448,6 +450,27 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     modal.querySelector('#tm-font-family').value = state.fontFamily;
     modal.querySelector('#tm-text-color').value = state.textColor;
     modal.querySelector('#tm-ratio').value = state.ratio;
+    
+    // [추가] 텍스트 표시 체크박스 상태 복원
+    const showTextCheckbox = modal.querySelector('#tm-show-text');
+    if (showTextCheckbox) {
+      // 저장된 상태가 있으면 그것을 따르고, 없으면(구버전 데이터) true
+      const shouldShow = state.showText !== undefined ? state.showText : true;
+      showTextCheckbox.checked = shouldShow;
+      
+      // 입력창 활성화/비활성화 UI 동기화
+      const titleInput = modal.querySelector('#tm-title');
+      const subtitleInput = modal.querySelector('#tm-subtitle');
+      if (titleInput) {
+        titleInput.disabled = !shouldShow;
+        titleInput.style.opacity = shouldShow ? '1' : '0.5';
+      }
+      if (subtitleInput) {
+        subtitleInput.disabled = !shouldShow;
+        subtitleInput.style.opacity = shouldShow ? '1' : '0.5';
+      }
+    }
+
     currentBgImage = state.bgImage;
 
     // 비율 변경 시 캔버스 크기 조정
