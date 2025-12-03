@@ -266,10 +266,26 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     const headers = {};
     if (meta.lastEtag) headers['If-None-Match'] = meta.lastEtag;
 
-    const res = await fetch(url, { headers });
-    if (res.status === 304) return;
+    // [수정] 재시도 로직 추가 (헤더 포함 시도 -> 실패 시 헤더 없이 재시도)
+    let res;
+    try {
+      res = await fetch(url, { headers });
+    } catch (networkError) {
+      Logger.warn(`[RSS] 1차 수집 실패 (${url}), 헤더 없이 재시도합니다.`, networkError);
+      // 잠시 대기 후 재시도
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // 헤더 없이 순수 요청 시도 (캐시 문제 회피)
+      res = await fetch(url, { cache: 'reload' });
+    }
+
+    if (res.status === 304) {
+      Logger.debug(`[RSS] 변경사항 없음 (304): ${url}`);
+      return;
+    }
+    
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+    // ETag 저장 및 메타데이터 업데이트
     await update(metaRef, {
       lastEtag: res.headers.get('ETag'),
       lastModified: res.headers.get('Last-Modified'),
@@ -278,7 +294,8 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     });
 
     const text = await res.text();
-
+    
+    // ... (이하 XML 파싱 및 처리 로직은 기존과 동일)
     // RSS 피드에서 채널 이름 추출
     let channelTitle = null;
 
@@ -325,29 +342,22 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
 
     // 채널 이름이 있으면 메타데이터에 저장
     if (channelTitle) {
-      await update(metaRef, {
-        title: channelTitle,
-        lastEtag: res.headers.get('ETag'),
-        lastModified: res.headers.get('Last-Modified'),
-        fetchedAt: Date.now(),
-        source: url,
-      });
-    } else {
-      // 채널 이름이 없어도 기존 메타데이터 업데이트
-      await update(metaRef, {
-        lastEtag: res.headers.get('ETag'),
-        lastModified: res.headers.get('Last-Modified'),
-        fetchedAt: Date.now(),
-        source: url,
-      });
+      await update(metaRef, { title: channelTitle });
     }
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
+    
+    // [추가] 아이템이 없으면 파싱 에러로 간주하지 않고 빈 배열 처리
+    if (items.length === 0) {
+       Logger.warn(`[RSS] 항목을 찾을 수 없음 (${url})`);
+       return;
+    }
+
     await limitConcurrency(items.slice(0, limit), (item) =>
       processRssItem(item, sourceId, channelType)
     );
   } catch (e) {
-    Logger.error(`[RSS] ${url || 'undefined'} Fail:`, e);
+    Logger.error(`[RSS] ${url || 'undefined'} 수집 최종 실패:`, e);
   }
 }
 
