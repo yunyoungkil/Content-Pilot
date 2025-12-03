@@ -4750,8 +4750,14 @@ function handleGenerateAction(btn, options) {
                 if (!chrome.runtime.lastError && r && r.success && r.scraps) {
                   linkedScrapsIds.forEach((id) => {
                     const s = r.scraps.find((item) => item.id === id);
-                    if (s)
-                      linkedScrapsContent.push({ title: s.title || '스크랩', text: s.text || '' });
+                    if (s) {
+                      // [수정] url 필드 추가!
+                      linkedScrapsContent.push({ 
+                        title: s.title || '스크랩', 
+                        text: s.text || '',
+                        url: s.url || '' // ✅ 핵심: URL 정보 전달 추가
+                      }); 
+                    }
                   });
                 }
                 resolve();
