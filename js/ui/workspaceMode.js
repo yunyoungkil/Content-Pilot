@@ -1407,22 +1407,57 @@ ${contentHtml}
 // -----------------------------------------------------------------------------
 // 워크스페이스 액션 버튼 업데이트 헬퍼 함수
 // -----------------------------------------------------------------------------
-function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
+async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
   if (!buttonContainer) return;
 
+  // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
+  let composeThumbnailText = false;
+  try {
+    const storage = await chrome.storage.local.get('composeThumbnailText');
+    composeThumbnailText = storage.composeThumbnailText || false;
+  } catch (e) {
+    console.warn('[Workspace] 설정 로드 실패:', e);
+  }
+
+  // 체크박스 HTML 생성
+  const checkboxHtml = `
+    <div style="display:flex; align-items:center; gap:6px; margin-right:12px; padding-right:12px; border-right:1px solid #eee;" 
+         title="체크 시: AI는 글자 없는 이미지를 그리고, 코드가 정확한 한글을 입힙니다. (오타 없음)\n해제 시: AI가 직접 글자를 그립니다. (스타일 자연스러움, 오타 가능성)">
+      <input type="checkbox" id="compose-thumbnail-text-checkbox" ${composeThumbnailText ? 'checked' : ''} style="cursor:pointer;">
+      <label for="compose-thumbnail-text-checkbox" style="font-size:12px; color:#555; cursor:pointer; user-select:none; white-space:nowrap; font-weight:500;">
+        텍스트 오버레이
+      </label>
+    </div>
+  `;
+
+  // 버튼 렌더링 (체크박스 포함)
   if (hasDraft) {
     // 초안이 있을 때: 텍스트만/썸네일만 재생성 버튼
     buttonContainer.innerHTML = `
-      <button id="regenerate-draft-btn" style="flex:1; min-width:140px;">📝 텍스트만 다시 쓰기</button>
-      <button id="regenerate-thumbnail-btn" style="flex:1; min-width:140px;">🎨 썸네일만 다시 그리기</button>
-      <button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>
+      ${checkboxHtml}
+      <div style="flex:1; display:flex; gap:8px; overflow-x:auto;">
+        <button id="regenerate-draft-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">📝 텍스트만 다시 쓰기</button>
+        <button id="regenerate-thumbnail-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">🎨 썸네일만 다시 그리기</button>
+        <button id="delete-draft-in-workspace" class="draft-delete-btn" title="초안 삭제" style="cursor:pointer;">🗑️</button>
+      </div>
     `;
   } else {
     // 초안이 없을 때: 전체 생성 버튼
     buttonContainer.innerHTML = `
-      <button id="generate-draft-btn" style="flex:1;">✨ AI 초안 생성</button>
+      ${checkboxHtml}
+      <button id="generate-draft-btn" style="flex:1; cursor:pointer;">✨ AI 초안 생성</button>
     `;
+  }
+
+  // 체크박스 이벤트 리스너 (설정 자동 저장)
+  const checkbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
+  if (checkbox) {
+    checkbox.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      chrome.storage.local.set({ composeThumbnailText: isChecked });
+      console.log('[Workspace] 텍스트 오버레이 설정 변경:', isChecked ? 'ON' : 'OFF');
+    });
   }
 }
 
@@ -1988,6 +2023,9 @@ export function renderWorkspace(container, ideaData) {
   }
 
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
+
+  // [추가] 초기 로드 시 액션 버튼 업데이트 (체크박스 포함)
+  updateWorkspaceActionButtons(workspaceEl, hasDraft);
 
   // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
   renderThumbnailButton(workspaceEl, ideaData);
@@ -4644,6 +4682,11 @@ function handleGenerateAction(btn, options) {
     alert('에디터가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
     return;
   }
+
+  // [추가] 체크박스 값 읽기
+  const checkbox = workspaceContainer.querySelector('#compose-thumbnail-text-checkbox');
+  const composeThumbnailText = checkbox ? checkbox.checked : false;
+  options.composeThumbnailText = composeThumbnailText;
 
   // 2. 버튼 상태 변경
   const originalText = btn.dataset.originalText || btn.innerHTML;
