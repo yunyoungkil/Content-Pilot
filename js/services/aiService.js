@@ -702,10 +702,23 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
  */
 export async function generateDraftFromIdea(ideaData, options = {}) {
   try {
-    // 옵션 기본값 설정
+    // 1. 옵션 및 체크박스 상태 확인 [수정]
+    // options에서 composeThumbnailText 값을 명확히 가져옵니다.
     const { generateDraft = true, generateThumbnail = true } = options;
+    
+    // 사용자 설정 로드 (options에 값이 없으면 저장소에서 확인)
+    let composeThumbnailText = options.composeThumbnailText;
+    if (composeThumbnailText === undefined) {
+       // 비동기 함수 내부이므로 await 사용 가능
+       try {
+         const storage = await chrome.storage.local.get('composeThumbnailText');
+         composeThumbnailText = !!storage.composeThumbnailText;
+       } catch (e) {
+         composeThumbnailText = false;
+       }
+    }
 
-    Logger.info('[generateDraftFromIdea] 실행 옵션:', { generateDraft, generateThumbnail });
+    Logger.info('[generateDraftFromIdea] 실행 옵션:', { generateDraft, generateThumbnail, composeThumbnailText });
 
     // 1. 기본 제목 및 페르소나 결정 (사용자 설정 > 자동 감지)
     // title 변수를 함수 최상단에서 선언하여 generateDraft 옵션에 상관없이 사용 가능하게 함
@@ -881,6 +894,20 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     });
 
     // 백업 파일의 상세한 프롬프트 구성
+    // [신규] 썸네일 프롬프트 가이드 동적 생성 (체크박스 상태에 따라 분기)
+    const thumbnailPromptGuide = composeThumbnailText
+      ? `
+        - **IMPORTANT**: The generated image MUST NOT contain any text, letters, or characters. 
+        - Keep the background clean and simple because text will be overlaid programmatically later.
+        - Focus on the visual elements and composition.
+      `
+      : `
+        - **Text Rendering Rules (CRITICAL)**:
+          1. You MUST instruct the model to render the title text explicitly using the format: "Render the text: 'TEXT_CONTENT'".
+          2. For Korean text, emphasize strict typography to prevent typos (e.g., "Bold, clear Korean typography", "Legible text").
+          3. If the text is too long (over 8 chars), summarize it into a short keyword.
+      `;
+
     const prompt = `
             ${systemPrompt}
             
@@ -1150,6 +1177,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             13. **스마트 썸네일 A/B 테스팅 정보 생성 (매우 중요)**: 
 
               초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
+              
+              [썸네일 생성 규칙]
+              ${thumbnailPromptGuide}
               
               // ▼▼▼ [추가] 제휴 상품 반영 필수 규칙 시작 ▼▼▼
               [제휴 상품 반영 필수 규칙]
@@ -1593,7 +1623,6 @@ ${defaultDescription}
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
 
-    const composeThumbnailText = !!options.composeThumbnailText; // default false unless explicitly true
     if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
       try {
