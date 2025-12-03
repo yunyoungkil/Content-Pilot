@@ -230,11 +230,14 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     'padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;';
   thumbBtn.textContent = '🎨 썸네일 만들기';
 
-  // '초안 삭제' 버튼이 있다면 그 앞에, 없으면 컨테이너 끝에 추가
+  // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
   const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
   if (deleteBtn) {
-    buttonContainer.insertBefore(thumbBtn, deleteBtn);
+    // buttonContainer.insertBefore(...) 대신 deleteBtn.parentNode.insertBefore(...) 사용
+    // deleteBtn이 div로 감싸져 있어도, 그 부모(div)에게 삽입을 요청하므로 안전함
+    deleteBtn.parentNode.insertBefore(thumbBtn, deleteBtn);
   } else {
+    // 삭제 버튼이 없으면(드문 경우) 컨테이너 끝에 추가
     buttonContainer.appendChild(thumbBtn);
   }
 
@@ -332,7 +335,9 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
     // 모달 즉시 열기
     Logger.info('[ThumbnailButton] 썸네일 모달 열기 (기존 데이터 사용)');
-    openThumbnailMaker(draftData, onInsert, onSave, null, { showText: composeThumbnailText });
+    const shadowRoot = workspaceEl.getRootNode();
+    const targetContainer = (shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE) ? shadowRoot : document.body;
+    openThumbnailMaker(draftData, onInsert, onSave, null, { showText: composeThumbnailText }, targetContainer);
 
     // 백그라운드에서 최신 데이터 가져오기 (선택적 업데이트)
     chrome.runtime.sendMessage(
@@ -1770,11 +1775,10 @@ export function renderWorkspace(container, ideaData) {
 
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
 
-  // [추가] 초기 로드 시 액션 버튼 업데이트 (체크박스 포함)
-  updateWorkspaceActionButtons(workspaceEl, hasDraft);
-
-  // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
-  renderThumbnailButton(workspaceEl, ideaData);
+  // [수정] 순서 보장: 액션 버튼이 다 그려진 '후에' 썸네일 버튼을 추가해야 함
+  updateWorkspaceActionButtons(workspaceEl, hasDraft).then(() => {
+    renderThumbnailButton(workspaceEl, ideaData);
+  });
 
   // tracking_only 카드인 경우 publishedUrl에서 permalink 추출
   if (isTrackingOnly && ideaData.publishedUrl && !ideaData.publishInfo?.permalink) {
@@ -4405,7 +4409,7 @@ export function updateWorkspaceScraps(container, ideaData) {
 
 // ✅ [UI 갱신 추가] handleGenerateAction: 생성 성공 시 버튼 상태 즉시 변경
 // ✅ [버그 수정] handleGenerateAction: 썸네일 데이터 누락 방지 및 동기화 강화
-function handleGenerateAction(btn, options) {
+async function handleGenerateAction(btn, options) {
   if (!btn) return;
 
   // 1. 데이터 및 에디터 찾기
@@ -4632,7 +4636,8 @@ function handleGenerateAction(btn, options) {
             }
             // 버튼 UI 갱신
             if (typeof updateWorkspaceActionButtons === 'function') {
-              updateWorkspaceActionButtons(workspaceEl, true);
+              // [수정] await를 추가하여 버튼 갱신이 끝날 때까지 기다립니다.
+              await updateWorkspaceActionButtons(workspaceEl, true);
             }
           }
         }

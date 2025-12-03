@@ -8,10 +8,13 @@ import { showToast, Logger, debounce } from '../utils.js';
  * @param {Function} onInsert - '본문에 삽입' 클릭 시 실행할 콜백 (dataUrl, altText 전달)
  * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
  * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
+ * @param {Object} initialOptions - 초기 옵션 (showText 등)
+ * @param {Element} container - 모달을 추가할 부모 컨테이너 (기본값: document.body)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initialOptions = {}) {
-  // 0. [버그 수정] 기존 모달이 있다면 제거 (좀비 모달 방지)
-  const existingModal = document.getElementById('cp-thumbnail-modal');
+export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initialOptions = {}, container = document.body) {
+  // 0. [버그 수정] 기존 모달이 있다면 제거 (container 내부 검색)
+  // container가 ShadowRoot일 수 있으므로 querySelector 사용
+  const existingModal = container.querySelector ? container.querySelector('#cp-thumbnail-modal') : document.getElementById('cp-thumbnail-modal');
   if (existingModal) {
     existingModal.remove();
   }
@@ -93,11 +96,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
   }
   console.log('[ThumbnailMaker] 초기화 데이터:', logThumbInfo);
 
-  // 2. 모달 컨테이너 생성 (어두운 테마 적용)
-  const modal = document.createElement('div');
-  modal.id = 'cp-thumbnail-modal';
+  // [핵심 수정] Z-Index를 브라우저 최대 허용값(2147483647)으로 수정
+  // 기존 2147483648은 무효화되어 패널 뒤로 숨겨짐
   modal.style.cssText =
-    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:640px;min-width:320px;background:#1e1e1e;color:#fff;z-index:2147483648;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.5);border-radius:16px;font-family:'Pretendard', sans-serif;border:1px solid #333;max-height:90vh;overflow-y:auto;box-sizing:border-box;";
+    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:640px;min-width:320px;background:#1e1e1e;color:#fff;z-index:2147483647;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.5);border-radius:16px;font-family:'Pretendard', sans-serif;border:1px solid #333;max-height:90vh;overflow-y:auto;box-sizing:border-box;";
 
   // 프롬프트 텍스트 이스케이프 처리
   const escapedPromptEn = (thumbInfo.thumbnailPromptEn || '')
@@ -299,7 +301,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
       #cp-thumbnail-modal::-webkit-scrollbar-thumb:hover { background: #666; }
     </style>
   `;
-  document.body.appendChild(modal);
+  // [수정] 전달받은 container(Shadow DOM)에 추가
+  container.appendChild(modal);
 
   // 3. 캔버스 및 상태 초기화
   const canvas = modal.querySelector('#tm-preview');
