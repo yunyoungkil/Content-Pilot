@@ -179,7 +179,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         </div>
         
         <div style="flex-shrink:0;">
-          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">메인 타이틀</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <label style="font-size:12px;color:#aaa;">메인 타이틀</label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="tm-show-text" checked style="cursor:pointer;accent-color:#6c5ce7;">
+              <label for="tm-show-text" style="font-size:11px;color:#ccc;cursor:pointer;">텍스트 표시</label>
+            </div>
+          </div>
           <input id="tm-title" type="text" value="${escapedThumbText}" placeholder="비교형: 'A VS B', 질문형: '어떻게 할까?', 리스트형: '1. 항목1, 2. 항목2'" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
         </div>
         
@@ -604,6 +610,14 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       };
     }
 
+    // [핵심 수정] 텍스트 표시가 꺼져있으면 텍스트 레이어 제거
+    const showText = document.getElementById('tm-show-text')?.checked ?? true;
+    if (!showText && templateData.layers) {
+      // type이 'text'인 모든 레이어를 필터링하여 제거
+      templateData.layers = templateData.layers.filter(layer => layer.type !== 'text');
+      console.log('[ThumbnailMaker] 텍스트 오버레이가 비활성화되어 텍스트 레이어를 제거했습니다.');
+    }
+
     // thumbnailGenerator.js의 렌더러 호출
     await renderTemplateFromData(ctx, templateData);
   };
@@ -935,6 +949,29 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       }
     }
   });
+
+  // [신규] 텍스트 표시 토글 이벤트
+  const showTextCheckbox = document.getElementById('tm-show-text');
+  if (showTextCheckbox) {
+    showTextCheckbox.addEventListener('change', () => {
+      const titleInput = document.getElementById('tm-title');
+      const subtitleInput = document.getElementById('tm-subtitle');
+      
+      // 체크 해제 시 입력창 비활성화 (시각적 피드백)
+      const isChecked = showTextCheckbox.checked;
+      if (titleInput) {
+        titleInput.disabled = !isChecked;
+        titleInput.style.opacity = isChecked ? '1' : '0.5';
+      }
+      if (subtitleInput) {
+        subtitleInput.disabled = !isChecked;
+        subtitleInput.style.opacity = isChecked ? '1' : '0.5';
+      }
+
+      updatePreview();
+      saveState();
+    });
+  }
 
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
   document.getElementById('tm-template-type')?.addEventListener('change', () => {
