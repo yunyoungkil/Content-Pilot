@@ -32,10 +32,14 @@ async function fetchImageAsBase64(url) {
       const reader = new FileReader();
       reader.onloadend = () => {
         try {
-          // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
+          // "data:image/jpeg;base64,..." 형식에서 MIME 타입과 데이터 분리
           const dataUrl = reader.result || '';
-          const base64 = dataUrl.split(',')[1] || '';
-          resolve(base64);
+          const matches = dataUrl.match(/^data:(.+);base64,(.*)$/);
+          if (matches) {
+            resolve({ mimeType: matches[1], data: matches[2] });
+          } else {
+            resolve(null);
+          }
         } catch (err) {
           reject(err);
         }
@@ -45,6 +49,22 @@ async function fetchImageAsBase64(url) {
     });
   } catch (e) {
     Logger.warn('[fetchImageAsBase64] 이미지 변환 실패:', e);
+    return null;
+  }
+}
+
+// [신규] 스크랩 이미지 분석 함수
+async function analyzeScrapImage(imageUrl) {
+  try {
+    const imageData = await fetchImageAsBase64(imageUrl);
+    if (!imageData) return null;
+
+    const prompt = "이 이미지를 블로그 포스팅에 활용할 수 있도록 자세히 묘사하고 분석해줘. 주요 객체, 분위기, 텍스트가 있다면 내용을 포함해서 설명해.";
+    // VISION 모델(gemini-2.0-flash) 사용
+    const analysis = await callGeminiAPI(prompt, AI_MODELS.VISION, [imageData]);
+    return analysis;
+  } catch (e) {
+    Logger.warn('[analyzeScrapImage] 분석 실패:', e);
     return null;
   }
 }
@@ -114,7 +134,7 @@ export async function getEmergingTopics(channelContext) {
 
 // Gemini 텍스트 모델 호출 유틸
 // Gemini 텍스트 모델 호출 유틸
-export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
+export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = []) {
   // 검사: API 키가 반드시 있어야 함
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey || !String(geminiApiKey).trim()) {
@@ -126,14 +146,36 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
   try {
+    // [수정] 멀티모달 입력을 위한 parts 구성
+    const parts = [];
+
+    // 텍스트 프롬프트 추가
+    if (prompt && typeof prompt === 'string') {
+      parts.push({ text: prompt });
+    }
+
+    // 이미지 데이터 추가 (Base64 형식)
+    if (Array.isArray(images)) {
+      for (const img of images) {
+        if (img && img.mimeType && img.data) {
+          parts.push({
+            inlineData: {
+              mimeType: img.mimeType,
+              data: img.data
+            }
+          });
+        }
+      }
+    }
+
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }] }] })
+      // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts }],
       }),
     });
 
@@ -150,9 +192,9 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
     const candidate = Array.isArray(json?.candidates) && json.candidates[0];
     if (!candidate) return '';
 
-    const parts = candidate?.content?.parts || [];
+    const responseParts = candidate?.content?.parts || [];
     // parts는 배열, 각 항목에 text가 있을 수 있음
-    for (const p of parts) {
+    for (const p of responseParts) {
       if (p && typeof p.text === 'string') return p.text;
     }
 
@@ -905,14 +947,30 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             .trim();
     };
 
-    // 2. 연결된 자료 텍스트 (스마트 압축 및 길이 제한 적용)
-    const linkedScrapsText = (ideaData.linkedScrapsContent || [])
-      .map((scrap, index) => {
+    // 2. 연결된 자료 텍스트 (스마트 압축 및 길이 제한 적용 + 이미지 분석)
+    const linkedScrapsText = await Promise.all(
+      (ideaData.linkedScrapsContent || []).map(async (scrap, index) => {
         const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
         const url = scrap.url || '';
         
         // 1단계: 텍스트 압축 (공백 제거로 밀도 높이기)
         let content = compressText(scrap.text || '');
+
+        // [신규] 이미지 분석 추가
+        let imageAnalysis = '';
+        if (scrap.image || (scrap.allImages && scrap.allImages.length > 0)) {
+          const imageUrl = scrap.image || scrap.allImages[0];
+          try {
+            Logger.debug(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 시작: ${imageUrl.substring(0, 50)}...`);
+            const analysis = await analyzeScrapImage(imageUrl);
+            if (analysis) {
+              imageAnalysis = `\n이미지 분석: ${analysis}`;
+              Logger.debug(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 완료`);
+            }
+          } catch (e) {
+            Logger.warn(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 실패:`, e);
+          }
+        }
 
         // 2단계: 길이 제한 (압축 후에도 너무 길면 자름)
         // 압축된 텍스트는 정보 밀도가 높으므로 2500자 정도면 충분합니다.
@@ -927,9 +985,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             content = `${front}\n... (중략) ...\n${back}`;
         }
 
-        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용:\n${content}\n`;
+        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용:\n${content}${imageAnalysis}\n`;
       })
-      .join('\n\n');
+    ).then(results => results.join('\n\n'));
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
