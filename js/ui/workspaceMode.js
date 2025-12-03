@@ -666,16 +666,30 @@ function createScrapCard(scrap, isLinked) {
   const cleanedTitle = textContent.replace(/\s+/g, ' ').trim();
   const displayTitle = cleanedTitle.substring(0, 10);
 
+  // [수정] 연결된 스크랩 UI 개선 (이미지 썸네일 표시)
   if (isLinked) {
-    return `<div class="scrap-card-item linked-scrap-item" data-scrap-id="${
-      scrap.id
-    }" data-text="${textContent.replace(
-      /"/g,
-      '&quot;'
-    )}" draggable="true" style="margin:0; flex-shrink:0; position:relative;">
-        <div class="linked-scrap-tag">
-          <span class="tag-text">${displayTitle}...</span>
-          <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제">×</button>
+    const imageUrl = scrap.image || (Array.isArray(scrap.allImages) && scrap.allImages[0]);
+    const hasImage = !!imageUrl;
+
+    return `<div class="scrap-card-item linked-scrap-item ${hasImage ? 'has-thumbnail' : ''}" 
+        data-scrap-id="${scrap.id}" 
+        data-text="${textContent.replace(/"/g, '&quot;')}" 
+        draggable="true" 
+        style="margin:0; flex-shrink:0; position:relative; display:flex; align-items:center; background:#fff; border:1px solid #ddd; border-radius:20px; padding:4px 10px 4px 4px; gap:6px; height:32px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+        
+        ${
+          hasImage
+            ? `<div style="width:24px; height:24px; border-radius:50%; overflow:hidden; flex-shrink:0; border:1px solid #eee;">
+                 <img src="${imageUrl}" style="width:100%; height:100%; object-fit:cover;">
+               </div>`
+            : `<span style="font-size:14px; margin-left:4px;">📄</span>`
+        }
+        
+        <div class="linked-scrap-tag" style="border:none; background:none; padding:0;">
+          <span class="tag-text" style="font-size:12px; color:#333; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:middle;">
+            ${displayTitle}...
+          </span>
+          <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제" style="margin-left:4px; border:none; background:none; color:#999; cursor:pointer; font-size:14px; padding:0 2px;">×</button>
         </div>
       </div>`;
   }
