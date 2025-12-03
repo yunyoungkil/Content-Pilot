@@ -436,31 +436,41 @@ export async function enhanceDraftWithFeatures({
       }
     }
 
-    // [수정] 16:9 이미지 업로드를 위해 composedDataUrl이 웹 URL(http...)인 경우 Data URL(Base64)로 변환
-    // 원본 이미지를 그대로 사용할 때 이 변환이 없으면 uploadImageToFirebaseStorage에서 오류 발생
+    // [핵심 수정] 16:9 이미지 업로드 준비 (URL -> Base64 변환 시도)
+    let final16x9Data = null; // 업로드용 데이터 (Base64)
+    let final16x9Url = null;  // 최종 URL
+
     if (
       composedDataUrl &&
       (composedDataUrl.startsWith('http') || composedDataUrl.startsWith('https'))
     ) {
       try {
         Logger.debug('[enhanceDraftWithFeatures] 16:9 이미지 업로드를 위해 Base64 변환 시도');
-        const base64 = await fetchImageAsBase64(composedDataUrl);
-        if (base64) {
-          // fetchImageAsBase64 returns {mimeType, data} object; construct data URL with proper MIME type
-          composedDataUrl = `data:${base64.mimeType};base64,${base64.data}`;
+        const base64Result = await fetchImageAsBase64(composedDataUrl);
+        if (base64Result && base64Result.data) {
+          final16x9Data = `data:${base64Result.mimeType || 'image/png'};base64,${base64Result.data}`;
+        } else {
+          // 변환 실패 시 원본 URL 그대로 사용 (재업로드 건너뜀)
+          Logger.warn('[enhanceDraftWithFeatures] Base64 변환 실패, 원본 URL 사용');
+          final16x9Url = composedDataUrl;
         }
       } catch (e) {
-        Logger.warn('[enhanceDraftWithFeatures] 16:9 이미지 Base64 변환 실패:', e);
-        // 변환 실패 시 부분 실패 처리 (1x1, 4x3만 저장되도록 시도하거나 여기서 중단)
-        thumbnailGenerationPartialFailure = true;
+        Logger.warn('[enhanceDraftWithFeatures] Base64 변환 중 오류, 원본 URL 사용:', e);
+        final16x9Url = composedDataUrl;
       }
+    } else {
+      // 이미 Base64인 경우
+      final16x9Data = composedDataUrl;
     }
 
-    // Cropping
+    // Cropping (1x1, 4x3)
     const userId = await getCurrentUserId();
+    // composedDataUrl이 http URL이어도 cropImageInOffscreen이 처리할 수 있도록 시도 (CORS 주의)
+    // 안전을 위해 final16x9Data(Base64)가 있을 때만 크롭 시도
+    const sourceForCrop = final16x9Data || composedDataUrl;
     const cropPromises = [
-      cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
-      cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
+      cropImageInOffscreen(sourceForCrop, 1).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
+      cropImageInOffscreen(sourceForCrop, 4 / 3).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
     ];
 
     let croppedResults;
@@ -479,7 +489,7 @@ export async function enhanceDraftWithFeatures({
     }
 
     // Upload
-    const [url_1x1, url_4x3, url_16x9] = await Promise.all([
+    const uploadPromises = [
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
         `thumbnails/${userId}/${permalink}-1x1.png`,
@@ -490,12 +500,24 @@ export async function enhanceDraftWithFeatures({
         `thumbnails/${userId}/${permalink}-4x3.png`,
         userId
       ),
-      uploadImageToFirebaseStorage(
-        composedDataUrl,
+    ];
+
+    // 16:9 이미지 업로드 (Base64 데이터가 있으면 업로드, 없으면 원본 URL 사용)
+    let url_16x9 = null;
+    if (final16x9Data) {
+      // Base64 데이터가 있으면 Firebase에 업로드
+      url_16x9 = await uploadImageToFirebaseStorage(
+        final16x9Data,
         `thumbnails/${userId}/${permalink}-16x9.png`,
         userId
-      ),
-    ]);
+      );
+    } else if (final16x9Url) {
+      // Base64 변환 실패 시 원본 URL 그대로 사용 (업로드 건너뜀)
+      Logger.info('[enhanceDraftWithFeatures] 16:9 이미지 Base64 변환 실패로 원본 URL 사용');
+      url_16x9 = final16x9Url;
+    }
+
+    const [url_1x1, url_4x3] = await Promise.all(uploadPromises);
 
     thumbnailUrls = {
       url_1x1,
