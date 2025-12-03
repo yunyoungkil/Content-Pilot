@@ -797,31 +797,51 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const trends = ideaData.recommendedSearches || []; // 연관 검색어 활용
     builder.setTrendContext(keywords, trends);
 
+    // [핵심 수정] 3-1. 채널 정보 미리 가져오기 (내부 링크 매칭을 위해 위로 이동)
+    let channelInfo = null;
+    let targetSourceId = null;
+    
+    try {
+      const userId = await getCurrentUserId();
+      const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+      const channelsData = channelsSnap?.val() || {};
+      const myBlogs = channelsData.myChannels?.blogs || [];
+      const myYoutubes = channelsData.myChannels?.youtubes || [];
+      const allChannels = [...myBlogs, ...myYoutubes];
+
+      // 카드의 channelId와 일치하는 채널 찾기 (UUID 비교)
+      let currentChannelId = ideaData.channelId;
+      if (!currentChannelId) {
+          const storage = await chrome.storage.local.get('activeChannelId');
+          currentChannelId = storage.activeChannelId;
+      }
+
+      if (currentChannelId) {
+        channelInfo = allChannels.find((ch) => {
+          // 1. UUID로 비교 (신규 방식)
+          if (ch.id === currentChannelId) return true;
+          // 2. apiUrl로 생성된 ID로 비교 (구버전 호환)
+          const generatedId = ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null;
+          return generatedId === currentChannelId;
+        });
+
+        // [중요] DB 매칭용 Source ID 계산 (RSS URL을 Base64로 변환)
+        // 이렇게 해야 DB에 저장된 'aHR0cHM...' 형식과 일치하게 됩니다.
+        if (channelInfo && channelInfo.apiUrl) {
+            targetSourceId = btoa(channelInfo.apiUrl).replace(/=/g, '');
+            Logger.debug(`[AI Service] 매칭용 Source ID 변환 완료: ${targetSourceId}`);
+        }
+      }
+    } catch (error) {
+      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
+    }
+
     // 4-A. 제휴 마케팅 링크 데이터 준비
     const userId = await getCurrentUserId();
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
       ' '
     )} ${ideaData.description || ''}`;
     const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
-
-    // 4-B. 채널 정보 가져오기 (JSON-LD용)
-    let channelInfo = null;
-    try {
-      const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
-      if (activeChannelId) {
-        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
-        const channelsData = channelsSnap?.val() || {};
-        const myBlogs = channelsData.myChannels?.blogs || [];
-        const myYoutubes = channelsData.myChannels?.youtubes || [];
-        const allChannels = [...myBlogs, ...myYoutubes];
-        channelInfo = allChannels.find((ch) => {
-          const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
-          return chId === activeChannelId;
-        });
-      }
-    } catch (error) {
-      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
-    }
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -856,6 +876,25 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // Keywords prepared but not used directly in prompt at this time
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
+    
+    // [디버깅 코드 시작] -------------------------------------------------------
+    const scraps = ideaData.linkedScrapsContent || [];
+    Logger.debug(`[External Link Debug] 전달받은 연결 자료 개수: ${scraps.length}`);
+    
+    if (scraps.length > 0) {
+        scraps.forEach((s, i) => {
+            Logger.debug(`[External Link Debug] 자료 #${i + 1}:`, {
+                title: s.title,
+                url_exists: !!s.url, // URL 존재 여부 (true/false)
+                url: s.url ? s.url.substring(0, 30) + '...' : '(URL 없음)',
+                text_len: s.text ? s.text.length : 0
+            });
+        });
+    } else {
+        Logger.warn(`[External Link Debug] 연결된 자료가 없습니다. (ideaData.linkedScrapsContent 비어있음)`);
+    }
+    // [디버깅 코드 끝] ---------------------------------------------------------
+
     const linkedScrapsText = (ideaData.linkedScrapsContent || [])
       .map((scrap, index) => {
         const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
@@ -873,30 +912,37 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       )}\n\n`;
     }
 
-    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회
+    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회 (수정됨)
     let myPastPostsText = '';
     try {
       const userId = await getCurrentUserId();
       const contentSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const allBlogs = contentSnap?.val() || {};
 
-      // 현재 채널의 글만 필터링 (channelId가 일치하는 경우)
+      // 현재 채널의 글만 필터링
       const myPosts = Object.values(allBlogs)
         .filter((item) => item !== null && item.title && item.fullLink)
         .filter((item) => {
-          // channelId가 있으면 일치하는 것만, 없으면 모두 포함
-          if (ideaData.channelId) {
-            return item.sourceId === ideaData.channelId;
-          }
-          return true; // channelId가 없으면 모든 글 포함
+          // channelId가 지정되지 않은 카드는 모든 글을 포함
+          if (!ideaData.channelId) return true;
+
+          // [핵심 수정] 변환된 ID(targetSourceId)와 비교
+          if (targetSourceId && item.sourceId === targetSourceId) return true;
+          
+          // 기존 방식 호환 (혹시 모를 구버전 데이터 대응)
+          if (item.sourceId === ideaData.channelId) return true;
+
+          return false;
         })
         .sort((a, b) => {
-          // 최신순 정렬 (publishedAt 또는 createdAt 기준)
+          // 최신순 정렬
           const dateA = a.publishedAt || a.createdAt || 0;
           const dateB = b.publishedAt || b.createdAt || 0;
           return dateB - dateA;
         })
-        .slice(0, 20); // 최근 20개만 사용
+        .slice(0, 20); // 최근 20개
+
+      Logger.debug(`[Internal Link] 최종 매칭된 내 글 개수: ${myPosts.length}개`);
 
       if (myPosts.length > 0) {
         myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
@@ -914,8 +960,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       Logger.warn('[generateDraftFromIdea] 내 과거 포스팅 조회 실패:', error);
       // 오류가 발생해도 계속 진행
     }
-
-    // 5. 추천 검색어와 롱테일 키워드 수집
     const recommendedSearches = ideaData.recommendedSearches || [];
     const longTailKeywords = ideaData.longTailKeywords || [];
     const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
