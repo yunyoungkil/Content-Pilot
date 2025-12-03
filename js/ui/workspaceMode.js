@@ -575,10 +575,20 @@ function showScrapDetailModal(scrapData, container = null) {
             /"/g,
             '&quot;'
           )}" style="max-width: 90vw; max-height: 90vh; object-fit: contain;">`;
-          document.body.appendChild(fullModal);
+          
+          // [수정] document.body 대신 Shadow DOM 내부 컨테이너에 추가
+          // container는 showScrapDetailModal의 인자로 전달된 Shadow DOM 내부 요소입니다.
+          if (container) {
+            container.appendChild(fullModal);
+          } else {
+            // container가 없는 예외 상황 (거의 없음)
+            document.body.appendChild(fullModal);
+          }
+
           fullModal.addEventListener('click', () => {
-            if (document.body.contains(fullModal)) {
-              document.body.removeChild(fullModal);
+            // [수정] 부모 요소에서 제거
+            if (fullModal.parentNode) {
+              fullModal.parentNode.removeChild(fullModal);
             }
           });
         });

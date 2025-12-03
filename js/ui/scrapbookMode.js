@@ -883,11 +883,15 @@ function renderDetailView(scrapId, container) {
       modal.innerHTML = `
           <img src="${img.src.replace(/"/g, '&quot;')}" style="max-width: 90vw; max-height: 90vh; object-fit: contain;">
         `;
-      document.body.appendChild(modal);
+      
+      // [수정] document.body 대신 Shadow DOM 내부 컨테이너에 추가
+      // container는 renderDetailView의 인자로 전달된 Shadow DOM 내부 요소입니다.
+      container.appendChild(modal);
 
       modal.addEventListener('click', () => {
-        if (document.body.contains(modal)) {
-          document.body.removeChild(modal);
+        // [수정] 부모 요소에서 제거
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal);
         }
       });
     });
