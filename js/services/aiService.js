@@ -379,6 +379,23 @@ export async function enhanceDraftWithFeatures({
       }
     }
 
+    // [수정] 16:9 이미지 업로드를 위해 composedDataUrl이 웹 URL(http...)인 경우 Data URL(Base64)로 변환
+    // 원본 이미지를 그대로 사용할 때 이 변환이 없으면 uploadImageToFirebaseStorage에서 오류 발생
+    if (composedDataUrl && (composedDataUrl.startsWith('http') || composedDataUrl.startsWith('https'))) {
+      try {
+        Logger.debug('[enhanceDraftWithFeatures] 16:9 이미지 업로드를 위해 Base64 변환 시도');
+        const base64 = await fetchImageAsBase64(composedDataUrl);
+        if (base64) {
+          // fetchImageAsBase64는 순수 base64 문자열만 반환하므로 prefix 추가
+          composedDataUrl = `data:image/png;base64,${base64}`;
+        }
+      } catch (e) {
+        Logger.warn('[enhanceDraftWithFeatures] 16:9 이미지 Base64 변환 실패:', e);
+        // 변환 실패 시 부분 실패 처리 (1x1, 4x3만 저장되도록 시도하거나 여기서 중단)
+        thumbnailGenerationPartialFailure = true;
+      }
+    }
+
     // Cropping
     const userId = await getCurrentUserId();
     const cropPromises = [
