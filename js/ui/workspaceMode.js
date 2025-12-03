@@ -4765,11 +4765,12 @@ function handleGenerateAction(btn, options) {
                   linkedScrapsIds.forEach((id) => {
                     const s = r.scraps.find((item) => item.id === id);
                     if (s) {
-                      // [수정] url 필드 추가!
                       linkedScrapsContent.push({ 
                         title: s.title || '스크랩', 
                         text: s.text || '',
-                        url: s.url || '' // ✅ 핵심: URL 정보 전달 추가
+                        url: s.url || '',
+                        // [추가] 이미지 URL 전달 (단일 image 또는 allImages의 첫 번째)
+                        image: s.image || (s.allImages && s.allImages.length > 0 ? s.allImages[0] : '')
                       }); 
                     }
                   });
