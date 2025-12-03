@@ -4659,7 +4659,11 @@ function handleGenerateAction(btn, options) {
           publishInfo: ideaData.publishInfo,
         };
 
-        const secondStepOptions = { generateDraft: false, generateThumbnail: true };
+        const secondStepOptions = { 
+          generateDraft: false, 
+          generateThumbnail: true,
+          composeThumbnailText: options.composeThumbnailText // 👈 이 부분이 누락되어 있었습니다.
+        };
 
         chrome.runtime.sendMessage(
           {
