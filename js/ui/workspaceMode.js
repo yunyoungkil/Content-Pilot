@@ -240,7 +240,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
   // 이벤트 연결
   thumbBtn.onclick = () => {
-    // 즉시 모달 열기 (기존 데이터로)
+    // [추가] 워크스페이스의 텍스트 오버레이 체크박스 상태 확인
+    const checkbox = workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
+    const composeThumbnailText = checkbox ? checkbox.checked : false;
+
     const draftData = {
       seoTitle: ideaData.seoTitle || ideaData.title,
       thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null,
@@ -329,7 +332,7 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
     // 모달 즉시 열기
     Logger.info('[ThumbnailButton] 썸네일 모달 열기 (기존 데이터 사용)');
-    openThumbnailMaker(draftData, onInsert, onSave, null);
+    openThumbnailMaker(draftData, onInsert, onSave, null, { showText: composeThumbnailText });
 
     // 백그라운드에서 최신 데이터 가져오기 (선택적 업데이트)
     chrome.runtime.sendMessage(

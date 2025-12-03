@@ -9,7 +9,7 @@ import { showToast, Logger, debounce } from '../utils.js';
  * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
  * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
+export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initialOptions = {}) {
   // 0. [버그 수정] 기존 모달이 있다면 제거 (좀비 모달 방지)
   const existingModal = document.getElementById('cp-thumbnail-modal');
   if (existingModal) {
@@ -188,7 +188,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <label style="font-size:12px;color:#aaa;">메인 타이틀</label>
             <div style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="tm-show-text" checked style="cursor:pointer;accent-color:#6c5ce7;">
+              <input type="checkbox" id="tm-show-text" ${initialShowText ? 'checked' : ''} style="cursor:pointer;accent-color:#6c5ce7;">
               <label for="tm-show-text" style="font-size:11px;color:#ccc;cursor:pointer;">텍스트 표시</label>
             </div>
           </div>
@@ -639,9 +639,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       };
     }
 
-    // [핵심 수정] 텍스트 표시가 꺼져있으면 텍스트 레이어 제거 (좀비 모달 방지 위해 modal.querySelector 사용)
+    // [핵심 수정] 텍스트 표시가 꺼져있으면 텍스트 레이어 제거 (좀비 모달 방지)
     const showTextCheckbox = modal.querySelector('#tm-show-text');
-    const showText = showTextCheckbox ? showTextCheckbox.checked : true;
+    // 체크박스가 있으면 그 값을 쓰고, 없으면 초기값 사용
+    const showText = showTextCheckbox ? showTextCheckbox.checked : initialShowText;
     
     if (!showText && templateData.layers) {
       // type이 'text'인 모든 레이어를 필터링하여 제거
