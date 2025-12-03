@@ -59,7 +59,7 @@ async function analyzeScrapImage(imageUrl) {
     const imageData = await fetchImageAsBase64(imageUrl);
     if (!imageData) return null;
 
-    const prompt = "이 이미지를 블로그 포스팅에 활용할 수 있도록 자세히 묘사하고 분석해줘. 주요 객체, 분위기, 텍스트가 있다면 내용을 포함해서 설명해.";
+    const prompt = "이 이미지를 상세히 분석해줘. 1. 이미지에 포함된 모든 텍스트를 추출해줘. 2. 이미지의 주요 객체와 요소들을 자세히 설명해줘. 3. 이미지의 전체적인 분위기와 스타일을 분석해줘. 4. 이 이미지가 어떤 맥락에서 사용될 수 있을지 제안해줘.";
     // VISION 모델(gemini-2.0-flash) 사용
     const analysis = await callGeminiAPI(prompt, AI_MODELS.VISION, [imageData]);
     return analysis;
@@ -1214,7 +1214,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ${
               affiliateLinks.length > 0
                 ? `
-            10. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
+            10. **페르소나 자기소개 금지 (Strict)**:
+               - AI가 페르소나를 연기하는 자기소개는 절대 사용하지 마세요.
+               - 예: "옆집 언니처럼 알려드릴게요", "전문가로서 말씀드리자면", "친구처럼 솔직하게 말하면" 등
+               - 자연스럽고 객관적인 톤으로 작성하세요. 독자가 AI가 쓴 글처럼 느껴지지 않도록 하세요.
+
+            11. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
               아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 키워드나 구매 의도가 나타나는 문맥에 **자연스럽게** 제휴 링크를 삽입해주세요.
 
               [제휴 링크 목록]
@@ -1421,7 +1426,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
                 * 예: "High-quality, eye-catching background image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay."
-            11. **참고 자료 링크 통합 방법 (매우 중요):**
+            14. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
