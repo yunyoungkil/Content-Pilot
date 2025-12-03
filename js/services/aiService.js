@@ -895,13 +895,41 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     }
     // [디버깅 코드 끝] ---------------------------------------------------------
 
+    // [스마트 정제 함수] 불필요한 공백/줄바꿈 제거 및 압축
+    const compressText = (text) => {
+        if (!text) return '';
+        return text
+            .replace(/\n\s*\n/g, '\n') // 여러 줄 공백을 한 줄로 축소
+            .replace(/[ \t]+/g, ' ')   // 연속된 스페이스/탭을 하나로 축소
+            .replace(/URL 복사 이웃추가 본문 기타 기능/g, '') // 네이버 블로그 상단 노이즈 제거
+            .trim();
+    };
+
+    // 2. 연결된 자료 텍스트 (스마트 압축 및 길이 제한 적용)
     const linkedScrapsText = (ideaData.linkedScrapsContent || [])
       .map((scrap, index) => {
         const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
         const url = scrap.url || '';
-        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용: ${scrap.text || ''}\n`;
+        
+        // 1단계: 텍스트 압축 (공백 제거로 밀도 높이기)
+        let content = compressText(scrap.text || '');
+
+        // 2단계: 길이 제한 (압축 후에도 너무 길면 자름)
+        // 압축된 텍스트는 정보 밀도가 높으므로 2500자 정도면 충분합니다.
+        const MAX_LENGTH = 2500; 
+        
+        if (content.length > MAX_LENGTH) {
+            // 앞부분(서론/광고)이 섞여있을 수 있으므로, 
+            // 너무 길 경우 '중간 부분'을 포함하는 것이 핵심을 건질 확률이 높음
+            // 여기서는 안전하게 앞부분 2000자 + 뒷부분 500자를 합치는 전략 사용
+            const front = content.substring(0, 2000);
+            const back = content.substring(content.length - 500);
+            content = `${front}\n... (중략) ...\n${back}`;
+        }
+
+        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용:\n${content}\n`;
       })
-      .join('\n');
+      .join('\n\n');
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
