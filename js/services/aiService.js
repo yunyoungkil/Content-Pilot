@@ -419,8 +419,8 @@ export async function enhanceDraftWithFeatures({
         try {
           const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
           if (sourceBase64) {
-            // fetchImageAsBase64 returns base64 string; construct a data URL as a safe fallback (assume png)
-            const candidateDataUrl = `data:image/png;base64,${sourceBase64}`;
+            // fetchImageAsBase64 returns {mimeType, data} object; construct a data URL as a safe fallback (assume png)
+            const candidateDataUrl = `data:image/png;base64,${sourceBase64.data}`;
             composedDataUrl = candidateDataUrl;
             Logger.info(
               '[enhanceDraftWithFeatures] compose fallback: source image converted to dataURL'
@@ -446,8 +446,8 @@ export async function enhanceDraftWithFeatures({
         Logger.debug('[enhanceDraftWithFeatures] 16:9 이미지 업로드를 위해 Base64 변환 시도');
         const base64 = await fetchImageAsBase64(composedDataUrl);
         if (base64) {
-          // fetchImageAsBase64는 순수 base64 문자열만 반환하므로 prefix 추가
-          composedDataUrl = `data:image/png;base64,${base64}`;
+          // fetchImageAsBase64 returns {mimeType, data} object; construct data URL with proper MIME type
+          composedDataUrl = `data:${base64.mimeType};base64,${base64.data}`;
         }
       } catch (e) {
         Logger.warn('[enhanceDraftWithFeatures] 16:9 이미지 Base64 변환 실패:', e);
