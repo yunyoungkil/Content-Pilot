@@ -947,47 +947,36 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             .trim();
     };
 
-    // 2. 연결된 자료 텍스트 (스마트 압축 및 길이 제한 적용 + 이미지 분석)
-    const linkedScrapsText = await Promise.all(
-      (ideaData.linkedScrapsContent || []).map(async (scrap, index) => {
-        const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
-        const url = scrap.url || '';
-        
-        // 1단계: 텍스트 압축 (공백 제거로 밀도 높이기)
+    // 2. 연결된 자료 텍스트 처리 (이미지 분석 추가)
+    const linkedScrapsContent = ideaData.linkedScrapsContent || [];
+    const processedScraps = [];
+
+    // [추가] 이미지 분석 병렬 처리
+    await Promise.all(linkedScrapsContent.map(async (scrap, index) => {
         let content = compressText(scrap.text || '');
-
-        // [신규] 이미지 분석 추가
-        let imageAnalysis = '';
-        if (scrap.image || (scrap.allImages && scrap.allImages.length > 0)) {
-          const imageUrl = scrap.image || scrap.allImages[0];
-          try {
-            Logger.debug(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 시작: ${imageUrl.substring(0, 50)}...`);
-            const analysis = await analyzeScrapImage(imageUrl);
-            if (analysis) {
-              imageAnalysis = `\n이미지 분석: ${analysis}`;
-              Logger.debug(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 완료`);
-            }
-          } catch (e) {
-            Logger.warn(`[generateDraftFromIdea] 스크랩 ${index + 1} 이미지 분석 실패:`, e);
-          }
-        }
-
-        // 2단계: 길이 제한 (압축 후에도 너무 길면 자름)
-        // 압축된 텍스트는 정보 밀도가 높으므로 2500자 정도면 충분합니다.
-        const MAX_LENGTH = 2500; 
         
-        if (content.length > MAX_LENGTH) {
-            // 앞부분(서론/광고)이 섞여있을 수 있으므로, 
-            // 너무 길 경우 '중간 부분'을 포함하는 것이 핵심을 건질 확률이 높음
-            // 여기서는 안전하게 앞부분 2000자 + 뒷부분 500자를 합치는 전략 사용
-            const front = content.substring(0, 2000);
-            const back = content.substring(content.length - 500);
-            content = `${front}\n... (중략) ...\n${back}`;
+        // 이미지가 있고 텍스트가 적거나(500자 미만) 이미지를 강조하고 싶을 때 분석 시도
+        // 여기서는 이미지가 있으면 무조건 분석하도록 설정 (필요시 조건 조절)
+        let imageAnalysis = '';
+        if (scrap.image) {
+            Logger.info(`[generateDraft] 스크랩 #${index + 1} 이미지 분석 시작...`);
+            const analysisResult = await analyzeScrapImage(scrap.image);
+            if (analysisResult) {
+                imageAnalysis = `\n\n[이미지 분석 내용 (Vision AI)]:\n${analysisResult}`;
+            }
         }
 
-        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용:\n${content}${imageAnalysis}\n`;
-      })
-    ).then(results => results.join('\n\n'));
+        // 길이 제한 (2500자)
+        if (content.length > 2500) {
+             const front = content.substring(0, 2000);
+             const back = content.substring(content.length - 500);
+             content = `${front}\n...(중략)...\n${back}`;
+        }
+
+        processedScraps[index] = `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n내용:\n${content}${imageAnalysis}\n`;
+    }));
+
+    const linkedScrapsText = processedScraps.join('\n\n');
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
