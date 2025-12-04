@@ -58,6 +58,8 @@ const {
   cleanDataForFirebase,
   getCurrentUserId,
   getUnifiedGalleryImages,
+  deleteImageFromStorage,
+  getUploadedImagesLog,
 } = require('./js/services/firebaseService.js');
 const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
@@ -1776,6 +1778,44 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const filter = msg.filter || 'ALL';
         const images = await getUnifiedGalleryImages(filter);
         return { success: true, images };
+      })()
+    );
+  }
+
+  if (msg.action === 'delete_image_from_storage') {
+    return handleAsync(
+      (async () => {
+        const { imageUrl } = msg.data;
+        if (!imageUrl) {
+          return { success: false, error: '이미지 URL이 필요합니다.' };
+        }
+        return await deleteImageFromStorage(imageUrl);
+      })()
+    );
+  }
+
+  if (msg.action === 'get_uploaded_images_log') {
+    return handleAsync(
+      (async () => {
+        const images = await getUploadedImagesLog();
+        return { success: true, images };
+      })()
+    );
+  }
+
+  if (msg.action === 'delete_storage_image') {
+    return handleAsync(
+      (async () => {
+        const { id, storagePath } = msg.data;
+        const userId = await getCurrentUserId();
+
+        // 1. 스토리지 원본 삭제
+        await deleteImageFromStorage(storagePath);
+
+        // 2. DB 메타데이터 삭제
+        await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+
+        return { success: true };
       })()
     );
   }

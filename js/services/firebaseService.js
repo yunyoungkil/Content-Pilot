@@ -586,6 +586,56 @@ export async function getUnifiedGalleryImages(filterTag = null) {
   return unifiedList;
 }
 
+/**
+ * [New] 스토리지 파일 삭제 (REST API)
+ */
+export async function deleteImageFromStorage(storageUrl) {
+  try {
+    let path = storageUrl;
+    const bucket = firebaseConfig.storageBucket;
+
+    // gs:// 경로 파싱
+    if (storageUrl.startsWith('gs://')) {
+      path = storageUrl.replace(`gs://${bucket}/`, '');
+    }
+
+    const encodedPath = encodeURIComponent(path);
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}`;
+
+    let token = await getValidToken(false);
+    if (!token) token = await getValidToken(true);
+
+    Logger.info(`[Storage] 삭제 요청: ${path}`);
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Storage Delete Failed: ${response.statusText}`);
+    }
+
+    return true;
+  } catch (error) {
+    Logger.error('[Storage] 삭제 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * [New] 업로드된 이미지 로그 조회
+ */
+export async function getUploadedImagesLog() {
+  const userId = await getCurrentUserId();
+  const snapshot = await get(`thumbnail_images/${userId}`);
+  const data = snapshot.val() || {};
+  
+  return Object.entries(data)
+    .map(([key, val]) => ({ id: key, ...val }))
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
 // 즉시 초기화
 initializeFirebase();
 
