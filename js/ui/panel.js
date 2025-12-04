@@ -403,21 +403,34 @@ export function createAndShowPanel() {
             import('./header.js').then((module) => {
               module.addHeaderEventListeners(shadowRoot);
             });
-          } else {
-            // 유효하지 않은 activeChannelId이거나 채널이 없으면 초기화하고 채널 관리 화면으로 이동
-            console.log(
-              '[Panel] 유효하지 않은 activeChannelId 또는 채널 없음, activeChannelId 초기화'
-            );
-            chrome.storage.local.remove('activeChannelId', () => {
-              // 채널 관리 화면으로 이동
-              const navItems = shadowRoot.querySelectorAll('.cp-mode-tab');
-              navItems.forEach((item) => item.classList.remove('active'));
+          } else if (myBlogs.length > 0) {
+            // 채널은 있지만 activeChannelId가 없으면 첫 번째 채널 자동 선택
+            console.log('[Panel] 채널 존재하지만 activeChannelId 없음, 첫 번째 채널 자동 선택');
+            const firstChannel = myBlogs[0];
+            const firstChannelId = generateChannelId(firstChannel);
+            
+            if (firstChannelId) {
+              chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+                console.log('[Panel] 첫 번째 채널 선택 완료, 대시보드 표시');
+                renderDashboard(mainArea);
+                addDashboardEventListeners(mainArea);
 
-              console.log('[Panel] renderChannelMode 호출 시작');
+                // 헤더 이벤트 리스너 초기화 (채널 선택기 등)
+                import('./header.js').then((module) => {
+                  module.addHeaderEventListeners(shadowRoot);
+                });
+              });
+            } else {
+              // 채널 ID 생성 실패 시 채널 관리 화면으로 이동
+              console.log('[Panel] 첫 번째 채널 ID 생성 실패, 채널 관리 화면으로 이동');
               renderChannelMode(mainArea);
-              console.log('[Panel] renderChannelMode 호출 완료');
               showOnboardingMessage(mainArea);
-            });
+            }
+          } else {
+            // 채널이 아예 없으면 채널 관리 화면으로 이동
+            console.log('[Panel] 채널 없음, 채널 관리 화면으로 이동');
+            renderChannelMode(mainArea);
+            showOnboardingMessage(mainArea);
           }
         });
         return;

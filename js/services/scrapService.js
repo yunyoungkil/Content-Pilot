@@ -202,6 +202,8 @@ export async function getFirebaseScraps(targetChannelId = null, limit = 50, star
     // 페이징 지원: 더 많은 데이터가 있는지 확인
     const hasMore = filteredScraps.length > limit;
 
+    Logger.debug(`[getFirebaseScraps] 반환 데이터 구조:`, { data: limitedScraps, hasMore });
+
     // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach((tab) => {

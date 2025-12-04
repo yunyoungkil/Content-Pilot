@@ -544,7 +544,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [Auth Service] 인증 ===
   if (msg.action === 'start_google_auth') return handleAsync(startGoogleAuth());
-  if (msg.action === 'revoke_google_auth') return handleAsync(revokeGoogleAuth());
+  
+  // [수정] 로그아웃 시 메모리 캐시 명시적 초기화
+  if (msg.action === 'revoke_google_auth') {
+    // 캐시 초기화
+    channelsAndKeyCache = null;
+    channelsAndKeyCacheTimestamp = 0;
+    kanbanDataCache = null;
+    kanbanDataCacheTimestamp = 0;
+    kanbanRealtimeListenerAttached = false;
+    Logger.info('[Auth] 로그아웃에 따른 백그라운드 캐시 초기화 완료');
+    
+    return handleAsync(revokeGoogleAuth());
+  }
 
   // === [System] 인증 토큰 가져오기 (테스트 스크립트용) ===
   if (msg.action === 'get_auth_token') {
@@ -1147,10 +1159,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const userId = await getCurrentUserId();
         const now = Date.now();
 
-        // 캐시 확인 (30초 이내)
-        if (kanbanDataCache && now - kanbanDataCacheTimestamp < KANBAN_CACHE_TTL) {
+        // [수정] 캐시 검증 시 userId 확인 추가
+        // 캐시가 존재하고, 캐시의 주인이 현재 사용자와 같으며, 시간이 유효한 경우에만 반환
+        if (kanbanDataCache && 
+            kanbanDataCache._userId === userId && 
+            (now - kanbanDataCacheTimestamp) < KANBAN_CACHE_TTL) {
           Logger.debug(`[get_kanban_data] 캐시된 데이터 반환 - userId: ${userId}`);
-          return kanbanDataCache;
+          Logger.debug(`[get_kanban_data] 캐시 반환 데이터 구조:`, kanbanDataCache.data);
+          return kanbanDataCache.data; // 이미 { success: true, data: {...} } 형태
         }
 
         Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
@@ -1184,13 +1200,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const snap = await get(dbRef);
         const data = snap?.val() || {};
-        const cardsCount = Object.keys(data).length;
-        Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
+        
+        // [수정] 실제 카드 개수 카운팅 (오해 방지)
+        let totalCards = 0;
+        let columnsCount = 0;
+        if (data) {
+          Object.keys(data).forEach(status => {
+            columnsCount++;
+            if (data[status] && typeof data[status] === 'object') {
+              totalCards += Object.keys(data[status]).length;
+            }
+          });
+        }
+        
+        Logger.info(`[get_kanban_data] 데이터 로드 완료 - 총 카드: ${totalCards}개 (컬럼: ${columnsCount}개)`);
 
         const responseData = { success: true, data: data };
 
-        // 캐시에 저장
-        kanbanDataCache = responseData;
+        // [수정] 캐시 저장 시 userId 포함하여 저장
+        kanbanDataCache = { data: responseData, _userId: userId };
         kanbanDataCacheTimestamp = now;
 
         // 즉시 UI에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
@@ -1362,8 +1390,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'cp_get_firebase_scraps') {
     return handleAsync(
       (async () => {
+        const userId = await getCurrentUserId();
+        Logger.info(`[cp_get_firebase_scraps] 요청 수신 - userId: ${userId}`);
+        
+        const snap = await get(ref(getDb(), `${COLLECTIONS.SCRAPS}/${userId}`));
+        const val = snap?.val() || {};
+        const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
         const targetChannelId = msg.channelId || null;
-        return await getFirebaseScraps(targetChannelId);
+        
+        const filtered = arr.filter((scrap) => {
+          // 채널 ID가 없으면 공용(항상 표시)
+          if (scrap.channelId === undefined || scrap.channelId === null) return true;
+          // 현재 선택된 채널과 일치하면 표시
+          if (scrap.channelId === targetChannelId) return true;
+          
+          // URL Origin 비교 (호환성)
+          if (scrap.channelId && targetChannelId) {
+            try {
+              const scrapUrl = atob(scrap.channelId.replace(/=/g, ''));
+              const targetUrl = atob(targetChannelId.replace(/=/g, ''));
+              if (new URL(scrapUrl).origin === new URL(targetUrl).origin) return true;
+            } catch (e) {}
+          }
+          return false;
+        });
+
+        Logger.info(`[cp_get_firebase_scraps] 스크랩 조회 결과 - 전체: ${arr.length}개, 필터링 후: ${filtered.length}개 (현재 채널: ${targetChannelId ? '특정 채널' : '전체/공용'})`);
+
+        const responseData = {
+          success: true,
+          data: filtered.sort((a, b) => b.timestamp - a.timestamp),
+        };
+
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'scraps_data_updated', scraps: responseData.data }).catch(() => {});
+          });
+        });
+
+        return responseData;
       })()
     );
   }
@@ -1448,10 +1513,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const userId = await getCurrentUserId();
         const now = Date.now();
 
-        // 캐시 확인 (5분 이내)
-        if (channelsAndKeyCache && now - channelsAndKeyCacheTimestamp < CHANNELS_CACHE_TTL) {
+        // [수정] 캐시 검증 시 userId 확인 추가
+        if (channelsAndKeyCache && 
+            channelsAndKeyCache._userId === userId && 
+            (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
           Logger.debug(`[get_channels_and_key] 캐시된 데이터 반환 - userId: ${userId}`);
-          return channelsAndKeyCache;
+          // _userId 제거하고 반환 (success, data 구조 유지)
+          const { _userId, ...cacheData } = channelsAndKeyCache;
+          const result = { success: true, data: cacheData.data };
+          Logger.debug(`[get_channels_and_key] 캐시 반환 데이터 구조:`, result);
+          return result;
         }
 
         Logger.info(`[get_channels_and_key] 새로운 데이터 조회 - userId: ${userId}`);
@@ -1462,8 +1533,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // channelsSnap은 { val: () => data, exists: () => boolean } 형태
         const channelsData = channelsSnap?.val() || {};
-        const blogsCount = channelsData.myChannels?.blogs?.length || 0;
-        const youtubesCount = channelsData.myChannels?.youtubes?.length || 0;
+        
+        // Firebase는 배열을 객체로 변환하므로 Object.keys()로 개수 확인
+        const blogsData = channelsData.myChannels?.blogs;
+        const youtubesData = channelsData.myChannels?.youtubes;
+        const blogsCount = blogsData ? (Array.isArray(blogsData) ? blogsData.length : Object.keys(blogsData).filter(k => k !== '_userId').length) : 0;
+        const youtubesCount = youtubesData ? (Array.isArray(youtubesData) ? youtubesData.length : Object.keys(youtubesData).filter(k => k !== '_userId').length) : 0;
+        
         Logger.info(
           `[get_channels_and_key] 채널 데이터 로드 완료 - blogs: ${blogsCount}, youtubes: ${youtubesCount}`
         );
@@ -1477,8 +1553,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           },
         };
 
-        // 캐시에 저장
-        channelsAndKeyCache = responseData;
+        // 캐시에 저장 (userId 포함)
+        channelsAndKeyCache = { ...responseData, _userId: userId };
         channelsAndKeyCacheTimestamp = now;
 
         // 콜백이 실행되지 않는 경우를 대비하여 content script에 메시지 전송

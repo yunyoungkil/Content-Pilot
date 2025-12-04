@@ -230,9 +230,13 @@ async function initGlobalChannelSelector(shadowRoot) {
   const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
 
   // 2. 채널 목록 가져오기
+  console.log('[Header] 채널 데이터 요청 시작');
   chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
+    console.log('[Header] 채널 데이터 응답 수신:', response);
     if (response && response.success) {
+      console.log('[Header] 채널 데이터 확인 - success:', response.success, '데이터 구조:', response.data);
       const myBlogs = response.data.myChannels?.blogs || [];
+      console.log('[Header] 블로그 채널 개수:', Array.isArray(myBlogs) ? myBlogs.length : Object.keys(myBlogs).length);
 
       // 옵션 초기화
       selector.innerHTML = '';
@@ -360,11 +364,13 @@ async function initGlobalChannelSelector(shadowRoot) {
                   : null,
                 tabName === 'scrapbook'
                   ? import('./scrapbookMode.js').then((module) => {
+                      window.__cp_active_mode = 'scrapbook';
                       module.renderScrapbook(mainArea);
                     })
                   : null,
                 tabName === 'kanban'
                   ? import('./kanbanMode.js').then((module) => {
+                      window.__cp_active_mode = 'kanban';
                       module.renderKanban(mainArea);
                       module.addKanbanEventListeners(mainArea);
                     })

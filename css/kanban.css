@@ -248,6 +248,9 @@
 .kanban-col-cards {
   flex: 1;
   overflow-y: auto;
+  /* ▼▼▼ [수정] 스크롤바 공간을 미리 확보하여 레이아웃 흔들림 방지 ▼▼▼ */
+  scrollbar-gutter: stable; 
+  /* ▲▲▲ [수정 끝] ▲▲▲ */
   padding: 12px;
   display: flex;
   flex-direction: column;

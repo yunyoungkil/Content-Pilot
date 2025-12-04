@@ -174,7 +174,11 @@
   border-radius: 8px;
   padding: 16px;
   min-height: 0; /* allow child .affiliate-link-list to scroll */
+  /* prevent flex item overflow issues when using long content */
+  min-width: 0;
   height: 100%;
+  /* Reserve scrollbar space to prevent layout shifts */
+  scrollbar-gutter: stable;
 }
 
 .affiliate-list-header {
@@ -244,6 +248,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* ensure the list occupies the remaining space inside the column and can shrink properly */
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  /* keep layout stable when scrollbar appears/disappears */
+  scrollbar-gutter: stable;
+  /* Remove max-height to let flex handle sizing naturally, preventing layout shifts */
 }
 
 /* 링크 카드 - 현대적인 디자인 개선 */

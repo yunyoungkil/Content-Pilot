@@ -266,16 +266,23 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     const headers = {};
     if (meta.lastEtag) headers['If-None-Match'] = meta.lastEtag;
 
-    // [수정] 재시도 로직 추가 (헤더 포함 시도 -> 실패 시 헤더 없이 재시도)
+    // [수정] credentials: 'omit' 옵션 추가 (쿠키 전송 방지 및 CORS 문제 완화)
     let res;
     try {
-      res = await fetch(url, { headers });
+      res = await fetch(url, { 
+        headers, 
+        credentials: 'omit' // 👈 핵심 수정: 불필요한 인증 정보 제외
+      });
     } catch (networkError) {
       Logger.warn(`[RSS] 1차 수집 실패 (${url}), 헤더 없이 재시도합니다.`, networkError);
       // 잠시 대기 후 재시도
       await new Promise(resolve => setTimeout(resolve, 500));
-      // 헤더 없이 순수 요청 시도 (캐시 문제 회피)
-      res = await fetch(url, { cache: 'reload' });
+      
+      // [수정] 재시도 시에도 credentials: 'omit' 및 cache: 'no-store' 적용
+      res = await fetch(url, { 
+        cache: 'no-store', // 👈 수정: 'reload'보다 강력한 캐시 무시
+        credentials: 'omit' // 👈 핵심 수정
+      });
     }
 
     if (res.status === 304) {

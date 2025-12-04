@@ -138,6 +138,8 @@ function renderKanban(container) {
 function loadKanbanData(retryCount = 0) {
   const MAX_RETRIES = 10;
 
+  console.log('[KanbanMode] 칸반 데이터 요청 시작');
+
   chrome.storage.local.get(['googleUserEmail'], (authResult) => {
     if (!authResult.googleUserEmail) {
       if (retryCount < MAX_RETRIES) {
@@ -157,9 +159,12 @@ function loadKanbanData(retryCount = 0) {
     // 인증 완료 후 데이터 로드
     console.log('[KanbanMode] 인증 확인 완료, 칸반 데이터 로드');
     chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
-      console.log('[KanbanMode] loadKanbanData - 응답 받음:', response);
+      console.log('[KanbanMode] 칸반 데이터 응답 수신:', response);
       if (response && response.success && response.data) {
+        console.log('[KanbanMode] 칸반 데이터 확인 - 카드 개수:', Object.keys(response.data).length);
         updateKanbanUI(response.data);
+      } else {
+        console.error('[KanbanMode] 칸반 데이터 로드 실패:', response);
       }
     });
 

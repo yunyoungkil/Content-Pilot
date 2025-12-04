@@ -538,7 +538,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // === [Auth Service] 인증 ===
   if (msg.action === 'start_google_auth') return handleAsync(startGoogleAuth());
-  if (msg.action === 'revoke_google_auth') return handleAsync(revokeGoogleAuth());
+  
+  // [수정] 로그아웃 시 메모리 캐시 명시적 초기화
+  if (msg.action === 'revoke_google_auth') {
+    // 캐시 초기화
+    channelsAndKeyCache = null;
+    channelsAndKeyCacheTimestamp = 0;
+    kanbanDataCache = null;
+    kanbanDataCacheTimestamp = 0;
+    kanbanRealtimeListenerAttached = false;
+    Logger.info('[Auth] 로그아웃에 따른 백그라운드 캐시 초기화 완료');
+    
+    return handleAsync(revokeGoogleAuth());
+  }
 
   // === [System] 인증 토큰 가져오기 (테스트 스크립트용) ===
   if (msg.action === 'get_auth_token') {
@@ -1136,6 +1148,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'get_kanban_data' || msg.action === 'get_all_kanban_data') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const now = Date.now();
+
+        // [수정] 캐시 검증 시 userId 확인 추가
+        if (kanbanDataCache && 
+            kanbanDataCache._userId === userId && 
+            (now - kanbanDataCacheTimestamp) < KANBAN_CACHE_TTL) {
+          Logger.debug(`[get_kanban_data] 캐시된 데이터 반환 - userId: ${userId}`);
+          return kanbanDataCache.data;
+        }
 
         Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
         const dbRef = ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`);
@@ -1173,8 +1197,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const responseData = { success: true, data: data };
 
-        // 캐시에 저장
-        kanbanDataCache = responseData;
+        // [수정] 캐시 저장 시 userId 포함
+        kanbanDataCache = { data: responseData, _userId: userId };
         kanbanDataCacheTimestamp = now;
 
         // 즉시 UI에 업데이트 메시지 전송 (콜백이 실행되지 않는 경우 대비)
@@ -1428,8 +1452,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const userId = await getCurrentUserId();
         const now = Date.now();
 
-        // 캐시 확인 (5분 이내)
-        if (channelsAndKeyCache && (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
+        // [수정] 캐시 검증 시 userId 확인 추가
+        if (channelsAndKeyCache && 
+            channelsAndKeyCache._userId === userId && 
+            (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
           Logger.debug(`[get_channels_and_key] 캐시된 데이터 반환 - userId: ${userId}`);
           return channelsAndKeyCache;
         }
@@ -1455,6 +1481,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             geminiApiKey: storage.geminiApiKey || '',
             ...channelsData,
           },
+          _userId: userId // [수정] userId 저장
         };
 
         // 캐시에 저장

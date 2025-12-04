@@ -59,6 +59,9 @@ export function renderAffiliateModal(container) {
         .affiliate-modal-large { background: #fff; color: #111; }
         .affiliate-link-card { background: #fff; border-radius: 8px; padding: 12px; border: 1px solid #eee; }
         .affiliate-form-section { background: #fff; border-radius: 8px; padding: 12px; }
+        /* ensure link list can scroll even when full CSS fails to load */
+        .affiliate-link-list { overflow-y: auto; min-height: 0; flex: 1 1 auto; box-sizing: border-box; scrollbar-gutter: stable; }
+        .affiliate-list-section { min-width: 0; box-sizing: border-box; }
       `;
 
       if (rootNode instanceof ShadowRoot) rootNode.appendChild(styleEl);

@@ -107,6 +107,8 @@ export function renderScrapbook(container) {
 function requestScrapsAndRender(container, retryCount = 0) {
   const MAX_RETRY_COUNT = 10;
 
+  console.log('[ScrapbookMode] 스크랩 데이터 요청 시작');
+
   // 인증 상태 확인
   chrome.storage.local.get(['googleUserEmail', 'activeChannelId'], (res) => {
     // 인증이 완료되지 않았으면 재시도
@@ -136,13 +138,14 @@ function requestScrapsAndRender(container, retryCount = 0) {
         channelId: activeChannelId,
       },
       (response) => {
-        console.log('[ScrapbookMode] requestScrapsAndRender - 응답 받음:', response);
+        console.log('[ScrapbookMode] 스크랩 데이터 응답 수신:', response);
         if (response && response.data) {
+          console.log('[ScrapbookMode] 스크랩 데이터 확인 - 개수:', response.data.length);
           allScraps = response.data.sort((a, b) => b.timestamp - a.timestamp);
           console.log('[ScrapbookMode] 스크랩 데이터 로드 완료:', allScraps.length, '개');
           renderScrapList(allScraps, container);
         } else {
-          console.log('[ScrapbookMode] 스크랩 데이터 없음 또는 응답 실패');
+          console.error('[ScrapbookMode] 스크랩 데이터 로드 실패:', response);
           const listContainer = container.querySelector('.scrapbook-list-cards');
           if (listContainer)
             listContainer.innerHTML =

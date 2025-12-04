@@ -380,6 +380,24 @@ export function renderChannelMode(container) {
 
       renderMyChannels();
 
+      // ▼▼▼ [수정] 로그인/로드 직후 활성 채널이 없으면 첫 번째 채널 자동 선택 ▼▼▼
+      chrome.storage.local.get('activeChannelId', (res) => {
+        if (!res.activeChannelId && myChannelsData.length > 0) {
+          const firstChannel = myChannelsData[0];
+          const firstChannelId = firstChannel.id || (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '');
+          
+          if (firstChannelId) {
+            console.log('[ChannelMode] 활성 채널이 없어 첫 번째 채널을 자동 선택합니다:', firstChannelId);
+            chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+              // 변경 사항을 전파하여 칸반/대시보드 등 다른 탭이 반응하도록 함
+              chrome.runtime.sendMessage({ action: 'channel_changed', channelId: firstChannelId });
+              // 필요 시 대시보드로 이동시키는 로직 추가 가능
+            });
+          }
+        }
+      });
+      // ▲▲▲ [수정 끝] ▲▲▲
+
       Logger.debug('[ChannelMode] processChannelDataResponse - renderMyChannels 호출 완료');
     } else {
       Logger.error('[ChannelMode] processChannelDataResponse - 채널 데이터 로드 실패:', response);
@@ -714,6 +732,27 @@ export function renderChannelMode(container) {
     if (myChannelsData.length === 0) {
       listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">등록된 채널이 없습니다.<br>'+ 채널 추가' 버튼을 눌러 시작하세요.</div>`;
     }
+
+    // [방어 코드] 렌더링 후 선택된 채널이 시각적으로 없다면 첫번째 놈을 강제 선택
+    setTimeout(() => {
+      const activeItem = container.querySelector('.my-channel-card.active');
+      if (!activeItem && myChannelsData.length > 0) {
+        Logger.debug('[ChannelMode] 선택된 채널 없음 감지, 첫 번째 채널 자동 선택');
+        // 첫 번째 채널 카드에 active 클래스 추가 (시각적 표시)
+        const firstCard = listEl.querySelector('.my-channel-card');
+        if (firstCard) {
+          firstCard.classList.add('active');
+        }
+        // activeChannelId 설정
+        const firstChannel = myChannelsData[0];
+        const firstChannelId = firstChannel.id || btoa(firstChannel.inputUrl || firstChannel.url).replace(/=/g, '');
+        if (firstChannelId) {
+          chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+            Logger.debug('[ChannelMode] 첫 번째 채널 선택 완료:', firstChannelId);
+          });
+        }
+      }
+    }, 100); // DOM 업데이트 후 실행
   }
 
   // 모달 관련 변수
