@@ -5,31 +5,35 @@ import { renderHeaderAndTabs } from './header.js';
 
 let selectedScrapId = null;
 let allScraps = [];
-// ▼▼▼ [추가] 스크랩북만의 독립적인 태그 필터 변수 ▼▼▼
 let activeScrapbookTagFilter = null;
+
+// [중요] 리스너 관리를 위한 변수 선언
+let scrapbookMessageListener = null;
+let scrapbookStorageListener = null;
 
 /**
  * Scrapbook 모드 정리 함수
- * 모드 전환 시 호출되어 메모리 누수 방지
  */
 export function destroyScrapbookMode() {
-  // 전역 변수 초기화
   selectedScrapId = null;
   allScraps = [];
   activeScrapbookTagFilter = null;
 
-  // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+  // [핵심 수정] 리스너 제거
+  if (scrapbookMessageListener) {
+    chrome.runtime.onMessage.removeListener(scrapbookMessageListener);
+    scrapbookMessageListener = null;
+  }
+  if (scrapbookStorageListener) {
+    chrome.storage.onChanged.removeListener(scrapbookStorageListener);
+    scrapbookStorageListener = null;
+  }
 }
 
 // 스크랩북 모드 UI 렌더링 함수
 export function renderScrapbook(container) {
-  // [체크리스트 4-1] 완전 초기화: 이전 채널의 모든 스크랩 제거
-  container.innerHTML = '';
-
-  // [체크리스트 4-3] 검색 초기화: 검색어 및 필터 초기화
-  if (typeof activeScrapbookTagFilter !== 'undefined') {
-    activeScrapbookTagFilter = null;
-  }
+  // 기존 정리
+  destroyScrapbookMode();
 
   container.innerHTML = `
     <div class="scrapbook-root">
@@ -52,56 +56,45 @@ export function renderScrapbook(container) {
 
   requestScrapsAndRender(container);
 
+  // 이벤트 리스너
   const keywordInput = container.querySelector('#scrapbook-keyword-input');
   keywordInput.addEventListener('keyup', () => {
-    renderScrapList(allScraps, container); // 키워드 입력 시에도 전체 목록을 다시 렌더링하여 필터링
+    renderScrapList(allScraps, container);
   });
 
-  // 스크랩 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
-  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
+  // [핵심 수정] 메시지 리스너 등록
+  scrapbookMessageListener = (msg, _sender, _sendResponse) => {
     if (msg.action === 'scraps_data_updated') {
-      console.log(
-        '[ScrapbookMode] 스크랩 데이터 업데이트 메시지 수신:',
-        msg.scraps?.length || 0,
-        '개'
-      );
-
-      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
+      // 컨테이너 유효성 체크
+      if (!container || !document.contains(container)) return;
       const listContainer = container.querySelector('.scrapbook-list-cards');
-      if (!listContainer) {
-        console.log('[ScrapbookMode] 스크랩 모드가 아닌 상태에서 메시지 수신, 무시');
-        return false;
-      }
+      if (!listContainer) return;
 
       if (msg.scraps && Array.isArray(msg.scraps)) {
         allScraps = msg.scraps.sort((a, b) => b.timestamp - a.timestamp);
         renderScrapList(allScraps, container);
       }
     }
-    return false;
-  });
+  };
+  chrome.runtime.onMessage.addListener(scrapbookMessageListener);
 
-  // 인증 상태 변경 감지하여 데이터 재로드
-  chrome.storage.onChanged.addListener((changes, namespace) => {
+  // [핵심 수정] 스토리지 리스너 등록
+  scrapbookStorageListener = (changes, namespace) => {
     if (namespace === 'local' && changes.googleUserEmail) {
       const newValue = changes.googleUserEmail.newValue;
       const oldValue = changes.googleUserEmail.oldValue;
 
       if (newValue && !oldValue) {
-        // 로그인: 새로 로그인한 경우 데이터 로드
-        console.log('[ScrapbookMode] 로그인 감지, 데이터 재로드');
         requestScrapsAndRender(container);
       } else if (!newValue && oldValue) {
-        // 로그아웃: 로그아웃한 경우 데이터 초기화
-        console.log('[ScrapbookMode] 로그아웃 감지, 데이터 초기화');
         allScraps = [];
         const listContainer = container.querySelector('.scrapbook-list-cards');
         if (listContainer)
-          listContainer.innerHTML =
-            '<p style="text-align:center;color:#888;margin-top:20px;">로그인이 필요합니다.</p>';
+          listContainer.innerHTML = '<p style="text-align:center;color:#888;margin-top:20px;">로그인이 필요합니다.</p>';
       }
     }
-  });
+  };
+  chrome.storage.onChanged.addListener(scrapbookStorageListener);
 }
 
 function requestScrapsAndRender(container, retryCount = 0) {

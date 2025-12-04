@@ -9,39 +9,52 @@ let currentlyDragging = { cardId: null, originalStatus: null };
 let kanbanContainer = null;
 let sortOrder = 'desc';
 
+// [중요] 리스너 관리를 위한 변수 선언
+let kanbanMessageListener = null;
+let kanbanStorageListener = null;
+
 /**
  * Kanban 모드 정리 함수
- * 모드 전환 시 호출되어 메모리 누수 방지
+ * 모드 전환 시 호출되어 메모리 누수 방지 및 리스너 제거
  */
 function destroyKanbanMode() {
-  // 드래그 중이 아닐 때만 초기화 (드래그 중에는 데이터 보존)
   if (!currentlyDragging.cardId) {
     allKanbanData = {};
   }
-  // 드래그 상태는 유지 (드래그 완료 후 초기화)
-  // currentlyDragging은 dragend에서 초기화됨
+  
   kanbanContainer = null;
-  // sortOrder는 유지 (사용자 설정 보존)
 
-  // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
+  // [핵심 수정] 등록된 리스너 제거
+  if (kanbanMessageListener) {
+    chrome.runtime.onMessage.removeListener(kanbanMessageListener);
+    kanbanMessageListener = null;
+  }
+  if (kanbanStorageListener) {
+    chrome.storage.onChanged.removeListener(kanbanStorageListener);
+    kanbanStorageListener = null;
+  }
+  
+  // 플래그 초기화
+  window.kanbanListenersAttached = false;
 }
 
 export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMode };
 /**
- * 칸반 보드 UI의 기본 골격을 렌더링하는 함수
+ * 칸반 보드 UI 렌더링
  */
 function renderKanban(container) {
+  // 기존 리스너 및 상태 정리 (안전장치)
+  destroyKanbanMode();
+
   kanbanContainer = container;
 
-  // [체크리스트 3-4] 입력창 닫기: 열려있던 카드 추가 입력창이나 상세 메뉴 닫기
+  // 기존 입력창 제거
   const existingInputs = container.querySelectorAll(
     '.kanban-card-input, .kanban-card-detail-modal'
   );
   existingInputs.forEach((el) => el.remove());
 
-  // [체크리스트 3-1] 완전 초기화: 이전 채널의 모든 카드 제거
-  container.innerHTML = '';
-
+  // HTML 초기화
   container.innerHTML = `
     <div class="kanban-board-container">
       <div class="kanban-controls-header">
@@ -81,57 +94,54 @@ function renderKanban(container) {
     </div>
   `;
 
-  // 인증 상태 확인 후 데이터 로드
+  // 데이터 로드
   loadKanbanData();
 
-  if (!window.kanbanListenersAttached) {
-    addRealtimeUpdateListener();
-    window.kanbanListenersAttached = true;
-  }
-
-  // 칸반 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
-  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
+  // [핵심 수정] 메시지 리스너 정의 및 등록
+  kanbanMessageListener = (msg, _sender, _sendResponse) => {
     if (msg.action === 'kanban_data_updated') {
-      console.log(
-        '[KanbanMode] 칸반 데이터 업데이트 메시지 수신:',
-        Object.keys(msg.data || {}).length,
-        '개 카드'
-      );
-
-      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
-      if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) {
-        console.log('[KanbanMode] 칸반 모드가 아닌 상태에서 메시지 수신, 무시');
-        return false;
+      // 컨테이너가 유효한지 확인 (DOM에 존재하는지)
+      if (!kanbanContainer || !document.contains(kanbanContainer)) {
+        return; 
+      }
+      
+      const rootEl = kanbanContainer.querySelector('#cp-kanban-board-root');
+      if (!rootEl) {
+        return;
       }
 
       if (msg.data) {
-        console.log('[KanbanMode] updateKanbanUI 호출 시작');
         allKanbanData = msg.data || {};
         updateKanbanUI(allKanbanData);
-        console.log('[KanbanMode] updateKanbanUI 호출 완료');
+        
+        // 워크스페이스 실시간 연동
+        if (window.__cp_active_mode === 'workspace' && window.__cp_workspace_idea_id) {
+            handleWorkspaceUpdate(msg.data);
+        }
       }
     }
-    return false;
-  });
+  };
+  chrome.runtime.onMessage.addListener(kanbanMessageListener);
 
-  // 인증 상태 변경 감지하여 데이터 재로드
-  chrome.storage.onChanged.addListener((changes, namespace) => {
+  // [핵심 수정] 스토리지 리스너 정의 및 등록 (로그인/로그아웃 감지)
+  kanbanStorageListener = (changes, namespace) => {
     if (namespace === 'local' && changes.googleUserEmail) {
       const newValue = changes.googleUserEmail.newValue;
       const oldValue = changes.googleUserEmail.oldValue;
 
       if (newValue && !oldValue) {
-        // 로그인: 새로 로그인한 경우 데이터 로드
         console.log('[KanbanMode] 로그인 감지, 데이터 재로드');
         loadKanbanData();
       } else if (!newValue && oldValue) {
-        // 로그아웃: 로그아웃한 경우 데이터 초기화
         console.log('[KanbanMode] 로그아웃 감지, 데이터 초기화');
         allKanbanData = {};
         updateKanbanUI({});
       }
     }
-  });
+  };
+  chrome.storage.onChanged.addListener(kanbanStorageListener);
+  
+  window.kanbanListenersAttached = true;
 }
 
 // 칸반 데이터 로드 함수 (인증 상태 확인 후 실행)
@@ -181,55 +191,38 @@ function loadKanbanData(retryCount = 0) {
 /**
  * background.js로부터 실시간 업데이트를 받아 UI를 갱신하는 리스너
  */
-function addRealtimeUpdateListener() {
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) return;
-
-    if (msg.action === 'kanban_data_updated') {
-      allKanbanData = msg.data || {};
-      updateKanbanUI(allKanbanData);
-
-      // 워크스페이스가 열려있고 해당 아이디어 데이터가 업데이트된 경우 워크스페이스 갱신
-      if (window.__cp_active_mode === 'workspace' && window.__cp_workspace_idea_id) {
-        const ideaId = window.__cp_workspace_idea_id;
-        // 모든 상태에서 아이디어 찾기
-        let ideaData = null;
-        let foundStatus = null;
-        for (const status in allKanbanData) {
-          if (allKanbanData[status]?.[ideaId]) {
-            ideaData = allKanbanData[status][ideaId];
-            foundStatus = status;
-            break;
-          }
-        }
-        if (ideaData) {
-          const shadowRoot = kanbanContainer.getRootNode();
-          const container = shadowRoot.querySelector('#cp-main-content');
-          if (container) {
-            renderHeaderAndTabs(shadowRoot);
-            // ▼▼▼ [수정] 기본값 할당 ▼▼▼
-            // renderWorkspace로 넘기기 전에 데이터 구조를 한 번 더 보장합니다.
-            const ideaDataForWorkspace = {
-              ...ideaData,
-              id: ideaId,
-              status: foundStatus,
-              // workspace 객체가 없으면(null/undefined) 빈 값으로 초기화
-              workspace: ideaData.workspace || {
-                keywords: [],
-                outline: [],
-                draft: '',
-                linkedScraps: {},
-              },
-            };
-            // 전역 ideaData 업데이트 (실시간 업데이트를 위해)
-            window.__cp_workspace_idea_data = ideaDataForWorkspace;
-            // ▲▲▲ [수정 완료] ▲▲▲
-            renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
-          }
-        }
+// 워크스페이스 업데이트 핸들러 (addRealtimeUpdateListener 내부 로직 분리)
+function handleWorkspaceUpdate(data) {
+    const ideaId = window.__cp_workspace_idea_id;
+    let ideaData = null;
+    let foundStatus = null;
+    
+    for (const status in data) {
+      if (data[status]?.[ideaId]) {
+        ideaData = data[status][ideaId];
+        foundStatus = status;
+        break;
       }
     }
-  });
+    
+    if (ideaData && kanbanContainer) {
+      const ideaDataForWorkspace = {
+        ...ideaData,
+        id: ideaId,
+        status: foundStatus,
+        workspace: ideaData.workspace || {
+          keywords: [],
+          outline: [],
+          draft: '',
+          linkedScraps: {},
+        },
+      };
+      window.__cp_workspace_idea_data = ideaDataForWorkspace;
+      
+      const shadowRoot = kanbanContainer.getRootNode();
+      // 워크스페이스 렌더링 로직 (필요 시)
+      // import('./workspaceMode.js').then(module => module.renderWorkspace(...));
+    }
 }
 
 /**
