@@ -1726,8 +1726,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         const { scrapId, imageUrl } = msg.data;
         
-        // [수정 1] 올바른 사용자 ID 가져오기 (기존: CONSTANTS.USER_ID -> 변경: await getCurrentUserId())
-        const userId = await getCurrentUserId();
+        // [수정] 로그인된 사용자 ID 사용
+        const userId = await getCurrentUserId(); 
         const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
         const scrapSnap = await get(scrapRef);
         const scrap = scrapSnap?.val();
@@ -1735,35 +1735,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (scrap) {
           const updates = {};
           let updated = false;
+          
+          // [핵심 수정] URL 정규화 후 비교 (삭제 실패 원인 해결)
+          const targetUrl = normalizeUrlForComparison(imageUrl);
 
-          // [수정 2] 'allImages' 필드 처리 (최신 데이터 표준)
+          // 1. 'allImages' 배열 필터링
           if (scrap.allImages && Array.isArray(scrap.allImages)) {
-            const newAllImages = scrap.allImages.filter((img) => img !== imageUrl);
-            // 배열 길이가 달라졌다면(삭제되었다면) 업데이트 대상에 추가
-            if (newAllImages.length !== scrap.allImages.length) {
+            const originalLength = scrap.allImages.length;
+            // 정규화된 URL로 비교하여 삭제
+            const newAllImages = scrap.allImages.filter(img => 
+              normalizeUrlForComparison(img) !== targetUrl
+            );
+            
+            if (newAllImages.length !== originalLength) {
               updates.allImages = newAllImages;
               updated = true;
             }
           }
 
-          // [수정 3] 'images' 필드 처리 (레거시 데이터 호환)
+          // 2. 'images' 배열 필터링 (구버전 호환)
           if (scrap.images && Array.isArray(scrap.images)) {
-            const newImages = scrap.images.filter((img) => img !== imageUrl);
-            if (newImages.length !== scrap.images.length) {
+            const originalLength = scrap.images.length;
+            const newImages = scrap.images.filter(img => 
+              normalizeUrlForComparison(img) !== targetUrl
+            );
+            
+            if (newImages.length !== originalLength) {
               updates.images = newImages;
               updated = true;
             }
           }
 
-          // [수정 4] 단일 'image' 필드 처리 (대표 이미지인 경우)
-          if (scrap.image === imageUrl) {
-            // 대표 이미지가 삭제되면 null로 설정하거나 allImages의 첫 번째 이미지로 대체할 수 있음
-            // 여기서는 안전하게 제거(null) 처리
+          // 3. 단일 'image' 필드 처리
+          if (scrap.image && normalizeUrlForComparison(scrap.image) === targetUrl) {
             updates.image = null; 
             updated = true;
           }
 
-          // 변경사항이 있을 때만 DB 업데이트 실행
           if (updated) {
             await update(scrapRef, updates);
           }
