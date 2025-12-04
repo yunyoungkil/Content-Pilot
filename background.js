@@ -1747,14 +1747,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === 'remove_scrap_image') {
-    return handleAsync(
-      (async () => {
-        const { scrapId, imageUrl } = msg.data;
-        return await removeScrapImage(scrapId, imageUrl);
-      })()
-    );
-  }  if (msg.action === 'delete_scrap') {
+// [추가/확인] 이미지 삭제 핸들러
+if (msg.action === 'remove_scrap_image') {
+  console.log('[Background] 이미지 삭제 요청 수신:', msg.data);
+  const { scrapId, imageUrl } = msg.data || {};
+
+  removeScrapImage(scrapId, imageUrl)
+    .then(result => {
+      console.log('[Background] 삭제 처리 결과:', result);
+      sendResponse(result);
+    })
+    .catch(error => {
+      console.error('[Background] 삭제 처리 중 오류:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+
+  return true; // 비동기 응답 필수
+}  if (msg.action === 'delete_scrap') {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;

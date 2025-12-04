@@ -837,6 +837,13 @@ function renderDetailView(scrapId, container) {
       const scrapId = btn.dataset.scrapId;
       const imageUrl = btn.dataset.imageUrl;
 
+      // [디버깅] 클릭 시 로그 출력
+      console.log('%c[UI Delete Click]', 'color: red; font-weight: bold;', {
+        scrapId: scrapId,
+        imageUrlFromDataset: imageUrl,
+        btnElement: btn
+      });
+
       if (confirm('이 이미지를 삭제하시겠습니까?')) {
         chrome.runtime.sendMessage(
           {
@@ -844,13 +851,18 @@ function renderDetailView(scrapId, container) {
             data: { scrapId, imageUrl },
           },
           (response) => {
+            // [디버깅] 응답 로그
+            console.log('[UI Delete Response]', response);
+
             if (response && response.success) {
               // 상세보기 다시 렌더링
               renderDetailView(scrapId, container);
               // 스크랩 목록도 업데이트
               requestScrapsAndRender(container);
             } else {
-              alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+              // 실패 시 더 자세한 에러 표시
+              console.error('삭제 실패 상세:', response);
+              alert('이미지 삭제 실패: ' + (response?.error || '알 수 없는 오류'));
             }
           }
         );
