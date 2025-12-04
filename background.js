@@ -133,6 +133,7 @@ import {
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
+  removeScrapImage,
 } from './js/services/scrapService.js';
 
 import {
@@ -1750,64 +1751,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        
-        // [수정] 로그인된 사용자 ID 사용
-        const userId = await getCurrentUserId();
-        const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
-        const scrapSnap = await get(scrapRef);
-        const scrap = scrapSnap?.val();
-
-        if (scrap) {
-          const updates = {};
-          let updated = false;
-
-          // [핵심] 삭제 대상 URL을 강력하게 정규화
-          const targetUrl = normalizeUrlForDeletion(imageUrl);
-          Logger.debug(`[ImageDelete] 요청 URL: ${imageUrl} -> 정규화: ${targetUrl}`);
-
-          // 1. 'allImages' 배열 처리
-          if (scrap.allImages && Array.isArray(scrap.allImages)) {
-            const originalLength = scrap.allImages.length;
-            // DB에 있는 URL들도 모두 동일한 방식으로 정규화해서 비교
-            const newAllImages = scrap.allImages.filter((img) => 
-              normalizeUrlForDeletion(img) !== targetUrl
-            );
-            
-            if (newAllImages.length !== originalLength) {
-              updates.allImages = newAllImages;
-              updated = true;
-              Logger.debug(`[ImageDelete] allImages에서 삭제됨 (${originalLength} -> ${newAllImages.length})`);
-            }
-          }
-
-          // 2. 'images' 배열 처리 (구버전 호환)
-          if (scrap.images && Array.isArray(scrap.images)) {
-            const originalLength = scrap.images.length;
-            const newImages = scrap.images.filter((img) => 
-              normalizeUrlForDeletion(img) !== targetUrl
-            );
-            
-            if (newImages.length !== originalLength) {
-              updates.images = newImages;
-              updated = true;
-            }
-          }
-
-          // 3. 단일 'image' 필드 처리
-          if (scrap.image && normalizeUrlForDeletion(scrap.image) === targetUrl) {
-            updates.image = null; 
-            updated = true;
-            Logger.debug(`[ImageDelete] 대표 이미지(image) 삭제됨`);
-          }
-
-          if (updated) {
-            await update(scrapRef, updates);
-            Logger.info(`[ImageDelete] 이미지 삭제 성공: ${scrapId}`);
-          } else {
-            Logger.warn(`[ImageDelete] 삭제할 이미지를 찾지 못함 (URL 불일치 가능성)`);
-          }
-        }
-        return { success: true };
+        return await removeScrapImage(scrapId, imageUrl);
       })()
     );
   }  if (msg.action === 'delete_scrap') {

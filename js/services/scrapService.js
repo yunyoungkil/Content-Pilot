@@ -2,7 +2,7 @@
 // 스크랩 관련 서비스
 
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { get, remove, push, getDb } from './firebaseService.js';
+import { get, remove, push, update, getDb } from './firebaseService.js';
 import { Logger } from '../utils.js';
 
 /**
@@ -334,5 +334,61 @@ export async function deleteScrap(scrapId) {
   } catch (_error) {
     Logger.error('[deleteScrap] 오류:', _error);
     return { success: false, error: _error.message };
+  }
+}
+
+/**
+ * [추가] 스크랩 내 특정 이미지 삭제
+ * allImages 배열에서 해당 URL을 제거하고 업데이트합니다.
+ * @param {string} scrapId - 스크랩 ID
+ * @param {string} imageUrl - 삭제할 이미지 URL
+ */
+export async function removeScrapImage(scrapId, imageUrl) {
+  if (!scrapId || !imageUrl) {
+    return { success: false, error: '필수 파라미터 누락' };
+  }
+
+  try {
+    const userId = await getCurrentUserId();
+    const scrapPath = `scraps/${userId}/${scrapId}`;
+
+    // 1. 기존 데이터 조회
+    const snapshot = await get(scrapPath);
+    if (!snapshot.exists()) {
+      return { success: false, error: '스크랩을 찾을 수 없습니다.' };
+    }
+
+    const scrapData = snapshot.val();
+    const updates = {};
+
+    // 2. allImages 배열 필터링 (삭제할 이미지 제외)
+    if (Array.isArray(scrapData.allImages)) {
+      const newAllImages = scrapData.allImages.filter(url => url !== imageUrl);
+      updates['allImages'] = newAllImages;
+    }
+
+    // 3. (Legacy) 단일 image 필드도 확인하여 같다면 삭제
+    if (scrapData.image === imageUrl) {
+      updates['image'] = null; // 혹은 newAllImages[0] 등으로 대체 가능
+    }
+
+    // 4. images 배열도 확인 (구버전 데이터 호환)
+    if (Array.isArray(scrapData.images)) {
+      const newImages = scrapData.images.filter(url => url !== imageUrl);
+      updates['images'] = newImages;
+    }
+
+    // 5. 변경사항이 있는 경우만 업데이트
+    if (Object.keys(updates).length > 0) {
+      await update(scrapPath, updates);
+      Logger.info(`[removeScrapImage] 이미지 삭제 완료: ${scrapId}`);
+      return { success: true };
+    } else {
+      return { success: true, message: '삭제할 이미지가 데이터에 없습니다.' };
+    }
+
+  } catch (error) {
+    Logger.error('[removeScrapImage] 오류:', error);
+    return { success: false, error: error.message };
   }
 }
