@@ -578,8 +578,17 @@ export async function getUnifiedGalleryImages(filterTag = null) {
   // 5. 최신순 정렬
   unifiedList.sort((a, b) => b.timestamp - a.timestamp);
 
-  // 6. 태그 필터링 (옵션)
+  // 6. 태그 및 소스 필터링 [버그 수정 핵심]
   if (filterTag && filterTag !== 'ALL') {
+    // [수정] UI(workspaceMode.js)에서 보내는 'STORAGE', 'SCRAP' 대문자 필터를 처리
+    if (filterTag === 'STORAGE') {
+      return unifiedList.filter((item) => item.source === 'STORAGE');
+    }
+    if (filterTag === 'SCRAP') {
+      return unifiedList.filter((item) => item.source === 'SCRAP');
+    }
+
+    // 그 외(draftMode.js 등)에서 보내는 태그(예: #Storage) 처리
     return unifiedList.filter((item) => item.tags.includes(filterTag));
   }
 
