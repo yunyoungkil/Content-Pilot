@@ -57,9 +57,34 @@ import {
   refreshChannelData,
   fetchImageAsBase64,
   updateUrlIndex,
-  normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
 } from './js/services/collectorService.js';
+
+// [추가] 이미지 삭제를 위한 강력한 URL 정규화 함수
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    // 1. HTML 엔티티(&amp;)를 일반 문자(&)로 변환 (가장 흔한 원인)
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    
+    // 2. URL 객체 생성 (프로토콜, 쿼리스트링 분리)
+    const u = new URL(cleanUrl);
+    
+    // 3. 경로(pathname)를 디코딩하여 표준화 (%20 -> 공백, %2F -> / 등)
+    // 쿼리스트링(?token=...)은 무시하고, 도메인+경로만 비교하여 일치율을 높임
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+        decodedPath = u.pathname;
+    }
+    
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    // URL 파싱 실패 시 원본 그대로 반환
+    return url.trim();
+  }
+}
 
 import {
   deleteCompetitorData,
@@ -1727,7 +1752,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { scrapId, imageUrl } = msg.data;
         
         // [수정] 로그인된 사용자 ID 사용
-        const userId = await getCurrentUserId(); 
+        const userId = await getCurrentUserId();
         const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
         const scrapSnap = await get(scrapRef);
         const scrap = scrapSnap?.val();
@@ -1735,29 +1760,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (scrap) {
           const updates = {};
           let updated = false;
-          
-          // [핵심 수정] URL 정규화 후 비교 (삭제 실패 원인 해결)
-          const targetUrl = normalizeUrlForComparison(imageUrl);
 
-          // 1. 'allImages' 배열 필터링
+          // [핵심] 삭제 대상 URL을 강력하게 정규화
+          const targetUrl = normalizeUrlForDeletion(imageUrl);
+          Logger.debug(`[ImageDelete] 요청 URL: ${imageUrl} -> 정규화: ${targetUrl}`);
+
+          // 1. 'allImages' 배열 처리
           if (scrap.allImages && Array.isArray(scrap.allImages)) {
             const originalLength = scrap.allImages.length;
-            // 정규화된 URL로 비교하여 삭제
-            const newAllImages = scrap.allImages.filter(img => 
-              normalizeUrlForComparison(img) !== targetUrl
+            // DB에 있는 URL들도 모두 동일한 방식으로 정규화해서 비교
+            const newAllImages = scrap.allImages.filter((img) => 
+              normalizeUrlForDeletion(img) !== targetUrl
             );
             
             if (newAllImages.length !== originalLength) {
               updates.allImages = newAllImages;
               updated = true;
+              Logger.debug(`[ImageDelete] allImages에서 삭제됨 (${originalLength} -> ${newAllImages.length})`);
             }
           }
 
-          // 2. 'images' 배열 필터링 (구버전 호환)
+          // 2. 'images' 배열 처리 (구버전 호환)
           if (scrap.images && Array.isArray(scrap.images)) {
             const originalLength = scrap.images.length;
-            const newImages = scrap.images.filter(img => 
-              normalizeUrlForComparison(img) !== targetUrl
+            const newImages = scrap.images.filter((img) => 
+              normalizeUrlForDeletion(img) !== targetUrl
             );
             
             if (newImages.length !== originalLength) {
@@ -1767,21 +1794,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
 
           // 3. 단일 'image' 필드 처리
-          if (scrap.image && normalizeUrlForComparison(scrap.image) === targetUrl) {
+          if (scrap.image && normalizeUrlForDeletion(scrap.image) === targetUrl) {
             updates.image = null; 
             updated = true;
+            Logger.debug(`[ImageDelete] 대표 이미지(image) 삭제됨`);
           }
 
           if (updated) {
             await update(scrapRef, updates);
+            Logger.info(`[ImageDelete] 이미지 삭제 성공: ${scrapId}`);
+          } else {
+            Logger.warn(`[ImageDelete] 삭제할 이미지를 찾지 못함 (URL 불일치 가능성)`);
           }
         }
         return { success: true };
       })()
     );
-  }
-
-  if (msg.action === 'delete_scrap') {
+  }  if (msg.action === 'delete_scrap') {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
