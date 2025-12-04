@@ -313,6 +313,7 @@ export function renderChannelMode(container) {
       blogsLength: response?.data?.myChannels?.blogs?.length || 0,
     });
 
+    // [수정] 성공 여부와 관계없이 UI 갱신 시도 (실패 시 에러 메시지 표시)
     if (response && response.success) {
       const youtubeApiKeyEl = container.querySelector('#youtube-api-key');
       const geminiApiKeyEl = container.querySelector('#gemini-api-key');
@@ -320,20 +321,19 @@ export function renderChannelMode(container) {
       if (geminiApiKeyEl) geminiApiKeyEl.value = response.data.geminiApiKey || '';
 
       // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
-      // [수정] - 안전한 빈 배열 처리
       let blogs = [];
-      if (response.data.myChannels && Array.isArray(response.data.myChannels.blogs)) {
+      // [수정] 데이터 경로 안전하게 접근
+      if (response.data && response.data.myChannels && Array.isArray(response.data.myChannels.blogs)) {
         blogs = response.data.myChannels.blogs;
       } else {
-        // 데이터가 없거나 null이면 빈 배열로 확정 (기본값 로딩 방지)
         blogs = [];
       }
       Logger.debug(
-        '[ChannelMode] processChannelDataResponse - 블로그 데이터 변환 시작, 개수:',
+        '[ChannelMode] processChannelDataResponse - 블로그 데이터 개수:',
         blogs.length
       );
 
-      let needSave = false; // 데이터 마이그레이션 필요 여부 플래그
+      let needSave = false;
 
       myChannelsData = blogs.map((blog) => {
         Logger.debug('[ChannelMode] processChannelDataResponse - 블로그 변환:', blog);
@@ -379,16 +379,17 @@ export function renderChannelMode(container) {
       const listEl = container.querySelector('#my-channel-list');
       Logger.debug('[ChannelMode] processChannelDataResponse - 목록 요소 확인:', !!listEl);
 
-      renderMyChannels();
+      renderMyChannels(); // [중요] 반드시 호출
 
       Logger.debug('[ChannelMode] processChannelDataResponse - renderMyChannels 호출 완료');
     } else {
       Logger.error('[ChannelMode] processChannelDataResponse - 채널 데이터 로드 실패:', response);
-      // 실패 시 재시도는 하지 않음 (인증은 완료되었으므로)
       const listEl = container.querySelector('#my-channel-list');
       if (listEl) {
         listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">데이터를 불러올 수 없습니다.<br>잠시 후 다시 시도해주세요.</div>`;
       }
+      // [수정] 실패 시에도 renderMyChannels 호출하여 빈 상태 표시
+      renderMyChannels();
     }
   }
 
@@ -590,6 +591,12 @@ export function renderChannelMode(container) {
 
     listEl.innerHTML = '';
 
+    // [수정] 데이터가 없는 경우 처리 강화
+    if (!myChannelsData || myChannelsData.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">등록된 채널이 없습니다.<br>'+ 채널 추가' 버튼을 눌러 시작하세요.</div>`;
+      return;
+    }
+
     myChannelsData.forEach((channel, index) => {
       // inputUrl 우선, 없으면 url 사용 (하위 호환성)
       const displayUrl = channel.inputUrl || channel.url || '';
@@ -712,9 +719,6 @@ export function renderChannelMode(container) {
 
       listEl.appendChild(card);
     });
-    if (myChannelsData.length === 0) {
-      listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">등록된 채널이 없습니다.<br>'+ 채널 추가' 버튼을 눌러 시작하세요.</div>`;
-    }
   }
 
   // 모달 관련 변수
