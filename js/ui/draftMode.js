@@ -22,7 +22,7 @@ export function renderDraftMode(container) {
   header.style.cssText =
     'padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #f8f9fa;';
   header.innerHTML = `
-    <h3 style="margin:0; font-size:16px; color:#333;">☁️ 스토리지 관리</h3>
+    <h3 style="margin:0; font-size:16px; color:#333;">☁️ 스토리지 이미지</h3>
     <button id="close-storage-btn" style="border:none; background:none; cursor:pointer; font-size:18px; color:#666;">×</button>
   `;
   root.appendChild(header);

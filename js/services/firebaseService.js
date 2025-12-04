@@ -552,7 +552,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
     if (imageUrl) {
       unifiedList.push({
         id: id,
-        type: 'SCRAP',
+        source: 'SCRAP', // [수정] type -> source 로 변경 (workspaceMode.js와 통일)
         url: imageUrl,
         thumbnail: imageUrl, // 스크랩은 원본 사용
         tags: [...(item.tags || []), '#Scrap'], // #Scrap 태그 자동 추가
@@ -566,7 +566,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
   Object.entries(storageVal).forEach(([id, item]) => {
     unifiedList.push({
       id: id,
-      type: 'STORAGE',
+      source: 'STORAGE', // [수정] type -> source 로 변경 (workspaceMode.js와 통일)
       url: item.downloadURL,
       thumbnail: item.downloadURL,
       tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
