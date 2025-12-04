@@ -145,8 +145,44 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           // ... (기존 카드 생성 로직 유지) ...
           const div = document.createElement('div');
           div.className = 'gallery-thumb-wrap';
-          // ... (DOM 구성) ...
-          div.innerHTML = `<img src="${imgData.url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;">`;
+          div.style.cssText = 'position: relative; cursor: pointer;';
+          
+          // 삭제 버튼 추가
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'workspace-image-delete-btn';
+          deleteBtn.innerHTML = '×';
+          deleteBtn.style.cssText = 'position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: #666; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s;';
+          deleteBtn.title = '이미지 삭제';
+          deleteBtn.onmouseover = () => deleteBtn.style.background = 'rgba(255, 0, 0, 0.9)';
+          deleteBtn.onmouseout = () => deleteBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+          deleteBtn.onclick = (e) => {
+              e.stopPropagation(); // 이미지 클릭 이벤트 방지
+              if (confirm('이 이미지를 삭제하시겠습니까?')) {
+                  chrome.runtime.sendMessage({
+                      action: 'remove_scrap_image',
+                      data: { imageUrl: imgData.url, scrapId: imgData.scrapId }
+                  }, (response) => {
+                      if (response && response.success) {
+                          // 성공 시 로컬 데이터에서 이미지 제거 후 갤러리 새로고침
+                          imageDataMap.delete(imgData.url);
+                          allImageData = Array.from(imageDataMap.values());
+                          renderImages(allImageData);
+                          showToast('✅ 이미지가 삭제되었습니다.');
+                      } else {
+                          showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
+                      }
+                  });
+              }
+          };
+          
+          // 이미지 요소
+          const img = document.createElement('img');
+          img.src = imgData.url;
+          img.className = 'gallery-thumb';
+          img.style.cssText = 'width:100%;height:88px;object-fit:cover;border-radius:8px;';
+          
+          div.appendChild(deleteBtn);
+          div.appendChild(img);
           
           div.addEventListener('click', () => {
                sendCommand('insert-image', { url: imgData.url });
