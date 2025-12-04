@@ -528,6 +528,64 @@ export function onFirebaseAuthStateChanged(callback) {
 // export
 export { initializeApp, getAuth, signInWithCredential, GoogleAuthProvider };
 
+/**
+ * [New] 통합 갤러리 데이터 가져오기
+ * 스크랩 이미지와 스토리지 이미지를 모두 가져와서 표준 포맷으로 병합합니다.
+ */
+export async function getUnifiedGalleryImages(filterTag = null) {
+  const userId = await getCurrentUserId();
+
+  // 1. 스크랩 데이터 가져오기
+  const scrapsSnap = await get(`scraps/${userId}`);
+  const scrapsVal = scrapsSnap.val() || {};
+
+  // 2. 스토리지 로그 가져오기
+  const storageSnap = await get(`thumbnail_images/${userId}`);
+  const storageVal = storageSnap.val() || {};
+
+  const unifiedList = [];
+
+  // 3. 스크랩 데이터 정규화
+  Object.entries(scrapsVal).forEach(([id, item]) => {
+    // 이미지가 있는 스크랩만 처리
+    const imageUrl = item.image || (item.allImages && item.allImages[0]);
+    if (imageUrl) {
+      unifiedList.push({
+        id: id,
+        type: 'SCRAP',
+        url: imageUrl,
+        thumbnail: imageUrl, // 스크랩은 원본 사용
+        tags: [...(item.tags || []), '#Scrap'], // #Scrap 태그 자동 추가
+        originData: item,
+        timestamp: item.timestamp || 0
+      });
+    }
+  });
+
+  // 4. 스토리지 데이터 정규화
+  Object.entries(storageVal).forEach(([id, item]) => {
+    unifiedList.push({
+      id: id,
+      type: 'STORAGE',
+      url: item.downloadURL,
+      thumbnail: item.downloadURL,
+      tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
+      originData: item, // storagePath 등 포함
+      timestamp: item.timestamp || 0
+    });
+  });
+
+  // 5. 최신순 정렬
+  unifiedList.sort((a, b) => b.timestamp - a.timestamp);
+
+  // 6. 태그 필터링 (옵션)
+  if (filterTag && filterTag !== 'ALL') {
+    return unifiedList.filter(item => item.tags.includes(filterTag));
+  }
+
+  return unifiedList;
+}
+
 // 즉시 초기화
 initializeFirebase();
 

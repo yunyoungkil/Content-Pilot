@@ -2,8 +2,26 @@
 // 스크랩 관련 서비스
 
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { get, remove, push, update, getDb } from './firebaseService.js';
+import { get, remove, push, update, getDb, ref } from './firebaseService.js';
 import { Logger } from '../utils.js';
+
+// [추가] URL 정규화 헬퍼 함수
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    const u = new URL(cleanUrl);
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+        decodedPath = u.pathname;
+    }
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    return url.trim();
+  }
+}
 
 /**
  * 스크랩 요소 저장
@@ -338,101 +356,69 @@ export async function deleteScrap(scrapId) {
 }
 
 /**
- * [디버깅 강화] 스크랩 내 특정 이미지 삭제
- * URL 인코딩/디코딩, 프로토콜 차이를 무시하고 유연하게 삭제합니다.
+ * [수정됨] 스크랩 내 특정 이미지 삭제 및 캐시 초기화
  */
-export async function removeScrapImage(scrapId, targetUrl) {
-  Logger.info(`[removeScrapImage] 삭제 요청 시작 - ID: ${scrapId}`);
-  Logger.debug(`[removeScrapImage] 삭제할 URL 원본: ${targetUrl}`);
-
-  if (!scrapId || !targetUrl) {
-    Logger.error('[removeScrapImage] 실패: 필수 파라미터 누락');
-    return { success: false, error: '필수 파라미터 누락' };
-  }
-
+export async function removeScrapImage(scrapId, imageUrl) {
   try {
     const userId = await getCurrentUserId();
-    const scrapPath = `scraps/${userId}/${scrapId}`;
-
-    // 1. 기존 데이터 조회
-    const snapshot = await get(scrapPath);
-    if (!snapshot.exists()) {
-      Logger.error('[removeScrapImage] 실패: 데이터 없음');
-      return { success: false, error: '스크랩을 찾을 수 없습니다.' };
-    }
-
-    const scrapData = snapshot.val();
+    const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
+    
+    // 1. 데이터 조회
+    const snapshot = await get(scrapRef);
+    if (!snapshot.exists()) return { success: false, error: 'Scrap not found' };
+    
+    const scrap = snapshot.val();
     const updates = {};
-    let isDeleted = false;
+    let updated = false;
+    const targetUrl = normalizeUrlForDeletion(imageUrl);
 
-    // [스마트 비교 함수]
-    // DB의 URL과 요청된 URL이 같은지 다방면으로 확인
-    const isSameUrl = (dbUrl, reqUrl) => {
-      if (!dbUrl) return false;
-      if (dbUrl === reqUrl) return true; // 완전 일치
+    Logger.debug(`[removeScrapImage] 삭제 시도 - Target: ${targetUrl}`);
 
-      try {
-        // 1. 디코딩 후 비교 (HTML Entity 등 처리)
-        const decodedDb = decodeURIComponent(dbUrl.replace(/&amp;/g, '&'));
-        const decodedReq = decodeURIComponent(reqUrl.replace(/&amp;/g, '&'));
-        if (decodedDb === decodedReq) return true;
-
-        // 2. 프로토콜 무시 비교 (http vs https)
-        const noProtoDb = decodedDb.replace(/^https?:\/\//, '');
-        const noProtoReq = decodedReq.replace(/^https?:\/\//, '');
-        if (noProtoDb === noProtoReq) return true;
-
-      } catch (e) {
-        return false;
-      }
-      return false;
-    };
-
-    // 2. allImages 배열 처리
-    if (Array.isArray(scrapData.allImages)) {
-      const originalLength = scrapData.allImages.length;
-      // 스마트 비교 함수로 필터링
-      const newAllImages = scrapData.allImages.filter(url => {
-        const match = isSameUrl(url, targetUrl);
-        if (match) Logger.debug(`[removeScrapImage] 매칭 성공(allImages): ${url}`);
-        return !match;
-      });
-
-      if (newAllImages.length !== originalLength) {
-        updates['allImages'] = newAllImages;
-        isDeleted = true;
-        Logger.info(`[removeScrapImage] allImages 업데이트 예정 (${originalLength} -> ${newAllImages.length})`);
+    // 2. allImages 필터링
+    if (scrap.allImages && Array.isArray(scrap.allImages)) {
+      const originalLen = scrap.allImages.length;
+      const newAllImages = scrap.allImages.filter(img => normalizeUrlForDeletion(img) !== targetUrl);
+      if (newAllImages.length !== originalLen) {
+        updates.allImages = newAllImages;
+        updated = true;
       }
     }
 
-    // 3. image (단일) 필드 처리
-    if (scrapData.image && isSameUrl(scrapData.image, targetUrl)) {
-      updates['image'] = null;
-      isDeleted = true;
-      Logger.info('[removeScrapImage] image 필드 삭제 예정');
-    }
-
-    // 4. images (구버전) 배열 처리
-    if (Array.isArray(scrapData.images)) {
-      const newImages = scrapData.images.filter(url => !isSameUrl(url, targetUrl));
-      if (newImages.length !== scrapData.images.length) {
-        updates['images'] = newImages;
-        isDeleted = true;
+    // 3. images 필터링 (Legacy)
+    if (scrap.images && Array.isArray(scrap.images)) {
+      const originalLen = scrap.images.length;
+      const newImages = scrap.images.filter(img => normalizeUrlForDeletion(img) !== targetUrl);
+      if (newImages.length !== originalLen) {
+        updates.images = newImages;
+        updated = true;
       }
     }
 
-    // 5. 업데이트 실행
-    if (isDeleted) {
-      await update(scrapPath, updates);
-      Logger.info(`[removeScrapImage] ✅ DB 업데이트 성공`);
+    // 4. image 필드 (Legacy)
+    if (scrap.image && normalizeUrlForDeletion(scrap.image) === targetUrl) {
+      updates.image = null;
+      updated = true;
+    }
+
+    // 5. DB 업데이트 및 캐시 초기화
+    if (updated) {
+      await update(scrapRef, updates);
+      
+      // [핵심 해결책] 캐시를 강제로 비워서 다음 조회 시 DB에서 새 데이터를 가져오게 함
+      if (typeof scrapCache !== 'undefined') {
+        scrapCache.clear();
+        Logger.info('[removeScrapImage] 캐시 초기화 완료');
+      }
+      
+      Logger.info(`[removeScrapImage] 이미지 삭제 완료`);
       return { success: true };
     } else {
-      Logger.warn(`[removeScrapImage] ⚠️ 매칭되는 이미지를 찾지 못함. DB 목록:`, scrapData.allImages);
-      return { success: true, message: '삭제할 이미지가 데이터에 없습니다 (이미 삭제됨?).' };
+      Logger.warn('[removeScrapImage] 매칭되는 이미지가 없습니다.');
+      return { success: true }; // 에러는 아님
     }
 
   } catch (error) {
-    Logger.error('[removeScrapImage] 시스템 오류:', error);
+    Logger.error('[removeScrapImage] 오류:', error);
     return { success: false, error: error.message };
   }
 }

@@ -57,6 +57,7 @@ const {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
+  getUnifiedGalleryImages,
 } = require('./js/services/firebaseService.js');
 const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
@@ -129,6 +130,7 @@ const {
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
+  removeScrapImage, // 👈 추가!
 } = require('./js/services/scrapService.js');
 
 const {
@@ -153,6 +155,24 @@ const {
 
 // Firebase 초기화
 initializeFirebase();
+
+// [추가] URL 정규화 함수 (스마트 매칭용)
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    const u = new URL(cleanUrl);
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+        decodedPath = u.pathname;
+    }
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    return url.trim();
+  }
+}
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
@@ -1745,16 +1765,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-        const scrapSnap = await get(scrapRef);
-        const scrap = scrapSnap?.val();
-        if (scrap) {
-          if (scrap.images && Array.isArray(scrap.images)) {
-            scrap.images = scrap.images.filter((img) => img !== imageUrl);
-            await update(scrapRef, { images: scrap.images });
-          }
-        }
-        return { success: true };
+        return await removeScrapImage(scrapId, imageUrl);
+      })()
+    );
+  }
+
+  if (msg.action === 'get_unified_gallery') {
+    return handleAsync(
+      (async () => {
+        const filter = msg.filter || 'ALL';
+        const images = await getUnifiedGalleryImages(filter);
+        return { success: true, images };
       })()
     );
   }

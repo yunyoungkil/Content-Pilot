@@ -837,13 +837,6 @@ function renderDetailView(scrapId, container) {
       const scrapId = btn.dataset.scrapId;
       const imageUrl = btn.dataset.imageUrl;
 
-      // [디버깅] 클릭 시 로그 출력
-      console.log('%c[UI Delete Click]', 'color: red; font-weight: bold;', {
-        scrapId: scrapId,
-        imageUrlFromDataset: imageUrl,
-        btnElement: btn
-      });
-
       if (confirm('이 이미지를 삭제하시겠습니까?')) {
         chrome.runtime.sendMessage(
           {
@@ -851,18 +844,35 @@ function renderDetailView(scrapId, container) {
             data: { scrapId, imageUrl },
           },
           (response) => {
-            // [디버깅] 응답 로그
-            console.log('[UI Delete Response]', response);
-
             if (response && response.success) {
-              // 상세보기 다시 렌더링
+              // ▼▼▼ [수정 시작] UI 즉시 갱신 로직 추가 ▼▼▼
+
+              // 1. 현재 로컬 메모리(allScraps)에서 해당 이미지를 즉시 제거
+              const targetScrap = allScraps.find(s => s.id === scrapId);
+              if (targetScrap) {
+                  // (A) allImages 배열에서 제거
+                  if (Array.isArray(targetScrap.allImages)) {
+                      targetScrap.allImages = targetScrap.allImages.filter(url => url !== imageUrl);
+                  }
+                  // (B) images 배열에서 제거 (구버전 호환)
+                  if (Array.isArray(targetScrap.images)) {
+                      targetScrap.images = targetScrap.images.filter(url => url !== imageUrl);
+                  }
+                  // (C) image 필드 제거 (단일 이미지)
+                  if (targetScrap.image === imageUrl) {
+                      targetScrap.image = null;
+                  }
+              }
+
+              // 2. 수정된 로컬 데이터를 기반으로 상세 화면 다시 그리기 (즉시 반영됨)
               renderDetailView(scrapId, container);
-              // 스크랩 목록도 업데이트
+
+              // 3. 서버 데이터 동기화는 뒤에서 조용히 수행 (나중에 완료되면 덮어씌움)
               requestScrapsAndRender(container);
+
+              // ▲▲▲ [수정 끝] ▲▲▲
             } else {
-              // 실패 시 더 자세한 에러 표시
-              console.error('삭제 실패 상세:', response);
-              alert('이미지 삭제 실패: ' + (response?.error || '알 수 없는 오류'));
+              alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
             }
           }
         );
