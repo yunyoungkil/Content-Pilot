@@ -1725,13 +1725,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
+        
+        // [수정 1] 올바른 사용자 ID 가져오기 (기존: CONSTANTS.USER_ID -> 변경: await getCurrentUserId())
+        const userId = await getCurrentUserId();
+        const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
         const scrapSnap = await get(scrapRef);
         const scrap = scrapSnap?.val();
+
         if (scrap) {
+          const updates = {};
+          let updated = false;
+
+          // [수정 2] 'allImages' 필드 처리 (최신 데이터 표준)
+          if (scrap.allImages && Array.isArray(scrap.allImages)) {
+            const newAllImages = scrap.allImages.filter((img) => img !== imageUrl);
+            // 배열 길이가 달라졌다면(삭제되었다면) 업데이트 대상에 추가
+            if (newAllImages.length !== scrap.allImages.length) {
+              updates.allImages = newAllImages;
+              updated = true;
+            }
+          }
+
+          // [수정 3] 'images' 필드 처리 (레거시 데이터 호환)
           if (scrap.images && Array.isArray(scrap.images)) {
-            scrap.images = scrap.images.filter((img) => img !== imageUrl);
-            await update(scrapRef, { images: scrap.images });
+            const newImages = scrap.images.filter((img) => img !== imageUrl);
+            if (newImages.length !== scrap.images.length) {
+              updates.images = newImages;
+              updated = true;
+            }
+          }
+
+          // [수정 4] 단일 'image' 필드 처리 (대표 이미지인 경우)
+          if (scrap.image === imageUrl) {
+            // 대표 이미지가 삭제되면 null로 설정하거나 allImages의 첫 번째 이미지로 대체할 수 있음
+            // 여기서는 안전하게 제거(null) 처리
+            updates.image = null; 
+            updated = true;
+          }
+
+          // 변경사항이 있을 때만 DB 업데이트 실행
+          if (updated) {
+            await update(scrapRef, updates);
           }
         }
         return { success: true };
