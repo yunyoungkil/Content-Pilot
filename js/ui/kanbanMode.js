@@ -55,6 +55,7 @@ function renderKanban(container) {
   existingInputs.forEach((el) => el.remove());
 
   // HTML 초기화
+  container.innerHTML = '';
   container.innerHTML = `
     <div class="kanban-board-container">
       <div class="kanban-controls-header">
@@ -144,7 +145,7 @@ function renderKanban(container) {
   window.kanbanListenersAttached = true;
 }
 
-// 칸반 데이터 로드 함수 (인증 상태 확인 후 실행)
+// 칸반 데이터 로드 함수
 function loadKanbanData(retryCount = 0) {
   const MAX_RETRIES = 10;
 
@@ -159,26 +160,22 @@ function loadKanbanData(retryCount = 0) {
         }, 1000);
       } else {
         console.warn('[KanbanMode] 인증 대기 시간 초과');
-        // 로그아웃 상태이므로 데이터 초기화
         allKanbanData = {};
         updateKanbanUI({});
       }
       return;
     }
 
-    // 인증 완료 후 데이터 로드
     console.log('[KanbanMode] 인증 확인 완료, 칸반 데이터 로드');
     chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
-      console.log('[KanbanMode] 칸반 데이터 응답 수신:', response);
       if (response && response.success && response.data) {
-        console.log('[KanbanMode] 칸반 데이터 확인 - 카드 개수:', Object.keys(response.data).length);
         updateKanbanUI(response.data);
       } else {
         console.error('[KanbanMode] 칸반 데이터 로드 실패:', response);
       }
     });
 
-    // 콜백이 실행되지 않는 경우를 대비하여 짧은 지연 후 재요청
+    // 콜백 미실행 대비 재요청
     setTimeout(() => {
       if (Object.keys(allKanbanData).length === 0) {
         console.log('[KanbanMode] 콜백 미실행 감지, 재요청');

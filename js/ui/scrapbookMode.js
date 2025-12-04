@@ -35,6 +35,13 @@ export function renderScrapbook(container) {
   // 기존 정리
   destroyScrapbookMode();
 
+  container.innerHTML = '';
+  
+  // 검색 초기화
+  if (typeof activeScrapbookTagFilter !== 'undefined') {
+    activeScrapbookTagFilter = null;
+  }
+
   container.innerHTML = `
     <div class="scrapbook-root">
       <div class="scrapbook-list-section">
