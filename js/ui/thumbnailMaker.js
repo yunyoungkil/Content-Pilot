@@ -11,10 +11,19 @@ import { showToast, Logger, debounce } from '../utils.js';
  * @param {Object} initialOptions - 초기 옵션 (showText 등)
  * @param {Element} container - 모달을 추가할 부모 컨테이너 (기본값: document.body)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initialOptions = {}, container = document.body) {
+export function openThumbnailMaker(
+  draftData,
+  onInsert,
+  onSave,
+  onEditTui,
+  initialOptions = {},
+  container = document.body
+) {
   // 0. [버그 수정] 기존 모달이 있다면 제거 (container 내부 검색)
   // container가 ShadowRoot일 수 있으므로 querySelector 사용
-  const existingModal = container.querySelector ? container.querySelector('#cp-thumbnail-modal') : document.getElementById('cp-thumbnail-modal');
+  const existingModal = container.querySelector
+    ? container.querySelector('#cp-thumbnail-modal')
+    : document.getElementById('cp-thumbnail-modal');
   if (existingModal) {
     existingModal.remove();
   }
@@ -460,14 +469,14 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
     modal.querySelector('#tm-font-family').value = state.fontFamily;
     modal.querySelector('#tm-text-color').value = state.textColor;
     modal.querySelector('#tm-ratio').value = state.ratio;
-    
+
     // [추가] 텍스트 표시 체크박스 상태 복원
     const showTextCheckbox = modal.querySelector('#tm-show-text');
     if (showTextCheckbox) {
       // 저장된 상태가 있으면 그것을 따르고, 없으면(구버전 데이터) true
       const shouldShow = state.showText !== undefined ? state.showText : true;
       showTextCheckbox.checked = shouldShow;
-      
+
       // 입력창 활성화/비활성화 UI 동기화
       const titleInput = modal.querySelector('#tm-title');
       const subtitleInput = modal.querySelector('#tm-subtitle');
@@ -528,8 +537,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
     const templateType = modal.querySelector('#tm-template-type')?.value || 'default';
 
     // [신규] UI에서 값 가져오기
-    const fontFamily =
-      modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif";
+    const fontFamily = modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif";
     const textColorMode = modal.querySelector('#tm-text-color')?.value || 'auto';
 
     // [Offscreen 가속] 배경 이미지가 있으면 offscreen에서 리사이징
@@ -653,10 +661,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
     const showTextCheckbox = modal.querySelector('#tm-show-text');
     // 체크박스가 있으면 그 값을 쓰고, 없으면 초기값 사용
     const showText = showTextCheckbox ? showTextCheckbox.checked : initialShowText;
-    
+
     if (!showText && templateData.layers) {
       // type이 'text'인 모든 레이어를 필터링하여 제거
-      templateData.layers = templateData.layers.filter(layer => layer.type !== 'text');
+      templateData.layers = templateData.layers.filter((layer) => layer.type !== 'text');
       console.log('[ThumbnailMaker] 텍스트 오버레이가 비활성화되어 텍스트 레이어를 제거했습니다.');
     }
 
@@ -998,7 +1006,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui, initi
     showTextCheckbox.addEventListener('change', () => {
       const titleInput = modal.querySelector('#tm-title');
       const subtitleInput = modal.querySelector('#tm-subtitle');
-      
+
       // 체크 해제 시 입력창 비활성화 (시각적 피드백)
       const isChecked = showTextCheckbox.checked;
       if (titleInput) {

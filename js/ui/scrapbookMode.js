@@ -848,20 +848,20 @@ function renderDetailView(scrapId, container) {
               // ▼▼▼ [수정 시작] UI 즉시 갱신 로직 추가 ▼▼▼
 
               // 1. 현재 로컬 메모리(allScraps)에서 해당 이미지를 즉시 제거
-              const targetScrap = allScraps.find(s => s.id === scrapId);
+              const targetScrap = allScraps.find((s) => s.id === scrapId);
               if (targetScrap) {
-                  // (A) allImages 배열에서 제거
-                  if (Array.isArray(targetScrap.allImages)) {
-                      targetScrap.allImages = targetScrap.allImages.filter(url => url !== imageUrl);
-                  }
-                  // (B) images 배열에서 제거 (구버전 호환)
-                  if (Array.isArray(targetScrap.images)) {
-                      targetScrap.images = targetScrap.images.filter(url => url !== imageUrl);
-                  }
-                  // (C) image 필드 제거 (단일 이미지)
-                  if (targetScrap.image === imageUrl) {
-                      targetScrap.image = null;
-                  }
+                // (A) allImages 배열에서 제거
+                if (Array.isArray(targetScrap.allImages)) {
+                  targetScrap.allImages = targetScrap.allImages.filter((url) => url !== imageUrl);
+                }
+                // (B) images 배열에서 제거 (구버전 호환)
+                if (Array.isArray(targetScrap.images)) {
+                  targetScrap.images = targetScrap.images.filter((url) => url !== imageUrl);
+                }
+                // (C) image 필드 제거 (단일 이미지)
+                if (targetScrap.image === imageUrl) {
+                  targetScrap.image = null;
+                }
               }
 
               // 2. 수정된 로컬 데이터를 기반으로 상세 화면 다시 그리기 (즉시 반영됨)
@@ -905,7 +905,7 @@ function renderDetailView(scrapId, container) {
       modal.innerHTML = `
           <img src="${img.src.replace(/"/g, '&quot;')}" style="max-width: 90vw; max-height: 90vh; object-fit: contain;">
         `;
-      
+
       // [수정] document.body 대신 Shadow DOM 내부 컨테이너에 추가
       // container는 renderDetailView의 인자로 전달된 Shadow DOM 내부 요소입니다.
       container.appendChild(modal);

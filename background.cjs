@@ -166,9 +166,9 @@ function normalizeUrlForDeletion(url) {
     const u = new URL(cleanUrl);
     let decodedPath;
     try {
-        decodedPath = decodeURIComponent(u.pathname);
+      decodedPath = decodeURIComponent(u.pathname);
     } catch (e) {
-        decodedPath = u.pathname;
+      decodedPath = u.pathname;
     }
     return (u.hostname + decodedPath).replace(/\/$/, '').trim();
   } catch (e) {

@@ -65,7 +65,11 @@ describe('Scrap Service', () => {
       const imageUrl = 'https://example.com/image.jpg';
 
       const mockScrapData = {
-        allImages: ['https://example.com/image1.jpg', 'https://example.com/image.jpg', 'https://example.com/image2.jpg'],
+        allImages: [
+          'https://example.com/image1.jpg',
+          'https://example.com/image.jpg',
+          'https://example.com/image2.jpg',
+        ],
         images: [],
         image: null,
       };
@@ -84,7 +88,10 @@ describe('Scrap Service', () => {
       // Then
       expect(result.success).toBe(true);
       expect(mockFirebaseService.getCurrentUserId).toHaveBeenCalledTimes(1);
-      expect(mockFirebaseService.ref).toHaveBeenCalledWith('mock-db', 'scraps/test-user-id/test-scrap-id');
+      expect(mockFirebaseService.ref).toHaveBeenCalledWith(
+        'mock-db',
+        'scraps/test-user-id/test-scrap-id'
+      );
       expect(mockFirebaseService.get).toHaveBeenCalledWith('mock-ref');
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
         allImages: ['https://example.com/image1.jpg', 'https://example.com/image2.jpg'],
@@ -99,7 +106,11 @@ describe('Scrap Service', () => {
 
       const mockScrapData = {
         allImages: [],
-        images: ['https://example.com/image1.jpg', 'https://example.com/image.jpg', 'https://example.com/image2.jpg'],
+        images: [
+          'https://example.com/image1.jpg',
+          'https://example.com/image.jpg',
+          'https://example.com/image2.jpg',
+        ],
         image: null,
       };
 
@@ -204,7 +215,9 @@ describe('Scrap Service', () => {
       // Then
       expect(result.success).toBe(true);
       expect(mockFirebaseService.update).not.toHaveBeenCalled();
-      expect(mockLogger.warn).toHaveBeenCalledWith('[removeScrapImage] 매칭되는 이미지가 없습니다.');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[removeScrapImage] 매칭되는 이미지가 없습니다.'
+      );
     });
 
     it('should return error when scrap not found', async () => {
@@ -266,10 +279,14 @@ describe('Scrap Service', () => {
 
       // scrapCache 모킹 (실제로는 scrapService 내부에 있지만 테스트를 위해 모킹)
       const mockScrapCache = { clear: jest.fn() };
-      jest.doMock('../js/services/scrapService.js', () => ({
-        ...jest.requireActual('../js/services/scrapService.js'),
-        scrapCache: mockScrapCache,
-      }), { virtual: true });
+      jest.doMock(
+        '../js/services/scrapService.js',
+        () => ({
+          ...jest.requireActual('../js/services/scrapService.js'),
+          scrapCache: mockScrapCache,
+        }),
+        { virtual: true }
+      );
 
       // When
       const result = await removeScrapImage(scrapId, imageUrl);

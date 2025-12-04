@@ -13,9 +13,9 @@ function normalizeUrlForDeletion(url) {
     const u = new URL(cleanUrl);
     let decodedPath;
     try {
-        decodedPath = decodeURIComponent(u.pathname);
+      decodedPath = decodeURIComponent(u.pathname);
     } catch (e) {
-        decodedPath = u.pathname;
+      decodedPath = u.pathname;
     }
     return (u.hostname + decodedPath).replace(/\/$/, '').trim();
   } catch (e) {
@@ -362,11 +362,11 @@ export async function removeScrapImage(scrapId, imageUrl) {
   try {
     const userId = await getCurrentUserId();
     const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
-    
+
     // 1. 데이터 조회
     const snapshot = await get(scrapRef);
     if (!snapshot.exists()) return { success: false, error: 'Scrap not found' };
-    
+
     const scrap = snapshot.val();
     const updates = {};
     let updated = false;
@@ -377,7 +377,9 @@ export async function removeScrapImage(scrapId, imageUrl) {
     // 2. allImages 필터링
     if (scrap.allImages && Array.isArray(scrap.allImages)) {
       const originalLen = scrap.allImages.length;
-      const newAllImages = scrap.allImages.filter(img => normalizeUrlForDeletion(img) !== targetUrl);
+      const newAllImages = scrap.allImages.filter(
+        (img) => normalizeUrlForDeletion(img) !== targetUrl
+      );
       if (newAllImages.length !== originalLen) {
         updates.allImages = newAllImages;
         updated = true;
@@ -387,7 +389,7 @@ export async function removeScrapImage(scrapId, imageUrl) {
     // 3. images 필터링 (Legacy)
     if (scrap.images && Array.isArray(scrap.images)) {
       const originalLen = scrap.images.length;
-      const newImages = scrap.images.filter(img => normalizeUrlForDeletion(img) !== targetUrl);
+      const newImages = scrap.images.filter((img) => normalizeUrlForDeletion(img) !== targetUrl);
       if (newImages.length !== originalLen) {
         updates.images = newImages;
         updated = true;
@@ -403,20 +405,19 @@ export async function removeScrapImage(scrapId, imageUrl) {
     // 5. DB 업데이트 및 캐시 초기화
     if (updated) {
       await update(scrapRef, updates);
-      
+
       // [핵심 해결책] 캐시를 강제로 비워서 다음 조회 시 DB에서 새 데이터를 가져오게 함
       if (typeof scrapCache !== 'undefined') {
         scrapCache.clear();
         Logger.info('[removeScrapImage] 캐시 초기화 완료');
       }
-      
+
       Logger.info(`[removeScrapImage] 이미지 삭제 완료`);
       return { success: true };
     } else {
       Logger.warn('[removeScrapImage] 매칭되는 이미지가 없습니다.');
       return { success: true }; // 에러는 아님
     }
-
   } catch (error) {
     Logger.error('[removeScrapImage] 오류:', error);
     return { success: false, error: error.message };

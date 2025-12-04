@@ -273,7 +273,7 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     } catch (networkError) {
       Logger.warn(`[RSS] 1차 수집 실패 (${url}), 헤더 없이 재시도합니다.`, networkError);
       // 잠시 대기 후 재시도
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       // 헤더 없이 순수 요청 시도 (캐시 문제 회피)
       res = await fetch(url, { cache: 'reload' });
     }
@@ -282,7 +282,7 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
       Logger.debug(`[RSS] 변경사항 없음 (304): ${url}`);
       return;
     }
-    
+
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     // ETag 저장 및 메타데이터 업데이트
@@ -294,7 +294,7 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     });
 
     const text = await res.text();
-    
+
     // ... (이하 XML 파싱 및 처리 로직은 기존과 동일)
     // RSS 피드에서 채널 이름 추출
     let channelTitle = null;
@@ -346,11 +346,11 @@ export async function fetchRssFeed(url, channelType, limit = 10) {
     }
 
     const items = text.match(/<(item|entry)>([\s\S]*?)<\/\1>/g) || [];
-    
+
     // [추가] 아이템이 없으면 파싱 에러로 간주하지 않고 빈 배열 처리
     if (items.length === 0) {
-       Logger.warn(`[RSS] 항목을 찾을 수 없음 (${url})`);
-       return;
+      Logger.warn(`[RSS] 항목을 찾을 수 없음 (${url})`);
+      return;
     }
 
     await limitConcurrency(items.slice(0, limit), (item) =>

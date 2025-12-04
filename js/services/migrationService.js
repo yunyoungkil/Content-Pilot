@@ -236,7 +236,9 @@ export async function migrateChannelIdCascade(oldId, newId) {
   if (!oldId || !newId || oldId === newId) return;
 
   const userId = await getCurrentUserId();
-  Logger.info(`[Migration] 채널 ID 변경 감지: ${oldId} -> ${newId}. 연관 데이터 이관을 시작합니다.`);
+  Logger.info(
+    `[Migration] 채널 ID 변경 감지: ${oldId} -> ${newId}. 연관 데이터 이관을 시작합니다.`
+  );
 
   try {
     const updates = {};
@@ -277,13 +279,14 @@ export async function migrateChannelIdCascade(oldId, newId) {
     if (migrationCount > 0) {
       // 루트 경로에서 업데이트 실행 (매우 효율적)
       await update(ref(getDb(), '/'), updates);
-      Logger.biz(`✅ [Migration] 채널 데이터 이관 완료: 총 ${migrationCount}개의 항목이 업데이트되었습니다.`);
+      Logger.biz(
+        `✅ [Migration] 채널 데이터 이관 완료: 총 ${migrationCount}개의 항목이 업데이트되었습니다.`
+      );
       return { success: true, count: migrationCount };
     } else {
       Logger.info('[Migration] 이관할 연관 데이터가 없습니다.');
       return { success: true, count: 0 };
     }
-
   } catch (error) {
     Logger.error('[Migration] 데이터 이관 중 오류 발생:', error);
     return { success: false, error: error.message };

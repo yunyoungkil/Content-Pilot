@@ -1565,12 +1565,14 @@ export function renderChannelMode(container) {
 
       // 2. 마이그레이션 실행 (수정 모드이고, ID가 달라졌을 때만)
       if (currentEditingIndex !== -1 && oldId && newId && oldId !== newId) {
-          // 사용자에게 알림 (선택 사항)
-          const confirmMigration = confirm('채널 ID가 변경되었습니다. 기존 데이터를 새 채널로 이동하시겠습니까?');
-          if (confirmMigration) {
-              showToast('🔄 데이터 이관 중...');
-              await migrateChannelIdCascade(oldId, newId);
-          }
+        // 사용자에게 알림 (선택 사항)
+        const confirmMigration = confirm(
+          '채널 ID가 변경되었습니다. 기존 데이터를 새 채널로 이동하시겠습니까?'
+        );
+        if (confirmMigration) {
+          showToast('🔄 데이터 이관 중...');
+          await migrateChannelIdCascade(oldId, newId);
+        }
       }
 
       const newData = {

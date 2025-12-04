@@ -557,7 +557,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
         thumbnail: imageUrl, // 스크랩은 원본 사용
         tags: [...(item.tags || []), '#Scrap'], // #Scrap 태그 자동 추가
         originData: item,
-        timestamp: item.timestamp || 0
+        timestamp: item.timestamp || 0,
       });
     }
   });
@@ -571,7 +571,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
       thumbnail: item.downloadURL,
       tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
       originData: item, // storagePath 등 포함
-      timestamp: item.timestamp || 0
+      timestamp: item.timestamp || 0,
     });
   });
 
@@ -580,7 +580,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
 
   // 6. 태그 필터링 (옵션)
   if (filterTag && filterTag !== 'ALL') {
-    return unifiedList.filter(item => item.tags.includes(filterTag));
+    return unifiedList.filter((item) => item.tags.includes(filterTag));
   }
 
   return unifiedList;
@@ -609,7 +609,7 @@ export async function deleteImageFromStorage(storageUrl) {
 
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     if (!response.ok && response.status !== 404) {
@@ -630,7 +630,7 @@ export async function getUploadedImagesLog() {
   const userId = await getCurrentUserId();
   const snapshot = await get(`thumbnail_images/${userId}`);
   const data = snapshot.val() || {};
-  
+
   return Object.entries(data)
     .map(([key, val]) => ({ id: key, ...val }))
     .sort((a, b) => b.timestamp - a.timestamp);

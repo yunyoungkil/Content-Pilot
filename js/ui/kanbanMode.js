@@ -358,7 +358,7 @@ async function updateColumnIncremental(
     loadingEl.remove();
     // 로딩 메시지가 있었다면, 초기화 상태이므로 강제로 모든 카드를 다시 렌더링하도록 유도하기 위해
     // previousCards를 비워서 '모두 추가됨'으로 인식하게 만듭니다.
-    previousCards = {}; 
+    previousCards = {};
   }
 
   const currentFiltered = {};

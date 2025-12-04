@@ -1,7 +1,8 @@
 // js/ui/draftMode.js (스토리지 관리자로 변경됨)
 import { showToast, showConfirmationToast } from '../utils.js';
 
-export function renderDraftingMode(container) {
+// [수정 완료] renderDraftingMode -> renderDraftMode 로 변경 (필수!)
+export function renderDraftMode(container) {
   // 기존 패널 제거 및 초기화
   const prev = document.getElementById('cp-draft-mode-root');
   if (prev) prev.remove();
@@ -18,7 +19,8 @@ export function renderDraftingMode(container) {
 
   // 헤더
   const header = document.createElement('div');
-  header.style.cssText = 'padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #f8f9fa;';
+  header.style.cssText =
+    'padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #f8f9fa;';
   header.innerHTML = `
     <h3 style="margin:0; font-size:16px; color:#333;">☁️ 스토리지 관리</h3>
     <button id="close-storage-btn" style="border:none; background:none; cursor:pointer; font-size:18px; color:#666;">×</button>
@@ -56,22 +58,24 @@ export function renderDraftingMode(container) {
     const file = e.target.files[0];
     if (!file) return;
 
-    // 미리보기 및 로딩 표시 (선택사항)
     showToast('업로드 시작...');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      chrome.runtime.sendMessage({
-        action: 'upload_thumbnail_to_storage',
-        data: { dataUrl: evt.target.result, filename: file.name }
-      }, (res) => {
-        if (res && res.success) {
-          showToast('✅ 업로드 완료');
-          loadStorageImages(content); // 목록 새로고침
-        } else {
-          showToast('❌ 업로드 실패: ' + (res?.error || 'Unknown error'), 'error');
+      chrome.runtime.sendMessage(
+        {
+          action: 'upload_thumbnail_to_storage',
+          data: { dataUrl: evt.target.result, filename: file.name },
+        },
+        (res) => {
+          if (res && res.success) {
+            showToast('✅ 업로드 완료');
+            loadStorageImages(content); // 목록 새로고침
+          } else {
+            showToast('❌ 업로드 실패: ' + (res?.error || 'Unknown error'), 'error');
+          }
         }
-      });
+      );
     };
     reader.readAsDataURL(file);
   };
@@ -81,17 +85,21 @@ function loadStorageImages(container) {
   // 통합 갤러리 API 재사용 (필터: STORAGE)
   chrome.runtime.sendMessage({ action: 'get_unified_gallery', filter: '#Storage' }, (res) => {
     if (!res || !res.success) {
-      container.innerHTML = '<div style="text-align:center; padding:20px; color:#e33;">데이터 로드 실패</div>';
+      container.innerHTML =
+        '<div style="text-align:center; padding:20px; color:#e33;">데이터 로드 실패</div>';
       return;
     }
 
     if (res.images.length === 0) {
-      container.innerHTML = '<div style="text-align:center; padding:40px; color:#888;">저장된 이미지가 없습니다.<br>아래 버튼으로 업로드해보세요.</div>';
+      container.innerHTML =
+        '<div style="text-align:center; padding:40px; color:#888;">저장된 이미지가 없습니다.<br>아래 버튼으로 업로드해보세요.</div>';
       return;
     }
 
     container.innerHTML = `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-      ${res.images.map(img => `
+      ${res.images
+        .map(
+          (img) => `
         <div class="storage-item" id="storage-${img.id}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
           <img src="${img.url}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
           <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.5); color:white; font-size:10px; padding:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -102,33 +110,38 @@ function loadStorageImages(container) {
             ×
           </button>
         </div>
-      `).join('')}
+      `
+        )
+        .join('')}
     </div>`;
 
     // 삭제 버튼 이벤트
-    container.querySelectorAll('.delete-storage-btn').forEach(btn => {
+    container.querySelectorAll('.delete-storage-btn').forEach((btn) => {
       btn.onclick = (e) => {
         e.stopPropagation();
         const id = btn.dataset.id;
         const path = btn.dataset.path;
 
         showConfirmationToast('정말 삭제하시겠습니까? (복구 불가)', () => {
-          // 낙관적 업데이트 (UI 먼저 삭제)
+          // 낙관적 업데이트
           const item = document.getElementById(`storage-${id}`);
-          if(item) item.style.opacity = '0.5';
+          if (item) item.style.opacity = '0.5';
 
-          chrome.runtime.sendMessage({
-            action: 'delete_storage_image',
-            data: { id, storagePath: path }
-          }, (delRes) => {
-            if (delRes && delRes.success) {
-              if(item) item.remove();
-              showToast('삭제되었습니다.');
-            } else {
-              if(item) item.style.opacity = '1';
-              showToast('삭제 실패', 'error');
+          chrome.runtime.sendMessage(
+            {
+              action: 'delete_storage_image',
+              data: { id, storagePath: path },
+            },
+            (delRes) => {
+              if (delRes && delRes.success) {
+                if (item) item.remove();
+                showToast('삭제되었습니다.');
+              } else {
+                if (item) item.style.opacity = '1';
+                showToast('삭제 실패', 'error');
+              }
             }
-          });
+          );
         });
       };
     });

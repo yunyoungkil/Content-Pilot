@@ -59,7 +59,8 @@ async function analyzeScrapImage(imageUrl) {
     const imageData = await fetchImageAsBase64(imageUrl);
     if (!imageData) return null;
 
-    const prompt = "이 이미지를 상세히 분석해줘. 1. 이미지에 포함된 모든 텍스트를 추출해줘. 2. 이미지의 주요 객체와 요소들을 자세히 설명해줘. 3. 이미지의 전체적인 분위기와 스타일을 분석해줘. 4. 이 이미지가 어떤 맥락에서 사용될 수 있을지 제안해줘.";
+    const prompt =
+      '이 이미지를 상세히 분석해줘. 1. 이미지에 포함된 모든 텍스트를 추출해줘. 2. 이미지의 주요 객체와 요소들을 자세히 설명해줘. 3. 이미지의 전체적인 분위기와 스타일을 분석해줘. 4. 이 이미지가 어떤 맥락에서 사용될 수 있을지 제안해줘.';
     // VISION 모델(gemini-2.0-flash) 사용
     const analysis = await callGeminiAPI(prompt, AI_MODELS.VISION, [imageData]);
     return analysis;
@@ -161,8 +162,8 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
           parts.push({
             inlineData: {
               mimeType: img.mimeType,
-              data: img.data
-            }
+              data: img.data,
+            },
           });
         }
       }
@@ -387,9 +388,12 @@ export async function enhanceDraftWithFeatures({
         // finalImagePrompt = finalImagePrompt.replace(/render text|typography|write/gi, '');
 
         // 2. [핵심] 강력한 텍스트 금지 명령을 프롬프트 끝에 강제로 추가
-        finalImagePrompt += " . CRITICAL: Do NOT render any text, letters, words, or typography in this image. Keep the background clean and clutter-free.";
+        finalImagePrompt +=
+          ' . CRITICAL: Do NOT render any text, letters, words, or typography in this image. Keep the background clean and clutter-free.';
 
-        Logger.debug('[enhanceDraftWithFeatures] 텍스트 오버레이 모드: 텍스트 금지 프롬프트 강제 주입됨');
+        Logger.debug(
+          '[enhanceDraftWithFeatures] 텍스트 오버레이 모드: 텍스트 금지 프롬프트 강제 주입됨'
+        );
       }
 
       // 수정된 프롬프트로 이미지 생성 요청
@@ -438,7 +442,7 @@ export async function enhanceDraftWithFeatures({
 
     // [핵심 수정] 16:9 이미지 업로드 준비 (URL -> Base64 변환 시도)
     let final16x9Data = null; // 업로드용 데이터 (Base64)
-    let final16x9Url = null;  // 최종 URL
+    let final16x9Url = null; // 최종 URL
 
     if (
       composedDataUrl &&
@@ -864,7 +868,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // [핵심 수정] 3-1. 채널 정보 미리 가져오기 (내부 링크 매칭을 위해 위로 이동)
     let channelInfo = null;
     let targetSourceId = null;
-    
+
     try {
       const userId = await getCurrentUserId();
       const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
@@ -876,8 +880,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // 카드의 channelId와 일치하는 채널 찾기 (UUID 비교)
       let currentChannelId = ideaData.channelId;
       if (!currentChannelId) {
-          const storage = await chrome.storage.local.get('activeChannelId');
-          currentChannelId = storage.activeChannelId;
+        const storage = await chrome.storage.local.get('activeChannelId');
+        currentChannelId = storage.activeChannelId;
       }
 
       if (currentChannelId) {
@@ -892,8 +896,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         // [중요] DB 매칭용 Source ID 계산 (RSS URL을 Base64로 변환)
         // 이렇게 해야 DB에 저장된 'aHR0cHM...' 형식과 일치하게 됩니다.
         if (channelInfo && channelInfo.apiUrl) {
-            targetSourceId = btoa(channelInfo.apiUrl).replace(/=/g, '');
-            Logger.debug(`[AI Service] 매칭용 Source ID 변환 완료: ${targetSourceId}`);
+          targetSourceId = btoa(channelInfo.apiUrl).replace(/=/g, '');
+          Logger.debug(`[AI Service] 매칭용 Source ID 변환 완료: ${targetSourceId}`);
         }
       }
     } catch (error) {
@@ -940,33 +944,35 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // Keywords prepared but not used directly in prompt at this time
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
-    
+
     // [디버깅 코드 시작] -------------------------------------------------------
     const scraps = ideaData.linkedScrapsContent || [];
     Logger.debug(`[External Link Debug] 전달받은 연결 자료 개수: ${scraps.length}`);
-    
+
     if (scraps.length > 0) {
-        scraps.forEach((s, i) => {
-            Logger.debug(`[External Link Debug] 자료 #${i + 1}:`, {
-                title: s.title,
-                url_exists: !!s.url, // URL 존재 여부 (true/false)
-                url: s.url ? s.url.substring(0, 30) + '...' : '(URL 없음)',
-                text_len: s.text ? s.text.length : 0
-            });
+      scraps.forEach((s, i) => {
+        Logger.debug(`[External Link Debug] 자료 #${i + 1}:`, {
+          title: s.title,
+          url_exists: !!s.url, // URL 존재 여부 (true/false)
+          url: s.url ? s.url.substring(0, 30) + '...' : '(URL 없음)',
+          text_len: s.text ? s.text.length : 0,
         });
+      });
     } else {
-        Logger.warn(`[External Link Debug] 연결된 자료가 없습니다. (ideaData.linkedScrapsContent 비어있음)`);
+      Logger.warn(
+        `[External Link Debug] 연결된 자료가 없습니다. (ideaData.linkedScrapsContent 비어있음)`
+      );
     }
     // [디버깅 코드 끝] ---------------------------------------------------------
 
     // [스마트 정제 함수] 불필요한 공백/줄바꿈 제거 및 압축
     const compressText = (text) => {
-        if (!text) return '';
-        return text
-            .replace(/\n\s*\n/g, '\n') // 여러 줄 공백을 한 줄로 축소
-            .replace(/[ \t]+/g, ' ')   // 연속된 스페이스/탭을 하나로 축소
-            .replace(/URL 복사 이웃추가 본문 기타 기능/g, '') // 네이버 블로그 상단 노이즈 제거
-            .trim();
+      if (!text) return '';
+      return text
+        .replace(/\n\s*\n/g, '\n') // 여러 줄 공백을 한 줄로 축소
+        .replace(/[ \t]+/g, ' ') // 연속된 스페이스/탭을 하나로 축소
+        .replace(/URL 복사 이웃추가 본문 기타 기능/g, '') // 네이버 블로그 상단 노이즈 제거
+        .trim();
     };
 
     // 2. 연결된 자료 텍스트 처리 (이미지 분석 추가)
@@ -974,29 +980,32 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const processedScraps = [];
 
     // [추가] 이미지 분석 병렬 처리
-    await Promise.all(linkedScrapsContent.map(async (scrap, index) => {
+    await Promise.all(
+      linkedScrapsContent.map(async (scrap, index) => {
         let content = compressText(scrap.text || '');
-        
+
         // 이미지가 있고 텍스트가 적거나(500자 미만) 이미지를 강조하고 싶을 때 분석 시도
         // 여기서는 이미지가 있으면 무조건 분석하도록 설정 (필요시 조건 조절)
         let imageAnalysis = '';
         if (scrap.image) {
-            Logger.info(`[generateDraft] 스크랩 #${index + 1} 이미지 분석 시작...`);
-            const analysisResult = await analyzeScrapImage(scrap.image);
-            if (analysisResult) {
-                imageAnalysis = `\n\n[이미지 분석 내용 (Vision AI)]:\n${analysisResult}`;
-            }
+          Logger.info(`[generateDraft] 스크랩 #${index + 1} 이미지 분석 시작...`);
+          const analysisResult = await analyzeScrapImage(scrap.image);
+          if (analysisResult) {
+            imageAnalysis = `\n\n[이미지 분석 내용 (Vision AI)]:\n${analysisResult}`;
+          }
         }
 
         // 길이 제한 (2500자)
         if (content.length > 2500) {
-             const front = content.substring(0, 2000);
-             const back = content.substring(content.length - 500);
-             content = `${front}\n...(중략)...\n${back}`;
+          const front = content.substring(0, 2000);
+          const back = content.substring(content.length - 500);
+          content = `${front}\n...(중략)...\n${back}`;
         }
 
-        processedScraps[index] = `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n내용:\n${content}${imageAnalysis}\n`;
-    }));
+        processedScraps[index] =
+          `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n내용:\n${content}${imageAnalysis}\n`;
+      })
+    );
 
     const linkedScrapsText = processedScraps.join('\n\n');
 
@@ -1025,7 +1034,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
           // [핵심 수정] 변환된 ID(targetSourceId)와 비교
           if (targetSourceId && item.sourceId === targetSourceId) return true;
-          
+
           // 기존 방식 호환 (혹시 모를 구버전 데이터 대응)
           if (item.sourceId === ideaData.channelId) return true;
 
