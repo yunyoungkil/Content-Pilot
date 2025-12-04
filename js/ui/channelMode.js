@@ -3,6 +3,7 @@
 import { showToast, Logger } from '../utils.js';
 import { deleteCompetitorData } from '../services/cascadeDeleteService.js';
 import { getCurrentUserId } from '../services/firebaseService.js';
+import { migrateChannelIdCascade } from '../services/migrationService.js';
 
 export function renderChannelMode(container) {
   container.innerHTML = `
@@ -1473,7 +1474,7 @@ export function renderChannelMode(container) {
   // 모달 적용 버튼 (임시 저장)
   const modalApplyBtn = container.querySelector('#modal-apply-btn');
   if (modalApplyBtn) {
-    modalApplyBtn.addEventListener('click', () => {
+    modalApplyBtn.addEventListener('click', async () => {
       const blogUrlEl = container.querySelector('#modal-blog-url');
       const platformSelect = container.querySelector('#modal-platform-select');
       const gaIdEl = container.querySelector('#modal-ga-id');
@@ -1541,10 +1542,40 @@ export function renderChannelMode(container) {
         return;
       }
 
+      // [변경 감지 로직 시작]
+      const oldId = currentEditingIndex === -1 ? null : myChannelsData[currentEditingIndex].id;
+
+      // 1. ID 결정 로직
+      // 만약 ID를 변경하는 UI가 있다면 여기서 newId를 가져오겠지만,
+      // 지금은 예시로 '기존 ID 유지' 또는 '새로 생성' 로직을 따릅니다.
+      // 사용자가 강제로 ID를 바꾸는 상황을 가정합니다.
+
+      let newId;
+      if (currentEditingIndex === -1) {
+        newId = crypto.randomUUID(); // 신규 생성
+      } else {
+        newId = myChannelsData[currentEditingIndex].id; // 기본은 유지
+
+        // [핵심] 만약 어떤 이유로 ID가 변경되었다면? (예: url 변경 시 ID도 재발급 정책 등)
+        // 여기서는 예시로 'url이 바뀌면 ID도 바뀐다'는 가정을 해보겠습니다. (실제로는 추천하지 않음)
+        // if (url !== myChannelsData[currentEditingIndex].url) {
+        //    newId = crypto.randomUUID();
+        // }
+      }
+
+      // 2. 마이그레이션 실행 (수정 모드이고, ID가 달라졌을 때만)
+      if (currentEditingIndex !== -1 && oldId && newId && oldId !== newId) {
+          // 사용자에게 알림 (선택 사항)
+          const confirmMigration = confirm('채널 ID가 변경되었습니다. 기존 데이터를 새 채널로 이동하시겠습니까?');
+          if (confirmMigration) {
+              showToast('🔄 데이터 이관 중...');
+              await migrateChannelIdCascade(oldId, newId);
+          }
+      }
+
       const newData = {
         // 신규 생성 시 UUID 부여, 수정 시 기존 ID 유지
-        id:
-          currentEditingIndex === -1 ? crypto.randomUUID() : myChannelsData[currentEditingIndex].id,
+        id: newId, // 결정된 ID 사용
         inputUrl: url,
         url: url,
         apiUrl: apiUrl, // 정확하게 생성된 RSS URL
