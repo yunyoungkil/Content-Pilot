@@ -330,7 +330,8 @@
 
 .link-edit-btn,
 .link-delete-btn,
-.link-open-btn {
+.link-open-btn,
+.link-idea-btn {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid #e9ecef;
   cursor: pointer;
@@ -354,13 +355,8 @@
   transform: scale(1.1);
 }
 
-.link-open-btn:hover {
-  background: #e8f5e8;
-  border-color: #4caf50;
-  transform: scale(1.1);
-}
-
-.link-open-btn:hover {
+.link-open-btn:hover,
+.link-idea-btn:hover {
   background: #e8f5e8;
   border-color: #4caf50;
   transform: scale(1.1);
@@ -1448,5 +1444,260 @@
   }
   100% {
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+}
+
+/* ============================================
+   Template Selector Modal Styles
+   ============================================ */
+
+/* Portal wrapper - ensure it sits above everything but doesn't capture events itself */
+#cp-modal-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000000000;
+  pointer-events: none; /* allow children modals to be interactive only where needed */
+}
+
+#template-selector-modal.cp-modal-wrap {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  display: flex;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 2147483647 !important; /* 브라우저 최대 z-index 값으로 설정 */
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+#template-selector-modal.cp-modal-wrap .cp-modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  /* 불투명한 검정 배경으로 변경하여 뒤쪽 요소가 보이지 않게 합니다. */
+  background: #000 !important;
+  z-index: 2147483646 !important; /* backdrop은 wrap보다 낮게 */
+}
+
+/* 템플릿 선택 모달의 실제 콘텐츠를 뷰포트 기준으로 띄워 다른 stacking context로부터 독립시킵니다. */
+#template-selector-modal.cp-modal-wrap .cp-modal {
+  position: fixed !important; /* 뷰포트 기준으로 고정 */
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important; /* 화면 중앙 정렬 */
+  z-index: 2147483647 !important; /* 모달 내용은 backdrop보다 높게 */
+  pointer-events: auto !important; /* 상호작용 허용 */
+  max-width: calc(100vw - 48px) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45) !important; /* 시각적 우위 */
+}
+
+.template-selector-modal {
+  width: min(90vw, 600px);
+  max-height: min(90vh, 700px);
+  position: relative;
+  z-index: 2147483647 !important; /* 브라우저 최대 z-index 값으로 설정 */
+  background: #fff !important; /* 흰색 패널 - 강제 적용 */
+  border-radius: 12px; /* 메인 모달과 동일한 모서리 */
+  overflow: hidden; /* 내부 스크롤 처리 */
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25); /* 깊은 그림자 */
+}
+
+.template-selector-body {
+  padding: 20px;
+  max-height: calc(90vh - 140px);
+  overflow-y: auto;
+  background: #f8f9fa;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.template-card {
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.template-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  transform: translateY(-3px) scale(1.02);
+}
+
+.template-card.selected {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+}
+
+.template-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* header 디자인을 제휴 링크 관리 패널과 동일하게 적용 */
+#template-selector-modal .cp-modal-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#template-selector-modal .cp-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#template-selector-modal .cp-modal-footer.template-selector-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #e9ecef;
+  background: #f8f9fa;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#template-selector-modal .cp-modal .cp-modal-close,
+#template-selector-modal .cp-modal .template-cancel-btn {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  height: 32px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#template-selector-modal .cp-modal .cp-modal-close:hover,
+#template-selector-modal .cp-modal .template-cancel-btn:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+/* 모달 바깥 영역(포털) 자체는 pointer-events none 이지만, 모달 안의 요소는 상호작용 가능 */
+#cp-modal-portal > .cp-modal-wrap {
+  pointer-events: auto;
+}
+
+.template-icon {
+  font-size: 22px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  color: white;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.template-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.template-description {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  margin: 8px 0 12px 0;
+}
+
+.template-preview {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  padding: 8px 12px;
+  /* 반투명 대신 제휴 모달과 유사한 연한 고정 색상으로 변경 */
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+  line-height: 1.4;
+}
+
+.template-selector-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.template-cancel-btn {
+  background: #6b7280 !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  transition: background-color 0.2s !important;
+}
+
+.template-cancel-btn:hover {
+  background: #4b5563 !important;
+}
+
+/* 템플릿 선택 애니메이션 */
+.template-card {
+  animation: templateCardFadeIn 0.4s ease-out forwards;
+}
+
+.template-card:nth-child(1) { animation-delay: 0.1s; }
+.template-card:nth-child(2) { animation-delay: 0.2s; }
+.template-card:nth-child(3) { animation-delay: 0.3s; }
+.template-card:nth-child(4) { animation-delay: 0.4s; }
+
+@keyframes templateCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 모바일 반응형 */
+@media (max-width: 640px) {
+  .template-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .template-selector-modal {
+    width: 95vw;
+    margin: 10px;
+  }
+
+  .template-selector-body {
+    padding: 16px;
   }
 }
