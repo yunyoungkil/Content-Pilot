@@ -17,6 +17,11 @@ export const CONSTANTS = {
   USER_ID: 'default_user', // 로그인 후 authService 등에 의해 동적으로 변경됨
 };
 
+// Gallery config: how many images per scrap to include in unified gallery
+export const GALLERY_IMAGES_PER_SCRAP = 6; // increased to include more images per scrap in unified gallery
+// safety cap for unified gallery total items to avoid huge loads
+export const MAX_UNIFIED_GALLERY_IMAGES = 600; // raised cap to allow more items in unified gallery
+
 export const firebaseConfig = {
   apiKey: 'AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY',
   authDomain: 'content-pilot-7eb03.firebaseapp.com',
@@ -547,17 +552,27 @@ export async function getUnifiedGalleryImages(filterTag = null) {
 
   // 3. 스크랩 데이터 정규화
   Object.entries(scrapsVal).forEach(([id, item]) => {
-    // 이미지가 있는 스크랩만 처리
-    const imageUrl = item.image || (item.allImages && item.allImages[0]);
-    if (imageUrl) {
-      unifiedList.push({
-        id: id,
-        source: 'SCRAP', // [수정] type -> source 로 변경 (workspaceMode.js와 통일)
-        url: imageUrl,
-        thumbnail: imageUrl, // 스크랩은 원본 사용
-        tags: [...(item.tags || []), '#Scrap'], // #Scrap 태그 자동 추가
-        originData: item,
-        timestamp: item.timestamp || 0,
+    // 스크랩의 모든 이미지를 수집
+    const imagesArr = [];
+    if (item.image) imagesArr.push(item.image);
+    if (Array.isArray(item.allImages)) imagesArr.push(...item.allImages);
+    if (Array.isArray(item.images)) imagesArr.push(...item.images);
+
+    // 중복 제거 및 유효성(널/빈값 제거)
+    const uniqueImages = [...new Set((imagesArr || []).filter(Boolean))];
+    if (uniqueImages.length > 0) {
+      // Push each image as its own gallery item (flatten groups)
+      const selected = uniqueImages.slice(0, GALLERY_IMAGES_PER_SCRAP);
+      selected.forEach((imgUrl, idx) => {
+        unifiedList.push({
+          id: `${id}::${idx}`,
+          scrapId: id,
+          source: 'SCRAP',
+          url: imgUrl,
+          thumbnail: imgUrl,
+          originData: item,
+          timestamp: item.timestamp || 0,
+        });
       });
     }
   });
@@ -569,6 +584,7 @@ export async function getUnifiedGalleryImages(filterTag = null) {
       source: 'STORAGE', // [수정] type -> source 로 변경 (workspaceMode.js와 통일)
       url: item.downloadURL,
       thumbnail: item.downloadURL,
+      images: [item.downloadURL],
       tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
       originData: item, // storagePath 등 포함
       timestamp: item.timestamp || 0,
@@ -577,6 +593,11 @@ export async function getUnifiedGalleryImages(filterTag = null) {
 
   // 5. 최신순 정렬
   unifiedList.sort((a, b) => b.timestamp - a.timestamp);
+
+  // safety cap to prevent sending too many images at once
+  if (unifiedList.length > MAX_UNIFIED_GALLERY_IMAGES) {
+    unifiedList.length = MAX_UNIFIED_GALLERY_IMAGES;
+  }
 
   // 6. 태그 및 소스 필터링 [버그 수정 핵심]
   if (filterTag && filterTag !== 'ALL') {

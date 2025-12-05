@@ -82,6 +82,7 @@ module.exports = {
       patterns: [
         { from: 'css', to: 'css' },
         { from: 'images', to: 'images', noErrorOnMissing: true },
+        { from: 'rules.json', to: 'rules.json' },
         // Removed background.cjs copy since we're bundling it now
       ],
     }),

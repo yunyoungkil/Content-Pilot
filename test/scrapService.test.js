@@ -58,6 +58,44 @@ describe('Scrap Service', () => {
     mockFirebaseService.ref.mockReturnValue('mock-ref');
   });
 
+  describe('toggleScrapSharing', () => {
+    it('should return error when scrap not found', async () => {
+      const scrapId = 'not-found';
+      const mockSnapshot = { exists: jest.fn(() => false), val: jest.fn(() => null) };
+      mockFirebaseService.get.mockResolvedValue(mockSnapshot);
+
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'channel-x');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('스크랩을 찾을 수 없습니다.');
+    });
+
+    it('should toggle to dedicated and clear cache when currently public', async () => {
+      const scrapId = 'scrap-1';
+      const mockScrapData = { channelId: null };
+      const mockSnapshot = { exists: jest.fn(() => true), val: jest.fn(() => mockScrapData) };
+      mockFirebaseService.get.mockResolvedValue(mockSnapshot);
+      mockFirebaseService.update.mockResolvedValue();
+
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'active-chan');
+      expect(result.success).toBe(true);
+      expect(result.newChannelId).toBe('active-chan');
+      expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', { channelId: 'active-chan' });
+    });
+
+    it('should toggle to public when currently dedicated', async () => {
+      const scrapId = 'scrap-2';
+      const mockScrapData = { channelId: 'some-chan' };
+      const mockSnapshot = { exists: jest.fn(() => true), val: jest.fn(() => mockScrapData) };
+      mockFirebaseService.get.mockResolvedValue(mockSnapshot);
+      mockFirebaseService.update.mockResolvedValue();
+
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'ignored');
+      expect(result.success).toBe(true);
+      expect(result.newChannelId).toBe(null);
+      expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', { channelId: null });
+    });
+  });
+
   describe('removeScrapImage', () => {
     it('should successfully remove image from allImages array', async () => {
       // Given
@@ -87,6 +125,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockFirebaseService.getCurrentUserId).toHaveBeenCalledTimes(1);
       expect(mockFirebaseService.ref).toHaveBeenCalledWith(
         'mock-db',
@@ -127,6 +166,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
         images: ['https://example.com/image1.jpg', 'https://example.com/image2.jpg'],
       });
@@ -156,6 +196,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
         image: null,
       });
@@ -185,6 +226,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
         allImages: [],
       });
@@ -214,6 +256,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(false);
       expect(mockFirebaseService.update).not.toHaveBeenCalled();
       expect(mockLogger.warn).toHaveBeenCalledWith(
         '[removeScrapImage] 매칭되는 이미지가 없습니다.'
@@ -293,6 +336,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockLogger.info).toHaveBeenCalledWith('[removeScrapImage] 캐시 초기화 완료');
     });
 
@@ -320,6 +364,7 @@ describe('Scrap Service', () => {
 
       // Then
       expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
         allImages: ['https://example.com/other.jpg'],
         images: [],

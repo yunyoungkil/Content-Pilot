@@ -390,6 +390,7 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     const newCard = {
       title: ideaData.title,
       description: ideaData.description || '',
+      seoTitle: ideaData.seoTitle || ideaData.title || '',
       createdAt: ideaData.createdAt || Date.now(),
       channelId: channelId,
       tags: tags,

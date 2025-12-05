@@ -576,6 +576,35 @@ export async function fetchAllChannelData() {
     try {
       await Promise.all(promises);
       Logger.biz(`✅ [fetchAllChannelData] 모든 채널 데이터 수집 완료 (${promises.length}개)`);
+
+      // 알림: 수집이 끝났음을 UI 및 콘텐츠 스크립트에 전파합니다.
+      // 대시보드 같은 extension UI는 runtime.onMessage로 듣고 있기 때문에
+      // chrome.runtime.sendMessage로 브로드캐스트합니다. 또한 콘텐츠 스크립트
+      // (탭) 쪽에서도 필요할 수 있으므로 tabs.query -> sendMessage도 실행합니다.
+      try {
+        chrome.runtime.sendMessage({ action: 'cp_data_refreshed' });
+      } catch (e) {
+        Logger.debug('[fetchAllChannelData] chrome.runtime.sendMessage 실패:', e && e.message);
+      }
+
+      try {
+        if (chrome.tabs && typeof chrome.tabs.query === 'function') {
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              if (tab && tab.id) {
+                try {
+                  chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }, () => {});
+                } catch (e) {
+                  // 탭에 content script가 없거나 메시지 실패는 조용히 무시
+                }
+              }
+            });
+          });
+        }
+      } catch (e) {
+        Logger.debug('[fetchAllChannelData] chrome.tabs 쿼리/전송 실패:', e && e.message);
+      }
+
     } catch (error) {
       Logger.error('[fetchAllChannelData] 수집 중 오류 발생:', error);
     }
@@ -614,19 +643,80 @@ export async function parseBlogPage(url, html) {
   }
 }
 
-// 6. 이미지 프록시
+// 6. 이미지 프록시 (네이버 등 Referer 체크 우회)
 export async function fetchImageAsBase64(url) {
   try {
-    const res = await fetch(url);
+    // 네이버 이미지인 경우 특별 처리
+    if (url.includes('postfiles.pstatic.net') || url.includes('blogfiles.naver.net')) {
+      // background script를 통해 fetch (Service Worker에서는 더 나은 권한)
+      const response = await chrome.runtime.sendMessage({
+        action: 'fetch_image_as_base64',
+        url: url
+      });
+      
+      if (response && response.success) {
+        return { success: true, dataUrl: response.dataUrl };
+      }
+      
+      // 폴백: img 태그를 사용한 로딩 시도
+      return await fetchImageViaImgTag(url);
+    }
+    
+    // 일반 이미지
+    const res = await fetch(url, {
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-cache'
+    });
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
     const blob = await res.blob();
     const reader = new FileReader();
     return new Promise((resolve) => {
       reader.onloadend = () => resolve({ success: true, dataUrl: reader.result });
+      reader.onerror = () => resolve({ success: false, error: 'FileReader error' });
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    return { success: false, error: e.message };
+    Logger.warn('[fetchImageAsBase64] fetch 실패, img 태그 방식 시도:', e.message);
+    // 폴백: img 태그 사용
+    return await fetchImageViaImgTag(url);
   }
+}
+
+// 네이버 이미지 등 Referer 체크가 엄격한 경우 img 태그로 우회
+async function fetchImageViaImgTag(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    
+    const timeout = setTimeout(() => {
+      resolve({ success: false, error: 'Timeout' });
+    }, 10000);
+    
+    img.onload = () => {
+      clearTimeout(timeout);
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        resolve({ success: true, dataUrl });
+      } catch (e) {
+        resolve({ success: false, error: e.message });
+      }
+    };
+    
+    img.onerror = () => {
+      clearTimeout(timeout);
+      resolve({ success: false, error: 'Image load failed' });
+    };
+    
+    img.src = url;
+  });
 }
 
 // 7. 단건 저장

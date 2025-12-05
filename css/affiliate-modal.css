@@ -268,6 +268,7 @@
   border: 1px solid #e9ecef;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0; /* 카드가 압축되지 않도록 고정 */
 }
 
 .affiliate-link-card::before {
@@ -328,7 +329,8 @@
 }
 
 .link-edit-btn,
-.link-delete-btn {
+.link-delete-btn,
+.link-open-btn {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid #e9ecef;
   cursor: pointer;
@@ -349,6 +351,18 @@
 .link-delete-btn:hover {
   background: #ffebee;
   border-color: #f44336;
+  transform: scale(1.1);
+}
+
+.link-open-btn:hover {
+  background: #e8f5e8;
+  border-color: #4caf50;
+  transform: scale(1.1);
+}
+
+.link-open-btn:hover {
+  background: #e8f5e8;
+  border-color: #4caf50;
   transform: scale(1.1);
 }
 

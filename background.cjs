@@ -133,6 +133,7 @@ const {
   saveEntireAnalysis,
   deleteScrap,
   removeScrapImage, // 👈 추가!
+  toggleScrapSharing,
 } = require('./js/services/scrapService.js');
 
 const {
@@ -433,7 +434,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })()
     );
   }
-  if (msg.action === 'fetch_image_as_base64') return handleAsync(fetchImageAsBase64(msg.url));
+  if (msg.action === 'fetch_image_as_base64') {
+    return handleAsync(
+      (async () => {
+        try {
+          // 네이버 이미지 특별 처리
+          if (msg.url.includes('postfiles.pstatic.net') || msg.url.includes('blogfiles.naver.net')) {
+            const response = await fetch(msg.url, {
+              method: 'GET',
+              headers: {
+                'Referer': 'https://blog.naver.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              },
+              credentials: 'omit',
+              cache: 'no-cache'
+            });
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const blob = await response.blob();
+            const buffer = await blob.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+            const mimeType = blob.type || 'image/jpeg';
+            return { success: true, dataUrl: `data:${mimeType};base64,${base64}` };
+          }
+          
+          // 일반 이미지 처리
+          return await fetchImageAsBase64(msg.url);
+        } catch (error) {
+          Logger.warn('[Background] fetch_image_as_base64 실패:', error.message);
+          return { success: false, error: error.message };
+        }
+      })()
+    );
+  }
 
   // === [Analytics Service] 성과 분석 & 진단 ===
   if (msg.action === 'trigger_performance_refresh')
@@ -1767,7 +1803,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        return await removeScrapImage(scrapId, imageUrl);
+        const result = await removeScrapImage(scrapId, imageUrl);
+        // broadcast so other UI contexts can refresh
+        try {
+          // only broadcast if DB actually changed so other contexts don't react to no-op deletions
+          if (result && result.success && result.changed) {
+            chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
+          }
+        } catch (e) {
+          const { Logger } = require('./js/utils.js');
+          Logger.warn('[Background] 브로드캐스트 실패:', e.message);
+        }
+        return result;
       })()
     );
   }
@@ -1861,17 +1908,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           };
         }
 
-        // 업데이트
-        await update(scrapRef, { channelId: newChannelId });
-
-        return {
-          success: true,
-          newChannelId,
-          message:
-            newChannelId === null
-              ? '공용 스크랩으로 변경되었습니다.'
-              : '전용 스크랩으로 변경되었습니다.',
-        };
+        // 중앙 서비스에 위임하여 DB 업데이트 + 캐시 초기화를 수행
+        try {
+          const result = await toggleScrapSharing(scrapId, currentChannelId);
+          return result;
+        } catch (error) {
+          Logger.error('[toggle_scrap_sharing] toggleScrapSharing 호출 오류:', error);
+          return { success: false, error: error?.message || 'Unknown error' };
+        }
       })()
     );
   }

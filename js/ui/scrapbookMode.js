@@ -837,6 +837,33 @@ function renderDetailView(scrapId, container) {
       const scrapId = btn.dataset.scrapId;
       const imageUrl = btn.dataset.imageUrl;
 
+      // Normalize image URL selection: prefer DB-stored/original URL from the scrap object
+      const normalizeForMatch = (u) => {
+        if (!u) return '';
+        try {
+          if (u.startsWith('data:')) return u;
+          const clean = u.replace(/&amp;/g, '&');
+          const parsed = new URL(clean);
+          let p = parsed.pathname || '';
+          try { p = decodeURIComponent(p); } catch (e) {}
+          return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+        } catch (e) {
+          return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+        }
+      };
+
+      // try to find canonical URL from local allScraps cache
+      let canonicalDeleteUrl = imageUrl;
+      const targetScrap = allScraps.find((s) => s.id === scrapId);
+      if (targetScrap) {
+        const originList = [];
+        if (targetScrap.image) originList.push(targetScrap.image);
+        if (Array.isArray(targetScrap.allImages)) originList.push(...targetScrap.allImages);
+        if (Array.isArray(targetScrap.images)) originList.push(...targetScrap.images);
+        const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(imageUrl));
+        if (matched) canonicalDeleteUrl = matched;
+      }
+
       if (confirm('이 이미지를 삭제하시겠습니까?')) {
         chrome.runtime.sendMessage(
           {
@@ -844,7 +871,7 @@ function renderDetailView(scrapId, container) {
             data: { scrapId, imageUrl },
           },
           (response) => {
-            if (response && response.success) {
+            if (response && response.success && response.changed) {
               // ▼▼▼ [수정 시작] UI 즉시 갱신 로직 추가 ▼▼▼
 
               // 1. 현재 로컬 메모리(allScraps)에서 해당 이미지를 즉시 제거
@@ -871,6 +898,8 @@ function renderDetailView(scrapId, container) {
               requestScrapsAndRender(container);
 
               // ▲▲▲ [수정 끝] ▲▲▲
+            } else if (response && response.success && !response.changed) {
+              alert('삭제 대상이 데이터베이스에서 발견되지 않았습니다.');
             } else {
               alert('이미지 삭제에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
             }
@@ -892,6 +921,31 @@ function renderDetailView(scrapId, container) {
   });
 
   // 이미지 클릭 시 확대 보기 (이미지 카드 내부)
+  // 외부에서 삭제 이벤트가 발생한 경우(다른 창/패널에서 삭제)에도 상세 뷰를 동기화
+  if (!detailContainer.dataset.scrapListenerAttached) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.action === 'scrap_image_removed') {
+        const { scrapId: removedScrapId, imageUrl: removedImageUrl } = msg.data || {};
+        if (removedScrapId !== scrap.id) return; // 다른 스크랩이면 무시
+
+        // 로컬 캐시(allScraps)에서 즉시 반영
+        const targetScrap = allScraps.find((s) => s.id === removedScrapId);
+        if (targetScrap) {
+          if (Array.isArray(targetScrap.allImages)) {
+            targetScrap.allImages = targetScrap.allImages.filter((u) => u !== removedImageUrl);
+          }
+          if (Array.isArray(targetScrap.images)) {
+            targetScrap.images = targetScrap.images.filter((u) => u !== removedImageUrl);
+          }
+          if (targetScrap.image === removedImageUrl) targetScrap.image = null;
+
+          // 현재 상세화면을 다시 렌더
+          renderDetailView(removedScrapId, container);
+        }
+      }
+    });
+    detailContainer.dataset.scrapListenerAttached = '1';
+  }
   detailContainer.querySelectorAll('.scrapbook-detail-image-item').forEach((item) => {
     item.addEventListener('click', (e) => {
       if (e.target.closest('.scrapbook-image-delete-btn')) return;

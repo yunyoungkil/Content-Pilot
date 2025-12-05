@@ -19,18 +19,89 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
   imageGalleryGrid.innerHTML = imageUrls
     .map(
       (url) => `
-      <div class="gallery-thumb-wrap">
-        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
+      <div class="gallery-thumb-wrap" style="min-width:0;min-height:88px;overflow:hidden;border-radius:8px;position:relative;background:#f5f5f5;">
+        <img data-src="${url}" src="" class="gallery-thumb lazy-loading" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);min-width:0;display:block;" alt="자료 이미지">
       </div>
     `
     )
     .join('');
   imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
+    // 클릭 이벤트
     img.addEventListener('click', () => {
-      sendCommand('insert-image', { url: img.src });
+      // if not yet loaded, use data-src; otherwise src
+      const url = img.dataset.src || img.src;
+      sendCommand('insert-image', { url });
       sendCommand('focus');
     });
+
+    // 이미지 로드 실패 시 백그라운드 프록시로 재시도
+    img.onerror = () => {
+      // show temporary placeholder
+      img.style.display = 'none';
+      const parent = img.parentElement || imageGalleryGrid;
+      const loading = document.createElement('div');
+      loading.textContent = '이미지 불러오는 중...';
+      loading.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
+      parent.appendChild(loading);
+
+      try {
+        chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset.src || img.src }, (response) => {
+          if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
+            parent.removeChild(loading);
+            const err = document.createElement('div');
+            err.textContent = '이미지 로드 실패';
+            err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+            parent.appendChild(err);
+            return;
+          }
+
+          img.onerror = null; // prevent loop
+          img.src = response.dataUrl;
+          img.style.display = 'block';
+          parent.removeChild(loading);
+        });
+      } catch (e) {
+        parent.removeChild(loading);
+        const err = document.createElement('div');
+        err.textContent = '이미지 로드 실패';
+        err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+        parent.appendChild(err);
+      }
+    };
+    // register intersection observer for lazy loading
+    try {
+      ensureGalleryImageObserver().observe(img);
+    } catch (e) {
+      /* ignore */
+    }
   });
+}
+
+// --- Lazy loader using IntersectionObserver for gallery images ---
+let galleryImageObserver = null;
+function ensureGalleryImageObserver() {
+  if (galleryImageObserver) return galleryImageObserver;
+
+  galleryImageObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const img = entry.target;
+        const src = img.dataset && img.dataset.src;
+        if (!src) {
+          galleryImageObserver.unobserve(img);
+          return;
+        }
+        // Set src and let normal load handlers take over
+        img.src = src;
+        img.classList.remove('lazy-loading');
+        galleryImageObserver.unobserve(img);
+      });
+    },
+    { root: null, rootMargin: '200px 0px', threshold: 0.01 }
+  );
+
+  return galleryImageObserver;
 }
 
 function renderImageGallery(linkedScrapsData) {
@@ -68,7 +139,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         <button class="gallery-filter-tab" data-filter="STORAGE" style="padding: 6px 12px; border: none; background: #f1f3f4; color: #5f6368; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 12px; font-weight: 500;">스토리지</button>
       </div>
     </div>
-    <div class="image-gallery-grid" style="flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px; overflow-y: auto; overflow-x: hidden;"></div>
+    <div class="image-gallery-grid" style="flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; overflow-y: auto; grid-auto-rows: auto;"></div>
     <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
       <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center;">
         <button id="close-preview" style="position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: all 0.2s;">닫기</button>
@@ -98,6 +169,28 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   imageGalleryGrid.innerHTML =
     "<p style='text-align:center;color:#888;padding:20px;'>이미지를 불러오는 중...</p>";
 
+  // 그리드 반응형 조정 함수
+  function adjustGridColumns() {
+    const containerWidth = imageGalleryGrid.offsetWidth;
+    let columns;
+
+    if (containerWidth >= 800) {
+      columns = 6; // 큰 화면: 6열
+    } else if (containerWidth >= 600) {
+      columns = 4; // 중간 화면: 4열
+    } else if (containerWidth >= 400) {
+      columns = 3; // 작은 화면: 3열
+    } else {
+      columns = 2; // 아주 작은 화면: 2열
+    }
+
+    imageGalleryGrid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+  }
+
+  // 초기 그리드 설정 및 이벤트 리스너
+  adjustGridColumns();
+  window.addEventListener('resize', adjustGridColumns);
+
   // 통합 갤러리 데이터 로드 함수
   function loadUnifiedGallery(filter = 'ALL') {
     chrome.runtime.sendMessage(
@@ -116,6 +209,8 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         if (response && response.success && Array.isArray(response.images)) {
           allImageData = response.images;
           renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+          // 데이터 로드 후 그리드 조정
+          setTimeout(adjustGridColumns, 100);
         } else {
           console.warn('[Gallery] 통합 갤러리 응답 실패:', response);
           imageGalleryGrid.innerHTML =
@@ -123,6 +218,16 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         }
       }
     );
+      // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
+      if (!imageGalleryArea.dataset.scrapListenerAttached) {
+        chrome.runtime.onMessage.addListener((msg) => {
+          if (msg?.action === 'scrap_image_removed') {
+            // 현재 필터 상태로 갤러리 다시 로드
+            loadUnifiedGallery(currentFilter);
+          }
+        });
+        imageGalleryArea.dataset.scrapListenerAttached = '1';
+      }
   }
 
   // 필터링 및 렌더링 함수
@@ -172,11 +277,30 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
     imageGalleryGrid.innerHTML = '';
 
     const fragment = document.createDocumentFragment();
+
+    // Precompute how many items are shown per scrap (in this flattened list)
+    const shownPerScrap = {};
+    const totalPerScrap = {};
+    images.forEach((it) => {
+      const sId = it.scrapId || it.id;
+      if (sId) {
+        shownPerScrap[sId] = (shownPerScrap[sId] || 0) + 1;
+        // total available count from originData (if present)
+        const origin = it.originData || {};
+        const total = Array.isArray(origin.allImages) ? origin.allImages.length : 1;
+        // store maximum seen for totalPerScrap
+        totalPerScrap[sId] = Math.max(totalPerScrap[sId] || 0, total);
+      }
+    });
+
+    // track seen so far while rendering to detect last-shown item
+    const seenPerScrap = {};
+
     images.forEach((imgData) => {
       const div = document.createElement('div');
       div.className = 'gallery-thumb-wrap';
       div.style.cssText =
-        'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5;';
+        'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
 
       // 소스 배지 추가
       const sourceBadge = document.createElement('div');
@@ -185,54 +309,225 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       sourceBadge.textContent = imgData.source === 'SCRAP' ? '스크랩' : '스토리지';
       div.appendChild(sourceBadge);
 
-      // 삭제 버튼 (스크랩 이미지만 삭제 가능)
-      if (imgData.source === 'SCRAP' && imgData.scrapId) {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'workspace-image-delete-btn';
-        deleteBtn.innerHTML = '×';
-        deleteBtn.style.cssText =
-          'position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: #666; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s;';
-        deleteBtn.title = '이미지 삭제';
-        deleteBtn.onmouseover = () => (deleteBtn.style.background = 'rgba(255, 0, 0, 0.9)');
-        deleteBtn.onmouseout = () => (deleteBtn.style.background = 'rgba(255, 255, 255, 0.9)');
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          if (confirm('이 이미지를 삭제하시겠습니까?')) {
-            chrome.runtime.sendMessage(
-              {
-                action: 'remove_scrap_image',
-                data: { imageUrl: imgData.url, scrapId: imgData.scrapId },
-              },
-              (response) => {
-                if (response && response.success) {
-                  loadUnifiedGallery(currentFilter); // 갤러리 새로고침
-                  showToast('✅ 이미지가 삭제되었습니다.');
-                } else {
-                  showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
-                }
-              }
-            );
-          }
-        };
-        div.appendChild(deleteBtn);
+      // NOTE: gallery items sometimes carry `id` instead of `scrapId`.
+      const effectiveScrapId = imgData.scrapId || imgData.id;
+
+      // 이미지 요소 (개별 항목으로 출력)
+      const img = document.createElement('img');
+      img.className = 'gallery-thumb';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+      // don't set src directly — use data-src and observe for lazy loading
+      img.dataset.src = imgData.url || imgData.thumbnail || '';
+      img.classList.add('lazy-loading');
+      try {
+        ensureGalleryImageObserver().observe(img);
+      } catch (e) {
+        // fallback: set src if observer unavailable
+        img.src = img.dataset.src;
       }
 
-      // 이미지 요소
-      const img = document.createElement('img');
-      img.src = imgData.url;
-      img.className = 'gallery-thumb';
-      img.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+      // 클릭 시 에디터에 삽입
+      img.addEventListener('click', () => {
+        const insertUrl = img.dataset?.src || img.src;
+        sendCommand('insert-image', { url: insertUrl });
+        sendCommand('focus');
+      });
+
+      // onerror fallback -> background proxy
       img.onerror = () => {
         img.style.display = 'none';
         div.style.background = '#f0f0f0';
         const errorText = document.createElement('div');
         errorText.textContent = '이미지 로드 실패';
-        errorText.style.cssText =
-          'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
+        errorText.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
         div.appendChild(errorText);
+
+        try {
+          chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url }, (response) => {
+            if (response && response.success && response.dataUrl) {
+              img.onerror = null;
+              img.src = response.dataUrl;
+              img.style.display = 'block';
+              if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+            }
+          });
+        } catch (e) {
+          // ignore
+        }
       };
 
+      // 삭제 버튼 (스크랩만 가능)
+      if (imgData.source === 'SCRAP' && effectiveScrapId) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'workspace-image-delete-btn';
+        delBtn.title = '이미지 삭제';
+        delBtn.style.cssText = 'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
+        delBtn.innerHTML = '×';
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!confirm('이 이미지를 삭제하시겠습니까?')) return;
+          const displayedUrl = img.dataset?.src || img.src;
+
+          // Prefer sending the canonical/original URL stored in originData when available
+          // This avoids sending data: or proxy/base64 URLs which won't match DB entries
+          const removedItem = allImageData.find((it) => (it.url === displayedUrl || it.thumbnail === displayedUrl));
+
+          const getAllFromOrigin = (origin) => {
+            if (!origin) return [];
+            const out = [];
+            if (origin.image) out.push(origin.image);
+            if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+            if (Array.isArray(origin.images)) out.push(...origin.images);
+            return [...new Set(out.filter(Boolean))];
+          };
+
+          const normalizeForMatch = (u) => {
+            if (!u) return '';
+            try {
+              if (u.startsWith('data:')) return u;
+              const clean = u.replace(/&amp;/g, '&');
+              const parsed = new URL(clean);
+              let p = parsed.pathname || '';
+              try { p = decodeURIComponent(p); } catch (e) {}
+              return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+            } catch (e) {
+              return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+            }
+          };
+
+          let canonicalDeleteUrl = displayedUrl;
+          if (removedItem && removedItem.originData) {
+            const originList = getAllFromOrigin(removedItem.originData);
+            const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl));
+            if (matched) {
+              canonicalDeleteUrl = matched;
+            }
+          }
+
+          chrome.runtime.sendMessage({ action: 'remove_scrap_image', data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId } }, (response) => {
+            // only proceed if backend reports a real DB change
+            if (response && response.success && response.changed) {
+              // Update local data to show next waiting image in the same grid position
+              try {
+                // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
+                const matchIndex = allImageData.findIndex((it) => (it.url === deleteUrl || it.thumbnail === deleteUrl));
+                if (matchIndex !== -1) {
+                  // Try to fill this slot from the same scrap's originData if there are more images
+                  const removedItem = allImageData[matchIndex];
+                  const scrapKey = removedItem.scrapId || removedItem.id;
+
+                  // Helper: extract all images from originData
+                  const getAllFromOrigin = (origin) => {
+                    if (!origin) return [];
+                    const out = [];
+                    if (origin.image) out.push(origin.image);
+                    if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+                    if (Array.isArray(origin.images)) out.push(...origin.images);
+                    return [...new Set(out.filter(Boolean))];
+                  };
+
+                  // small normalization helper to align with backend matching rules
+                  const normalizeForMatch = (u) => {
+                    if (!u) return '';
+                    try {
+                      // keep data: URIs unchanged
+                      if (u.startsWith('data:')) return u;
+                      const clean = u.replace(/&amp;/g, '&');
+                      const parsed = new URL(clean);
+                      let p = parsed.pathname || '';
+                      try {
+                        p = decodeURIComponent(p);
+                      } catch (e) {
+                        // ignore decode errors
+                      }
+                      return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+                    } catch (e) {
+                      return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+                    }
+                  };
+
+                  const origin = removedItem.originData || {};
+                  let originImages = getAllFromOrigin(origin);
+
+                  // Current displayed urls for this scrap (normalized)
+                  const displayed = allImageData
+                    .filter((it) => (it.scrapId || it.id) === scrapKey)
+                    .map((it) => it.url || it.thumbnail)
+                    .map((d) => normalizeForMatch(d));
+
+                  // Exclude the deleted image (normalized) from candidates and any already-displayed images
+                  const normalizedDelete = normalizeForMatch(deleteUrl);
+
+                  originImages = originImages.filter((o) => normalizeForMatch(o) !== normalizedDelete);
+
+                  // Find a candidate that's in originImages but not displayed (normalized comparison)
+                  let candidate = null;
+                  for (const o of originImages) {
+                    const normO = normalizeForMatch(o);
+                    if (!displayed.includes(normO) && normO !== normalizedDelete) {
+                      candidate = o;
+                      break;
+                    }
+                  }
+
+                  if (candidate) {
+                    // Replace the removed item with the candidate image entry
+                    const newEntry = {
+                      id: `${scrapKey}::${Date.now()}`,
+                      scrapId: scrapKey,
+                      source: removedItem.source || 'SCRAP',
+                      url: candidate,
+                      thumbnail: candidate,
+                      originData: origin,
+                      timestamp: removedItem.timestamp || Date.now(),
+                    };
+                    allImageData.splice(matchIndex, 1, newEntry);
+                  } else {
+                    // No candidate; just remove
+                    allImageData.splice(matchIndex, 1);
+                  }
+                }
+                // re-render gallery with updated data, keeping filter
+                renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+                showToast('✅ 이미지가 삭제되었습니다.');
+              } catch (e) {
+                // fallback: remove DOM node
+                if (div.parentNode) div.parentNode.removeChild(div);
+                showToast('✅ 이미지가 삭제되었습니다.');
+              }
+            } else if (response && response.success && !response.changed) {
+              // backend found nothing to delete; notify and don't update UI state
+              showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
+            } else {
+              showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
+            }
+          });
+        });
+
+        div.appendChild(delBtn);
+      }
+
+      // Append image element
       div.appendChild(img);
+
+      // +N overlay for groups: show on the last shown image for a scrap when there are more images in the origin
+      const scrapKey = imgData.scrapId || imgData.id;
+      if (scrapKey) seenPerScrap[scrapKey] = (seenPerScrap[scrapKey] || 0) + 1;
+
+      const isLastShown = scrapKey && seenPerScrap[scrapKey] === shownPerScrap[scrapKey];
+      const totalCount = scrapKey ? totalPerScrap[scrapKey] || 0 : 0;
+      const shownCount = scrapKey ? shownPerScrap[scrapKey] || 0 : 0;
+      const extra = totalCount - shownCount;
+      if (isLastShown && extra > 0) {
+        const overlay = document.createElement('div');
+        overlay.className = 'gallery-more-overlay';
+        overlay.textContent = `+${extra}`;
+        overlay.title = `${extra}개 추가 이미지`; // tooltip
+        overlay.style.cssText = 'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
+        div.appendChild(overlay);
+      }
 
       // 클릭 이벤트
       div.addEventListener('click', () => {
@@ -243,6 +538,34 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       fragment.appendChild(div);
     });
     imageGalleryGrid.appendChild(fragment);
+
+    // Eager-load newly rendered images that are already within the visible grid viewport
+    // This prevents needing to switch tabs / re-focus to trigger IntersectionObserver
+    try {
+      setTimeout(() => {
+        const lazyImgs = imageGalleryGrid.querySelectorAll('img.lazy-loading');
+        if (!lazyImgs || lazyImgs.length === 0) return;
+        const gridRect = imageGalleryGrid.getBoundingClientRect();
+        lazyImgs.forEach((img) => {
+          try {
+            const r = img.getBoundingClientRect();
+            // follow same rootMargin logic: if within 200px range of viewport inside grid, load immediately
+            if (r.top < gridRect.bottom + 200 && r.bottom > gridRect.top - 200) {
+              const src = img.dataset && img.dataset.src;
+              if (src) {
+                img.src = src;
+                img.classList.remove('lazy-loading');
+                try {
+                  if (galleryImageObserver) galleryImageObserver.unobserve(img);
+                } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        });
+      }, 30);
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   // 이벤트 리스너 설정

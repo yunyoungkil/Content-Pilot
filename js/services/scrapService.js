@@ -413,13 +413,70 @@ export async function removeScrapImage(scrapId, imageUrl) {
       }
 
       Logger.info(`[removeScrapImage] 이미지 삭제 완료`);
-      return { success: true };
+      // indicate that a DB change actually occurred so callers can rely on this
+      return { success: true, changed: true };
     } else {
       Logger.warn('[removeScrapImage] 매칭되는 이미지가 없습니다.');
-      return { success: true }; // 에러는 아님
+      // no DB change performed
+      return { success: true, changed: false };
     }
   } catch (error) {
     Logger.error('[removeScrapImage] 오류:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 스크랩의 공유 상태를 토글하고 캐시를 초기화합니다.
+ * (공용 <-> 전용)
+ * @param {string} scrapId
+ * @param {string|null} currentChannelId - 현재 활성 채널 ID (전용으로 변경할 때 필요)
+ * @returns {Promise<{success: boolean, newChannelId?: string|null, message?: string, error?: string}>}
+ */
+export async function toggleScrapSharing(scrapId, currentChannelId = null) {
+  if (!scrapId) {
+    return { success: false, error: '스크랩 ID가 필요합니다.' };
+  }
+
+  try {
+    const userId = await getCurrentUserId();
+    const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
+    const snap = await get(scrapRef);
+    const scrapData = snap?.val();
+
+    if (!scrapData) {
+      return { success: false, error: '스크랩을 찾을 수 없습니다.' };
+    }
+
+    const currentChannelIdValue = scrapData.channelId;
+    const isCurrentlyPublic = currentChannelIdValue === null || currentChannelIdValue === undefined;
+
+    // 토글: 공용(null/undefined) ↔ 전용(currentChannelId)
+    const newChannelId = isCurrentlyPublic ? currentChannelId : null;
+
+    // 활성 채널이 없으면 전용으로 변경 불가
+    if (isCurrentlyPublic && !currentChannelId) {
+      return {
+        success: false,
+        error: '활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다.',
+      };
+    }
+
+    await update(scrapRef, { channelId: newChannelId });
+
+    // 캐시 초기화: 변경 직후 바로 재조회하면 최신 데이터가 나오도록 함
+    if (typeof scrapCache !== 'undefined') {
+      scrapCache.clear();
+      Logger.info('[toggleScrapSharing] scrapCache 초기화 완료');
+    }
+
+    return {
+      success: true,
+      newChannelId,
+      message: newChannelId === null ? '공용 스크랩으로 변경되었습니다.' : '전용 스크랩으로 변경되었습니다.',
+    };
+  } catch (error) {
+    Logger.error('[toggleScrapSharing] 오류:', error);
     return { success: false, error: error.message };
   }
 }

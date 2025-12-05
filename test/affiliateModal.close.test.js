@@ -6,6 +6,7 @@ jest.mock("../js/services/affiliateService.js", () => ({
   addAffiliateLink: jest.fn().mockResolvedValue({}),
   updateAffiliateLink: jest.fn().mockResolvedValue({}),
   deleteAffiliateLink: jest.fn().mockResolvedValue({}),
+  incrementAffiliateLinkClick: jest.fn().mockResolvedValue({ success: true, newClickCount: 1 }),
 }));
 
 describe("affiliateModal close behavior", () => {
@@ -88,5 +89,46 @@ describe("affiliateModal close behavior", () => {
     const img = preview.querySelector("img");
     expect(img).toBeTruthy();
     expect(img.src).toContain("example.com/img.jpg");
+  });
+
+  test("link open button opens link in new tab and increments click count", async () => {
+    // Mock window.open
+    const mockWindowOpen = jest.fn();
+    global.window.open = mockWindowOpen;
+
+    // Mock affiliateService to return a link
+    const mockGetAffiliateLinks = require("../js/services/affiliateService.js").getAffiliateLinks;
+    const mockIncrementClick = require("../js/services/affiliateService.js").incrementAffiliateLinkClick;
+    
+    mockGetAffiliateLinks.mockResolvedValueOnce([{
+      id: "test-link-1",
+      name: "Test Link",
+      url: "https://example.com",
+      platform: "General",
+      keywords: ["test"],
+      clickCount: 0,
+      createdAt: Date.now()
+    }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // wait for the async loadLinks to complete
+    await new Promise((r) => setTimeout(r, 0));
+
+    const openBtn = container.querySelector(".link-open-btn");
+    expect(openBtn).toBeTruthy();
+    expect(openBtn.title).toBe("링크 열기");
+
+    // Click the open button
+    openBtn.click();
+
+    // Should open link in new tab
+    expect(mockWindowOpen).toHaveBeenCalledWith("https://example.com", "_blank");
+
+    // Should increment click count
+    expect(mockIncrementClick).toHaveBeenCalledWith("test-link-1");
   });
 });

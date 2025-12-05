@@ -5,6 +5,7 @@ import {
   addAffiliateLink,
   updateAffiliateLink,
   deleteAffiliateLink,
+  incrementAffiliateLinkClick,
 } from '../services/affiliateService.js';
 
 import { showToast, Logger, debounce } from '../utils.js';
@@ -1458,6 +1459,7 @@ async function loadLinks(container) {
             <span class="link-platform">${platformName}</span>
           </div>
           <div class="link-actions">
+            <button class="link-open-btn" title="링크 열기">🔗</button>
             <button class="link-edit-btn" title="수정">✏️</button>
             <button class="link-delete-btn" title="삭제">🗑️</button>
           </div>
@@ -1481,6 +1483,35 @@ async function loadLinks(container) {
           )}</div>
         </div>
       `;
+
+      // 링크 열기 버튼 이벤트
+      const openBtn = item.querySelector('.link-open-btn');
+      if (openBtn) {
+        openBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            // 새 탭에서 링크 열기
+            window.open(link.url, '_blank');
+            
+            // 클릭 수 증가
+            await incrementAffiliateLinkClick(link.id);
+            
+            // UI 업데이트 (클릭 수 표시)
+            const clickCountEl = item.querySelector('.click-count');
+            if (clickCountEl) {
+              const newClickCount = (link.clickCount || 0) + 1;
+              clickCountEl.textContent = `클릭: ${newClickCount.toLocaleString()}`;
+            }
+            
+            showToast('🔗 링크가 열렸습니다.');
+          } catch (error) {
+            console.error('[AffiliateModal] 링크 열기 실패:', error);
+            // 클릭 수 증가 실패해도 링크는 열림
+            window.open(link.url, '_blank');
+            showToast('⚠️ 링크는 열렸지만 클릭 수 기록에 실패했습니다.');
+          }
+        });
+      }
 
       // 수정 버튼 이벤트
       const editBtn = item.querySelector('.link-edit-btn');
@@ -1514,11 +1545,12 @@ async function loadLinks(container) {
         });
       }
 
-      // 카드 클릭으로 수정 모드 (삭제 버튼 제외)
+      // 카드 클릭으로 수정 모드 (링크 열기/삭제 버튼 제외)
       item.addEventListener('click', (e) => {
         if (
           !e.target.classList.contains('link-delete-btn') &&
-          !e.target.classList.contains('link-edit-btn')
+          !e.target.classList.contains('link-edit-btn') &&
+          !e.target.classList.contains('link-open-btn')
         ) {
           openEditForm(container, link);
         }

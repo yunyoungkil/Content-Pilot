@@ -9,7 +9,8 @@ try {
 }
 
 // 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
-chrome.action.onClicked.addListener(async (tab) => {
+if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+  chrome.action.onClicked.addListener(async (tab) => {
   try {
     // 현재 탭에 content script 삽입
     await chrome.scripting.executeScript({
@@ -27,7 +28,8 @@ chrome.action.onClicked.addListener(async (tab) => {
   } catch (error) {
     Logger.error('[Background] Failed to activate Content Pilot:', error);
   }
-});
+  });
+}
 
 import {
   getDb,
@@ -186,7 +188,8 @@ const KANBAN_CACHE_TTL = 30 * 1000; // 30초 TTL
 Logger.info('🚀 [System] Service Worker Started (Lightweight Router)');
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
-chrome.action.onClicked.addListener((tab) => {
+if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+  chrome.action.onClicked.addListener((tab) => {
   if (tab.id) {
     chrome.tabs.sendMessage(
       tab.id,
@@ -211,7 +214,8 @@ chrome.action.onClicked.addListener((tab) => {
       }
     );
   }
-});
+  });
+}
 
 // 1. 알람 리스너 (스케줄러)
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -1163,6 +1167,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'get_kanban_data' || msg.action === 'get_all_kanban_data') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
 
         Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
         const dbRef = ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`);
@@ -1756,6 +1763,15 @@ if (msg.action === 'remove_scrap_image') {
   removeScrapImage(scrapId, imageUrl)
     .then(result => {
       console.log('[Background] 삭제 처리 결과:', result);
+      // Notify other extension contexts so UIs can refresh immediately
+      try {
+        // only broadcast when DB was actually updated
+        if (result && result.success && result.changed) {
+          chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
+        }
+      } catch (e) {
+        console.warn('[Background] 브로드캐스트 실패:', e.message);
+      }
       sendResponse(result);
     })
     .catch(error => {

@@ -270,21 +270,54 @@ export function extractContextualContent(element) {
  * @returns {string} 하이라이트가 적용된 HTML
  */
 export function applyHighlightsToHTML(text, highlights) {
-  if (!highlights || highlights.length === 0) {
-    return text;
+  if (!highlights || highlights.length === 0) return text;
+
+  // Normalize ranges and clamp to bounds. Ignore invalid ranges.
+  const len = text ? text.length : 0;
+  const ranges = (highlights || [])
+    .map((h) => {
+      const s = Number.isFinite(h.startIndex) ? h.startIndex : 0;
+      const e = Number.isFinite(h.endIndex)
+        ? h.endIndex
+        : Math.min(len, s + (h.text ? String(h.text).length : 0));
+      return {
+        startIndex: Math.max(0, Math.min(len, s)),
+        endIndex: Math.max(0, Math.min(len, e)),
+        score: Number.isFinite(h.score) ? h.score : 1,
+      };
+    })
+    .filter((r) => r.startIndex < r.endIndex);
+
+  if (ranges.length === 0) return text;
+
+  // Merge overlapping ranges to produce non-overlapping highlights
+  ranges.sort((a, b) => a.startIndex - b.startIndex);
+  const merged = [];
+  for (const r of ranges) {
+    if (merged.length === 0) {
+      merged.push({ ...r });
+      continue;
+    }
+    const last = merged[merged.length - 1];
+    if (r.startIndex <= last.endIndex) {
+      // overlap -> extend the previous segment
+      last.endIndex = Math.max(last.endIndex, r.endIndex);
+      last.score = Math.max(last.score, r.score);
+    } else {
+      merged.push({ ...r });
+    }
   }
 
-  // 인덱스 기준으로 정렬 (뒤에서부터 처리하여 인덱스 변경 방지)
-  const sortedHighlights = [...highlights].sort((a, b) => b.startIndex - a.startIndex);
-
-  let result = text;
-  sortedHighlights.forEach((highlight) => {
-    const before = result.substring(0, highlight.startIndex);
-    const highlighted = `<mark class="scrap-highlight" data-score="${highlight.score}">${highlight.text}</mark>`;
-    const after = result.substring(highlight.endIndex);
-    result = before + highlighted + after;
-  });
-
+  // Build final HTML using merged ranges (single pass)
+  let result = '';
+  let prev = 0;
+  for (const m of merged) {
+    result += text.substring(prev, m.startIndex);
+    const highlightedText = text.substring(m.startIndex, m.endIndex);
+    result += `<mark class="scrap-highlight" data-score="${m.score}">${highlightedText}</mark>`;
+    prev = m.endIndex;
+  }
+  result += text.substring(prev);
   return result;
 }
 

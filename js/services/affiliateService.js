@@ -133,3 +133,28 @@ export async function updateAffiliateLink(linkId, data) {
     throw error;
   }
 }
+
+/**
+ * 제휴 링크 클릭 수 증가
+ */
+export async function incrementAffiliateLinkClick(linkId) {
+  try {
+    const userId = await getCurrentUserId();
+    const path = `${DB_PATH}/${userId}/${linkId}/clickCount`;
+    
+    // 현재 클릭 수를 가져옴
+    const currentData = await dbRequest('GET', `${DB_PATH}/${userId}/${linkId}`);
+    const currentClickCount = (currentData && currentData.clickCount) || 0;
+    
+    // 클릭 수 증가
+    await dbRequest('PATCH', `${DB_PATH}/${userId}/${linkId}`, {
+      clickCount: currentClickCount + 1
+    });
+
+    Logger.debug(`[AffiliateService] 링크 클릭 수 증가: ${linkId} (${currentClickCount + 1})`);
+    return { success: true, newClickCount: currentClickCount + 1 };
+  } catch (error) {
+    Logger.error('[AffiliateService] 링크 클릭 수 증가 실패:', error);
+    throw error;
+  }
+}

@@ -13,6 +13,9 @@ export function setupHighlighter() {
   let isScrapingActive = false;
   let highlightToggleState = true; // 기본적으로 활성화
 
+  // save handler refs so tests can clean up and avoid duplicate listeners
+  if (!window.__pilotHighlightHandlerRefs) window.__pilotHighlightHandlerRefs = {};
+
   // 헬퍼 함수: 하이라이트 제거
   function clearHighlight() {
     if (lastHighlightedElement) {
@@ -29,7 +32,7 @@ export function setupHighlighter() {
   });
 
   // chrome.storage.onChanged 리스너로 상태 동기화
-  chrome.storage.onChanged.addListener((changes, namespace) => {
+  const _storageOnChangedListener = (changes, namespace) => {
     if (namespace === 'local') {
       if (changes.isScrapingActive) {
         isScrapingActive =
@@ -44,23 +47,21 @@ export function setupHighlighter() {
             : true;
       }
     }
-  });
+  };
+  chrome.storage.onChanged.addListener(_storageOnChangedListener);
+  window.__pilotHighlightHandlerRefs.storageListener = _storageOnChangedListener;
 
-  document.addEventListener(
-    'mouseout',
-    (e) => {
-      // relatedTarget이 null이면 마우스가 창(프레임) 밖으로 나갔다는 의미입니다.
-      if (e.relatedTarget === null) {
-        clearHighlight();
-      }
-    },
-    true
-  );
+  const _mouseoutHandler = (e) => {
+    // relatedTarget이 null이면 마우스가 창(프레임) 밖으로 나갔다는 의미입니다.
+    if (e.relatedTarget === null) {
+      clearHighlight();
+    }
+  };
+  document.addEventListener('mouseout', _mouseoutHandler, true);
+  window.__pilotHighlightHandlerRefs.mouseout = _mouseoutHandler;
 
   // 1. 하이라이트 표시 (mouseover) - 로컬 변수만 참조 (성능 최적화)
-  document.addEventListener(
-    'mouseover',
-    function (e) {
+  const _mouseoverHandler = function (e) {
       // 로컬 변수만 참조하여 비동기 IPC 호출 제거
       if (isScrapingActive && highlightToggleState) {
         const target = e.target;
@@ -75,20 +76,20 @@ export function setupHighlighter() {
           lastHighlightedElement = target;
         }
       }
-    },
-    true
-  );
+  };
+  document.addEventListener('mouseover', _mouseoverHandler, true);
+  window.__pilotHighlightHandlerRefs.mouseover = _mouseoverHandler;
 
   // 2. Alt 키를 떼거나 창 포커스를 잃으면 하이라이트 제거
-  document.addEventListener(
-    'keyup',
-    (e) => {
-      if (e.key === 'Alt') clearHighlight();
-    },
-    true
-  );
+  const _keyupHandler = (e) => {
+    if (e.key === 'Alt') clearHighlight();
+  };
+  document.addEventListener('keyup', _keyupHandler, true);
+  window.__pilotHighlightHandlerRefs.keyup = _keyupHandler;
 
-  window.addEventListener('blur', clearHighlight, true);
+  const _blurHandler = () => clearHighlight();
+  window.addEventListener('blur', _blurHandler, true);
+  window.__pilotHighlightHandlerRefs.blur = _blurHandler;
 
   // 스크랩 저장 모달 인라인 구현 (chunk 로딩 오류 방지)
   function showScrapSaveModalInline(scrapData, activeChannelId, activeChannelName) {
@@ -272,9 +273,7 @@ export function setupHighlighter() {
   }
 
   // 3. 스크랩 실행 (click)
-  document.addEventListener(
-    'click',
-    function (e) {
+  const _clickHandler = function (e) {
       // isScrapingActive와 highlightToggleState 값을 모두 가져옴
       chrome.storage.local.get(['isScrapingActive', 'highlightToggleState'], function (result) {
         // !e.altKey 대신 !result.highlightToggleState를 확인
@@ -383,7 +382,27 @@ export function setupHighlighter() {
 
         clearHighlight();
       });
-    },
-    true
-  );
+  };
+  document.addEventListener('click', _clickHandler, true);
+  window.__pilotHighlightHandlerRefs.click = _clickHandler;
+}
+
+// Test helper: remove listeners and reset init flag so tests can re-initialize safely
+export function resetHighlighterForTests() {
+  try {
+    const refs = window.__pilotHighlightHandlerRefs;
+    if (refs) {
+      if (refs.mouseout) document.removeEventListener('mouseout', refs.mouseout, true);
+      if (refs.mouseover) document.removeEventListener('mouseover', refs.mouseover, true);
+      if (refs.keyup) document.removeEventListener('keyup', refs.keyup, true);
+      if (refs.blur) window.removeEventListener('blur', refs.blur, true);
+      if (refs.click) document.removeEventListener('click', refs.click, true);
+      if (refs.storageListener && chrome && chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.removeListener)
+        chrome.storage.onChanged.removeListener(refs.storageListener);
+      delete window.__pilotHighlightHandlerRefs;
+    }
+  } catch (err) {
+    // swallow in tests
+  }
+  window.__pilotHighlightInitialized = false;
 }
