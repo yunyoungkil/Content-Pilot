@@ -9,6 +9,10 @@ jest.mock("../js/services/affiliateService.js", () => ({
   incrementAffiliateLinkClick: jest.fn().mockResolvedValue({ success: true, newClickCount: 1 }),
 }));
 
+jest.mock("../js/services/kanbanService.js", () => ({
+  addIdeaToKanban: jest.fn().mockResolvedValue({ success: true }),
+}));
+
 describe("affiliateModal close behavior", () => {
   test("clicking header close button hides modal", async () => {
     const container = document.createElement("div");
@@ -130,5 +134,65 @@ describe("affiliateModal close behavior", () => {
 
     // Should increment click count
     expect(mockIncrementClick).toHaveBeenCalledWith("test-link-1");
+  });
+
+  test("idea add button converts affiliate link to idea and adds to kanban", async () => {
+    const mockAddIdeaToKanban = require("../js/services/kanbanService.js").addIdeaToKanban;
+    const mockGetAffiliateLinks = require("../js/services/affiliateService.js").getAffiliateLinks;
+    
+    mockGetAffiliateLinks.mockResolvedValueOnce([{
+      id: "test-link-1",
+      name: "Test Product",
+      url: "https://example.com",
+      platform: "Coupang",
+      keywords: ["test", "product"],
+      clickCount: 0,
+      createdAt: Date.now(),
+      cardData: {
+        productName: "Test Product Name",
+        salePrice: 10000,
+        originalPrice: 12000,
+        discountRate: 17,
+        rating: 4.5,
+        reviewCount: 100
+      }
+    }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // wait for the async loadLinks to complete
+    await new Promise((r) => setTimeout(r, 0));
+
+    const ideaBtn = container.querySelector(".link-idea-btn");
+    expect(ideaBtn).toBeTruthy();
+    expect(ideaBtn.title).toBe("아이디어로 추가 (Shift+클릭으로 템플릿 선택)");
+
+    // Click the idea add button
+    ideaBtn.click();
+
+    // Should call addIdeaToKanban with converted idea data
+    expect(mockAddIdeaToKanban).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Test Product",
+        description: expect.stringContaining("제휴 링크: Coupang"),
+        tags: ["test", "product"],
+        url: "https://example.com",
+        publishedUrl: "https://example.com",
+        origin: expect.objectContaining({
+          type: 'affiliate_link',
+          platform: 'Coupang',
+          affiliateLinkId: 'test-link-1'
+        }),
+        affiliateData: expect.objectContaining({
+          platform: 'Coupang',
+          salePrice: 10000,
+          originalPrice: 12000,
+          discountRate: 17
+        })
+      })
+    );
   });
 });

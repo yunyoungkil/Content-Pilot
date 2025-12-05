@@ -41,6 +41,14 @@ describe('Background Message Handlers', () => {
       uploadImageToFirebaseStorage: jest.fn(),
       cleanDataForFirebase: jest.fn(),
     }));
+
+    // authService.restoreAuthSession을 테스트에서 무시하도록 모킹해서 import 시 불필요한 로그를 억제
+    jest.doMock('../js/services/authService.js', () => ({
+      restoreAuthSession: jest.fn().mockResolvedValue(null),
+      getValidToken: jest.fn(),
+      startGoogleAuth: jest.fn(),
+      revokeGoogleAuth: jest.fn(),
+    }));
   });
 
   afterEach(() => {

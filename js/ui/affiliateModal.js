@@ -1552,8 +1552,23 @@ async function loadLinks(container) {
           };
 
           if (useTemplateSelector) {
+            // 메인 모달을 완전히 숨겨서 stacking/context 충돌을 피함
+            const mainModal = document.querySelector('#affiliate-modal');
+            let originalDisplay = '';
+            if (mainModal) {
+              // 저장된 인라인 display 값 복원 위해 보관
+              originalDisplay = mainModal.style.display;
+              mainModal.style.display = 'none';
+            }
+
             // 템플릿 선택 UI 표시
             const templateResult = await showIdeaTemplateSelector(container, link);
+
+            // 메인 모달의 display 복원
+            if (mainModal) {
+              mainModal.style.display = originalDisplay;
+            }
+
             if (!templateResult) return; // 취소됨
             selectedTemplate = templateResult;
           }
@@ -1933,14 +1948,17 @@ function showIdeaTemplateSelector(container, link) {
       <div id="template-selector-modal" class="cp-modal-wrap">
         <div class="cp-modal-backdrop"></div>
         <div class="cp-modal template-selector-modal">
-          <div class="cp-modal-header">
-            <div class="cp-modal-title">
+            <div class="cp-modal-header affiliate-modal-header">
+              <div class="cp-modal-title cp-modal-title--affiliate">
               <span class="template-icon">💡</span>
               아이디어 템플릿 선택
             </div>
-            <div class="cp-modal-title-subtitle">
+              <div class="cp-modal-title-subtitle">
               "${link.name}"을(를) 어떤 콘텐츠로 만들까요?
             </div>
+              <div class="affiliate-modal-actions">
+                <button class="cp-modal-close affiliate-close-btn" title="닫기">×</button>
+              </div>
           </div>
 
           <div class="cp-modal-body template-selector-body">
@@ -1965,13 +1983,72 @@ function showIdeaTemplateSelector(container, link) {
       </div>
     `;
 
-    // 모달 추가
-    container.insertAdjacentHTML('beforeend', modalHTML);
-    const modal = container.querySelector('#template-selector-modal');
+    // 모달 추가: 최상단 포털 컨테이너에 삽입하여 어떤 부모 stacking-context에도 영향받지 않게 함
+    let portal = document.querySelector('#cp-modal-portal');
+    if (!portal) {
+      portal = document.createElement('div');
+      portal.id = 'cp-modal-portal';
+      // 포털이 다른 요소보다 무조건 위에 오도록 초기 스타일 지정
+      portal.style.position = 'fixed';
+      portal.style.inset = '0';
+      portal.style.zIndex = '10000000000';
+      portal.style.pointerEvents = 'none'; // 기본적으로 이벤트는 하위 모달에 전달되지 않음
+      document.body.appendChild(portal);
+    }
+
+    // 포털에 모달 삽입
+    portal.insertAdjacentHTML('beforeend', modalHTML);
+    const modal = portal.querySelector('#template-selector-modal');
+
+    // 강제로 z-index 설정 (CSS가 제대로 적용되지 않을 경우를 대비)
+    if (modal) {
+      // 강제 inline 스타일로 우선 적용 - 스타일시트 우선순위/로딩 순서 충돌을 우회
+      modal.style.zIndex = '10000000000';
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100vw';
+      modal.style.height = '100vh';
+      modal.style.pointerEvents = 'auto'; // 포털 자체는 none, 모달은 상호작용 가능
+
+      const backdrop = modal.querySelector('.cp-modal-backdrop');
+      if (backdrop) {
+        backdrop.style.zIndex = '9999999998';
+        backdrop.style.position = 'fixed';
+        backdrop.style.inset = '0';
+        backdrop.style.background = 'rgba(0,0,0,0.6)';
+        backdrop.style.pointerEvents = 'auto';
+      }
+
+      const modalContent = modal.querySelector('.cp-modal');
+      if (modalContent) {
+        // ensure modal content is fixed+centered and above backdrop
+        modalContent.style.position = 'fixed';
+        modalContent.style.top = '50%';
+        modalContent.style.left = '50%';
+        modalContent.style.transform = 'translate(-50%, -50%)';
+        modalContent.style.zIndex = '10000000000';
+        modalContent.style.pointerEvents = 'auto';
+        modalContent.style.maxWidth = 'calc(100vw - 48px)';
+        modalContent.style.boxShadow = '0 20px 60px rgba(0,0,0,0.45)';
+      }
+      // 개발/디버깅용: 현재 연관 모달과 템플릿 모달의 계산된 z-index 확인
+      try {
+        const computedTpl = modal.querySelector('.cp-modal')
+          ? window.getComputedStyle(modal.querySelector('.cp-modal')).zIndex
+          : 'n/a';
+        const affiliate = document.querySelector('#affiliate-modal');
+        const computedAff = affiliate ? window.getComputedStyle(affiliate).zIndex : 'n/a';
+        console.debug('[AffiliateModal] computed z-index - template:', computedTpl, 'affiliate:', computedAff);
+      } catch (e) {
+        console.debug('[AffiliateModal] computed z-index check failed', e && e.message);
+      }
+    }
 
     // 이벤트 리스너
     const templateCards = modal.querySelectorAll('.template-card');
     const cancelBtn = modal.querySelector('.template-cancel-btn');
+    const closeBtn = modal.querySelector('.cp-modal-close');
 
     // 템플릿 선택
     templateCards.forEach(card => {
@@ -1982,6 +2059,14 @@ function showIdeaTemplateSelector(container, link) {
         resolve(selectedTemplate);
       });
     });
+
+    // 닫기 버튼
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        modal.remove();
+        resolve(null);
+      });
+    }
 
     // 취소
     cancelBtn.addEventListener('click', () => {
