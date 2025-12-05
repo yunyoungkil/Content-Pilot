@@ -8,6 +8,8 @@ import {
   incrementAffiliateLinkClick,
 } from '../services/affiliateService.js';
 
+import { addIdeaToKanban } from '../services/kanbanService.js';
+
 import { showToast, Logger, debounce } from '../utils.js';
 
 let currentLinks = [];
@@ -164,7 +166,7 @@ export function renderAffiliateModal(container) {
                   <label for="aff-url" class="affiliate-form-label required">제휴 링크 URL</label>
                   <input type="url" id="aff-url" class="affiliate-form-input" placeholder="https://link.coupang.com/...">
                   <div class="form-help-text">제휴 프로그램에서 제공받은 추적 링크를 입력하세요.</div>
-
+                </div>
                 <div class="affiliate-form-group">
                   <label class="affiliate-form-label">자동 매칭 키워드</label>
                   <div class="affiliate-keyword-container">
@@ -1460,6 +1462,7 @@ async function loadLinks(container) {
           </div>
           <div class="link-actions">
             <button class="link-open-btn" title="링크 열기">🔗</button>
+            <button class="link-idea-btn" title="아이디어로 추가 (Shift+클릭으로 템플릿 선택)">💡</button>
             <button class="link-edit-btn" title="수정">✏️</button>
             <button class="link-delete-btn" title="삭제">🗑️</button>
           </div>
@@ -1489,26 +1492,97 @@ async function loadLinks(container) {
       if (openBtn) {
         openBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
+
+          // 버튼 비활성화 (중복 클릭 방지)
+          openBtn.disabled = true;
+          openBtn.textContent = '🔗 열기 중...';
+
           try {
-            // 새 탭에서 링크 열기
+            // 새 탭에서 링크 열기 (먼저 실행)
             window.open(link.url, '_blank');
-            
-            // 클릭 수 증가
-            await incrementAffiliateLinkClick(link.id);
-            
-            // UI 업데이트 (클릭 수 표시)
-            const clickCountEl = item.querySelector('.click-count');
-            if (clickCountEl) {
-              const newClickCount = (link.clickCount || 0) + 1;
-              clickCountEl.textContent = `클릭: ${newClickCount.toLocaleString()}`;
+
+            // 클릭 수 증가 시도
+            const clickResult = await incrementAffiliateLinkClick(link.id);
+
+            if (clickResult.success) {
+              // UI 업데이트 (클릭 수 표시)
+              const clickCountEl = item.querySelector('.click-count');
+              if (clickCountEl) {
+                clickCountEl.textContent = `클릭: ${clickResult.newClickCount.toLocaleString()}`;
+              }
+              showToast('🔗 링크가 열렸습니다.');
+            } else {
+              // 클릭 수 증가 실패
+              showToast('⚠️ 링크는 열렸지만 클릭 수 기록에 실패했습니다.');
             }
-            
-            showToast('🔗 링크가 열렸습니다.');
+
           } catch (error) {
-            console.error('[AffiliateModal] 링크 열기 실패:', error);
-            // 클릭 수 증가 실패해도 링크는 열림
-            window.open(link.url, '_blank');
-            showToast('⚠️ 링크는 열렸지만 클릭 수 기록에 실패했습니다.');
+            console.error('[AffiliateModal] 링크 열기/클릭 수 증가 실패:', error);
+
+            // 링크는 이미 열렸으므로 사용자에게 상황 설명
+            if (error.message?.includes('네트워크 오류')) {
+              showToast('⚠️ 링크는 열렸지만 네트워크 문제로 클릭 수를 저장할 수 없습니다.');
+            } else if (error.message?.includes('링크를 찾을 수 없습니다')) {
+              showToast('⚠️ 링크는 열렸지만 해당 링크 정보를 찾을 수 없습니다.');
+            } else {
+              showToast('⚠️ 링크는 열렸지만 클릭 수 기록 중 오류가 발생했습니다.');
+            }
+          } finally {
+            // 버튼 상태 복원
+            openBtn.disabled = false;
+            openBtn.textContent = '🔗';
+          }
+        });
+      }
+
+      // 아이디어 추가 버튼 이벤트
+      const ideaBtn = item.querySelector('.link-idea-btn');
+      if (ideaBtn) {
+        ideaBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+
+          // Shift+클릭 시 템플릿 선택 UI 표시
+          const useTemplateSelector = e.shiftKey;
+
+          let selectedTemplate = {
+            id: 'basic',
+            name: '기본 템플릿',
+            type: 'basic',
+            description: '제휴 링크 정보를 기본 형식으로 변환'
+          };
+
+          if (useTemplateSelector) {
+            // 템플릿 선택 UI 표시
+            const templateResult = await showIdeaTemplateSelector(container, link);
+            if (!templateResult) return; // 취소됨
+            selectedTemplate = templateResult;
+          }
+
+          // 버튼 비활성화 (중복 클릭 방지)
+          ideaBtn.disabled = true;
+          ideaBtn.textContent = '💡 추가 중...';
+
+          try {
+            // 선택된 템플릿으로 제휴 링크를 아이디어 데이터로 변환
+            const ideaData = convertAffiliateLinkToIdeaWithTemplate(link, selectedTemplate);
+
+            // 칸반에 아이디어 추가
+            const result = await addIdeaToKanban(ideaData);
+
+            if (result.success) {
+              const templateMsg = useTemplateSelector ? ` ${selectedTemplate.name} 템플릿으로` : '';
+              showToast(`💡 "${link.name}"이(가)${templateMsg} 아이디어로 추가되었습니다!`);
+            } else {
+              showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
+            }
+
+          } catch (error) {
+            console.error('[AffiliateModal] 아이디어 추가 실패:', error);
+            showToast('❌ 아이디어 추가 중 오류가 발생했습니다.');
+          } finally {
+            // 버튼 상태 복원
+            ideaBtn.disabled = false;
+            ideaBtn.textContent = '💡';
           }
         });
       }
@@ -1545,12 +1619,13 @@ async function loadLinks(container) {
         });
       }
 
-      // 카드 클릭으로 수정 모드 (링크 열기/삭제 버튼 제외)
+      // 카드 클릭으로 수정 모드 (링크 열기/아이디어 추가/삭제 버튼 제외)
       item.addEventListener('click', (e) => {
         if (
           !e.target.classList.contains('link-delete-btn') &&
           !e.target.classList.contains('link-edit-btn') &&
-          !e.target.classList.contains('link-open-btn')
+          !e.target.classList.contains('link-open-btn') &&
+          !e.target.classList.contains('link-idea-btn')
         ) {
           openEditForm(container, link);
         }
@@ -1628,4 +1703,296 @@ function openEditForm(container, link) {
 
   // 폼이 열리면 상품명 입력창에 포커스
   if (nameInput) setTimeout(() => nameInput.focus(), 100);
+}
+
+/**
+ * 제휴 링크를 아이디어 카드로 변환
+ * @param {Object} link - 제휴 링크 데이터
+ * @returns {Object} 아이디어 카드 데이터
+ */
+function convertAffiliateLinkToIdea(link) {
+  const cardData = link.cardData || {};
+
+  return {
+    title: link.name,
+    description: `제휴 링크: ${link.platform} - ${cardData.productName || link.name}
+
+가격: ${cardData.salePrice ? cardData.salePrice.toLocaleString() + '원' : '정보 없음'}
+${cardData.originalPrice ? `원가: ${cardData.originalPrice.toLocaleString()}원` : ''}
+${cardData.discountRate ? `할인율: ${cardData.discountRate}%` : ''}
+키워드: ${link.keywords?.join(', ') || '없음'}
+
+${cardData.rating ? `별점: ${cardData.rating}/5` : ''}
+${cardData.reviewCount ? `리뷰: ${cardData.reviewCount.toLocaleString()}개` : ''}
+
+원본 링크: ${link.url}`,
+    tags: link.keywords || [],
+    url: link.url,
+    publishedUrl: link.url,
+    origin: {
+      type: 'affiliate_link',
+      platform: link.platform,
+      affiliateLinkId: link.id,
+      createdAt: link.createdAt
+    },
+    affiliateData: {
+      platform: link.platform,
+      originalPrice: cardData.originalPrice,
+      salePrice: cardData.salePrice,
+      discountRate: cardData.discountRate,
+      imageUrl: cardData.imageUrl,
+      rating: cardData.rating,
+      reviewCount: cardData.reviewCount,
+      isRocket: cardData.isRocket,
+      badges: cardData.badges,
+      insertMode: cardData.insertMode
+    }
+  };
+}
+
+/**
+ * 제휴 링크를 아이디어 카드로 변환 (템플릿 선택 기능 추가)
+ * @param {Object} link - 제휴 링크 데이터
+ * @param {Object} template - 선택된 템플릿
+ * @returns {Object} 아이디어 카드 데이터
+ */
+function convertAffiliateLinkToIdeaWithTemplate(link, template) {
+  const cardData = link.cardData || {};
+  const baseData = convertAffiliateLinkToIdea(link);
+
+  // 템플릿별 description 생성
+  let templateDescription = '';
+
+  switch (template.id) {
+    case 'product-review':
+      templateDescription = generateProductReviewTemplate(link, cardData);
+      break;
+    case 'advertisement':
+      templateDescription = generateAdvertisementTemplate(link, cardData);
+      break;
+    case 'comparison':
+      templateDescription = generateComparisonTemplate(link, cardData);
+      break;
+    default:
+      templateDescription = baseData.description;
+  }
+
+  return {
+    ...baseData,
+    title: template.titlePrefix ? `${template.titlePrefix} ${link.name}` : link.name,
+    description: templateDescription,
+    tags: [...(baseData.tags || []), ...(template.defaultTags || [])],
+    template: {
+      id: template.id,
+      name: template.name,
+      type: template.type
+    }
+  };
+}
+
+/**
+ * 제품 리뷰 템플릿 생성
+ */
+function generateProductReviewTemplate(link, cardData) {
+  return `📝 제품 리뷰 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+${cardData.originalPrice ? `원가: ${cardData.originalPrice.toLocaleString()}원` : ''}
+${cardData.discountRate ? `할인율: ${cardData.discountRate}%` : ''}
+
+리뷰 포인트:
+• 외관 및 디자인
+• 성능 및 기능
+• 장단점 분석
+• 추천 대상
+• 총평 및 별점 (${cardData.rating || 'N/A'}/5)
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 솔직한 사용 후기
+- 장단점 비교
+- 구매 가이드 제공
+- 시각적 리뷰 강조`;
+}
+
+/**
+ * 광고 콘텐츠 템플릿 생성
+ */
+function generateAdvertisementTemplate(link, cardData) {
+  return `📢 광고 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+${cardData.discountRate ? `할인 혜택: ${cardData.discountRate}% OFF` : ''}
+
+광고 포인트:
+• 제품의 핵심 가치 제안
+• 시각적으로 매력적인 요소 강조
+• 구매 유도 문구
+• 신뢰할 수 있는 증거 제시
+• 긴급성 또는 희소성 강조
+
+타겟 오디언스: ${link.keywords?.join(', ') || '일반 소비자'}
+CTA (Call-to-Action): 지금 바로 구매하기
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 감성적 어필
+- 시각적 임팩트
+- 구매 동기 부여
+- 브랜드 스토리텔링`;
+}
+
+/**
+ * 비교 콘텐츠 템플릿 생성
+ */
+function generateComparisonTemplate(link, cardData) {
+  return `⚖️ 비교 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+
+비교 분석 포인트:
+• 가격 대비 성능
+• 주요 특징 비교
+• 장단점 대조
+• 사용자 리뷰 분석
+• 추천도 평가
+
+비교 대상 제안:
+• 동일 카테고리 내 경쟁 제품
+• 이전 버전과의 차이점
+• 비슷한 가격대의 대안 제품
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 객관적 데이터 기반
+- 시각적 비교표 활용
+- 결론과 추천 제시
+- 사용자 선택 가이드`;
+}
+
+/**
+ * 아이디어 템플릿 선택 UI 표시
+ * @param {HTMLElement} container - 모달 컨테이너
+ * @param {Object} link - 제휴 링크 데이터
+ * @returns {Promise<Object|null>} 선택된 템플릿 또는 null (취소)
+ */
+function showIdeaTemplateSelector(container, link) {
+  return new Promise((resolve) => {
+    // 템플릿 옵션들
+    const templates = [
+      {
+        id: 'basic',
+        name: '기본 템플릿',
+        type: 'basic',
+        description: '제휴 링크 정보를 기본 형식으로 변환',
+        icon: '📄'
+      },
+      {
+        id: 'product-review',
+        name: '제품 리뷰',
+        type: 'content',
+        titlePrefix: '[리뷰]',
+        defaultTags: ['리뷰', '사용후기'],
+        description: '제품 사용 후기 및 평가 콘텐츠',
+        icon: '📝'
+      },
+      {
+        id: 'advertisement',
+        name: '광고 콘텐츠',
+        type: 'marketing',
+        titlePrefix: '[광고]',
+        defaultTags: ['광고', '마케팅'],
+        description: '제품 홍보 및 판매 촉진 콘텐츠',
+        icon: '📢'
+      },
+      {
+        id: 'comparison',
+        name: '비교 콘텐츠',
+        type: 'analysis',
+        titlePrefix: '[비교]',
+        defaultTags: ['비교', '분석'],
+        description: '제품 비교 및 분석 콘텐츠',
+        icon: '⚖️'
+      }
+    ];
+
+    // 템플릿 선택 모달 HTML
+    const modalHTML = `
+      <div id="template-selector-modal" class="cp-modal-wrap">
+        <div class="cp-modal-backdrop"></div>
+        <div class="cp-modal template-selector-modal">
+          <div class="cp-modal-header">
+            <div class="cp-modal-title">
+              <span class="template-icon">💡</span>
+              아이디어 템플릿 선택
+            </div>
+            <div class="cp-modal-title-subtitle">
+              "${link.name}"을(를) 어떤 콘텐츠로 만들까요?
+            </div>
+          </div>
+
+          <div class="cp-modal-body template-selector-body">
+            <div class="template-grid">
+              ${templates.map(template => `
+                <div class="template-card" data-template-id="${template.id}">
+                  <div class="template-header">
+                    <span class="template-icon">${template.icon}</span>
+                    <h3 class="template-name">${template.name}</h3>
+                  </div>
+                  <p class="template-description">${template.description}</p>
+                  ${template.titlePrefix ? `<div class="template-preview">예: ${template.titlePrefix} ${link.name}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="cp-modal-footer template-selector-footer">
+            <button class="cp-btn cp-btn-secondary template-cancel-btn">취소</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 모달 추가
+    container.insertAdjacentHTML('beforeend', modalHTML);
+    const modal = container.querySelector('#template-selector-modal');
+
+    // 이벤트 리스너
+    const templateCards = modal.querySelectorAll('.template-card');
+    const cancelBtn = modal.querySelector('.template-cancel-btn');
+
+    // 템플릿 선택
+    templateCards.forEach(card => {
+      card.addEventListener('click', () => {
+        const templateId = card.dataset.templateId;
+        const selectedTemplate = templates.find(t => t.id === templateId);
+        modal.remove();
+        resolve(selectedTemplate);
+      });
+    });
+
+    // 취소
+    cancelBtn.addEventListener('click', () => {
+      modal.remove();
+      resolve(null);
+    });
+
+    // 배경 클릭으로 취소
+    modal.querySelector('.cp-modal-backdrop').addEventListener('click', () => {
+      modal.remove();
+      resolve(null);
+    });
+  });
 }
