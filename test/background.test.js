@@ -13,7 +13,8 @@ describe('Background Message Handlers', () => {
         onMessage: { addListener: jest.fn() },
         onConnect: { addListener: jest.fn() },
         onInstalled: { addListener: jest.fn() },
-        sendMessage: jest.fn(),
+        // make sendMessage return a Promise so callers using .catch() won't throw
+        sendMessage: jest.fn().mockResolvedValue({ success: true }),
         lastError: null,
       },
       storage: {
@@ -195,4 +196,83 @@ describe('Background Message Handlers', () => {
       expect(sendResponse).toHaveBeenCalledWith({ success: true, userId: mockedUserId });
     });
   });
+
+    describe('collector handlers (fetch_all_channel_data / refresh_channel_data / fetch_and_save_single_post / delete_channel)', () => {
+      test('should handle fetch_all_channel_data via fetchAllChannelData', async () => {
+        const mockFetchAll = jest.fn().mockResolvedValue({ success: true, count: 3 });
+        jest.doMock('../js/services/collectorService.js', () => ({
+          fetchAllChannelData: mockFetchAll,
+        }));
+
+        await import('../background.js');
+        const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+        const message = { action: 'fetch_all_channel_data' };
+        await runtimeHandler(message, {}, mockSendResponse);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(mockFetchAll).toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({ success: true, count: 3 });
+      });
+
+      test('should handle refresh_channel_data with source and platform', async () => {
+        const mockRefresh = jest.fn().mockResolvedValue({ success: true, refreshed: 1 });
+        jest.doMock('../js/services/collectorService.js', () => ({
+          refreshChannelData: mockRefresh,
+        }));
+
+        await import('../background.js');
+        const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+        const message = { action: 'refresh_channel_data', sourceId: 'source-x', platform: 'blogs' };
+        await runtimeHandler(message, {}, mockSendResponse);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(mockRefresh).toHaveBeenCalledWith('source-x', 'blogs');
+        expect(mockSendResponse).toHaveBeenCalledWith({ success: true, refreshed: 1 });
+      });
+
+      test('should handle fetch_and_save_single_post with url and ids', async () => {
+        const mockFetchSave = jest.fn().mockResolvedValue({ success: true, saved: true });
+        jest.doMock('../js/services/collectorService.js', () => ({
+          fetchAndSaveSinglePost: mockFetchSave,
+        }));
+
+        await import('../background.js');
+        const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+        const message = {
+          action: 'fetch_and_save_single_post',
+          url: 'https://example.com/post',
+          channelId: 'chan1',
+          sourceId: 'source1',
+        };
+
+        await runtimeHandler(message, {}, mockSendResponse);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(mockFetchSave).toHaveBeenCalledWith('https://example.com/post', 'chan1', 'source1');
+        expect(mockSendResponse).toHaveBeenCalledWith({ success: true, saved: true });
+      });
+
+      test('delete_channel should reject when user is default_user (not authenticated)', async () => {
+        // mock getCurrentUserId to return default_user to exercise unauthorized branch
+        jest.doMock('../js/services/firebaseService.js', () => ({
+          getUnifiedGalleryImages: jest.fn(),
+          getCurrentUserId: jest.fn().mockResolvedValue('default_user'),
+          getDb: jest.fn(),
+          CONSTANTS: { USER_ID: 'default_user' },
+          initializeFirebase: jest.fn(),
+        }));
+
+        await import('../background.js');
+        const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+        const message = { action: 'delete_channel', id: 'ch-1', url: 'https://channel' };
+        await runtimeHandler(message, {}, mockSendResponse);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(mockSendResponse).toHaveBeenCalledWith({ success: false, error: '로그인이 필요합니다.' });
+      });
+    });
 });
