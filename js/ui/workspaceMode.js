@@ -259,7 +259,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       tab.style.color = 'white';
 
       currentFilter = tab.dataset.filter;
-      renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+      loadUnifiedGallery(currentFilter);
     });
   });
 

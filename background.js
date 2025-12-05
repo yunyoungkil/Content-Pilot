@@ -36,6 +36,7 @@ import {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
+  getUnifiedGalleryImages,
 } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
@@ -1815,6 +1816,16 @@ if (msg.action === 'remove_scrap_image') {
               ? '공용 스크랩으로 변경되었습니다.'
               : '전용 스크랩으로 변경되었습니다.',
         };
+      })()
+    );
+  }
+
+  if (msg.action === 'get_unified_gallery') {
+    return handleAsync(
+      (async () => {
+        const filter = msg.filter || msg.data?.filter || 'ALL';
+        const images = await getUnifiedGalleryImages(filter);
+        return { success: true, images };
       })()
     );
   }
