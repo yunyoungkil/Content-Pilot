@@ -240,7 +240,10 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     // 태그 중복 제거
     tags = [...new Set(tags)];
 
-    const workspaceKeywords = tags.filter((t) => t !== '#AI-추천');
+    // 우선순위: AI가 추천한 검색어(recommendedSearches) 또는 recommendedKeywords를 사용
+    // 없으면 기존 태그/키워드를 사용
+    const workspaceKeywords =
+      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     // ▼▼▼ [중요] PRD v1.0에 따라 workspace 객체는 반드시 생성되어야 합니다.
@@ -252,10 +255,15 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
       channelId: channelId, // 👈 핵심: 채널 ID 저장 (없으면 null = 공용/미지정)
       tags: tags,
       origin: origin,
-      workspace: {
+        workspace: {
         // PRD v1.0 모델 - workspaceMode.js에서 필수로 사용
+        // keywords: 포스팅에 포함될 SEO 최적화 키워드를 우선으로 저장
         keywords: workspaceKeywords || [],
+        // 추천 목차: AI로 생성된 경우 ideaData.outline에 채워져 올 수 있음
         outline: ideaData.outline || ideaData.workspace?.outline || [],
+        // 추천 검색어 및 롱테일도 workspace에 보관하여 UI/작성 프롬프트에서 사용 가능
+        recommendedKeywords: ideaData.recommendedSearches || ideaData.recommendedKeywords || [],
+        longTailKeywords: ideaData.longTailKeywords || [],
         draft: ideaData.draft_content || ideaData.draft || ideaData.workspace?.draft || '',
         linkedScraps: ideaData.workspace?.linkedScraps || {},
       },
@@ -386,7 +394,8 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     // 태그 중복 제거
     tags = [...new Set(tags)];
 
-    const workspaceKeywords = tags.filter((t) => t !== '#AI-추천');
+    const workspaceKeywords =
+      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     const newCard = {
@@ -400,6 +409,8 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       workspace: {
         keywords: workspaceKeywords || [],
         outline: ideaData.outline || ideaData.workspace?.outline || [],
+        recommendedKeywords: ideaData.recommendedSearches || ideaData.recommendedKeywords || [],
+        longTailKeywords: ideaData.longTailKeywords || [],
         draft: ideaData.draft_content || ideaData.draft || ideaData.workspace?.draft || '',
         linkedScraps: ideaData.workspace?.linkedScraps || {},
       },
