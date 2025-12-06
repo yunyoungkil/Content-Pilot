@@ -514,14 +514,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(analyzeImageForTemplate(msg.data));
   if (msg.action === 'call_gemini')
     return handleAsync(callGeminiAPI(msg.prompt).then((text) => ({ success: true, text })));
-  if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, options } = msg;
-    return handleAsync(
-      generateIdeaBriefing(cardId, title, description, options)
-        .then(() => ({ success: true }))
-        .catch((error) => ({ success: false, error: error.message }))
-    );
-  }
   if (msg.action === 'analyze_my_channel') return handleAsync(analyzeMyChannel(msg.data));
   if (msg.action === 'generate_content_ideas') return handleAsync(generateContentIdeas(msg.data));
   if (msg.action === 'request_search_keywords')

@@ -460,27 +460,19 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
           originType || 'undefined'
         }, status: ${status}`
       );
-
-      // Background를 통해서 AI 브리핑 생성 (referer 문제 해결)
-      chrome.runtime.sendMessage({
-        action: 'generate_idea_briefing',
-        cardId: cardId,
-        title: ideaData.title,
-        description: ideaData.description || '',
-        options: {
-          status: status,
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-          generateMainKeywords: true,
-        }
-      }, (response) => {
-        if (response && response.success) {
+      generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
+        status: status,
+        generateOutline: true,
+        generateKeywords: true,
+        generateLongTail: true,
+        generateMainKeywords: true,
+      })
+        .then(() => {
           Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        } else {
-          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', response?.error || 'Unknown error');
-        }
-      });
+        })
+        .catch((error) => {
+          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', error);
+        });
     } else {
       Logger.debug(
         `[addIdeaToKanban] AI 브리핑 자동 생성 건너뜀 - originType: ${
