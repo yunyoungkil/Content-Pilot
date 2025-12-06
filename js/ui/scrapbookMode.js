@@ -845,7 +845,11 @@ function renderDetailView(scrapId, container) {
           const clean = u.replace(/&amp;/g, '&');
           const parsed = new URL(clean);
           let p = parsed.pathname || '';
-          try { p = decodeURIComponent(p); } catch (e) {}
+          try {
+            p = decodeURIComponent(p);
+          } catch (e) {
+            // Use encoded pathname if decoding fails
+          }
           return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
         } catch (e) {
           return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
@@ -860,7 +864,9 @@ function renderDetailView(scrapId, container) {
         if (targetScrap.image) originList.push(targetScrap.image);
         if (Array.isArray(targetScrap.allImages)) originList.push(...targetScrap.allImages);
         if (Array.isArray(targetScrap.images)) originList.push(...targetScrap.images);
-        const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(imageUrl));
+        const matched = originList.find(
+          (o) => normalizeForMatch(o) === normalizeForMatch(imageUrl)
+        );
         if (matched) canonicalDeleteUrl = matched;
       }
 

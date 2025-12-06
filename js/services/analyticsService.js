@@ -633,7 +633,10 @@ export async function updateSinglePerformanceMetric(contentInfo) {
       // GA4 ID가 없어도 AdSense와 GSC 데이터는 수집
       // 사용자에게 GA4 설정을 안내하는 메시지 추가
       try {
-        await sendErrorToUI('GA4_MISSING', 'GA4 속성 ID가 설정되지 않아 조회수 데이터를 수집할 수 없습니다. 채널 설정에서 GA4 Property ID를 입력해주세요.');
+        await sendErrorToUI(
+          'GA4_MISSING',
+          'GA4 속성 ID가 설정되지 않아 조회수 데이터를 수집할 수 없습니다. 채널 설정에서 GA4 Property ID를 입력해주세요.'
+        );
       } catch (e) {
         Logger.warn('[updateSinglePerformanceMetric] GA4 설정 안내 메시지 전송 실패:', e);
       }

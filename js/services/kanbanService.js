@@ -270,7 +270,14 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     const newCardRef = push(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}/${targetStatus}`));
     const newCardKey = newCardRef.key;
     // Debug: Log origin and any thumbnail info before saving
-    try { console.log('[addIdeaToKanban DEBUG] Saving idea', { origin: newCard.origin, thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null }); } catch(e) {}
+    try {
+      console.log('[addIdeaToKanban DEBUG] Saving idea', {
+        origin: newCard.origin,
+        thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null,
+      });
+    } catch (e) {
+      console.debug('[KanbanService] Failed to log card creation:', e.message);
+    }
     await set(newCardRef, cleanDataForFirebase(newCard));
 
     // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)

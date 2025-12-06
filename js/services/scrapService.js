@@ -473,7 +473,10 @@ export async function toggleScrapSharing(scrapId, currentChannelId = null) {
     return {
       success: true,
       newChannelId,
-      message: newChannelId === null ? '공용 스크랩으로 변경되었습니다.' : '전용 스크랩으로 변경되었습니다.',
+      message:
+        newChannelId === null
+          ? '공용 스크랩으로 변경되었습니다.'
+          : '전용 스크랩으로 변경되었습니다.',
     };
   } catch (error) {
     Logger.error('[toggleScrapSharing] 오류:', error);

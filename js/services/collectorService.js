@@ -604,7 +604,6 @@ export async function fetchAllChannelData() {
       } catch (e) {
         Logger.debug('[fetchAllChannelData] chrome.tabs 쿼리/전송 실패:', e && e.message);
       }
-
     } catch (error) {
       Logger.error('[fetchAllChannelData] 수집 중 오류 발생:', error);
     }
@@ -651,26 +650,26 @@ export async function fetchImageAsBase64(url) {
       // background script를 통해 fetch (Service Worker에서는 더 나은 권한)
       const response = await chrome.runtime.sendMessage({
         action: 'fetch_image_as_base64',
-        url: url
+        url: url,
       });
-      
+
       if (response && response.success) {
         return { success: true, dataUrl: response.dataUrl };
       }
-      
+
       // 폴백: img 태그를 사용한 로딩 시도
       return await fetchImageViaImgTag(url);
     }
-    
+
     // 일반 이미지
     const res = await fetch(url, {
       mode: 'cors',
       credentials: 'omit',
-      cache: 'no-cache'
+      cache: 'no-cache',
     });
-    
+
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    
+
     const blob = await res.blob();
     const reader = new FileReader();
     return new Promise((resolve) => {
@@ -690,11 +689,11 @@ async function fetchImageViaImgTag(url) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    
+
     const timeout = setTimeout(() => {
       resolve({ success: false, error: 'Timeout' });
     }, 10000);
-    
+
     img.onload = () => {
       clearTimeout(timeout);
       try {
@@ -709,12 +708,12 @@ async function fetchImageViaImgTag(url) {
         resolve({ success: false, error: e.message });
       }
     };
-    
+
     img.onerror = () => {
       clearTimeout(timeout);
       resolve({ success: false, error: 'Image load failed' });
     };
-    
+
     img.src = url;
   });
 }
