@@ -126,6 +126,8 @@ nvm use 22
    npx webpack
    ```
 
+> 빌드 최적화: 빌드 과정에서 이미지(asset)를 자동 압축하도록 `image-minimizer-webpack-plugin`(imagemin)이 적용되었습니다. 최종 빌드 시 이미지 크기를 줄여 확장 프로그램 용량 및 로딩 부담을 완화합니다.
+
 5. **프로젝트 자동 빌드 (Build)**
 
    package.json
