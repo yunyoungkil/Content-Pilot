@@ -13,6 +13,15 @@ jest.mock("../js/services/kanbanService.js", () => ({
   addIdeaToKanban: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+// Mock AI service used by affiliateModal
+jest.mock('../js/services/aiService.js', () => ({
+  callGeminiAPI: jest.fn().mockResolvedValue(JSON.stringify({
+    recommendedSearches: ['seo-auto-1', 'seo-auto-2'],
+    longTailKeywords: ['seo-auto-long-1'],
+    outline: ['섹션 1', '섹션 2']
+  }))
+}));
+
 describe("affiliateModal close behavior", () => {
   test("clicking header close button hides modal", async () => {
     const container = document.createElement("div");
@@ -202,5 +211,102 @@ describe("affiliateModal close behavior", () => {
         template: expect.objectContaining({ id: 'product-review' })
       })
     );
+  });
+
+  test('AI generate and save stores recommendedSearches/longTail/outline and adds keywords', async () => {
+    const { addAffiliateLink, getAffiliateLinks } = require('../js/services/affiliateService.js');
+    const { callGeminiAPI } = require('../js/services/aiService.js');
+
+    // Make link list empty so we can open add-form
+    getAffiliateLinks.mockResolvedValueOnce([]);
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // open add form
+    const addBtn = container.querySelector('#btn-show-add-form');
+    expect(addBtn).toBeTruthy();
+    addBtn.click();
+
+    // Wait a tick
+    await new Promise((r) => setTimeout(r, 0));
+
+    const nameInput = container.querySelector('#aff-name');
+    const urlInput = container.querySelector('#aff-url');
+    const keywordInput = container.querySelector('#affiliate-keyword-input');
+    const aiBtn = container.querySelector('#btn-generate-seo');
+    const saveBtn = container.querySelector('#btn-save-link');
+
+    nameInput.value = 'AI Product';
+    urlInput.value = 'https://ai.example/item';
+
+    // Add one temp keyword via input and Enter
+    keywordInput.value = 'affiliate-key';
+    const enterEvent = new KeyboardEvent('keydown', { key: 'Enter' });
+    keywordInput.dispatchEvent(enterEvent);
+
+    // Click AI generate
+    expect(aiBtn).toBeTruthy();
+    aiBtn.click();
+
+    // wait for AI call
+    await new Promise((r) => setTimeout(r, 0));
+
+    // callGeminiAPI should have been called
+    expect(callGeminiAPI).toHaveBeenCalled();
+
+    // Now click save - addAffiliateLink should be called with SEO fields
+    await saveBtn.click();
+    // wait for async operations
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(addAffiliateLink).toHaveBeenCalled();
+    const payload = addAffiliateLink.mock.calls[0][0];
+    expect(payload.originalAffiliateKeywords).toEqual(['affiliate-key']);
+    expect(payload.recommendedSearches).toEqual(['seo-auto-1', 'seo-auto-2']);
+    expect(payload.longTailKeywords).toEqual(['seo-auto-long-1']);
+    expect(payload.outline).toEqual(['섹션 1', '섹션 2']);
+  });
+
+  test('convertAffiliateLinkToIdea prefers recommendedSearches for tags when adding idea', async () => {
+    const mockAddIdeaToKanban = require('../js/services/kanbanService.js').addIdeaToKanban;
+    const mockGetAffiliateLinks = require('../js/services/affiliateService.js').getAffiliateLinks;
+
+    mockGetAffiliateLinks.mockResolvedValueOnce([{
+      id: 'test-link-2',
+      platform: 'Coupang',
+      name: 'SEO Product',
+      url: 'https://example.com/product',
+      createdAt: Date.now(),
+      keywords: ['k1','k2'],
+      recommendedSearches: ['seoA','seoB'],
+      cardData: {
+        productName: 'SEO Product'
+      }
+    }]);
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const templateBtn = container.querySelector('.link-template-btn');
+    expect(templateBtn).toBeTruthy();
+    templateBtn.click();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const templateCard = document.body.querySelector('#template-selector-modal .template-card[data-template-id="product-review"]');
+    expect(templateCard).toBeTruthy();
+    templateCard.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockAddIdeaToKanban).toHaveBeenCalled();
+    const ideaArg = mockAddIdeaToKanban.mock.calls.pop()[0];
+    // tags should use recommendedSearches when present
+    expect(ideaArg.tags).toEqual(expect.arrayContaining(['seoA','seoB']));
   });
 });
