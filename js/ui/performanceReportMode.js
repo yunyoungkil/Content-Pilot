@@ -149,7 +149,31 @@ async function generatePerformanceReport(container) {
     // 데이터 로드 후 리포트 생성
     setTimeout(() => {
       if (allPerformanceData.length === 0) {
-        showToast('분석할 성과 데이터가 없습니다.', 'error');
+        const contentEl = container.querySelector('#perf-report-content');
+        contentEl.innerHTML = `
+          <div class="perf-no-data">
+            <div class="perf-report-icon">⚠️</div>
+            <h3>성과 데이터가 없습니다</h3>
+            <p>아직 성과 데이터를 수집하지 않았거나, GA4 설정이 필요할 수 있습니다.</p>
+            <div class="perf-setup-guide">
+              <h4>설정 확인사항:</h4>
+              <ul>
+                <li>채널 설정에서 GA4 Property ID가 입력되어 있는지 확인하세요</li>
+                <li>콘텐츠가 발행된 후 최소 24시간이 지났는지 확인하세요</li>
+                <li>Google Analytics에서 데이터가 수집되고 있는지 확인하세요</li>
+              </ul>
+              <button id="open-channel-settings-btn" class="perf-control-btn primary">채널 설정 열기</button>
+            </div>
+          </div>
+        `;
+        // 채널 설정 버튼 이벤트 추가
+        const settingsBtn = contentEl.querySelector('#open-channel-settings-btn');
+        if (settingsBtn) {
+          settingsBtn.addEventListener('click', () => {
+            // 채널 모드로 전환하는 이벤트 발생
+            window.dispatchEvent(new CustomEvent('switch-to-channel-mode'));
+          });
+        }
         return;
       }
       performAnalysis(container);

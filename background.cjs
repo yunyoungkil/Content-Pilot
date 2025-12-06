@@ -486,8 +486,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(Promise.reject(new Error('testAdSenseGa4Access: 아직 구현되지 않음')));
 
   // === [AI Service] 생성 및 분석 ===
-  if (msg.action === 'generate_draft_from_idea')
-    return handleAsync(generateDraftFromIdea(msg.data, msg.options || {}));
+  if (msg.action === 'generate_draft_from_idea') {
+    const opts = msg.options || {};
+    opts.onProgress = (p) => {
+      if (sender.tab?.id) {
+        chrome.tabs
+          .sendMessage(sender.tab.id, {
+            action: 'thumbnail_progress',
+            progress: p,
+            cardId: msg.data?.cardId || null,
+            message: p?.message || null,
+            step: p?.step || null,
+          })
+          .catch((err) => {
+            if (
+              err?.message &&
+              !err.message.includes('message port closed') &&
+              !err.message.includes('Could not establish connection')
+            ) {
+              Logger.debug('[sendMessage] thumbnail_progress 전송 실패:', err.message);
+            }
+          });
+      }
+    };
+    return handleAsync(generateDraftFromIdea(msg.data, opts));
+  }
   if (msg.action === 'generate_idea_briefing') {
     const { cardId, title, description, ...opts } = msg.data;
     opts.onProgress = (p) => {

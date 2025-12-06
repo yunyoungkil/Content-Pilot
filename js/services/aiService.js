@@ -25,8 +25,46 @@ import { AI_MODELS } from '../constants.js';
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
   try {
+    // First try background fetch via runtime message (helps bypass page CSP)
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const BG_FETCH_TIMEOUT_MS = 5000;
+        const bgMsgPromise = new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url }, (resp) => {
+              resolve(resp);
+            });
+          } catch (e) {
+            resolve(null);
+          }
+        });
+        const responseMsg = await Promise.race([
+          bgMsgPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)),
+        ]);
+        // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
+        if (responseMsg && responseMsg.success) {
+          try { console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url); } catch(e) {}
+          if (responseMsg.dataUrl) {
+            const m = responseMsg.dataUrl.match(/^data:(.+);base64,(.*)$/);
+            if (m) return { mimeType: m[1], data: m[2] };
+            return null;
+          }
+          if (responseMsg.data && responseMsg.mimeType) {
+            return { mimeType: responseMsg.mimeType, data: responseMsg.data };
+          }
+        }
+      } catch (e) {
+      Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
+      try { console.log('[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL', url); } catch(e) {}
+      }
+    }
+
+    Logger.debug('[fetchImageAsBase64] Falling back to fetch for URL:', url);
+    try { console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url); } catch(e) {}
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    try { console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url); } catch(e) {}
     const blob = await response.blob();
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -173,6 +211,8 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // Referer 제한 우회를 위한 헤더 (Chrome 확장에서는 제한적)
+        'Origin': 'chrome-extension://' + chrome.runtime.id,
       },
       // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
       body: JSON.stringify({
@@ -340,6 +380,7 @@ export async function enhanceDraftWithFeatures({
   ideaData = {},
   jsonLdSchema = null,
   formattedDraft = '',
+  onProgress = null,
 } = {}) {
   let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null;
   let thumbnailGenerationPartialFailure = false;
@@ -354,21 +395,38 @@ export async function enhanceDraftWithFeatures({
       type: selectedThumbnail.type,
       permalink: permalink.substring(0, 30),
     });
+    // Emit progress: thumbnail generation started
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' }); } catch(e) {}
 
     // Image source selection
     let generatedImages = [];
     let isProductSynthesis = false;
 
-    const productLink = Array.isArray(affiliateLinks)
-      ? affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl)
-      : null;
+    let productLink = null;
+    if (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+      // Prefer exact affiliate link if provided in ideaData.origin
+      productLink = (ideaData?.origin?.affiliateLinkId
+        ? affiliateLinks.find((l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl)
+        : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
+    }
+    if (productLink) {
+      const reason = (ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId) ? 'origin_match' : 'best_candidate';
+      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', { id: productLink.id, url: productLink.url, reason });
+      try { console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', { id: productLink.id, url: productLink.url, reason }); } catch(e) {}
+    } else {
+      Logger.info('[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)');
+      try { console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected'); } catch(e) {}
+    }
 
     if (productLink) {
+      try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis', progress: 55, message: '상품 이미지 합성 시작...' }); } catch(e) {}
       const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
       if (productBase64) {
         const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
           generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+          Logger.info('[enhanceDraftWithFeatures] product synthesis images count:', generatedImages.length);
+          try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis_complete', progress: 70, message: '상품 합성 이미지 생성 완료' }); } catch(e) {}
           isProductSynthesis = true;
         } catch (err) {
           Logger.warn(
@@ -397,10 +455,14 @@ export async function enhanceDraftWithFeatures({
       }
 
       // 수정된 프롬프트로 이미지 생성 요청
+      try { console.log('[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt', finalImagePrompt); } catch(e) {}
       generatedImages = await generateAiImage(finalImagePrompt, 1);
+      try { console.log('[enhanceDraftWithFeatures DEBUG] generateAiImage returned:', Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages); } catch(e) {}
+      Logger.info('[enhanceDraftWithFeatures] AI generate images count:', generatedImages.length);
     }
 
     const sourceImageUrl = generatedImages[0];
+    Logger.info('[enhanceDraftWithFeatures] sourceImageUrl chosen:', sourceImageUrl);
 
     // Compose text overlay if requested
     let composedDataUrl = sourceImageUrl;
@@ -409,19 +471,32 @@ export async function enhanceDraftWithFeatures({
         selectedThumbnail.thumbnailText ||
         (ideaData.title.length > 10 ? ideaData.title.substring(0, 8) + '...' : ideaData.title);
       const textPosition = selectedThumbnail.textPosition || 'bottom';
+      // safety: protect offscreen operations with a timeout to avoid indefinite hangs in tests or runtime
       try {
-        composedDataUrl = await composeThumbnailInOffscreen(
+        try { console.log('[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for', sourceImageUrl); } catch(e) {}
+        const COMPOSE_TIMEOUT_MS = 8000;
+        const composePromise = composeThumbnailInOffscreen(
           sourceImageUrl,
           thumbnailText,
           textPosition
         );
+        // Promise.race to ensure the operation doesn't hang forever
+        composedDataUrl = await Promise.race([
+          composePromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)),
+        ]);
+        try { console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded'); } catch(e) {}
+        Logger.info('[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:', sourceImageUrl);
       } catch (composeErr) {
+          Logger.debug('[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:', composeErr && composeErr.message);
         Logger.warn(
           '[enhanceDraftWithFeatures] compose failed, will try fallback to source image dataUrl',
           composeErr && composeErr.message
         );
         try {
           const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
+          try { console.log('[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:', !!(sourceBase64 && sourceBase64.data)); } catch(e) {}
+          Logger.debug('[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:', sourceBase64 && !!sourceBase64.data);
           if (sourceBase64) {
             // fetchImageAsBase64 returns {mimeType, data} object; construct a data URL as a safe fallback (assume png)
             const candidateDataUrl = `data:image/png;base64,${sourceBase64.data}`;
@@ -472,9 +547,17 @@ export async function enhanceDraftWithFeatures({
     // composedDataUrl이 http URL이어도 cropImageInOffscreen이 처리할 수 있도록 시도 (CORS 주의)
     // 안전을 위해 final16x9Data(Base64)가 있을 때만 크롭 시도
     const sourceForCrop = final16x9Data || composedDataUrl;
+    // crop operations should have timeouts to avoid long-running tasks
+    const CROP_TIMEOUT_MS = 6000;
     const cropPromises = [
-      cropImageInOffscreen(sourceForCrop, 1).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
-      cropImageInOffscreen(sourceForCrop, 4 / 3).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
+      Promise.race([
+        cropImageInOffscreen(sourceForCrop, 1),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+      ]).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
+      Promise.race([
+        cropImageInOffscreen(sourceForCrop, 4 / 3),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+      ]).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
     ];
 
     let croppedResults;
@@ -493,6 +576,7 @@ export async function enhanceDraftWithFeatures({
     }
 
     // Upload
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_start', progress: 85, message: '썸네일 업로드 시작...' }); } catch(e) {}
     const uploadPromises = [
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
@@ -529,6 +613,7 @@ export async function enhanceDraftWithFeatures({
       url_16x9,
       altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
     };
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_complete', progress: 95, message: '썸네일 업로드 완료' }); } catch(e) {}
 
     // Update jsonLdSchema if present
     if (jsonLdSchema) {
@@ -562,6 +647,7 @@ export async function enhanceDraftWithFeatures({
       Logger.warn('[enhanceDraftWithFeatures] HTML insertion failed:', insertErr);
     }
 
+    try { if (typeof onProgress === 'function') onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' }); } catch(e) {}
     Logger.info('[enhanceDraftWithFeatures] 썸네일 생성 및 업로드 완료');
     return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
   } catch (e) {
@@ -572,7 +658,7 @@ export async function enhanceDraftWithFeatures({
 }
 
 // [신규] 제휴 링크 조회 및 필터링 헬퍼 함수
-async function getRelevantAffiliateLinks(userId, contextText) {
+async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
   try {
     const snap = await get(ref(getDb(), `affiliate_links/${userId}`));
     const linksMap = snap?.val();
@@ -588,42 +674,51 @@ async function getRelevantAffiliateLinks(userId, contextText) {
       return [];
     }
 
-    // contextText(제목+태그)에 키워드가 포함된 링크만 필터링 (토큰 절약 및 정확도 향상)
-    // 키워드가 없거나, 키워드가 문맥에 포함된 경우 선택
-    const contextLower = contextText.toLowerCase();
-    const relevantLinks = links.filter((link) => {
-      if (
-        !link.keywords ||
-        !Array.isArray(link.keywords) ||
-        link.keywords.length === 0 ||
-        !link.url
-      ) {
-        Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
-        return false;
-      }
+    // contextText(제목+태그)에 키워드/상품명이 포함된 링크를 스코어링하고 정렬
+    const contextLower = (contextText || '').toLowerCase();
+    const preferredId = options.preferredAffiliateId || null;
 
-      // keywords 배열에서 하나라도 contextText에 포함되는 키워드가 있는지 확인
-      const hasRelevantKeyword = link.keywords.some((keyword) => {
-        const keywordLower = keyword.toLowerCase();
-        return contextLower.includes(keywordLower);
+    const scored = links
+      .map((link) => {
+        const keywords = Array.isArray(link.keywords) ? link.keywords : [];
+        let score = 0;
+        // keywords matching score
+        keywords.forEach((keyword) => {
+          try {
+            if (keyword && contextLower.includes(String(keyword).toLowerCase())) score += 1;
+          } catch (e) {
+            /* ignore */
+          }
+        });
+        // product name match gives higher priority
+        const productNameLower = (link.productName || '').toLowerCase();
+        if (productNameLower && contextLower.includes(productNameLower)) score += 5;
+        // if preferred id provided, give a large bonus
+        if (preferredId && link.id === preferredId) score += 1000;
+        return { link, score };
+      })
+      // Exclude invalid entries (no keywords/url) or zero score, unless it's preferred
+      .filter(({ link, score }) => {
+        if (!link.keywords || !Array.isArray(link.keywords) || link.keywords.length === 0 || !link.url) {
+          Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
+          return false;
+        }
+        return score > 0;
       });
 
-      const productNameLower = (link.productName || '').toLowerCase();
-      const hasRelevantProductName = productNameLower && contextLower.includes(productNameLower);
-
-      // 키워드나 상품명이 문맥에 포함된 경우 선택
-      const isRelevant = hasRelevantKeyword || hasRelevantProductName;
-
-      if (isRelevant) {
-        Logger.debug(
-          `[getRelevantAffiliateLinks] 관련 링크 발견: ${link.keywords.join(
-            ', '
-          )} (${link.url.substring(0, 50)}...)`
-        );
-      }
-
-      return isRelevant;
+    // sort by score desc, then most recent
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (b.link.createdAt || 0) - (a.link.createdAt || 0);
     });
+
+    const relevantLinks = scored.map((s) => s.link);
+    try {
+      Logger.debug('[getRelevantAffiliateLinks] link scores:', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl, productName: s.link.productName })));
+    } catch (e) {
+      Logger.debug('[getRelevantAffiliateLinks] score logging failed', e);
+    }
+    try { console.log('[getRelevantAffiliateLinks DEBUG] link scores', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl }))); } catch(e) {}
 
     // 최대 10개까지만 반환 (프롬프트 과부하 방지)
     const result = relevantLinks.slice(0, 10);
@@ -636,6 +731,7 @@ async function getRelevantAffiliateLinks(userId, contextText) {
     return [];
   }
 }
+export { getRelevantAffiliateLinks };
 
 /**
  * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
@@ -909,7 +1005,16 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
       ' '
     )} ${ideaData.description || ''}`;
-    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, { preferredAffiliateId: ideaData?.origin?.affiliateLinkId });
+    try {
+      Logger.info('[generateDraftFromIdea] affiliateLinks candidates:', {
+        preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
+        candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null }))
+      });
+    } catch (e) {
+      Logger.debug('[generateDraftFromIdea] affiliate candidate logging failed');
+    }
+    try { console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', { preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null, candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null })) }); } catch(e) {}
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -1496,6 +1601,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       thumbnailCandidates = ideaData.publishInfo?.thumbnailInfo || [];
     } else {
       Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
+      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'draft_generation', progress: 20, message: '초안 생성 중...' }); } catch (e) {}
 
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
@@ -1540,6 +1646,7 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
+      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'thumbnail_prepare', progress: 35, message: '썸네일 후보 분석 중...' }); } catch (e) {}
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;
@@ -1829,6 +1936,7 @@ ${defaultDescription}
           ideaData,
           jsonLdSchema,
           formattedDraft,
+          onProgress: options.onProgress,
         });
 
         // merge results back into local variables

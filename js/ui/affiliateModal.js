@@ -9,6 +9,7 @@ import {
 } from '../services/affiliateService.js';
 
 import { addIdeaToKanban } from '../services/kanbanService.js';
+import { showLoadingToast, hideLoadingToast } from '../utils.js';
 
 import { showToast, Logger, debounce } from '../utils.js';
 
@@ -21,24 +22,34 @@ export function renderAffiliateModal(container) {
   }
   // CSS 로드 (한 번만) — Shadow DOM에서 렌더링될 수 있으므로
   // 루트 노드(문서 또는 쉐도우 루트)에 스타일 시트를 삽입합니다.
-  try {
+    try {
     const rootNode = container?.getRootNode ? container.getRootNode() : document;
-    const alreadyLinked =
-      (rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
-      document.querySelector('link[href*="affiliate-modal.css"]');
+    const alreadyLinkedInRoot = rootNode && rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]');
+    const alreadyLinkedInDoc = document.querySelector && document.querySelector('link[href*="affiliate-modal.css"]');
 
-    if (!alreadyLinked) {
+    if (!alreadyLinkedInRoot || !alreadyLinkedInDoc) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = chrome.runtime.getURL('css/affiliate-modal.css');
 
-      // ShadowRoot에서도 append 가능 (open mode인 경우)
-      if (rootNode instanceof ShadowRoot) {
-        rootNode.appendChild(link);
-        console.info('[AffiliateModal] stylesheet injected into ShadowRoot:', link.href);
-      } else if (document.head) {
-        document.head.appendChild(link);
-        console.info('[AffiliateModal] stylesheet injected into document.head:', link.href);
+      // Inject into ShadowRoot (if using Shadow DOM) for scoped styles
+      if (rootNode instanceof ShadowRoot && !alreadyLinkedInRoot) {
+        try {
+          rootNode.appendChild(link.cloneNode());
+          console.info('[AffiliateModal] stylesheet injected into ShadowRoot:', link.href);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to inject stylesheet into ShadowRoot:', e);
+        }
+      }
+
+      // Always ensure there's a copy in document.head for portal / non-shadow modals
+      if (document.head && !alreadyLinkedInDoc) {
+        try {
+          document.head.appendChild(link);
+          console.info('[AffiliateModal] stylesheet injected into document.head:', link.href);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to inject stylesheet into document.head:', e);
+        }
       }
     }
   } catch (err) {
@@ -51,9 +62,9 @@ export function renderAffiliateModal(container) {
   try {
     const rootNode = container?.getRootNode ? container.getRootNode() : document;
     const inlineId = 'affiliate-inline-style';
-    const hasInline =
-      (rootNode.querySelector && rootNode.querySelector(`#${inlineId}`)) ||
-      document.querySelector(`#${inlineId}`);
+    const hasInlineInRoot = rootNode && rootNode.querySelector && rootNode.querySelector(`#${inlineId}`);
+    const hasInlineInDoc = document && document.querySelector && document.querySelector(`#${inlineId}`);
+    const hasInline = hasInlineInRoot || hasInlineInDoc;
     if (!hasInline) {
       const styleEl = document.createElement('style');
       styleEl.id = inlineId;
@@ -64,8 +75,21 @@ export function renderAffiliateModal(container) {
         .affiliate-form-section { background: #fff; border-radius: 8px; padding: 12px; }
       `;
 
-      if (rootNode instanceof ShadowRoot) rootNode.appendChild(styleEl);
-      else if (document.head) document.head.appendChild(styleEl);
+      // append to both shadow root and document head to ensure styles are present
+      if (rootNode instanceof ShadowRoot && !hasInlineInRoot) {
+        try {
+          rootNode.appendChild(styleEl.cloneNode(true));
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to append fallback style to ShadowRoot:', e);
+        }
+      }
+      if (document.head && !hasInlineInDoc) {
+        try {
+          document.head.appendChild(styleEl);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to append fallback style to document.head:', e);
+        }
+      }
 
       console.info('[AffiliateModal] minimal inline fallback styles injected.');
     }
@@ -1454,6 +1478,7 @@ async function loadLinks(container) {
       // 클릭 수 표시
       const clickCount = link.clickCount || 0;
 
+      item.title = 'Shift+Click: 템플릿 선택하여 아이디어로 추가';
       item.innerHTML = `
         <div class="link-header">
           <div class="link-platform-info">
@@ -1462,7 +1487,7 @@ async function loadLinks(container) {
           </div>
           <div class="link-actions">
             <button class="link-open-btn" title="링크 열기">🔗</button>
-            <button class="link-idea-btn" title="아이디어로 추가 (Shift+클릭으로 템플릿 선택)">💡</button>
+            <button class="link-template-btn" title="템플릿 선택하여 아이디어 추가" aria-label="템플릿 선택하여 아이디어 추가">🧩</button>
             <button class="link-edit-btn" title="수정">✏️</button>
             <button class="link-delete-btn" title="삭제">🗑️</button>
           </div>
@@ -1535,72 +1560,62 @@ async function loadLinks(container) {
         });
       }
 
-      // 아이디어 추가 버튼 이벤트
-      const ideaBtn = item.querySelector('.link-idea-btn');
-      if (ideaBtn) {
-        ideaBtn.addEventListener('click', async (e) => {
+      // 템플릿 버튼 이벤트: 템플릿 선택 UI를 통해 아이디어를 추가
+      const templateBtn = item.querySelector('.link-template-btn');
+      if (templateBtn) {
+        templateBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-
-          // Shift+클릭 시 템플릿 선택 UI 표시
-          const useTemplateSelector = e.shiftKey;
-
-          let selectedTemplate = {
-            id: 'basic',
-            name: '기본 템플릿',
-            type: 'basic',
-            description: '제휴 링크 정보를 기본 형식으로 변환'
-          };
-
-          if (useTemplateSelector) {
-            // 메인 모달을 완전히 숨겨서 stacking/context 충돌을 피함
+          templateBtn.disabled = true;
+          templateBtn.textContent = '🧩 선택 중...';
+          try {
             const mainModal = document.querySelector('#affiliate-modal');
             let originalDisplay = '';
             if (mainModal) {
-              // 저장된 인라인 display 값 복원 위해 보관
               originalDisplay = mainModal.style.display;
               mainModal.style.display = 'none';
             }
-
-            // 템플릿 선택 UI 표시
-            const templateResult = await showIdeaTemplateSelector(container, link);
-
-            // 메인 모달의 display 복원
-            if (mainModal) {
-              mainModal.style.display = originalDisplay;
-            }
-
-            if (!templateResult) return; // 취소됨
-            selectedTemplate = templateResult;
-          }
-
-          // 버튼 비활성화 (중복 클릭 방지)
-          ideaBtn.disabled = true;
-          ideaBtn.textContent = '💡 추가 중...';
-
-          try {
-            // 선택된 템플릿으로 제휴 링크를 아이디어 데이터로 변환
+            const selectedTemplate = await showIdeaTemplateSelector(container, link);
+            if (mainModal) mainModal.style.display = originalDisplay;
+            if (!selectedTemplate) return;
             const ideaData = convertAffiliateLinkToIdeaWithTemplate(link, selectedTemplate);
-
-            // 칸반에 아이디어 추가
-            const result = await addIdeaToKanban(ideaData);
-
-            if (result.success) {
-              const templateMsg = useTemplateSelector ? ` ${selectedTemplate.name} 템플릿으로` : '';
-              showToast(`💡 "${link.name}"이(가)${templateMsg} 아이디어로 추가되었습니다!`);
-            } else {
-              showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
+            // Debug: log which affiliate link and image are used to create the idea
+            try {
+              Logger.info('[AffiliateModal] Creating idea from affiliate link', {
+                affiliateLinkId: link.id,
+                imageUrl: link.cardData?.imageUrl || null,
+                template: selectedTemplate?.id,
+              });
+            } catch (e) {
+              Console && Console.debug && Console.debug('[AffiliateModal] Logger not available for idea creation debug');
             }
-
+            // Also print to the console directly so it's visible in page console
+            try {
+              console.log('[AffiliateModal DEBUG] Creating idea from affiliate link', {
+                affiliateLinkId: link.id,
+                imageUrl: link.cardData?.imageUrl || null,
+                template: selectedTemplate?.id,
+              });
+            } catch (e) {
+              /* ignore */
+            }
+            // Provide immediate loading feedback to the user while background generates images
+            try { showLoadingToast('이미지 및 썸네일을 생성 중입니다...'); } catch(e) {}
+            const result = await addIdeaToKanban(ideaData);
+            try { hideLoadingToast(); } catch(e) {}
+            if (result.success) showToast(`💡 "${link.name}"이(가) ${selectedTemplate.name} 템플릿으로 아이디어에 추가되었습니다!`);
+            else showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
           } catch (error) {
-            console.error('[AffiliateModal] 아이디어 추가 실패:', error);
+            console.error('[AffiliateModal] template button idea add failed', error);
             showToast('❌ 아이디어 추가 중 오류가 발생했습니다.');
           } finally {
-            // 버튼 상태 복원
-            ideaBtn.disabled = false;
-            ideaBtn.textContent = '💡';
+            templateBtn.disabled = false;
+            templateBtn.textContent = '🧩';
           }
         });
       }
+
+      // 기존: 카드 클릭의 Shift+Click으로 템플릿 선택 UI를 통해 추가합니다.
+      // (이전에는 개별 버튼으로 제공되었으나 디자인 변경으로 제거되었습니다.)
 
       // 수정 버튼 이벤트
       const editBtn = item.querySelector('.link-edit-btn');
@@ -1639,10 +1654,42 @@ async function loadLinks(container) {
         if (
           !e.target.classList.contains('link-delete-btn') &&
           !e.target.classList.contains('link-edit-btn') &&
-          !e.target.classList.contains('link-open-btn') &&
-          !e.target.classList.contains('link-idea-btn')
+          !e.target.classList.contains('link-open-btn')
         ) {
-          openEditForm(container, link);
+          // Shift+Click on the card opens template selector (to add as idea)
+          if (e.shiftKey) {
+            e.stopPropagation();
+            (async () => {
+              // Hide main modal while template selector is open to avoid stacking context problems
+              const mainModal = document.querySelector('#affiliate-modal');
+              let originalDisplay = '';
+              if (mainModal) {
+                originalDisplay = mainModal.style.display;
+                mainModal.style.display = 'none';
+              }
+
+              const selectedTemplate = await showIdeaTemplateSelector(container, link);
+
+              if (mainModal) mainModal.style.display = originalDisplay;
+
+              if (!selectedTemplate) return;
+
+              try {
+                const ideaData = convertAffiliateLinkToIdeaWithTemplate(link, selectedTemplate);
+                const result = await addIdeaToKanban(ideaData);
+                if (result.success) {
+                  showToast(`💡 "${link.name}"이(가) ${selectedTemplate.name} 템플릿으로 아이디어에 추가되었습니다!`);
+                } else {
+                  showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
+                }
+              } catch (error) {
+                console.error('[AffiliateModal] 아이디어 추가(템플릿 선택) 실패:', error);
+                showToast('❌ 아이디어 추가 중 오류가 발생했습니다.');
+              }
+            })();
+          } else {
+            openEditForm(container, link);
+          }
         }
       });
 
@@ -2016,8 +2063,18 @@ function showIdeaTemplateSelector(container, link) {
         backdrop.style.zIndex = '9999999998';
         backdrop.style.position = 'fixed';
         backdrop.style.inset = '0';
-        backdrop.style.background = 'rgba(0,0,0,0.6)';
+        // Set a strong black backdrop using important so it applies regardless of CSS load timing
+        try {
+          backdrop.style.setProperty('background', '#000', 'important');
+        } catch (e) {
+          // Fallback: inline background if setProperty fails
+          backdrop.style.background = '#000';
+        }
         backdrop.style.pointerEvents = 'auto';
+        try {
+          // Debug: print computed backdrop background to help verify which style is applied
+          console.debug('[AffiliateModal] template backdrop computed background:', window.getComputedStyle(backdrop).backgroundColor);
+        } catch (e) {}
       }
 
       const modalContent = modal.querySelector('.cp-modal');

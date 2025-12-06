@@ -2,6 +2,7 @@
 
 import { createAndShowPanel, hidePanelForScrap, restorePanelAfterScrap } from './ui/panel.js';
 import { showRecentScrapPreview, showToast } from './ui/preview.js';
+import { showLoadingToast, updateLoadingToast, hideLoadingToast } from './utils.js';
 
 export function initialize() {
   // 이 코드는 최상위 창(top frame)에서만 실행됩니다.
@@ -34,6 +35,40 @@ function initializeContentPilot() {
 
       // 아이콘과 메시지를 함께 표시
       showToast(`${icon} ${message}`);
+    }
+    // Thumbnail (image) generation progress messages
+    else if (msg.action === 'thumbnail_progress') {
+      try {
+        const progress = msg.progress || {};
+        // if numeric progress provided, show toast with progress
+        if (typeof progress === 'object') {
+          const pct = progress.progress || msg.progress?.progress || null;
+          const message = progress.message || msg.message || '이미지 생성 중입니다...';
+          if (typeof pct === 'number' && pct >= 0 && pct < 100) {
+            updateLoadingToast(message, pct);
+            showLoadingToast(message, { progress: pct });
+          } else if (pct === 100) {
+            hideLoadingToast();
+            showToast('✅ 이미지 생성이 완료되었습니다.');
+          } else if (msg?.abort) {
+            hideLoadingToast();
+            showToast('❌ 이미지 생성이 실패했습니다.');
+          } else {
+            // default
+            showLoadingToast(message);
+          }
+        } else {
+          // legacy message shape: numeric
+          const pct = Number(msg.progress || 0);
+          if (pct > 0 && pct < 100) showLoadingToast(msg.message || '이미지 생성 중...', { progress: pct });
+          if (pct >= 100) {
+            hideLoadingToast();
+            showToast('✅ 이미지 생성이 완료되었습니다.');
+          }
+        }
+      } catch (e) {
+        console.warn('[Main] thumbnail_progress message handling failed:', e);
+      }
     }
   });
 

@@ -160,12 +160,18 @@ global.testHelpers = {
   mockChromeRuntime: () => {
     const listeners = [];
     chrome.runtime.sendMessage.mockImplementation((message, callback) => {
-      // 메시지 리스너들에게 브로드캐스트
+      // For image fetch, do not notify listeners to avoid side effects; just return test data
+      if (message && message.action === 'fetch_image_as_base64') {
+        if (callback)
+          callback({ success: true, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA' });
+        return;
+      }
+      // For other messages, broadcast to listeners
       listeners.forEach((listener) => {
         try {
           listener(message, {}, () => {});
         } catch (e) {
-          // 에러 무시
+          // ignore
         }
       });
       if (callback) callback({ success: true });

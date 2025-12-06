@@ -83,6 +83,7 @@ module.exports = {
         { from: 'css', to: 'css' },
         { from: 'images', to: 'images', noErrorOnMissing: true },
         { from: 'rules.json', to: 'rules.json' },
+        { from: 'manifest.json', to: 'manifest.json' }, // manifest.json 복사 추가
         // Removed background.cjs copy since we're bundling it now
       ],
     }),

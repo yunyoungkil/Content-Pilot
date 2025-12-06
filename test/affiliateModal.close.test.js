@@ -136,7 +136,7 @@ describe("affiliateModal close behavior", () => {
     expect(mockIncrementClick).toHaveBeenCalledWith("test-link-1");
   });
 
-  test("idea add button converts affiliate link to idea and adds to kanban", async () => {
+  test("shift+click on card opens template selector and adds idea to kanban", async () => {
     const mockAddIdeaToKanban = require("../js/services/kanbanService.js").addIdeaToKanban;
     const mockGetAffiliateLinks = require("../js/services/affiliateService.js").getAffiliateLinks;
     
@@ -166,19 +166,26 @@ describe("affiliateModal close behavior", () => {
     // wait for the async loadLinks to complete
     await new Promise((r) => setTimeout(r, 0));
 
-    const ideaBtn = container.querySelector(".link-idea-btn");
-    expect(ideaBtn).toBeTruthy();
-    expect(ideaBtn.title).toBe("아이디어로 추가 (Shift+클릭으로 템플릿 선택)");
 
-    // Click the idea add button
-    ideaBtn.click();
+    // Click the template button in card actions to open the template selector and add idea
+    const templateBtn = container.querySelector('.link-template-btn');
+    expect(templateBtn).toBeTruthy();
+    templateBtn.click();
+
+    // Wait for the modal and processing
+    await new Promise((r) => setTimeout(r, 0));
+
+    const templateCard = document.body.querySelector('#template-selector-modal .template-card[data-template-id="product-review"]');
+    expect(templateCard).toBeTruthy();
+    templateCard.click();
+    await new Promise((r) => setTimeout(r, 0));
 
     // Should call addIdeaToKanban with converted idea data
     expect(mockAddIdeaToKanban).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Test Product",
-        description: expect.stringContaining("제휴 링크: Coupang"),
-        tags: ["test", "product"],
+        title: "[리뷰] Test Product",
+        description: expect.stringContaining("플랫폼: Coupang"),
+        tags: expect.arrayContaining(["test", "product", "리뷰", "사용후기"]),
         url: "https://example.com",
         publishedUrl: "https://example.com",
         origin: expect.objectContaining({
@@ -191,7 +198,8 @@ describe("affiliateModal close behavior", () => {
           salePrice: 10000,
           originalPrice: 12000,
           discountRate: 17
-        })
+        }),
+        template: expect.objectContaining({ id: 'product-review' })
       })
     );
   });
