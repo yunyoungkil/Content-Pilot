@@ -1933,12 +1933,13 @@ ${cardData.reviewCount ? `리뷰: ${cardData.reviewCount.toLocaleString()}개` :
       reviewCount: cardData.reviewCount,
       isRocket: cardData.isRocket,
       badges: cardData.badges,
-      insertMode: cardData.insertMode,
-      // Include SEO fields if present so downstream idea creation uses them
-      recommendedSearches: link.recommendedSearches || link.recommendedKeywords || [],
-      longTailKeywords: link.longTailKeywords || [],
-      outline: link.outline || []
+      insertMode: cardData.insertMode
     }
+    ,
+    // Include SEO fields if present so downstream idea creation uses them
+    recommendedSearches: link.recommendedSearches || link.recommendedKeywords || [],
+    longTailKeywords: link.longTailKeywords || [],
+    outline: link.outline || [],
   };
 }
 
