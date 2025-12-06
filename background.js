@@ -479,28 +479,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(generateDraftFromIdea(msg.data, opts));
   }
   if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, ...opts } = msg.data;
-    opts.onProgress = (p) => {
-      if (sender.tab?.id) {
-        chrome.tabs
-          .sendMessage(sender.tab.id, {
-            action: 'briefing_progress',
-            cardId,
-            progress: p,
-          })
-          .catch((err) => {
-            // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
-            if (
-              err?.message &&
-              !err.message.includes('message port closed') &&
-              !err.message.includes('Could not establish connection')
-            ) {
-              Logger.debug('[sendMessage] briefing_progress 전송 실패:', err.message);
-            }
-          });
-      }
-    };
-    return handleAsync(generateIdeaBriefing(cardId, title, description, opts));
+    const { cardId, title, description, options } = msg;
+    return handleAsync(
+      generateIdeaBriefing(cardId, title, description, options)
+        .then(() => ({ success: true }))
+        .catch((error) => ({ success: false, error: error.message }))
+    );
   }
   if (msg.action === 'ai_generate_images') {
     return handleAsync(
@@ -514,14 +498,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(analyzeImageForTemplate(msg.data));
   if (msg.action === 'call_gemini')
     return handleAsync(callGeminiAPI(msg.prompt).then((text) => ({ success: true, text })));
-  if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, options } = msg;
-    return handleAsync(
-      generateIdeaBriefing(cardId, title, description, options)
-        .then(() => ({ success: true }))
-        .catch((error) => ({ success: false, error: error.message }))
-    );
-  }
   if (msg.action === 'analyze_my_channel') return handleAsync(analyzeMyChannel(msg.data));
   if (msg.action === 'generate_content_ideas') return handleAsync(generateContentIdeas(msg.data));
   if (msg.action === 'request_search_keywords')
