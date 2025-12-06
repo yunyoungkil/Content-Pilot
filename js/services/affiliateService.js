@@ -63,6 +63,15 @@ export async function addAffiliateLink(data) {
       clickCount: 0,
       // keywords가 빈 배열이라도 명시적으로 포함
       keywords: Array.isArray(data.keywords) ? data.keywords : [],
+      // SEO 관련 추가 필드
+      originalAffiliateKeywords: Array.isArray(data.keywords) ? data.keywords : [],
+      recommendedSearches: Array.isArray(data.recommendedSearches)
+        ? data.recommendedSearches
+        : Array.isArray(data.recommendedKeywords)
+        ? data.recommendedKeywords
+        : [],
+      longTailKeywords: Array.isArray(data.longTailKeywords) ? data.longTailKeywords : [],
+      outline: Array.isArray(data.outline) ? data.outline : [],
     };
 
     const path = `${DB_PATH}/${userId}/${linkId}`;
@@ -124,6 +133,15 @@ export async function updateAffiliateLink(linkId, data) {
     const cleanData = cleanDataForFirebase(data);
     // keywords가 빈 배열이라도 명시적으로 포함
     cleanData.keywords = Array.isArray(data.keywords) ? data.keywords : [];
+    // SEO 관련 필드도 명시적으로 포함
+    cleanData.originalAffiliateKeywords = Array.isArray(data.keywords) ? data.keywords : [];
+    cleanData.recommendedSearches = Array.isArray(data.recommendedSearches)
+      ? data.recommendedSearches
+      : Array.isArray(data.recommendedKeywords)
+      ? data.recommendedKeywords
+      : [];
+    cleanData.longTailKeywords = Array.isArray(data.longTailKeywords) ? data.longTailKeywords : [];
+    cleanData.outline = Array.isArray(data.outline) ? data.outline : [];
     await dbRequest('PATCH', path, cleanData);
 
     Logger.debug(`[AffiliateService] 링크 수정 완료: ${linkId}`);
