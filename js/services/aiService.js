@@ -40,11 +40,17 @@ async function fetchImageAsBase64(url) {
         });
         const responseMsg = await Promise.race([
           bgMsgPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)
+          ),
         ]);
         // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
         if (responseMsg && responseMsg.success) {
-          try { console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url); } catch(e) {}
+          try {
+            console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url);
+          } catch (e) {
+            // Intentionally silent
+          }
           if (responseMsg.dataUrl) {
             const m = responseMsg.dataUrl.match(/^data:(.+);base64,(.*)$/);
             if (m) return { mimeType: m[1], data: m[2] };
@@ -55,16 +61,31 @@ async function fetchImageAsBase64(url) {
           }
         }
       } catch (e) {
-      Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
-      try { console.log('[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL', url); } catch(e) {}
+        Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
+        try {
+          console.log(
+            '[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL',
+            url
+          );
+        } catch (e) {
+          // Intentionally silent
+        }
       }
     }
 
     Logger.debug('[fetchImageAsBase64] Falling back to fetch for URL:', url);
-    try { console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url); } catch(e) {}
+    try {
+      console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url);
+    } catch (e) {
+      // Intentionally silent
+    }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
-    try { console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url); } catch(e) {}
+    try {
+      console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url);
+    } catch (e) {
+      // Intentionally silent
+    }
     const blob = await response.blob();
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -184,66 +205,61 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
   // API 키는 Query Parameter로 전달해야 함
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
-  try {
-    // [수정] 멀티모달 입력을 위한 parts 구성
-    const parts = [];
+  // [수정] 멀티모달 입력을 위한 parts 구성
+  const parts = [];
 
-    // 텍스트 프롬프트 추가
-    if (prompt && typeof prompt === 'string') {
-      parts.push({ text: prompt });
-    }
+  // 텍스트 프롬프트 추가
+  if (prompt && typeof prompt === 'string') {
+    parts.push({ text: prompt });
+  }
 
-    // 이미지 데이터 추가 (Base64 형식)
-    if (Array.isArray(images)) {
-      for (const img of images) {
-        if (img && img.mimeType && img.data) {
-          parts.push({
-            inlineData: {
-              mimeType: img.mimeType,
-              data: img.data,
-            },
-          });
-        }
+  // 이미지 데이터 추가 (Base64 형식)
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      if (img && img.mimeType && img.data) {
+        parts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.data,
+          },
+        });
       }
     }
-
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Referer 제한 우회를 위한 헤더 (Chrome 확장에서는 제한적)
-        'Origin': 'chrome-extension://' + chrome.runtime.id,
-      },
-      // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
-      body: JSON.stringify({
-        contents: [{ parts }],
-      }),
-    });
-
-    if (!resp.ok) {
-      // 가능한한 유의미한 오류 메시지 추출
-      const body = await resp.json().catch(() => ({}));
-      const msg = body?.error?.message || `HTTP ${resp.status}`;
-      throw new Error(msg);
-    }
-
-    const json = await resp.json().catch(() => ({}));
-
-    // [수정] Gemini 응답 파싱
-    const candidate = Array.isArray(json?.candidates) && json.candidates[0];
-    if (!candidate) return '';
-
-    const responseParts = candidate?.content?.parts || [];
-    // parts는 배열, 각 항목에 text가 있을 수 있음
-    for (const p of responseParts) {
-      if (p && typeof p.text === 'string') return p.text;
-    }
-
-    return '';
-  } catch (err) {
-    // 네트워크 에러는 그대로 전파
-    throw err;
   }
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      // Referer 제한 우회를 위한 헤더 (Chrome 확장에서는 제한적)
+      Origin: 'chrome-extension://' + chrome.runtime.id,
+    },
+    // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
+    body: JSON.stringify({
+      contents: [{ parts }],
+    }),
+  });
+
+  if (!resp.ok) {
+    // 가능한한 유의미한 오류 메시지 추출
+    const body = await resp.json().catch(() => ({}));
+    const msg = body?.error?.message || `HTTP ${resp.status}`;
+    throw new Error(msg);
+  }
+
+  const json = await resp.json().catch(() => ({}));
+
+  // [수정] Gemini 응답 파싱
+  const candidate = Array.isArray(json?.candidates) && json.candidates[0];
+  if (!candidate) return '';
+
+  const responseParts = candidate?.content?.parts || [];
+  // parts는 배열, 각 항목에 text가 있을 수 있음
+  for (const p of responseParts) {
+    if (p && typeof p.text === 'string') return p.text;
+  }
+
+  return '';
 }
 
 // Higher-level helper wrapping callGeminiAPI with retry/backoff and prompt optimization
@@ -396,7 +412,12 @@ export async function enhanceDraftWithFeatures({
       permalink: permalink.substring(0, 30),
     });
     // Emit progress: thumbnail generation started
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' });
+    } catch (e) {
+      // Intentionally silent
+    }
 
     // Image source selection
     let generatedImages = [];
@@ -405,28 +426,73 @@ export async function enhanceDraftWithFeatures({
     let productLink = null;
     if (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
       // Prefer exact affiliate link if provided in ideaData.origin
-      productLink = (ideaData?.origin?.affiliateLinkId
-        ? affiliateLinks.find((l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl)
-        : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
+      productLink =
+        (ideaData?.origin?.affiliateLinkId
+          ? affiliateLinks.find(
+              (l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl
+            )
+          : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
     }
     if (productLink) {
-      const reason = (ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId) ? 'origin_match' : 'best_candidate';
-      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', { id: productLink.id, url: productLink.url, reason });
-      try { console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', { id: productLink.id, url: productLink.url, reason }); } catch(e) {}
+      const reason =
+        ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId
+          ? 'origin_match'
+          : 'best_candidate';
+      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', {
+        id: productLink.id,
+        url: productLink.url,
+        reason,
+      });
+      try {
+        console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', {
+          id: productLink.id,
+          url: productLink.url,
+          reason,
+        });
+      } catch (e) {
+        // Intentionally silent
+      }
     } else {
-      Logger.info('[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)');
-      try { console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected'); } catch(e) {}
+      Logger.info(
+        '[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)'
+      );
+      try {
+        console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected');
+      } catch (e) {
+        // Intentionally silent
+      }
     }
 
     if (productLink) {
-      try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis', progress: 55, message: '상품 이미지 합성 시작...' }); } catch(e) {}
+      try {
+        if (typeof onProgress === 'function')
+          onProgress({
+            step: 'product_synthesis',
+            progress: 55,
+            message: '상품 이미지 합성 시작...',
+          });
+      } catch (e) {
+        // Intentionally silent
+      }
       const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
       if (productBase64) {
         const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
           generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
-          Logger.info('[enhanceDraftWithFeatures] product synthesis images count:', generatedImages.length);
-          try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis_complete', progress: 70, message: '상품 합성 이미지 생성 완료' }); } catch(e) {}
+          Logger.info(
+            '[enhanceDraftWithFeatures] product synthesis images count:',
+            generatedImages.length
+          );
+          try {
+            if (typeof onProgress === 'function')
+              onProgress({
+                step: 'product_synthesis_complete',
+                progress: 70,
+                message: '상품 합성 이미지 생성 완료',
+              });
+          } catch (e) {
+            // Intentionally silent
+          }
           isProductSynthesis = true;
         } catch (err) {
           Logger.warn(
@@ -455,9 +521,23 @@ export async function enhanceDraftWithFeatures({
       }
 
       // 수정된 프롬프트로 이미지 생성 요청
-      try { console.log('[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt', finalImagePrompt); } catch(e) {}
+      try {
+        console.log(
+          '[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt',
+          finalImagePrompt
+        );
+      } catch (e) {
+        // Intentionally silent
+      }
       generatedImages = await generateAiImage(finalImagePrompt, 1);
-      try { console.log('[enhanceDraftWithFeatures DEBUG] generateAiImage returned:', Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages); } catch(e) {}
+      try {
+        console.log(
+          '[enhanceDraftWithFeatures DEBUG] generateAiImage returned:',
+          Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages
+        );
+      } catch (e) {
+        // Intentionally silent
+      }
       Logger.info('[enhanceDraftWithFeatures] AI generate images count:', generatedImages.length);
     }
 
@@ -473,7 +553,14 @@ export async function enhanceDraftWithFeatures({
       const textPosition = selectedThumbnail.textPosition || 'bottom';
       // safety: protect offscreen operations with a timeout to avoid indefinite hangs in tests or runtime
       try {
-        try { console.log('[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for', sourceImageUrl); } catch(e) {}
+        try {
+          console.log(
+            '[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for',
+            sourceImageUrl
+          );
+        } catch (e) {
+          // Intentionally silent
+        }
         const COMPOSE_TIMEOUT_MS = 8000;
         const composePromise = composeThumbnailInOffscreen(
           sourceImageUrl,
@@ -483,20 +570,42 @@ export async function enhanceDraftWithFeatures({
         // Promise.race to ensure the operation doesn't hang forever
         composedDataUrl = await Promise.race([
           composePromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)
+          ),
         ]);
-        try { console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded'); } catch(e) {}
-        Logger.info('[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:', sourceImageUrl);
+        try {
+          console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded');
+        } catch (e) {
+          // Intentionally silent
+        }
+        Logger.info(
+          '[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:',
+          sourceImageUrl
+        );
       } catch (composeErr) {
-          Logger.debug('[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:', composeErr && composeErr.message);
+        Logger.debug(
+          '[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:',
+          composeErr && composeErr.message
+        );
         Logger.warn(
           '[enhanceDraftWithFeatures] compose failed, will try fallback to source image dataUrl',
           composeErr && composeErr.message
         );
         try {
           const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
-          try { console.log('[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:', !!(sourceBase64 && sourceBase64.data)); } catch(e) {}
-          Logger.debug('[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:', sourceBase64 && !!sourceBase64.data);
+          try {
+            console.log(
+              '[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:',
+              !!(sourceBase64 && sourceBase64.data)
+            );
+          } catch (e) {
+            // Intentionally silent
+          }
+          Logger.debug(
+            '[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:',
+            sourceBase64 && !!sourceBase64.data
+          );
           if (sourceBase64) {
             // fetchImageAsBase64 returns {mimeType, data} object; construct a data URL as a safe fallback (assume png)
             const candidateDataUrl = `data:image/png;base64,${sourceBase64.data}`;
@@ -552,11 +661,15 @@ export async function enhanceDraftWithFeatures({
     const cropPromises = [
       Promise.race([
         cropImageInOffscreen(sourceForCrop, 1),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)
+        ),
       ]).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
       Promise.race([
         cropImageInOffscreen(sourceForCrop, 4 / 3),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)
+        ),
       ]).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
     ];
 
@@ -576,7 +689,16 @@ export async function enhanceDraftWithFeatures({
     }
 
     // Upload
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_start', progress: 85, message: '썸네일 업로드 시작...' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({
+          step: 'thumbnail_upload_start',
+          progress: 85,
+          message: '썸네일 업로드 시작...',
+        });
+    } catch (e) {
+      // Intentionally silent
+    }
     const uploadPromises = [
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
@@ -613,7 +735,16 @@ export async function enhanceDraftWithFeatures({
       url_16x9,
       altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
     };
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_complete', progress: 95, message: '썸네일 업로드 완료' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({
+          step: 'thumbnail_upload_complete',
+          progress: 95,
+          message: '썸네일 업로드 완료',
+        });
+    } catch (e) {
+      // Intentionally silent
+    }
 
     // Update jsonLdSchema if present
     if (jsonLdSchema) {
@@ -647,7 +778,12 @@ export async function enhanceDraftWithFeatures({
       Logger.warn('[enhanceDraftWithFeatures] HTML insertion failed:', insertErr);
     }
 
-    try { if (typeof onProgress === 'function') onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' });
+    } catch (e) {
+      // Intentionally silent
+    }
     Logger.info('[enhanceDraftWithFeatures] 썸네일 생성 및 업로드 완료');
     return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
   } catch (e) {
@@ -699,7 +835,12 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
       })
       // Exclude invalid entries (no keywords/url) or zero score, unless it's preferred
       .filter(({ link, score }) => {
-        if (!link.keywords || !Array.isArray(link.keywords) || link.keywords.length === 0 || !link.url) {
+        if (
+          !link.keywords ||
+          !Array.isArray(link.keywords) ||
+          link.keywords.length === 0 ||
+          !link.url
+        ) {
           Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
           return false;
         }
@@ -714,11 +855,30 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
 
     const relevantLinks = scored.map((s) => s.link);
     try {
-      Logger.debug('[getRelevantAffiliateLinks] link scores:', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl, productName: s.link.productName })));
+      Logger.debug(
+        '[getRelevantAffiliateLinks] link scores:',
+        scored.map((s) => ({
+          id: s.link.id,
+          score: s.score,
+          hasImage: !!s.link.cardData?.imageUrl,
+          productName: s.link.productName,
+        }))
+      );
     } catch (e) {
       Logger.debug('[getRelevantAffiliateLinks] score logging failed', e);
     }
-    try { console.log('[getRelevantAffiliateLinks DEBUG] link scores', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl }))); } catch(e) {}
+    try {
+      console.log(
+        '[getRelevantAffiliateLinks DEBUG] link scores',
+        scored.map((s) => ({
+          id: s.link.id,
+          score: s.score,
+          hasImage: !!s.link.cardData?.imageUrl,
+        }))
+      );
+    } catch (e) {
+      // Intentionally silent
+    }
 
     // 최대 10개까지만 반환 (프롬프트 과부하 방지)
     const result = relevantLinks.slice(0, 10);
@@ -1005,16 +1165,31 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
       ' '
     )} ${ideaData.description || ''}`;
-    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, { preferredAffiliateId: ideaData?.origin?.affiliateLinkId });
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, {
+      preferredAffiliateId: ideaData?.origin?.affiliateLinkId,
+    });
     try {
       Logger.info('[generateDraftFromIdea] affiliateLinks candidates:', {
         preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
-        candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null }))
+        candidates: (affiliateLinks || []).map((l) => ({
+          id: l.id,
+          imageUrl: l.cardData?.imageUrl || null,
+        })),
       });
     } catch (e) {
       Logger.debug('[generateDraftFromIdea] affiliate candidate logging failed');
     }
-    try { console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', { preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null, candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null })) }); } catch(e) {}
+    try {
+      console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', {
+        preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
+        candidates: (affiliateLinks || []).map((l) => ({
+          id: l.id,
+          imageUrl: l.cardData?.imageUrl || null,
+        })),
+      });
+    } catch (e) {
+      // Intentionally silent
+    }
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -1601,15 +1776,19 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       thumbnailCandidates = ideaData.publishInfo?.thumbnailInfo || [];
     } else {
       Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
-      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'draft_generation', progress: 20, message: '초안 생성 중...' }); } catch (e) {}
+      try {
+        if (typeof options.onProgress === 'function')
+          options.onProgress({
+            step: 'draft_generation',
+            progress: 20,
+            message: '초안 생성 중...',
+          });
+      } catch (e) {
+        // Intentionally silent
+      }
 
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
-      try {
-        rawDraft = await callDraftAPI(prompt);
-      } catch (apiError) {
-        // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
-        throw apiError;
-      }
+      rawDraft = await callDraftAPI(prompt);
 
       // 모든 재시도 후에도 빈 응답이면 기본 템플릿 제공
       if (!rawDraft || rawDraft.trim().length === 0) {
@@ -1646,7 +1825,16 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
-      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'thumbnail_prepare', progress: 35, message: '썸네일 후보 분석 중...' }); } catch (e) {}
+      try {
+        if (typeof options.onProgress === 'function')
+          options.onProgress({
+            step: 'thumbnail_prepare',
+            progress: 35,
+            message: '썸네일 후보 분석 중...',
+          });
+      } catch (e) {
+        // Intentionally silent
+      }
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;

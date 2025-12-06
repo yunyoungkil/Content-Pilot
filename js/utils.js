@@ -245,7 +245,8 @@ export function updateLoadingToast(message, progress, id = 'cp-loading-toast-mod
   const span = el.querySelector('.cp-loading-toast-message');
   if (span && message) span.textContent = message;
   const bar = el.querySelector('.cp-loading-progress-bar');
-  if (bar && typeof progress === 'number') bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
+  if (bar && typeof progress === 'number')
+    bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
 }
 
 export function hideLoadingToast(id = 'cp-loading-toast-modal') {

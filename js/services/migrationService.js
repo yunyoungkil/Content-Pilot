@@ -1,7 +1,7 @@
 // js/services/migrationService.js
 // 데이터 마이그레이션 관련 서비스
 
-import { getDb } from './firebaseService.js';
+import { getDb, getCurrentUserId } from './firebaseService.js';
 import { ref, get, update, set, remove } from './firebaseService.js';
 import { Logger } from '../utils.js';
 

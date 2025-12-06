@@ -41,30 +41,36 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
       const parent = img.parentElement || imageGalleryGrid;
       const loading = document.createElement('div');
       loading.textContent = '이미지 불러오는 중...';
-      loading.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
+      loading.style.cssText =
+        'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
       parent.appendChild(loading);
 
       try {
-        chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset.src || img.src }, (response) => {
-          if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
-            parent.removeChild(loading);
-            const err = document.createElement('div');
-            err.textContent = '이미지 로드 실패';
-            err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
-            parent.appendChild(err);
-            return;
-          }
+        chrome.runtime.sendMessage(
+          { action: 'fetch_image_as_base64', url: img.dataset.src || img.src },
+          (response) => {
+            if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
+              parent.removeChild(loading);
+              const err = document.createElement('div');
+              err.textContent = '이미지 로드 실패';
+              err.style.cssText =
+                'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+              parent.appendChild(err);
+              return;
+            }
 
-          img.onerror = null; // prevent loop
-          img.src = response.dataUrl;
-          img.style.display = 'block';
-          parent.removeChild(loading);
-        });
+            img.onerror = null; // prevent loop
+            img.src = response.dataUrl;
+            img.style.display = 'block';
+            parent.removeChild(loading);
+          }
+        );
       } catch (e) {
         parent.removeChild(loading);
         const err = document.createElement('div');
         err.textContent = '이미지 로드 실패';
-        err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+        err.style.cssText =
+          'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
         parent.appendChild(err);
       }
     };
@@ -218,16 +224,16 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         }
       }
     );
-      // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
-      if (!imageGalleryArea.dataset.scrapListenerAttached) {
-        chrome.runtime.onMessage.addListener((msg) => {
-          if (msg?.action === 'scrap_image_removed') {
-            // 현재 필터 상태로 갤러리 다시 로드
-            loadUnifiedGallery(currentFilter);
-          }
-        });
-        imageGalleryArea.dataset.scrapListenerAttached = '1';
-      }
+    // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
+    if (!imageGalleryArea.dataset.scrapListenerAttached) {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg?.action === 'scrap_image_removed') {
+          // 현재 필터 상태로 갤러리 다시 로드
+          loadUnifiedGallery(currentFilter);
+        }
+      });
+      imageGalleryArea.dataset.scrapListenerAttached = '1';
+    }
   }
 
   // 필터링 및 렌더링 함수
@@ -341,18 +347,22 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         div.style.background = '#f0f0f0';
         const errorText = document.createElement('div');
         errorText.textContent = '이미지 로드 실패';
-        errorText.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
+        errorText.style.cssText =
+          'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
         div.appendChild(errorText);
 
         try {
-          chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url }, (response) => {
-            if (response && response.success && response.dataUrl) {
-              img.onerror = null;
-              img.src = response.dataUrl;
-              img.style.display = 'block';
-              if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+          chrome.runtime.sendMessage(
+            { action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url },
+            (response) => {
+              if (response && response.success && response.dataUrl) {
+                img.onerror = null;
+                img.src = response.dataUrl;
+                img.style.display = 'block';
+                if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+              }
             }
-          });
+          );
         } catch (e) {
           // ignore
         }
@@ -363,7 +373,8 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         const delBtn = document.createElement('button');
         delBtn.className = 'workspace-image-delete-btn';
         delBtn.title = '이미지 삭제';
-        delBtn.style.cssText = 'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
+        delBtn.style.cssText =
+          'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
         delBtn.innerHTML = '×';
         delBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -372,7 +383,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 
           // Prefer sending the canonical/original URL stored in originData when available
           // This avoids sending data: or proxy/base64 URLs which won't match DB entries
-          const removedItem = allImageData.find((it) => (it.url === displayedUrl || it.thumbnail === displayedUrl));
+          const removedItem = allImageData.find(
+            (it) => it.url === displayedUrl || it.thumbnail === displayedUrl
+          );
 
           const getAllFromOrigin = (origin) => {
             if (!origin) return [];
@@ -390,7 +403,11 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
               const clean = u.replace(/&amp;/g, '&');
               const parsed = new URL(clean);
               let p = parsed.pathname || '';
-              try { p = decodeURIComponent(p); } catch (e) {}
+              try {
+                p = decodeURIComponent(p);
+              } catch (e) {
+                // Use encoded pathname if decoding fails
+              }
               return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
             } catch (e) {
               return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
@@ -400,110 +417,127 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           let canonicalDeleteUrl = displayedUrl;
           if (removedItem && removedItem.originData) {
             const originList = getAllFromOrigin(removedItem.originData);
-            const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl));
+            const matched = originList.find(
+              (o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl)
+            );
             if (matched) {
               canonicalDeleteUrl = matched;
             }
           }
 
-          chrome.runtime.sendMessage({ action: 'remove_scrap_image', data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId } }, (response) => {
-            // only proceed if backend reports a real DB change
-            if (response && response.success && response.changed) {
-              // Update local data to show next waiting image in the same grid position
-              try {
-                // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
-                const matchIndex = allImageData.findIndex((it) => (it.url === deleteUrl || it.thumbnail === deleteUrl));
-                if (matchIndex !== -1) {
-                  // Try to fill this slot from the same scrap's originData if there are more images
-                  const removedItem = allImageData[matchIndex];
-                  const scrapKey = removedItem.scrapId || removedItem.id;
+          chrome.runtime.sendMessage(
+            {
+              action: 'remove_scrap_image',
+              data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId },
+            },
+            (response) => {
+              // only proceed if backend reports a real DB change
+              if (response && response.success && response.changed) {
+                // Update local data to show next waiting image in the same grid position
+                try {
+                  // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
+                  const matchIndex = allImageData.findIndex(
+                    (it) => it.url === canonicalDeleteUrl || it.thumbnail === canonicalDeleteUrl
+                  );
+                  if (matchIndex !== -1) {
+                    // Try to fill this slot from the same scrap's originData if there are more images
+                    const removedItem = allImageData[matchIndex];
+                    const scrapKey = removedItem.scrapId || removedItem.id;
 
-                  // Helper: extract all images from originData
-                  const getAllFromOrigin = (origin) => {
-                    if (!origin) return [];
-                    const out = [];
-                    if (origin.image) out.push(origin.image);
-                    if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
-                    if (Array.isArray(origin.images)) out.push(...origin.images);
-                    return [...new Set(out.filter(Boolean))];
-                  };
-
-                  // small normalization helper to align with backend matching rules
-                  const normalizeForMatch = (u) => {
-                    if (!u) return '';
-                    try {
-                      // keep data: URIs unchanged
-                      if (u.startsWith('data:')) return u;
-                      const clean = u.replace(/&amp;/g, '&');
-                      const parsed = new URL(clean);
-                      let p = parsed.pathname || '';
-                      try {
-                        p = decodeURIComponent(p);
-                      } catch (e) {
-                        // ignore decode errors
-                      }
-                      return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
-                    } catch (e) {
-                      return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
-                    }
-                  };
-
-                  const origin = removedItem.originData || {};
-                  let originImages = getAllFromOrigin(origin);
-
-                  // Current displayed urls for this scrap (normalized)
-                  const displayed = allImageData
-                    .filter((it) => (it.scrapId || it.id) === scrapKey)
-                    .map((it) => it.url || it.thumbnail)
-                    .map((d) => normalizeForMatch(d));
-
-                  // Exclude the deleted image (normalized) from candidates and any already-displayed images
-                  const normalizedDelete = normalizeForMatch(deleteUrl);
-
-                  originImages = originImages.filter((o) => normalizeForMatch(o) !== normalizedDelete);
-
-                  // Find a candidate that's in originImages but not displayed (normalized comparison)
-                  let candidate = null;
-                  for (const o of originImages) {
-                    const normO = normalizeForMatch(o);
-                    if (!displayed.includes(normO) && normO !== normalizedDelete) {
-                      candidate = o;
-                      break;
-                    }
-                  }
-
-                  if (candidate) {
-                    // Replace the removed item with the candidate image entry
-                    const newEntry = {
-                      id: `${scrapKey}::${Date.now()}`,
-                      scrapId: scrapKey,
-                      source: removedItem.source || 'SCRAP',
-                      url: candidate,
-                      thumbnail: candidate,
-                      originData: origin,
-                      timestamp: removedItem.timestamp || Date.now(),
+                    // Helper: extract all images from originData
+                    const getAllFromOrigin = (origin) => {
+                      if (!origin) return [];
+                      const out = [];
+                      if (origin.image) out.push(origin.image);
+                      if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+                      if (Array.isArray(origin.images)) out.push(...origin.images);
+                      return [...new Set(out.filter(Boolean))];
                     };
-                    allImageData.splice(matchIndex, 1, newEntry);
-                  } else {
-                    // No candidate; just remove
-                    allImageData.splice(matchIndex, 1);
+
+                    // small normalization helper to align with backend matching rules
+                    const normalizeForMatch = (u) => {
+                      if (!u) return '';
+                      try {
+                        // keep data: URIs unchanged
+                        if (u.startsWith('data:')) return u;
+                        const clean = u.replace(/&amp;/g, '&');
+                        const parsed = new URL(clean);
+                        let p = parsed.pathname || '';
+                        try {
+                          p = decodeURIComponent(p);
+                        } catch (e) {
+                          // ignore decode errors
+                        }
+                        return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+                      } catch (e) {
+                        return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+                      }
+                    };
+
+                    const origin = removedItem.originData || {};
+                    let originImages = getAllFromOrigin(origin);
+
+                    // Current displayed urls for this scrap (normalized)
+                    const displayed = allImageData
+                      .filter((it) => (it.scrapId || it.id) === scrapKey)
+                      .map((it) => it.url || it.thumbnail)
+                      .map((d) => normalizeForMatch(d));
+
+                    // Exclude the deleted image (normalized) from candidates and any already-displayed images
+                    const normalizedDelete = normalizeForMatch(canonicalDeleteUrl);
+
+                    originImages = originImages.filter(
+                      (o) => normalizeForMatch(o) !== normalizedDelete
+                    );
+
+                    // Find a candidate that's in originImages but not displayed (normalized comparison)
+                    let candidate = null;
+                    for (const o of originImages) {
+                      const normO = normalizeForMatch(o);
+                      if (!displayed.includes(normO) && normO !== normalizedDelete) {
+                        candidate = o;
+                        break;
+                      }
+                    }
+
+                    if (candidate) {
+                      // Replace the removed item with the candidate image entry
+                      const newEntry = {
+                        id: `${scrapKey}::${Date.now()}`,
+                        scrapId: scrapKey,
+                        source: removedItem.source || 'SCRAP',
+                        url: candidate,
+                        thumbnail: candidate,
+                        originData: origin,
+                        timestamp: removedItem.timestamp || Date.now(),
+                      };
+                      allImageData.splice(matchIndex, 1, newEntry);
+                    } else {
+                      // No candidate; just remove
+                      allImageData.splice(matchIndex, 1);
+                    }
                   }
+                  // re-render gallery with updated data, keeping filter
+                  renderFilteredImages(
+                    allImageData,
+                    currentFilter,
+                    isDraftFilterActive,
+                    draftContentText
+                  );
+                  showToast('✅ 이미지가 삭제되었습니다.');
+                } catch (e) {
+                  // fallback: remove DOM node
+                  if (div.parentNode) div.parentNode.removeChild(div);
+                  showToast('✅ 이미지가 삭제되었습니다.');
                 }
-                // re-render gallery with updated data, keeping filter
-                renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
-                showToast('✅ 이미지가 삭제되었습니다.');
-              } catch (e) {
-                // fallback: remove DOM node
-                if (div.parentNode) div.parentNode.removeChild(div);
-                showToast('✅ 이미지가 삭제되었습니다.');
+              } else if (response && response.success && !response.changed) {
+                // backend found nothing to delete; notify and don't update UI state
+                showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
+              } else {
+                showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
               }
-            } else if (response && response.success && !response.changed) {
-              // backend found nothing to delete; notify and don't update UI state
-              showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
-            } else {
-              showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
             }
-          });
+          );
         });
 
         div.appendChild(delBtn);
@@ -525,7 +559,8 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         overlay.className = 'gallery-more-overlay';
         overlay.textContent = `+${extra}`;
         overlay.title = `${extra}개 추가 이미지`; // tooltip
-        overlay.style.cssText = 'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
+        overlay.style.cssText =
+          'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
         div.appendChild(overlay);
       }
 
@@ -557,10 +592,14 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
                 img.classList.remove('lazy-loading');
                 try {
                   if (galleryImageObserver) galleryImageObserver.unobserve(img);
-                } catch (_) {}
+                } catch (_) {
+                  // Observer cleanup can fail safely
+                }
               }
             }
-          } catch (_) {}
+          } catch (_) {
+            // Image loading can fail safely
+          }
         });
       }, 30);
     } catch (e) {
@@ -3230,119 +3269,6 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
         const options = { generateDraft: false, generateThumbnail: true };
         handleGenerateAction(btn, options);
       }
-    } else if (e.target.closest('.scrap-card-item')) {
-      // 스크랩 카드 클릭 시
-      const card = e.target.closest('.scrap-card-item');
-      if (!card) return;
-
-      // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
-      if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
-        return;
-      }
-
-      // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
-      if (
-        e.target.classList.contains('scrap-card-snippet') ||
-        e.target.closest('.scrap-card-snippet') ||
-        e.target.classList.contains('scrap-link-btn') ||
-        e.target.closest('.scrap-link-btn')
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        const url = card.dataset.previewUrl || card.dataset.url;
-        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-          window.open(url, '_blank');
-          showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
-        } else {
-          showToast('❌ 유효한 URL이 없습니다.');
-        }
-        return;
-      }
-
-      // 3. 태그 클릭은 무시
-      if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
-        return;
-      }
-
-      // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
-      e.preventDefault();
-      e.stopPropagation();
-
-      const scrapId = card.dataset.scrapId;
-      if (!scrapId) {
-        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
-        return;
-      }
-
-      // 스크랩 상세 정보 가져오기
-      chrome.runtime.sendMessage({ action: 'get_scrap_detail', scrapId: scrapId }, (response) => {
-        if (response && response.success && response.scrap) {
-          const scrap = response.scrap;
-
-          // 모달 생성
-          const modal = document.createElement('div');
-          modal.className = 'scrap-detail-modal';
-          modal.style.cssText = `
-              position: fixed;
-              top: 0;
-              left: 0;
-              width: 100%;
-              height: 100%;
-              background: rgba(0,0,0,0.7);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              z-index: 10000;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            `;
-
-          modal.innerHTML = `
-              <div style="background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-                <div style="padding: 24px; border-bottom: 1px solid #e1e5e9;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div style="flex: 1;">
-                      <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 600; color: #1a1a1a;">${scrap.title || '제목 없음'}</h2>
-                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                        <a href="${scrap.url}" target="_blank" style="color: #0066cc; text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 4px;">
-                          🔗 ${scrap.url}
-                        </a>
-                      </div>
-                      ${
-                        scrap.tags && scrap.tags.length > 0
-                          ? `
-                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                          ${scrap.tags.map((tag) => `<span style="background: #f0f4f8; color: #475569; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${tag}</span>`).join('')}
-                        </div>
-                      `
-                          : ''
-                      }
-                    </div>
-                    <button class="modal-close-btn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; hover: background: #f5f5f5;">×</button>
-                  </div>
-                </div>
-                <div style="padding: 24px;">
-                  <div style="color: #374151; line-height: 1.6; font-size: 15px;">${scrap.text || scrap.cleanText || '내용이 없습니다.'}</div>
-                </div>
-              </div>
-            `;
-
-          // 닫기 버튼 이벤트
-          modal.querySelector('.modal-close-btn').addEventListener('click', () => {
-            modal.remove();
-          });
-
-          // 배경 클릭으로 닫기
-          modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-              modal.remove();
-            }
-          });
-
-          document.body.appendChild(modal);
-        } else {
-          showToast('❌ 스크랩 정보를 불러올 수 없습니다.');
-        }
-      });
     } else if (
       e.target.id === 'delete-draft-in-workspace' ||
       e.target.closest('#delete-draft-in-workspace')

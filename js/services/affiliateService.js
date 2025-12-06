@@ -165,9 +165,10 @@ export async function incrementAffiliateLinkClick(linkId) {
     const clickCountPath = `${linkPath}/clickCount`;
     await dbRequest('PUT', clickCountPath, newClickCount);
 
-    Logger.debug(`[AffiliateService] 링크 클릭 수 증가 성공: ${linkId} (${currentClickCount} → ${newClickCount})`);
+    Logger.debug(
+      `[AffiliateService] 링크 클릭 수 증가 성공: ${linkId} (${currentClickCount} → ${newClickCount})`
+    );
     return { success: true, newClickCount };
-
   } catch (error) {
     Logger.error(`[AffiliateService] 링크 클릭 수 증가 실패 (${linkId}):`, error);
 

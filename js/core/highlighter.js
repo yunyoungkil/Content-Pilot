@@ -62,20 +62,20 @@ export function setupHighlighter() {
 
   // 1. 하이라이트 표시 (mouseover) - 로컬 변수만 참조 (성능 최적화)
   const _mouseoverHandler = function (e) {
-      // 로컬 변수만 참조하여 비동기 IPC 호출 제거
-      if (isScrapingActive && highlightToggleState) {
-        const target = e.target;
-        if (
-          target &&
-          !target.closest('#content-pilot-panel') &&
-          target !== document.body &&
-          lastHighlightedElement !== target
-        ) {
-          clearHighlight();
-          target.classList.add('pilot-highlight');
-          lastHighlightedElement = target;
-        }
+    // 로컬 변수만 참조하여 비동기 IPC 호출 제거
+    if (isScrapingActive && highlightToggleState) {
+      const target = e.target;
+      if (
+        target &&
+        !target.closest('#content-pilot-panel') &&
+        target !== document.body &&
+        lastHighlightedElement !== target
+      ) {
+        clearHighlight();
+        target.classList.add('pilot-highlight');
+        lastHighlightedElement = target;
       }
+    }
   };
   document.addEventListener('mouseover', _mouseoverHandler, true);
   window.__pilotHighlightHandlerRefs.mouseover = _mouseoverHandler;
@@ -274,114 +274,114 @@ export function setupHighlighter() {
 
   // 3. 스크랩 실행 (click)
   const _clickHandler = function (e) {
-      // isScrapingActive와 highlightToggleState 값을 모두 가져옴
-      chrome.storage.local.get(['isScrapingActive', 'highlightToggleState'], function (result) {
-        // !e.altKey 대신 !result.highlightToggleState를 확인
-        if (!result.isScrapingActive || !result.highlightToggleState || !lastHighlightedElement)
-          return;
+    // isScrapingActive와 highlightToggleState 값을 모두 가져옴
+    chrome.storage.local.get(['isScrapingActive', 'highlightToggleState'], function (result) {
+      // !e.altKey 대신 !result.highlightToggleState를 확인
+      if (!result.isScrapingActive || !result.highlightToggleState || !lastHighlightedElement)
+        return;
 
-        e.preventDefault();
-        e.stopPropagation();
-        const targetElement = lastHighlightedElement;
+      e.preventDefault();
+      e.stopPropagation();
+      const targetElement = lastHighlightedElement;
 
-        // ... (기존 스크랩 데이터 생성 및 전송 로직은 동일)
-        let images = [];
-        if (targetElement.tagName === 'IMG') images.push(targetElement.src);
-        const imgEls = targetElement.querySelectorAll('img');
-        images = images.concat(
-          Array.from(imgEls)
-            .map((img) => img.src)
-            .filter(Boolean)
-        );
-        images = [...new Set(images)];
-        const image = images.length > 0 ? images[0] : null;
+      // ... (기존 스크랩 데이터 생성 및 전송 로직은 동일)
+      let images = [];
+      if (targetElement.tagName === 'IMG') images.push(targetElement.src);
+      const imgEls = targetElement.querySelectorAll('img');
+      images = images.concat(
+        Array.from(imgEls)
+          .map((img) => img.src)
+          .filter(Boolean)
+      );
+      images = [...new Set(images)];
+      const image = images.length > 0 ? images[0] : null;
 
-        // 기본 스크랩 데이터 생성
-        let scrapData = {
-          text: targetElement.innerText || targetElement.textContent || '',
-          html: targetElement.outerHTML || '',
-          tag: targetElement.tagName,
-          url: location.href,
-          image,
-          images,
-          _sourceElement: targetElement, // DOM 요소 직접 전달
-        };
+      // 기본 스크랩 데이터 생성
+      let scrapData = {
+        text: targetElement.innerText || targetElement.textContent || '',
+        html: targetElement.outerHTML || '',
+        tag: targetElement.tagName,
+        url: location.href,
+        image,
+        images,
+        _sourceElement: targetElement, // DOM 요소 직접 전달
+      };
 
-        // [신규] 문맥 추출 강화 - 핵심 문장 하이라이트 메타데이터 추가
-        try {
-          scrapData = enrichScrapWithHighlights(scrapData);
-          if (scrapData.hasHighlights && scrapData.highlights && scrapData.highlights.length > 0) {
-            Logger.biz(`📌 [Scrap] 핵심 문장 ${scrapData.highlights.length}개 식별됨`);
-            Logger.info(
-              '[Scrap] 하이라이트 상세:',
-              scrapData.highlights.map((h) => ({
-                text: h.text.substring(0, 50) + '...',
-                score: h.score,
-              }))
-            );
-          } else {
-            Logger.warn(
-              '[Scrap] 하이라이트된 문장 없음 (텍스트 길이:',
-              scrapData.text?.length || 0,
-              ')'
-            );
-          }
-        } catch (error) {
-          Logger.error('[Highlighter] 하이라이트 추출 실패:', error);
-          Logger.error('[Highlighter] 에러 스택:', error.stack);
-          // 오류 시 원본 데이터 사용
-        }
-
-        // _sourceElement는 전송하지 않음 (직렬화 불가)
-        delete scrapData._sourceElement;
-
-        // [신규] 스크랩 저장 전 모달 표시 (최상위 프레임에서만)
-        if (window.self === window.top) {
-          // 현재 활성 채널 정보 가져오기
-          chrome.storage.local.get('activeChannelId', (storage) => {
-            const activeChannelId = storage.activeChannelId || null;
-
-            // 채널 이름 가져오기
-            chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
-              let activeChannelName = null;
-              if (response && response.success && activeChannelId) {
-                const myBlogs = response.data?.myChannels?.blogs || [];
-                const currentChannel = myBlogs.find((blog) => {
-                  const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : '');
-                  return id === activeChannelId;
-                });
-                activeChannelName = currentChannel?.inputUrl || currentChannel?.url || null;
-              }
-
-              // 모달 표시 (인라인으로 직접 구현하여 chunk 로딩 오류 방지)
-              showScrapSaveModalInline(scrapData, activeChannelId, activeChannelName);
-            });
-          });
+      // [신규] 문맥 추출 강화 - 핵심 문장 하이라이트 메타데이터 추가
+      try {
+        scrapData = enrichScrapWithHighlights(scrapData);
+        if (scrapData.hasHighlights && scrapData.highlights && scrapData.highlights.length > 0) {
+          Logger.biz(`📌 [Scrap] 핵심 문장 ${scrapData.highlights.length}개 식별됨`);
+          Logger.info(
+            '[Scrap] 하이라이트 상세:',
+            scrapData.highlights.map((h) => ({
+              text: h.text.substring(0, 50) + '...',
+              score: h.score,
+            }))
+          );
         } else {
-          // iframe 내부에서는 모달을 표시할 수 없으므로 기본 동작 (공용 스크랩으로 저장)
-          try {
-            chrome.runtime.sendMessage(
-              { action: 'scrap_element', data: scrapData, channelId: null },
-              (response) => {
-                if (chrome.runtime.lastError) {
-                  Logger.error('[Highlighter] Chrome runtime error:', chrome.runtime.lastError);
-                  return;
-                }
-                if (response && response.success) {
-                  window.top.postMessage(
-                    { action: 'cp_show_preview', data: { ...scrapData, channelId: null } },
-                    '*'
-                  );
-                }
-              }
-            );
-          } catch (error) {
-            Logger.error('[Highlighter] Failed to send message:', error);
-          }
+          Logger.warn(
+            '[Scrap] 하이라이트된 문장 없음 (텍스트 길이:',
+            scrapData.text?.length || 0,
+            ')'
+          );
         }
+      } catch (error) {
+        Logger.error('[Highlighter] 하이라이트 추출 실패:', error);
+        Logger.error('[Highlighter] 에러 스택:', error.stack);
+        // 오류 시 원본 데이터 사용
+      }
 
-        clearHighlight();
-      });
+      // _sourceElement는 전송하지 않음 (직렬화 불가)
+      delete scrapData._sourceElement;
+
+      // [신규] 스크랩 저장 전 모달 표시 (최상위 프레임에서만)
+      if (window.self === window.top) {
+        // 현재 활성 채널 정보 가져오기
+        chrome.storage.local.get('activeChannelId', (storage) => {
+          const activeChannelId = storage.activeChannelId || null;
+
+          // 채널 이름 가져오기
+          chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
+            let activeChannelName = null;
+            if (response && response.success && activeChannelId) {
+              const myBlogs = response.data?.myChannels?.blogs || [];
+              const currentChannel = myBlogs.find((blog) => {
+                const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : '');
+                return id === activeChannelId;
+              });
+              activeChannelName = currentChannel?.inputUrl || currentChannel?.url || null;
+            }
+
+            // 모달 표시 (인라인으로 직접 구현하여 chunk 로딩 오류 방지)
+            showScrapSaveModalInline(scrapData, activeChannelId, activeChannelName);
+          });
+        });
+      } else {
+        // iframe 내부에서는 모달을 표시할 수 없으므로 기본 동작 (공용 스크랩으로 저장)
+        try {
+          chrome.runtime.sendMessage(
+            { action: 'scrap_element', data: scrapData, channelId: null },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                Logger.error('[Highlighter] Chrome runtime error:', chrome.runtime.lastError);
+                return;
+              }
+              if (response && response.success) {
+                window.top.postMessage(
+                  { action: 'cp_show_preview', data: { ...scrapData, channelId: null } },
+                  '*'
+                );
+              }
+            }
+          );
+        } catch (error) {
+          Logger.error('[Highlighter] Failed to send message:', error);
+        }
+      }
+
+      clearHighlight();
+    });
   };
   document.addEventListener('click', _clickHandler, true);
   window.__pilotHighlightHandlerRefs.click = _clickHandler;
@@ -397,7 +397,13 @@ export function resetHighlighterForTests() {
       if (refs.keyup) document.removeEventListener('keyup', refs.keyup, true);
       if (refs.blur) window.removeEventListener('blur', refs.blur, true);
       if (refs.click) document.removeEventListener('click', refs.click, true);
-      if (refs.storageListener && chrome && chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.removeListener)
+      if (
+        refs.storageListener &&
+        chrome &&
+        chrome.storage &&
+        chrome.storage.onChanged &&
+        chrome.storage.onChanged.removeListener
+      )
         chrome.storage.onChanged.removeListener(refs.storageListener);
       delete window.__pilotHighlightHandlerRefs;
     }

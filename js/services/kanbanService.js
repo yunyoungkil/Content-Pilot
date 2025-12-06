@@ -270,7 +270,14 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     const newCardRef = push(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}/${targetStatus}`));
     const newCardKey = newCardRef.key;
     // Debug: Log origin and any thumbnail info before saving
-    try { console.log('[addIdeaToKanban DEBUG] Saving idea', { origin: newCard.origin, thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null }); } catch(e) {}
+    try {
+      console.log('[addIdeaToKanban DEBUG] Saving idea', {
+        origin: newCard.origin,
+        thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null,
+      });
+    } catch (e) {
+      console.debug('[KanbanService] Failed to log card creation:', e.message);
+    }
     await set(newCardRef, cleanDataForFirebase(newCard));
 
     // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)
@@ -460,27 +467,19 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
           originType || 'undefined'
         }, status: ${status}`
       );
-
-      // Background를 통해서 AI 브리핑 생성 (referer 문제 해결)
-      chrome.runtime.sendMessage({
-        action: 'generate_idea_briefing',
-        cardId: cardId,
-        title: ideaData.title,
-        description: ideaData.description || '',
-        options: {
-          status: status,
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-          generateMainKeywords: true,
-        }
-      }, (response) => {
-        if (response && response.success) {
+      generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
+        status: status,
+        generateOutline: true,
+        generateKeywords: true,
+        generateLongTail: true,
+        generateMainKeywords: true,
+      })
+        .then(() => {
           Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        } else {
-          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', response?.error || 'Unknown error');
-        }
-      });
+        })
+        .catch((error) => {
+          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', error);
+        });
     } else {
       Logger.debug(
         `[addIdeaToKanban] AI 브리핑 자동 생성 건너뜀 - originType: ${

@@ -60,7 +60,8 @@ function initializeContentPilot() {
         } else {
           // legacy message shape: numeric
           const pct = Number(msg.progress || 0);
-          if (pct > 0 && pct < 100) showLoadingToast(msg.message || '이미지 생성 중...', { progress: pct });
+          if (pct > 0 && pct < 100)
+            showLoadingToast(msg.message || '이미지 생성 중...', { progress: pct });
           if (pct >= 100) {
             hideLoadingToast();
             showToast('✅ 이미지 생성이 완료되었습니다.');
