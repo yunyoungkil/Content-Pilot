@@ -1935,6 +1935,7 @@ ${cardData.reviewCount ? `리뷰: ${cardData.reviewCount.toLocaleString()}개` :
       badges: cardData.badges,
       insertMode: cardData.insertMode
     }
+    ,
     // Include SEO fields if present so downstream idea creation uses them
     recommendedSearches: link.recommendedSearches || link.recommendedKeywords || [],
     longTailKeywords: link.longTailKeywords || [],
