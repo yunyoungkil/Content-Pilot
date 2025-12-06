@@ -9,7 +9,8 @@ try {
 }
 
 // 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
-chrome.action.onClicked.addListener(async (tab) => {
+if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+  chrome.action.onClicked.addListener(async (tab) => {
   try {
     // 현재 탭에 content script 삽입
     await chrome.scripting.executeScript({
@@ -27,7 +28,8 @@ chrome.action.onClicked.addListener(async (tab) => {
   } catch (error) {
     Logger.error('[Background] Failed to activate Content Pilot:', error);
   }
-});
+  });
+}
 
 import {
   getDb,
@@ -36,6 +38,7 @@ import {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
+  getUnifiedGalleryImages,
 } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
@@ -57,9 +60,34 @@ import {
   refreshChannelData,
   fetchImageAsBase64,
   updateUrlIndex,
-  normalizeUrlForComparison,
   encodeUrlForFirebaseKey,
 } from './js/services/collectorService.js';
+
+// [추가] 이미지 삭제를 위한 강력한 URL 정규화 함수
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    // 1. HTML 엔티티(&amp;)를 일반 문자(&)로 변환 (가장 흔한 원인)
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    
+    // 2. URL 객체 생성 (프로토콜, 쿼리스트링 분리)
+    const u = new URL(cleanUrl);
+    
+    // 3. 경로(pathname)를 디코딩하여 표준화 (%20 -> 공백, %2F -> / 등)
+    // 쿼리스트링(?token=...)은 무시하고, 도메인+경로만 비교하여 일치율을 높임
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+        decodedPath = u.pathname;
+    }
+    
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    // URL 파싱 실패 시 원본 그대로 반환
+    return url.trim();
+  }
+}
 
 import {
   deleteCompetitorData,
@@ -108,6 +136,7 @@ import {
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
+  removeScrapImage,
 } from './js/services/scrapService.js';
 
 import {
@@ -159,7 +188,8 @@ const KANBAN_CACHE_TTL = 30 * 1000; // 30초 TTL
 Logger.info('🚀 [System] Service Worker Started (Lightweight Router)');
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
-chrome.action.onClicked.addListener((tab) => {
+if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+  chrome.action.onClicked.addListener((tab) => {
   if (tab.id) {
     chrome.tabs.sendMessage(
       tab.id,
@@ -184,7 +214,8 @@ chrome.action.onClicked.addListener((tab) => {
       }
     );
   }
-});
+  });
+}
 
 // 1. 알람 리스너 (스케줄러)
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -422,31 +453,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(Promise.reject(new Error('testAdSenseGa4Access: 아직 구현되지 않음')));
 
   // === [AI Service] 생성 및 분석 ===
-  if (msg.action === 'generate_draft_from_idea')
-    return handleAsync(generateDraftFromIdea(msg.data));
-  if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, ...opts } = msg.data;
+  if (msg.action === 'generate_draft_from_idea') {
+    const opts = msg.options || {};
     opts.onProgress = (p) => {
       if (sender.tab?.id) {
         chrome.tabs
           .sendMessage(sender.tab.id, {
-            action: 'briefing_progress',
-            cardId,
+            action: 'thumbnail_progress',
             progress: p,
+            cardId: msg.data?.cardId || null,
+            message: p?.message || null,
+            step: p?.step || null,
           })
           .catch((err) => {
-            // "message port closed"는 정상적인 상황 (탭이 닫혔거나 content script가 없을 때)
             if (
               err?.message &&
               !err.message.includes('message port closed') &&
               !err.message.includes('Could not establish connection')
             ) {
-              Logger.debug('[sendMessage] briefing_progress 전송 실패:', err.message);
+              Logger.debug('[sendMessage] thumbnail_progress 전송 실패:', err.message);
             }
           });
       }
     };
-    return handleAsync(generateIdeaBriefing(cardId, title, description, opts));
+    return handleAsync(generateDraftFromIdea(msg.data, opts));
+  }
+  if (msg.action === 'generate_idea_briefing') {
+    const payload = msg.data || msg || {};
+    const { cardId, title, description, options } = payload;
+    return handleAsync(
+      generateIdeaBriefing(cardId, title, description, options)
+        .then(() => ({ success: true }))
+        .catch((error) => ({ success: false, error: error.message }))
+    );
   }
   if (msg.action === 'ai_generate_images') {
     return handleAsync(
@@ -1136,6 +1175,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'get_kanban_data' || msg.action === 'get_all_kanban_data') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
 
         Logger.info(`[get_kanban_data] 새로운 데이터 조회 - userId: ${userId}`);
         const dbRef = ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`);
@@ -1721,25 +1763,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-  if (msg.action === 'remove_scrap_image') {
-    return handleAsync(
-      (async () => {
-        const { scrapId, imageUrl } = msg.data;
-        const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-        const scrapSnap = await get(scrapRef);
-        const scrap = scrapSnap?.val();
-        if (scrap) {
-          if (scrap.images && Array.isArray(scrap.images)) {
-            scrap.images = scrap.images.filter((img) => img !== imageUrl);
-            await update(scrapRef, { images: scrap.images });
-          }
-        }
-        return { success: true };
-      })()
-    );
-  }
+// [추가/확인] 이미지 삭제 핸들러
+if (msg.action === 'remove_scrap_image') {
+  console.log('[Background] 이미지 삭제 요청 수신:', msg.data);
+  const { scrapId, imageUrl } = msg.data || {};
 
-  if (msg.action === 'delete_scrap') {
+  removeScrapImage(scrapId, imageUrl)
+    .then(result => {
+      console.log('[Background] 삭제 처리 결과:', result);
+      // Notify other extension contexts so UIs can refresh immediately
+      try {
+        // only broadcast when DB was actually updated
+        if (result && result.success && result.changed) {
+          chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
+        }
+      } catch (e) {
+        console.warn('[Background] 브로드캐스트 실패:', e.message);
+      }
+      sendResponse(result);
+    })
+    .catch(error => {
+      console.error('[Background] 삭제 처리 중 오류:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+
+  return true; // 비동기 응답 필수
+}  if (msg.action === 'delete_scrap') {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
@@ -1791,6 +1840,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               ? '공용 스크랩으로 변경되었습니다.'
               : '전용 스크랩으로 변경되었습니다.',
         };
+      })()
+    );
+  }
+
+  if (msg.action === 'get_unified_gallery') {
+    return handleAsync(
+      (async () => {
+        const filter = msg.filter || msg.data?.filter || 'ALL';
+        const images = await getUnifiedGalleryImages(filter);
+        return { success: true, images };
       })()
     );
   }

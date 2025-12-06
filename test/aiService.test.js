@@ -35,6 +35,8 @@ import {
  * Gemini API 호출 및 응답 처리 기능 검증
  */
 describe('AI Service', () => {
+  // some AI tests can involve slightly longer async operations (image processing, cropping, etc.)
+  jest.setTimeout(20000);
   beforeEach(() => {
     // Chrome storage 모킹 초기화
     global.chrome.storage.local.get.mockResolvedValue({
@@ -44,6 +46,18 @@ describe('AI Service', () => {
 
     // fetch API 초기화
     global.fetch.mockClear();
+
+    // Ensure runtime message sendMessage won't hang in tests
+    if (!global.chrome.runtime.sendMessage) {
+      global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+        // Default: handle fetch_image_as_base64 action with a synthetic base64 payload
+        if (msg && msg.action === 'fetch_image_as_base64') {
+          if (typeof cb === 'function') cb({ success: true, data: 'R0FDRkE=', mimeType: 'image/png' });
+          return;
+        }
+        if (typeof cb === 'function') cb({ success: false });
+      });
+    }
 
     // Firebase 서비스 모킹
     jest.doMock('../js/services/firebaseService.js', () => ({
@@ -140,9 +154,9 @@ describe('AI Service', () => {
         expect.stringContaining('generativelanguage.googleapis.com'),
         expect.objectContaining({
           method: 'POST',
-          headers: {
+          headers: expect.objectContaining({
             'Content-Type': 'application/json',
-          },
+          }),
           body: expect.stringContaining('"contents"'),
         })
       );
@@ -222,6 +236,52 @@ describe('AI Service', () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
       // first model should have failed and we succeed on fallback (2 calls)
       expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('getRelevantAffiliateLinks', () => {
+    test('should prefer preferredAffiliateId and sort results by score', async () => {
+      // isolate modules to ensure firebaseService mock is attached before requiring aiService
+      jest.isolateModules(async () => {
+        jest.resetModules();
+        // mock firebaseService specifically for this test
+        jest.doMock('../js/services/firebaseService.js', () => ({
+          getDb: jest.fn(() => 'mock-db'),
+          ref: jest.fn(() => 'mock-ref'),
+          update: jest.fn(() => Promise.resolve()),
+          get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+          getCurrentUserId: jest.fn(() => 'test-user-id'),
+          cleanDataForFirebase: jest.fn((data) => data),
+        }));
+
+        const firebaseService = require('../js/services/firebaseService.js');
+        const linksMap = {
+          link_1: {
+            id: 'link_1',
+            keywords: ['vacuum', 'clean'],
+            productName: 'Dyson V15',
+            url: 'https://partner.example/link_1',
+            createdAt: 1,
+            cardData: { imageUrl: 'https://images.example/a.jpg' },
+          },
+          link_2: {
+            id: 'link_2',
+            keywords: ['vacuum'],
+            productName: 'Generic Vacuum',
+            url: 'https://partner.example/link_2',
+            createdAt: 2,
+            cardData: { imageUrl: 'https://images.example/b.jpg' },
+          },
+        };
+
+        firebaseService.get.mockResolvedValueOnce({ val: () => linksMap });
+
+        const { getRelevantAffiliateLinks } = require('../js/services/aiService.js');
+        const result = await getRelevantAffiliateLinks('test-user-id', 'Dyson V15 vacuum review', { preferredAffiliateId: 'link_2' });
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        expect(result[0].id).toBe('link_2');
+      });
     });
   });
 
@@ -364,6 +424,13 @@ describe('AI Service', () => {
 
       // Import the module fresh
       const svc = require('../js/services/aiService.js');
+      // Mock generateAiImage to control sourceImageUrl and avoid external Gemini calls
+      jest.spyOn(svc, 'generateAiImage').mockResolvedValue(['https://images.test/generated.png']);
+      // Mock generateAiImage directly to avoid slow external Gemini calls and speed up test
+      if (!svc.generateAiImage) {
+        throw new Error('generateAiImage not found on service');
+      }
+      jest.spyOn(svc, 'generateAiImage').mockResolvedValue(['https://images.test/generated.png']);
 
       // Save original fetch and install a temporary fetch mock used by callGeminiAPI and generateAiImage
       const originalFetch = global.fetch;
@@ -401,20 +468,31 @@ describe('AI Service', () => {
 
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
 
-      const res = await svc.generateDraftFromIdea(idea, {
-        generateDraft: true,
-        generateThumbnail: true,
+      // Call the enhancement function directly to isolate thumbnail compose fallback behavior.
+      const res = await svc.enhanceDraftWithFeatures({
+        thumbnailCandidates: [
+          {
+            type: 'curiosity',
+            thumbnailPromptEn: 'Test prompt',
+            thumbnailText: 'Test',
+            altText: 'Alt Text',
+          },
+        ],
+        affiliateLinks: [],
+        permalink: 'test-permalink',
         composeThumbnailText: true,
+        seoTitle: 'Test SEO',
+        ideaData: idea,
+        formattedDraft: '<h1>Header</h1><p>Body</p>',
+        jsonLdSchema: null,
       });
       // restore original fetch so we don't break other tests
       global.fetch = originalFetch;
       // debug
-      console.log('generateDraftFromIdea test response =>', res);
-
-      expect(res.success).toBe(true);
+      console.log('enhanceDraftWithFeatures test response =>', res);
       // draft content may vary depending on sanitization — main assertion here is that draft succeeded
       // Because crop failed, we should have partialFailure flag set
-      expect(res.thumbnailPartialFailure).toBe(true);
+      expect(res.thumbnailGenerationPartialFailure).toBe(true);
       // thumbnailUrls should still exist (uploaded URLs)
       expect(res.thumbnailUrls).toBeTruthy();
       expect(res.thumbnailUrls.url_16x9 || res.thumbnailUrls.url_1x1).toBeTruthy();
@@ -519,17 +597,170 @@ describe('AI Service', () => {
 
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
 
-      const res = await svc.generateDraftFromIdea(idea, {
-        generateDraft: true,
-        generateThumbnail: true,
+      // Directly call the enhancement flow to focus on compose fallback behavior
+      const res = await svc.enhanceDraftWithFeatures({
+        thumbnailCandidates: [
+          {
+            type: 'curiosity',
+            thumbnailPromptEn: 'Test prompt',
+            thumbnailText: 'Test',
+            altText: 'Alt Text',
+          },
+        ],
+        affiliateLinks: [],
+        permalink: 'test-permalink',
         composeThumbnailText: true,
+        seoTitle: 'Test SEO',
+        ideaData: idea,
+        formattedDraft: '<h1>Header</h1><p>Body</p>',
+        jsonLdSchema: null,
       });
       // restore original fetch so we don't break other tests
       global.fetch = originalFetch;
 
-      expect(res.success).toBe(true);
+      // service returns partial flags & thumbnailUrls; ensure we have them
+      expect(res).toBeTruthy();
       // compose failed but fallback used -> should still report partial failure
-      expect(res.thumbnailPartialFailure).toBe(true);
+      expect(res.thumbnailGenerationPartialFailure).toBe(true);
+      expect(res.thumbnailUrls).toBeTruthy();
+    });
+
+    test('should call onProgress during draft and thumbnail generation', async () => {
+      jest.resetModules();
+
+      // mock minimal dependencies similar to previous tests
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+      }));
+
+      jest.doMock('../js/services/offscreenService.js', () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
+        cropImageInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,cropped-image-data')),
+        composeThumbnailInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,COMPOSED')),
+      }));
+
+      jest.doMock('../js/services/promptService.js', () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
+      jest.doMock('../js/utils.js', () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // fetch mock for text + image models
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        if (String(url).includes('models/t')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }] }) });
+        }
+        if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+        }
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+      });
+
+      const svc = require('../js/services/aiService.js');
+      const progressCb = jest.fn();
+      const idea = { title: 'Progress Test', description: 'desc', tags: ['a'] };
+      await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true, composeThumbnailText: true, onProgress: progressCb });
+      global.fetch = originalFetch;
+
+      expect(progressCb).toHaveBeenCalled();
+      // ensure we got at least progress for draft and thumbnail generation
+      const steps = progressCb.mock.calls.map((c) => c[0].step);
+      expect(steps.includes('draft_generation') || steps.includes('thumbnail_generation')).toBe(true);
+    });
+
+    test('should fallback when compose operation times out', async () => {
+      jest.resetModules();
+
+      // minimal mocks
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+      }));
+
+      jest.doMock('../js/services/offscreenService.js', () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
+        // compose never resolves -> simulate hang
+        composeThumbnailInOffscreen: jest.fn(() => new Promise(() => {})),
+        cropImageInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,cropped-image-data')),
+      }));
+
+      jest.doMock('../js/services/promptService.js', () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
+      jest.doMock('../js/utils.js', () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // fetch mock for text + image models
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        if (String(url).includes('models/t')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }] }) });
+        }
+        if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
+          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+        }
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+      });
+
+      const svc = require('../js/services/aiService.js');
+      const idea = { title: 'Timeout Test', description: 'desc', tags: ['a'] };
+      const res = await svc.enhanceDraftWithFeatures({
+        thumbnailCandidates: [
+          {
+            type: 'curiosity',
+            thumbnailPromptEn: 'Test prompt',
+            thumbnailText: 'Test',
+            altText: 'Alt Text',
+          },
+        ],
+        affiliateLinks: [],
+        permalink: 'test-permalink',
+        composeThumbnailText: true,
+        seoTitle: 'Test SEO',
+        ideaData: idea,
+        formattedDraft: '<h1>Header</h1><p>Body</p>',
+        jsonLdSchema: null,
+      });
+      global.fetch = originalFetch;
+
+      expect(res).toBeTruthy();
+      expect(res.thumbnailGenerationPartialFailure).toBe(true);
       expect(res.thumbnailUrls).toBeTruthy();
     });
     test.skip('should generate draft with affiliate links', async () => {

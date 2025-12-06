@@ -17,6 +17,11 @@ export const CONSTANTS = {
   USER_ID: 'default_user', // 로그인 후 authService 등에 의해 동적으로 변경됨
 };
 
+// Gallery config: how many images per scrap to include in unified gallery
+export const GALLERY_IMAGES_PER_SCRAP = 6; // increased to include more images per scrap in unified gallery
+// safety cap for unified gallery total items to avoid huge loads
+export const MAX_UNIFIED_GALLERY_IMAGES = 600; // raised cap to allow more items in unified gallery
+
 export const firebaseConfig = {
   apiKey: 'AIzaSyBR6hwdNaR_807gfkgDrw91MvqSBMNlUtY',
   authDomain: 'content-pilot-7eb03.firebaseapp.com',
@@ -527,6 +532,139 @@ export function onFirebaseAuthStateChanged(callback) {
 
 // export
 export { initializeApp, getAuth, signInWithCredential, GoogleAuthProvider };
+
+/**
+ * [New] 통합 갤러리 데이터 가져오기
+ * 스크랩 이미지와 스토리지 이미지를 모두 가져와서 표준 포맷으로 병합합니다.
+ */
+export async function getUnifiedGalleryImages(filterTag = null) {
+  const userId = await getCurrentUserId();
+
+  // 1. 스크랩 데이터 가져오기
+  const scrapsSnap = await get(`scraps/${userId}`);
+  const scrapsVal = scrapsSnap.val() || {};
+
+  // 2. 스토리지 로그 가져오기
+  const storageSnap = await get(`thumbnail_images/${userId}`);
+  const storageVal = storageSnap.val() || {};
+
+  const unifiedList = [];
+
+  // 3. 스크랩 데이터 정규화
+  Object.entries(scrapsVal).forEach(([id, item]) => {
+    // 스크랩의 모든 이미지를 수집
+    const imagesArr = [];
+    if (item.image) imagesArr.push(item.image);
+    if (Array.isArray(item.allImages)) imagesArr.push(...item.allImages);
+    if (Array.isArray(item.images)) imagesArr.push(...item.images);
+
+    // 중복 제거 및 유효성(널/빈값 제거)
+    const uniqueImages = [...new Set((imagesArr || []).filter(Boolean))];
+    if (uniqueImages.length > 0) {
+      // Push each image as its own gallery item (flatten groups)
+      const selected = uniqueImages.slice(0, GALLERY_IMAGES_PER_SCRAP);
+      selected.forEach((imgUrl, idx) => {
+        unifiedList.push({
+          id: `${id}::${idx}`,
+          scrapId: id,
+          source: 'SCRAP',
+          url: imgUrl,
+          thumbnail: imgUrl,
+          originData: item,
+          timestamp: item.timestamp || 0,
+        });
+      });
+    }
+  });
+
+  // 4. 스토리지 데이터 정규화
+  Object.entries(storageVal).forEach(([id, item]) => {
+    unifiedList.push({
+      id: id,
+      source: 'STORAGE', // [수정] type -> source 로 변경 (workspaceMode.js와 통일)
+      url: item.downloadURL,
+      thumbnail: item.downloadURL,
+      images: [item.downloadURL],
+      tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
+      originData: item, // storagePath 등 포함
+      timestamp: item.timestamp || 0,
+    });
+  });
+
+  // 5. 최신순 정렬
+  unifiedList.sort((a, b) => b.timestamp - a.timestamp);
+
+  // safety cap to prevent sending too many images at once
+  if (unifiedList.length > MAX_UNIFIED_GALLERY_IMAGES) {
+    unifiedList.length = MAX_UNIFIED_GALLERY_IMAGES;
+  }
+
+  // 6. 태그 및 소스 필터링 [버그 수정 핵심]
+  if (filterTag && filterTag !== 'ALL') {
+    // [수정] UI(workspaceMode.js)에서 보내는 'STORAGE', 'SCRAP' 대문자 필터를 처리
+    if (filterTag === 'STORAGE') {
+      return unifiedList.filter((item) => item.source === 'STORAGE');
+    }
+    if (filterTag === 'SCRAP') {
+      return unifiedList.filter((item) => item.source === 'SCRAP');
+    }
+
+    // 그 외(draftMode.js 등)에서 보내는 태그(예: #Storage) 처리
+    return unifiedList.filter((item) => item.tags.includes(filterTag));
+  }
+
+  return unifiedList;
+}
+
+/**
+ * [New] 스토리지 파일 삭제 (REST API)
+ */
+export async function deleteImageFromStorage(storageUrl) {
+  try {
+    let path = storageUrl;
+    const bucket = firebaseConfig.storageBucket;
+
+    // gs:// 경로 파싱
+    if (storageUrl.startsWith('gs://')) {
+      path = storageUrl.replace(`gs://${bucket}/`, '');
+    }
+
+    const encodedPath = encodeURIComponent(path);
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}`;
+
+    let token = await getValidToken(false);
+    if (!token) token = await getValidToken(true);
+
+    Logger.info(`[Storage] 삭제 요청: ${path}`);
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Storage Delete Failed: ${response.statusText}`);
+    }
+
+    return true;
+  } catch (error) {
+    Logger.error('[Storage] 삭제 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * [New] 업로드된 이미지 로그 조회
+ */
+export async function getUploadedImagesLog() {
+  const userId = await getCurrentUserId();
+  const snapshot = await get(`thumbnail_images/${userId}`);
+  const data = snapshot.val() || {};
+
+  return Object.entries(data)
+    .map(([key, val]) => ({ id: key, ...val }))
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
 
 // 즉시 초기화
 initializeFirebase();

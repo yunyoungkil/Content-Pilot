@@ -168,6 +168,99 @@ export function showToast(msg) {
   }, 1200);
 }
 
+// Persistent loading toast / progress UI
+export function showLoadingToast(message = '로딩 중...', options = {}) {
+  // options: id (string), dismissible (bool), progress (0-100)
+  const id = options.id || 'cp-loading-toast-modal';
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.style.position = 'fixed';
+    el.style.left = '50%';
+    el.style.top = '60px';
+    el.style.transform = 'translateX(-50%)';
+    el.style.background = 'rgba(34,34,34,0.97)';
+    el.style.color = '#fff';
+    el.style.fontSize = '15px';
+    el.style.fontWeight = '600';
+    el.style.padding = '10px 18px';
+    el.style.borderRadius = '10px';
+    el.style.boxShadow = '0 2px 12px rgba(0,0,0,0.13)';
+    el.style.zIndex = '2147483647';
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.gap = '10px';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'cp-loading-spinner';
+    spinner.style.width = '16px';
+    spinner.style.height = '16px';
+    spinner.style.border = '2px solid rgba(255,255,255,0.2)';
+    spinner.style.borderTop = '2px solid #fff';
+    spinner.style.borderRadius = '50%';
+    spinner.style.animation = 'cp-spin 1s linear infinite';
+    spinner.style.flex = 'none';
+
+    const txt = document.createElement('span');
+    txt.className = 'cp-loading-toast-message';
+    txt.textContent = message;
+
+    el.appendChild(spinner);
+    el.appendChild(txt);
+
+    // optional progress bar
+    if (typeof options.progress === 'number') {
+      const barWrap = document.createElement('div');
+      barWrap.style.width = '160px';
+      barWrap.style.height = '6px';
+      barWrap.style.background = 'rgba(255,255,255,0.08)';
+      barWrap.style.borderRadius = '6px';
+      barWrap.style.overflow = 'hidden';
+      barWrap.style.marginLeft = '10px';
+      barWrap.style.flex = 'none';
+      const bar = document.createElement('div');
+      bar.className = 'cp-loading-progress-bar';
+      bar.style.height = '100%';
+      bar.style.width = `${Math.min(Math.max(options.progress, 0), 100)}%`;
+      bar.style.background = '#fff';
+      bar.style.opacity = '0.9';
+      barWrap.appendChild(bar);
+      el.appendChild(barWrap);
+    }
+    document.body.appendChild(el);
+  } else {
+    const span = el.querySelector('.cp-loading-toast-message');
+    if (span) span.textContent = message;
+    const bar = el.querySelector('.cp-loading-progress-bar');
+    if (bar && typeof options.progress === 'number') {
+      bar.style.width = `${Math.min(Math.max(options.progress, 0), 100)}%`;
+    }
+  }
+}
+
+export function updateLoadingToast(message, progress, id = 'cp-loading-toast-modal') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const span = el.querySelector('.cp-loading-toast-message');
+  if (span && message) span.textContent = message;
+  const bar = el.querySelector('.cp-loading-progress-bar');
+  if (bar && typeof progress === 'number') bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
+}
+
+export function hideLoadingToast(id = 'cp-loading-toast-modal') {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// simple spinner animation rule for cp-loading-spinner (keeps simple runtime insertion)
+if (typeof document !== 'undefined' && !document.getElementById('cp-loading-spinner-style')) {
+  const style = document.createElement('style');
+  style.id = 'cp-loading-spinner-style';
+  style.textContent = `@keyframes cp-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+  document.head && document.head.appendChild(style);
+}
+
 // 긴 링크를 줄여서 보여주는 함수
 export function shortenLink(url, maxLength = 40) {
   if (!url) return '';

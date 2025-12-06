@@ -89,6 +89,17 @@ latest stable / Canary) if you rely on the `offscreen` manifest field.
 - [Node.js](https://nodejs.org/ko) (npm 포함)
 - **Google Chrome 브라우저 (버전 109 이상)**: 이 확장 프로그램의 핵심 기능인 `Offscreen Document` API가 **Chrome 109**부터 정식 지원되므로, 반드시 해당 버전 이상의 Chrome 브라우저가 필요합니다.
 
+### 개발자용 Node / CI 안내
+
+- 본 프로젝트의 package.json에는 engines: "node": ">=18 <=22"로 명시되어 있습니다. CI는 이 엔진 범위를 지원하도록 GitHub Actions에서 Node 버전 18, 20, 22로 테스트를 실행합니다.
+- 로컬 개발 환경에서는 Node 22를 권장합니다(성능 및 최신 기능). nvm 또는 n에서 Node 버전 관리해 사용하세요.
+
+```powershell
+# 예: nvm 사용 시
+nvm install 22
+nvm use 22
+```
+
 ### 설치 순서
 
 1. **프로젝트 복제 (Clone)**
@@ -114,6 +125,8 @@ latest stable / Canary) if you rely on the `offscreen` manifest field.
    ```bash
    npx webpack
    ```
+
+> 빌드 최적화: 빌드 과정에서 이미지(asset)를 자동 압축하도록 `image-minimizer-webpack-plugin`(imagemin)이 적용되었습니다. 최종 빌드 시 이미지 크기를 줄여 확장 프로그램 용량 및 로딩 부담을 완화합니다.
 
 5. **프로젝트 자동 빌드 (Build)**
 

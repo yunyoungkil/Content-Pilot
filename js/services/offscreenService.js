@@ -700,7 +700,9 @@ async function sendToOffscreen(action, data, timeout = 30000) {
   await ensureOffscreenDocument();
 
   // 포트 안정화 대기
-  try { await waitForOffscreenPort(5000); } catch (e) {}
+  try {
+    await waitForOffscreenPort(5000);
+  } catch (e) {}
 
   return new Promise((resolve, reject) => {
     // 1. 고유 ID 생성
@@ -723,7 +725,9 @@ async function sendToOffscreen(action, data, timeout = 30000) {
         const portResponse = (msg) => {
           // 3. 포트 메시지도 ID 확인
           if (msg && msg.action === `${action}_response` && msg.requestId === requestId) {
-            try { offscreenPort.onMessage.removeListener(portResponse); } catch (e) {}
+            try {
+              offscreenPort.onMessage.removeListener(portResponse);
+            } catch (e) {}
             if (msg.success) resolve(msg);
             else reject(new Error(msg.error || `${action} 실패`));
             return true;

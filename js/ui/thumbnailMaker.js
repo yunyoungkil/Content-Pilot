@@ -8,8 +8,26 @@ import { showToast, Logger, debounce } from '../utils.js';
  * @param {Function} onInsert - '본문에 삽입' 클릭 시 실행할 콜백 (dataUrl, altText 전달)
  * @param {Function} onSave - 상태 변경 시 자동 저장 콜백 (thumbnailInfo 전달)
  * @param {Function} onEditTui - '정밀 편집' 클릭 시 실행할 콜백 (dataUrl 전달)
+ * @param {Object} initialOptions - 초기 옵션 (showText 등)
+ * @param {Element} container - 모달을 추가할 부모 컨테이너 (기본값: document.body)
  */
-export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
+export function openThumbnailMaker(
+  draftData,
+  onInsert,
+  onSave,
+  onEditTui,
+  initialOptions = {},
+  container = document.body
+) {
+  // 0. [버그 수정] 기존 모달이 있다면 제거 (container 내부 검색)
+  // container가 ShadowRoot일 수 있으므로 querySelector 사용
+  const existingModal = container.querySelector
+    ? container.querySelector('#cp-thumbnail-modal')
+    : document.getElementById('cp-thumbnail-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+
   // 1. 기존 데이터에서 썸네일 정보 추출 (배열 지원)
   let thumbInfo = null;
   let thumbnailCandidates = []; // 3가지 컨셉 후보 저장
@@ -87,11 +105,17 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   }
   console.log('[ThumbnailMaker] 초기화 데이터:', logThumbInfo);
 
-  // 2. 모달 컨테이너 생성 (어두운 테마 적용)
+  // [수정 1] initialOptions에서 initialShowText 추출 (변수 선언 누락 수정)
+  const initialShowText = initialOptions.showText !== undefined ? initialOptions.showText : true;
+
+  // [수정 2] modal 변수 선언 및 엘리먼트 생성 (누락된 코드 추가)
   const modal = document.createElement('div');
   modal.id = 'cp-thumbnail-modal';
+
+  // [핵심 수정] Z-Index를 브라우저 최대 허용값(2147483647)으로 수정
+  // 기존 2147483648은 무효화되어 패널 뒤로 숨겨짐
   modal.style.cssText =
-    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:640px;min-width:320px;background:#1e1e1e;color:#fff;z-index:2147483648;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.5);border-radius:16px;font-family:'Pretendard', sans-serif;border:1px solid #333;max-height:90vh;overflow-y:auto;box-sizing:border-box;";
+    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:640px;min-width:320px;background:#1e1e1e;color:#fff;z-index:2147483647;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.5);border-radius:16px;font-family:'Pretendard', sans-serif;border:1px solid #333;max-height:90vh;overflow-y:auto;box-sizing:border-box;";
 
   // 프롬프트 텍스트 이스케이프 처리
   const escapedPromptEn = (thumbInfo.thumbnailPromptEn || '')
@@ -179,7 +203,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         </div>
         
         <div style="flex-shrink:0;">
-          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">메인 타이틀</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <label style="font-size:12px;color:#aaa;">메인 타이틀</label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="tm-show-text" ${initialShowText ? 'checked' : ''} style="cursor:pointer;accent-color:#6c5ce7;">
+              <label for="tm-show-text" style="font-size:11px;color:#ccc;cursor:pointer;">텍스트 표시</label>
+            </div>
+          </div>
           <input id="tm-title" type="text" value="${escapedThumbText}" placeholder="비교형: 'A VS B', 질문형: '어떻게 할까?', 리스트형: '1. 항목1, 2. 항목2'" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
         </div>
         
@@ -287,7 +317,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       #cp-thumbnail-modal::-webkit-scrollbar-thumb:hover { background: #666; }
     </style>
   `;
-  document.body.appendChild(modal);
+  // [수정] 전달받은 container(Shadow DOM)에 추가
+  container.appendChild(modal);
 
   // 3. 캔버스 및 상태 초기화
   const canvas = modal.querySelector('#tm-preview');
@@ -357,15 +388,15 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       }
 
       const currentInfo = {
-        thumbnailText: document.getElementById('tm-title').value,
-        subtitle: document.getElementById('tm-subtitle')?.value || '',
+        thumbnailText: modal.querySelector('#tm-title')?.value || '',
+        subtitle: modal.querySelector('#tm-subtitle')?.value || '',
         thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
         thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
         // 스타일 정보 저장
-        templateType: document.getElementById('tm-template-type')?.value || 'default',
-        fontFamily: document.getElementById('tm-font-family')?.value || "'Pretendard', sans-serif",
-        textColor: document.getElementById('tm-text-color')?.value || 'auto',
-        ratio: document.getElementById('tm-ratio')?.value || '16:9',
+        templateType: modal.querySelector('#tm-template-type')?.value || 'default',
+        fontFamily: modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif",
+        textColor: modal.querySelector('#tm-text-color')?.value || 'auto',
+        ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
         // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback)
         bgImage: bgImageToSave,
         // [신규] 선택된 컨셉 인덱스 저장 (영구 저장)
@@ -391,13 +422,15 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     if (isRestoring) return;
 
     const state = {
-      templateType: document.getElementById('tm-template-type')?.value || 'default',
-      title: document.getElementById('tm-title').value,
-      subtitle: document.getElementById('tm-subtitle')?.value || '',
-      fontFamily: document.getElementById('tm-font-family')?.value || "'Pretendard', sans-serif",
-      textColor: document.getElementById('tm-text-color')?.value || 'auto',
-      ratio: document.getElementById('tm-ratio')?.value || '16:9',
+      templateType: modal.querySelector('#tm-template-type')?.value || 'default',
+      title: modal.querySelector('#tm-title').value,
+      subtitle: modal.querySelector('#tm-subtitle')?.value || '',
+      fontFamily: modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif",
+      textColor: modal.querySelector('#tm-text-color')?.value || 'auto',
+      ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
       bgImage: currentBgImage,
+      // [추가] 텍스트 표시 여부 상태 저장
+      showText: modal.querySelector('#tm-show-text')?.checked ?? true,
       timestamp: Date.now(),
     };
 
@@ -426,16 +459,37 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const restoreState = (state) => {
     isRestoring = true; // 복원 중임을 표시
 
-    if (document.getElementById('tm-template-type')) {
-      document.getElementById('tm-template-type').value = state.templateType || 'default';
+    if (modal.querySelector('#tm-template-type')) {
+      modal.querySelector('#tm-template-type').value = state.templateType || 'default';
     }
-    document.getElementById('tm-title').value = state.title;
-    if (document.getElementById('tm-subtitle')) {
-      document.getElementById('tm-subtitle').value = state.subtitle || '';
+    modal.querySelector('#tm-title').value = state.title;
+    if (modal.querySelector('#tm-subtitle')) {
+      modal.querySelector('#tm-subtitle').value = state.subtitle || '';
     }
-    document.getElementById('tm-font-family').value = state.fontFamily;
-    document.getElementById('tm-text-color').value = state.textColor;
-    document.getElementById('tm-ratio').value = state.ratio;
+    modal.querySelector('#tm-font-family').value = state.fontFamily;
+    modal.querySelector('#tm-text-color').value = state.textColor;
+    modal.querySelector('#tm-ratio').value = state.ratio;
+
+    // [추가] 텍스트 표시 체크박스 상태 복원
+    const showTextCheckbox = modal.querySelector('#tm-show-text');
+    if (showTextCheckbox) {
+      // 저장된 상태가 있으면 그것을 따르고, 없으면(구버전 데이터) true
+      const shouldShow = state.showText !== undefined ? state.showText : true;
+      showTextCheckbox.checked = shouldShow;
+
+      // 입력창 활성화/비활성화 UI 동기화
+      const titleInput = modal.querySelector('#tm-title');
+      const subtitleInput = modal.querySelector('#tm-subtitle');
+      if (titleInput) {
+        titleInput.disabled = !shouldShow;
+        titleInput.style.opacity = shouldShow ? '1' : '0.5';
+      }
+      if (subtitleInput) {
+        subtitleInput.disabled = !shouldShow;
+        subtitleInput.style.opacity = shouldShow ? '1' : '0.5';
+      }
+    }
+
     currentBgImage = state.bgImage;
 
     // 비율 변경 시 캔버스 크기 조정
@@ -462,8 +516,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
   // Undo/Redo 버튼 상태 업데이트
   const updateUndoRedoButtons = () => {
-    const undoBtn = document.getElementById('tm-undo');
-    const redoBtn = document.getElementById('tm-redo');
+    const undoBtn = modal.querySelector('#tm-undo');
+    const redoBtn = modal.querySelector('#tm-redo');
     if (undoBtn) {
       undoBtn.disabled = history.currentIndex <= 0;
       undoBtn.style.opacity = history.currentIndex <= 0 ? '0.5' : '1';
@@ -478,14 +532,13 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   const updatePreview = async () => {
     const startTime = performance.now();
 
-    const title = document.getElementById('tm-title').value;
-    const subtitle = document.getElementById('tm-subtitle')?.value || '';
-    const templateType = document.getElementById('tm-template-type')?.value || 'default';
+    const title = modal.querySelector('#tm-title').value;
+    const subtitle = modal.querySelector('#tm-subtitle')?.value || '';
+    const templateType = modal.querySelector('#tm-template-type')?.value || 'default';
 
     // [신규] UI에서 값 가져오기
-    const fontFamily =
-      document.getElementById('tm-font-family')?.value || "'Pretendard', sans-serif";
-    const textColorMode = document.getElementById('tm-text-color')?.value || 'auto';
+    const fontFamily = modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif";
+    const textColorMode = modal.querySelector('#tm-text-color')?.value || 'auto';
 
     // [Offscreen 가속] 배경 이미지가 있으면 offscreen에서 리사이징
     let processedBgImage = currentBgImage;
@@ -604,6 +657,17 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       };
     }
 
+    // [핵심 수정] 텍스트 표시가 꺼져있으면 텍스트 레이어 제거 (좀비 모달 방지)
+    const showTextCheckbox = modal.querySelector('#tm-show-text');
+    // 체크박스가 있으면 그 값을 쓰고, 없으면 초기값 사용
+    const showText = showTextCheckbox ? showTextCheckbox.checked : initialShowText;
+
+    if (!showText && templateData.layers) {
+      // type이 'text'인 모든 레이어를 필터링하여 제거
+      templateData.layers = templateData.layers.filter((layer) => layer.type !== 'text');
+      console.log('[ThumbnailMaker] 텍스트 오버레이가 비활성화되어 텍스트 레이어를 제거했습니다.');
+    }
+
     // thumbnailGenerator.js의 렌더러 호출
     await renderTemplateFromData(ctx, templateData);
   };
@@ -637,10 +701,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
   // [신규] 탭 전환 UI 로직
   const toggleTabs = (mode) => {
-    const aiPanel = document.getElementById('tm-bg-ai-panel');
-    const uploadPanel = document.getElementById('tm-bg-upload-panel');
-    const aiTab = document.getElementById('tm-bg-mode-ai');
-    const uploadTab = document.getElementById('tm-bg-mode-upload');
+    const aiPanel = modal.querySelector('#tm-bg-ai-panel');
+    const uploadPanel = modal.querySelector('#tm-bg-upload-panel');
+    const aiTab = modal.querySelector('#tm-bg-mode-ai');
+    const uploadTab = modal.querySelector('#tm-bg-mode-upload');
 
     if (mode === 'ai') {
       aiPanel.style.display = 'block';
@@ -663,10 +727,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     }
   };
 
-  const bgModeAi = document.getElementById('tm-bg-mode-ai');
+  const bgModeAi = modal.querySelector('#tm-bg-mode-ai');
   if (bgModeAi) bgModeAi.onclick = () => toggleTabs('ai');
 
-  const bgModeUpload = document.getElementById('tm-bg-mode-upload');
+  const bgModeUpload = modal.querySelector('#tm-bg-mode-upload');
   if (bgModeUpload) bgModeUpload.onclick = () => toggleTabs('upload');
 
   // [신규] 컨셉 선택 버튼 이벤트 리스너
@@ -752,14 +816,14 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   }
 
   // [신규] 파일 업로드 처리
-  const uploadBtn = document.getElementById('tm-upload-btn');
+  const uploadBtn = modal.querySelector('#tm-upload-btn');
   if (uploadBtn)
     uploadBtn.onclick = () => {
-      const fileInput = document.getElementById('tm-file-input');
+      const fileInput = modal.querySelector('#tm-file-input');
       if (fileInput) fileInput.click();
     };
 
-  const fileInput = document.getElementById('tm-file-input');
+  const fileInput = modal.querySelector('#tm-file-input');
   if (fileInput)
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -811,11 +875,11 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     });
 
   // [핵심] 배경 생성 버튼 클릭 (스타일 반영)
-  const genBgBtn = document.getElementById('tm-gen-bg');
+  const genBgBtn = modal.querySelector('#tm-gen-bg');
   if (genBgBtn)
     genBgBtn.onclick = async () => {
-      const btn = document.getElementById('tm-gen-bg');
-      const loading = document.getElementById('tm-loading');
+      const btn = modal.querySelector('#tm-gen-bg');
+      const loading = modal.querySelector('#tm-loading');
       if (!btn || !loading) return;
 
       // UI 로딩 상태 전환
@@ -830,7 +894,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
       try {
         // 스타일에 따른 프롬프트 튜닝
-        const style = document.getElementById('tm-bg-style').value;
+        const style = modal.querySelector('#tm-bg-style').value;
         let promptSuffix = '';
 
         if (style === 'abstract') {
@@ -850,7 +914,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         }
 
         // 메인 타이틀 가져오기
-        const titleInput = document.getElementById('tm-title');
+        const titleInput = modal.querySelector('#tm-title');
         const mainTitle = titleInput ? titleInput.value.trim() : thumbInfo.thumbnailText || '';
 
         // Gemini API 문서 참고: 고화질 텍스트 렌더링을 위해 텍스트를 명시적으로 포함
@@ -903,7 +967,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     };
 
   // [신규] Undo/Redo 이벤트 리스너
-  const undoBtn = document.getElementById('tm-undo');
+  const undoBtn = modal.querySelector('#tm-undo');
   if (undoBtn)
     undoBtn.addEventListener('click', () => {
       if (history.currentIndex > 0) {
@@ -912,7 +976,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       }
     });
 
-  const redoBtn = document.getElementById('tm-redo');
+  const redoBtn = modal.querySelector('#tm-redo');
   if (redoBtn)
     redoBtn.addEventListener('click', () => {
       if (history.currentIndex < history.states.length - 1) {
@@ -926,23 +990,46 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     if (e.ctrlKey || e.metaKey) {
       if (e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        const undoBtn = document.getElementById('tm-undo');
+        const undoBtn = modal.querySelector('#tm-undo');
         if (undoBtn) undoBtn.click();
       } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
         e.preventDefault();
-        const redoBtn = document.getElementById('tm-redo');
+        const redoBtn = modal.querySelector('#tm-redo');
         if (redoBtn) redoBtn.click();
       }
     }
   });
 
+  // [신규] 텍스트 표시 토글 이벤트
+  const showTextCheckbox = modal.querySelector('#tm-show-text');
+  if (showTextCheckbox) {
+    showTextCheckbox.addEventListener('change', () => {
+      const titleInput = modal.querySelector('#tm-title');
+      const subtitleInput = modal.querySelector('#tm-subtitle');
+
+      // 체크 해제 시 입력창 비활성화 (시각적 피드백)
+      const isChecked = showTextCheckbox.checked;
+      if (titleInput) {
+        titleInput.disabled = !isChecked;
+        titleInput.style.opacity = isChecked ? '1' : '0.5';
+      }
+      if (subtitleInput) {
+        subtitleInput.disabled = !isChecked;
+        subtitleInput.style.opacity = isChecked ? '1' : '0.5';
+      }
+
+      updatePreview();
+      saveState();
+    });
+  }
+
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
-  document.getElementById('tm-template-type')?.addEventListener('change', () => {
+  modal.querySelector('#tm-template-type')?.addEventListener('change', () => {
     updatePreview();
     saveState();
   });
 
-  const titleInput = document.getElementById('tm-title');
+  const titleInput = modal.querySelector('#tm-title');
   if (titleInput)
     titleInput.addEventListener(
       'input',
@@ -952,7 +1039,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
       }, 300)
     );
 
-  const subtitleInput = document.getElementById('tm-subtitle');
+  const subtitleInput = modal.querySelector('#tm-subtitle');
   if (subtitleInput)
     subtitleInput.addEventListener(
       'input',
@@ -963,14 +1050,14 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     );
 
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
-  const fontFamilySelect = document.getElementById('tm-font-family');
+  const fontFamilySelect = modal.querySelector('#tm-font-family');
   if (fontFamilySelect)
     fontFamilySelect.addEventListener('change', () => {
       updatePreview();
       saveState();
     });
 
-  const textColorInput = document.getElementById('tm-text-color');
+  const textColorInput = modal.querySelector('#tm-text-color');
   if (textColorInput)
     textColorInput.addEventListener('change', () => {
       updatePreview();
@@ -978,7 +1065,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     });
 
   // [신규] 비율 변경 이벤트 - 상태 저장 포함
-  const ratioSelect = document.getElementById('tm-ratio');
+  const ratioSelect = modal.querySelector('#tm-ratio');
   if (ratioSelect)
     ratioSelect.addEventListener('change', (e) => {
       const [w, h] = e.target.value.split(':').map(Number);
@@ -1002,8 +1089,8 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     });
 
   // [신규] 드래그 앤 드롭 이벤트
-  const wrapper = document.getElementById('tm-canvas-wrapper');
-  const overlay = document.getElementById('tm-drag-overlay');
+  const wrapper = modal.querySelector('#tm-canvas-wrapper');
+  const overlay = modal.querySelector('#tm-drag-overlay');
 
   if (!wrapper || !overlay) {
     console.warn('[ThumbnailMaker] 드래그 앤 드롭 요소를 찾을 수 없습니다.');
@@ -1048,10 +1135,10 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
   }
 
   // 본문 삽입 버튼
-  const insertBtn = document.getElementById('tm-insert');
+  const insertBtn = modal.querySelector('#tm-insert');
   if (insertBtn)
     insertBtn.onclick = async () => {
-      const btn = document.getElementById('tm-insert');
+      const btn = modal.querySelector('#tm-insert');
       if (!btn) return;
       const originalText = btn.textContent;
 
@@ -1069,11 +1156,11 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
 
         // [SEO 핵심] 현재 입력된 제목을 Alt 텍스트로 사용
         const altText =
-          document.getElementById('tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
+          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
 
         // 1. 제목 가져오기
         const rawTitle =
-          document.getElementById('tm-title').value || thumbInfo.thumbnailText || 'thumbnail';
+          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || 'thumbnail';
 
         // 2. [SEO] 안전한 파일명으로 변환 (한글/영어/숫자 외 제거, 공백 -> 하이픈)
         // 예: "집 전체를 손끝으로!" -> "집-전체를-손끝으로-170..."
@@ -1108,7 +1195,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
         // [수정] 에러 발생 시에도 altText 전달
         const dataUrl = canvas.toDataURL('image/png');
         const altText =
-          document.getElementById('tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
+          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
         if (onInsert) onInsert(dataUrl, altText);
         modal.remove();
       } finally {
@@ -1118,7 +1205,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     };
 
   // 정밀 편집 (TUI) 버튼 - 실제 기능 구현
-  const editTuiBtn = document.getElementById('tm-edit-tui');
+  const editTuiBtn = modal.querySelector('#tm-edit-tui');
   if (editTuiBtn)
     editTuiBtn.onclick = () => {
       try {
@@ -1149,7 +1236,7 @@ export function openThumbnailMaker(draftData, onInsert, onSave, onEditTui) {
     };
 
   // 닫기 버튼
-  const closeBtn = document.getElementById('tm-close');
+  const closeBtn = modal.querySelector('#tm-close');
   if (closeBtn) closeBtn.onclick = () => modal.remove();
 
   // 초기 1회 렌더링 (기본 배경 + 텍스트)

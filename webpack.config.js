@@ -1,6 +1,7 @@
 // webpack.config.js
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const ImageMinimizerPlugin = require('image-minimizer-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = {
@@ -82,8 +83,23 @@ module.exports = {
       patterns: [
         { from: 'css', to: 'css' },
         { from: 'images', to: 'images', noErrorOnMissing: true },
+        { from: 'rules.json', to: 'rules.json' },
+        { from: 'manifest.json', to: 'manifest.json' }, // manifest.json 복사 추가
         // Removed background.cjs copy since we're bundling it now
       ],
+    }),
+    // Image optimization for build assets (lossy defaults tuned for web)
+    new ImageMinimizerPlugin({
+      minimizer: {
+        implementation: ImageMinimizerPlugin.imageminMinify,
+        options: {
+          plugins: [
+            ['imagemin-mozjpeg', { quality: 75 }],
+            ['imagemin-pngquant', { quality: [0.6, 0.8] }],
+            ['imagemin-webp', { quality: 75 }],
+          ],
+        },
+      },
     }),
   ],
   module: {

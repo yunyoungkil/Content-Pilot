@@ -351,6 +351,16 @@ async function updateColumnIncremental(
   previousCards,
   activeChannelId
 ) {
+  // [버그 수정] 로딩 메시지 제거 로직 추가
+  // 데이터가 0개여도 로딩 메시지는 반드시 지워져야 합니다.
+  const loadingEl = columnEl.querySelector('.loading-scraps');
+  if (loadingEl) {
+    loadingEl.remove();
+    // 로딩 메시지가 있었다면, 초기화 상태이므로 강제로 모든 카드를 다시 렌더링하도록 유도하기 위해
+    // previousCards를 비워서 '모두 추가됨'으로 인식하게 만듭니다.
+    previousCards = {};
+  }
+
   const currentFiltered = {};
   const previousFiltered = {};
 
@@ -908,7 +918,7 @@ function createKanbanCard(id, data, status) {
   }
   // SEO 제목이 있으면 표시
   const seoTitleHtml =
-    data.seoTitle && data.seoTitle !== data.title
+    data.seoTitle
       ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
         <span style="color: #4285f4;">SEO:</span> ${data.seoTitle}
       </div>`

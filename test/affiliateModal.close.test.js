@@ -6,6 +6,11 @@ jest.mock("../js/services/affiliateService.js", () => ({
   addAffiliateLink: jest.fn().mockResolvedValue({}),
   updateAffiliateLink: jest.fn().mockResolvedValue({}),
   deleteAffiliateLink: jest.fn().mockResolvedValue({}),
+  incrementAffiliateLinkClick: jest.fn().mockResolvedValue({ success: true, newClickCount: 1 }),
+}));
+
+jest.mock("../js/services/kanbanService.js", () => ({
+  addIdeaToKanban: jest.fn().mockResolvedValue({ success: true }),
 }));
 
 describe("affiliateModal close behavior", () => {
@@ -88,5 +93,114 @@ describe("affiliateModal close behavior", () => {
     const img = preview.querySelector("img");
     expect(img).toBeTruthy();
     expect(img.src).toContain("example.com/img.jpg");
+  });
+
+  test("link open button opens link in new tab and increments click count", async () => {
+    // Mock window.open
+    const mockWindowOpen = jest.fn();
+    global.window.open = mockWindowOpen;
+
+    // Mock affiliateService to return a link
+    const mockGetAffiliateLinks = require("../js/services/affiliateService.js").getAffiliateLinks;
+    const mockIncrementClick = require("../js/services/affiliateService.js").incrementAffiliateLinkClick;
+    
+    mockGetAffiliateLinks.mockResolvedValueOnce([{
+      id: "test-link-1",
+      name: "Test Link",
+      url: "https://example.com",
+      platform: "General",
+      keywords: ["test"],
+      clickCount: 0,
+      createdAt: Date.now()
+    }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // wait for the async loadLinks to complete
+    await new Promise((r) => setTimeout(r, 0));
+
+    const openBtn = container.querySelector(".link-open-btn");
+    expect(openBtn).toBeTruthy();
+    expect(openBtn.title).toBe("링크 열기");
+
+    // Click the open button
+    openBtn.click();
+
+    // Should open link in new tab
+    expect(mockWindowOpen).toHaveBeenCalledWith("https://example.com", "_blank");
+
+    // Should increment click count
+    expect(mockIncrementClick).toHaveBeenCalledWith("test-link-1");
+  });
+
+  test("shift+click on card opens template selector and adds idea to kanban", async () => {
+    const mockAddIdeaToKanban = require("../js/services/kanbanService.js").addIdeaToKanban;
+    const mockGetAffiliateLinks = require("../js/services/affiliateService.js").getAffiliateLinks;
+    
+    mockGetAffiliateLinks.mockResolvedValueOnce([{
+      id: "test-link-1",
+      name: "Test Product",
+      url: "https://example.com",
+      platform: "Coupang",
+      keywords: ["test", "product"],
+      clickCount: 0,
+      createdAt: Date.now(),
+      cardData: {
+        productName: "Test Product Name",
+        salePrice: 10000,
+        originalPrice: 12000,
+        discountRate: 17,
+        rating: 4.5,
+        reviewCount: 100
+      }
+    }]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    renderAffiliateModal(container);
+
+    // wait for the async loadLinks to complete
+    await new Promise((r) => setTimeout(r, 0));
+
+
+    // Click the template button in card actions to open the template selector and add idea
+    const templateBtn = container.querySelector('.link-template-btn');
+    expect(templateBtn).toBeTruthy();
+    templateBtn.click();
+
+    // Wait for the modal and processing
+    await new Promise((r) => setTimeout(r, 0));
+
+    const templateCard = document.body.querySelector('#template-selector-modal .template-card[data-template-id="product-review"]');
+    expect(templateCard).toBeTruthy();
+    templateCard.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Should call addIdeaToKanban with converted idea data
+    expect(mockAddIdeaToKanban).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "[리뷰] Test Product",
+        description: expect.stringContaining("플랫폼: Coupang"),
+        tags: expect.arrayContaining(["test", "product", "리뷰", "사용후기"]),
+        url: "https://example.com",
+        publishedUrl: "https://example.com",
+        origin: expect.objectContaining({
+          type: 'affiliate_link',
+          platform: 'Coupang',
+          affiliateLinkId: 'test-link-1'
+        }),
+        affiliateData: expect.objectContaining({
+          platform: 'Coupang',
+          salePrice: 10000,
+          originalPrice: 12000,
+          discountRate: 17
+        }),
+        template: expect.objectContaining({ id: 'product-review' })
+      })
+    );
   });
 });

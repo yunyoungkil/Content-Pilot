@@ -59,11 +59,11 @@ describe('Constants', () => {
     });
   });
 
-  describe("AI_MODELS", () => {
-    test("should have all required AI model versions", () => {
-      expect(AI_MODELS.TEXT).toBe("gemini-2.0-flash");
-      expect(AI_MODELS.IMAGE).toBe("gemini-2.0-flash-exp");
-      expect(AI_MODELS.VISION).toBe("gemini-2.0-flash");
+  describe('AI_MODELS', () => {
+    test('should have all required AI model versions', () => {
+      expect(AI_MODELS.TEXT).toBe('gemini-2.0-flash');
+      expect(AI_MODELS.IMAGE).toBe('gemini-3-pro-image-preview');
+      expect(AI_MODELS.VISION).toBe('gemini-3-pro-image-preview');
     });
 
     test('should have exactly 3 AI models', () => {

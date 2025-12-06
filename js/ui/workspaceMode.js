@@ -19,18 +19,89 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
   imageGalleryGrid.innerHTML = imageUrls
     .map(
       (url) => `
-      <div class="gallery-thumb-wrap">
-        <img src="${url}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);" alt="자료 이미지">
+      <div class="gallery-thumb-wrap" style="min-width:0;min-height:88px;overflow:hidden;border-radius:8px;position:relative;background:#f5f5f5;">
+        <img data-src="${url}" src="" class="gallery-thumb lazy-loading" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);min-width:0;display:block;" alt="자료 이미지">
       </div>
     `
     )
     .join('');
   imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
+    // 클릭 이벤트
     img.addEventListener('click', () => {
-      sendCommand('insert-image', { url: img.src });
+      // if not yet loaded, use data-src; otherwise src
+      const url = img.dataset.src || img.src;
+      sendCommand('insert-image', { url });
       sendCommand('focus');
     });
+
+    // 이미지 로드 실패 시 백그라운드 프록시로 재시도
+    img.onerror = () => {
+      // show temporary placeholder
+      img.style.display = 'none';
+      const parent = img.parentElement || imageGalleryGrid;
+      const loading = document.createElement('div');
+      loading.textContent = '이미지 불러오는 중...';
+      loading.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
+      parent.appendChild(loading);
+
+      try {
+        chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset.src || img.src }, (response) => {
+          if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
+            parent.removeChild(loading);
+            const err = document.createElement('div');
+            err.textContent = '이미지 로드 실패';
+            err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+            parent.appendChild(err);
+            return;
+          }
+
+          img.onerror = null; // prevent loop
+          img.src = response.dataUrl;
+          img.style.display = 'block';
+          parent.removeChild(loading);
+        });
+      } catch (e) {
+        parent.removeChild(loading);
+        const err = document.createElement('div');
+        err.textContent = '이미지 로드 실패';
+        err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+        parent.appendChild(err);
+      }
+    };
+    // register intersection observer for lazy loading
+    try {
+      ensureGalleryImageObserver().observe(img);
+    } catch (e) {
+      /* ignore */
+    }
   });
+}
+
+// --- Lazy loader using IntersectionObserver for gallery images ---
+let galleryImageObserver = null;
+function ensureGalleryImageObserver() {
+  if (galleryImageObserver) return galleryImageObserver;
+
+  galleryImageObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const img = entry.target;
+        const src = img.dataset && img.dataset.src;
+        if (!src) {
+          galleryImageObserver.unobserve(img);
+          return;
+        }
+        // Set src and let normal load handlers take over
+        img.src = src;
+        img.classList.remove('lazy-loading');
+        galleryImageObserver.unobserve(img);
+      });
+    },
+    { root: null, rootMargin: '200px 0px', threshold: 0.01 }
+  );
+
+  return galleryImageObserver;
 }
 
 function renderImageGallery(linkedScrapsData) {
@@ -48,9 +119,11 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   const imageGalleryArea = resourceLibrary.querySelector('.image-gallery-area');
   if (!imageGalleryArea) return;
 
+  // 헤더 HTML이 이미 갤러리 필터 탭을 포함하고 있으므로 유지
   if (!imageGalleryArea.querySelector('.image-gallery-header')) {
     imageGalleryArea.innerHTML = `
-      <div class="image-gallery-header" style="flex-shrink: 0; padding: 12px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+    <div class="image-gallery-header" style="flex-shrink: 0; padding: 12px; border-bottom: 1px solid #e9ecef; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         <input type="text" id="image-search-input" placeholder="이미지 검색..." 
           style="flex: 1; min-width: 150px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
         <button id="filter-by-draft-btn" title="초안 내용에 맞는 이미지만 보기" 
@@ -60,429 +133,536 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         </button>
         <span id="image-count" style="font-size: 12px; color: #666; white-space: nowrap;">0개</span>
       </div>
-      <div class="image-gallery-grid" style="flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px; overflow-y: auto; overflow-x: hidden;"></div>
-      <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
-        <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center;">
-          <button id="close-preview" style="position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: all 0.2s;">닫기</button>
-          <img id="preview-image" src="" style="max-width: 100%; max-height: calc(90vh - 80px); object-fit: contain; border-radius: 8px;">
-          <div id="image-metadata" style="margin-top: 12px; background: rgba(0,0,0,0.6); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 12px; max-width: 100%; text-align: center; backdrop-filter: blur(10px);"></div>
-        </div>
+      <div class="gallery-filter-tabs" style="display: flex; gap: 4px; border-bottom: 1px solid #e0e0e0;">
+        <button class="gallery-filter-tab active" data-filter="ALL" style="padding: 6px 12px; border: none; background: #4285f4; color: white; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 12px; font-weight: 500;">전체</button>
+        <button class="gallery-filter-tab" data-filter="SCRAP" style="padding: 6px 12px; border: none; background: #f1f3f4; color: #5f6368; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 12px; font-weight: 500;">스크랩</button>
+        <button class="gallery-filter-tab" data-filter="STORAGE" style="padding: 6px 12px; border: none; background: #f1f3f4; color: #5f6368; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 12px; font-weight: 500;">스토리지</button>
       </div>
-    `;
+    </div>
+    <div class="image-gallery-grid" style="flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; overflow-y: auto; grid-auto-rows: auto;"></div>
+    <div id="image-preview-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
+      <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center;">
+        <button id="close-preview" style="position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: all 0.2s;">닫기</button>
+        <img id="preview-image" src="" style="max-width: 100%; max-height: calc(90vh - 80px); object-fit: contain; border-radius: 8px;">
+        <div id="image-metadata" style="margin-top: 12px; background: rgba(0,0,0,0.6); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 12px; max-width: 100%; text-align: center; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);"></div>
+      </div>
+    </div>
+  `;
   }
 
   const imageGalleryGrid = imageGalleryArea.querySelector('.image-gallery-grid');
   const searchInput = imageGalleryArea.querySelector('#image-search-input');
   const filterByDraftBtn = imageGalleryArea.querySelector('#filter-by-draft-btn');
   const imageCount = imageGalleryArea.querySelector('#image-count');
+  const galleryFilterTabs = imageGalleryArea.querySelectorAll('.gallery-filter-tab');
   const previewModal = imageGalleryArea.querySelector('#image-preview-modal');
   const previewImage = imageGalleryArea.querySelector('#preview-image');
   const imageMetadata = imageGalleryArea.querySelector('#image-metadata');
   const closePreview = imageGalleryArea.querySelector('#close-preview');
 
+  let currentFilter = 'ALL';
   let isDraftFilterActive = false;
   let allImageData = [];
   let draftContentText = '';
 
+  // 초기 로딩 메시지
   imageGalleryGrid.innerHTML =
     "<p style='text-align:center;color:#888;padding:20px;'>이미지를 불러오는 중...</p>";
 
-  const imageDataMap = new Map();
+  // 그리드 반응형 조정 함수
+  function adjustGridColumns() {
+    const containerWidth = imageGalleryGrid.offsetWidth;
+    let columns;
 
-  const isValidImageUrl = (url) => {
-    if (!url || typeof url !== 'string') return false;
-    const trimmed = url.trim();
-    if (trimmed.length === 0) return false;
-    const invalidPatterns = [
-      /sync\.smartadserver\.com/i,
-      /getuid/i,
-      /usersync/i,
-      /pixel/i,
-      /tracking/i,
-      /analytics/i,
-      /beacon/i,
-      /\.js(\?|$)/i,
-      /\.css(\?|$)/i,
-      /\.html(\?|$)/i,
-    ];
-    if (invalidPatterns.some((pattern) => pattern.test(trimmed))) return false;
-    return (
-      trimmed.startsWith('http://') ||
-      trimmed.startsWith('https://') ||
-      trimmed.startsWith('data:image/')
-    );
-  };
+    if (containerWidth >= 800) {
+      columns = 6; // 큰 화면: 6열
+    } else if (containerWidth >= 600) {
+      columns = 4; // 중간 화면: 4열
+    } else if (containerWidth >= 400) {
+      columns = 3; // 작은 화면: 3열
+    } else {
+      columns = 2; // 아주 작은 화면: 2열
+    }
 
-  const normalizeImageUrl = (url, baseUrl) => {
-    if (!url || typeof url !== 'string') return null;
-    const trimmed = url.trim();
-    if (trimmed.length === 0) return null;
-    if (
-      trimmed.startsWith('http://') ||
-      trimmed.startsWith('https://') ||
-      trimmed.startsWith('data:image/')
-    ) {
-      return trimmed;
-    }
-    if (trimmed.startsWith('//')) {
-      return 'https:' + trimmed;
-    }
-    if (trimmed.startsWith('/') && baseUrl) {
-      try {
-        return new URL(trimmed, new URL(baseUrl).origin).href;
-      } catch (e) {
-        return null;
-      }
-    }
-    if (!trimmed.startsWith('http') && baseUrl) {
-      try {
-        return new URL(trimmed, baseUrl).href;
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  };
+    imageGalleryGrid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+  }
 
-  allScraps.forEach((scrap) => {
-    const baseUrl = scrap.url || window.location.href;
-    const processUrl = (url) => {
-      const normalized = normalizeImageUrl(url, baseUrl);
-      if (normalized && isValidImageUrl(normalized) && !imageDataMap.has(normalized)) {
-        imageDataMap.set(normalized, {
-          url: normalized,
-          source: '스크랩',
-          title: scrap.text?.substring(0, 50) || scrap.url || '스크랩 이미지',
-          url_source: scrap.url || '',
-          timestamp: scrap.timestamp || Date.now(),
-          scrapId: scrap.id,
-        });
-      }
-    };
-    if (scrap.image) processUrl(scrap.image);
-    if (Array.isArray(scrap.allImages)) scrap.allImages.forEach(processUrl);
-    if (Array.isArray(scrap.images)) scrap.images.forEach(processUrl);
-  });
+  // 초기 그리드 설정 및 이벤트 리스너
+  adjustGridColumns();
+  window.addEventListener('resize', adjustGridColumns);
 
-  chrome.runtime.sendMessage({ action: 'get_canvas_images' }, (canvasResponse) => {
-    if (canvasResponse && canvasResponse.success && Array.isArray(canvasResponse.images)) {
-      canvasResponse.images.forEach((imageUrl) => {
-        const normalized = normalizeImageUrl(imageUrl, window.location.href);
-        if (normalized && isValidImageUrl(normalized) && !imageDataMap.has(normalized)) {
-          imageDataMap.set(normalized, {
-            url: normalized,
-            source: '캔버스',
-            title: '편집된 이미지',
-            url_source: '',
-            timestamp: Date.now(),
-          });
+  // 통합 갤러리 데이터 로드 함수
+  function loadUnifiedGallery(filter = 'ALL') {
+    chrome.runtime.sendMessage(
+      {
+        action: 'get_unified_gallery',
+        data: { filter },
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Gallery] 통합 갤러리 로드 실패:', chrome.runtime.lastError);
+          imageGalleryGrid.innerHTML =
+            "<p style='text-align:center;color:#888;padding:20px;'>갤러리를 불러올 수 없습니다.</p>";
+          return;
         }
-      });
+
+        if (response && response.success && Array.isArray(response.images)) {
+          allImageData = response.images;
+          renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+          // 데이터 로드 후 그리드 조정
+          setTimeout(adjustGridColumns, 100);
+        } else {
+          console.warn('[Gallery] 통합 갤러리 응답 실패:', response);
+          imageGalleryGrid.innerHTML =
+            "<p style='text-align:center;color:#888;padding:20px;'>갤러리를 불러올 수 없습니다.</p>";
+        }
+      }
+    );
+      // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
+      if (!imageGalleryArea.dataset.scrapListenerAttached) {
+        chrome.runtime.onMessage.addListener((msg) => {
+          if (msg?.action === 'scrap_image_removed') {
+            // 현재 필터 상태로 갤러리 다시 로드
+            loadUnifiedGallery(currentFilter);
+          }
+        });
+        imageGalleryArea.dataset.scrapListenerAttached = '1';
+      }
+  }
+
+  // 필터링 및 렌더링 함수
+  function renderFilteredImages(images, filter, draftFilterActive, draftText) {
+    let filteredImages = images;
+
+    // 소스 필터 적용
+    if (filter !== 'ALL') {
+      filteredImages = filteredImages.filter((img) => img.source === filter);
     }
 
-    const allImages = Array.from(imageDataMap.values());
-    allImageData = allImages;
-
-    function extractTextFromDraft(html) {
-      if (!html) return '';
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = html;
-      let text = tempDiv.textContent || tempDiv.innerText || '';
-      text = text.replace(/\s+/g, ' ').trim();
-      return text;
-    }
-
-    function calculateRelevance(imageData, draftText) {
-      if (!draftText || draftText.length < 10) return 0;
+    // 초안 필터 적용 (실제로는 AI 서비스를 통해 구현)
+    if (draftFilterActive && draftText) {
+      // 간단한 텍스트 매칭으로 필터링 (실제로는 더 정교한 AI 매칭 필요)
       const draftWords = draftText
         .toLowerCase()
         .split(/\s+/)
         .filter((w) => w.length > 2);
-      if (draftWords.length === 0) return 0;
-
-      let score = 0;
-      const searchText = (
-        (imageData.title || '') +
-        ' ' +
-        (imageData.url_source || '') +
-        ' ' +
-        (imageData.url || '')
-      ).toLowerCase();
-
-      draftWords.forEach((word) => {
-        if (searchText.includes(word)) score += 1;
-      });
-
-      try {
-        if (imageData.url) {
-          const urlDomain = new URL(imageData.url).hostname;
-          if (urlDomain && draftText.toLowerCase().includes(urlDomain.split('.')[0])) score += 0.5;
-        }
-      } catch (e) {
-        Logger.warn('[Workspace] image url parsing/analysis error', e);
-      }
-
-      return Math.min(score / Math.max(draftWords.length, 1), 1);
-    }
-
-    function filterImagesByDraft(images, draftText) {
-      if (!draftText || draftText.length < 10) return images;
-      return images
-        .map((img) => ({
-          ...img,
-          relevance: calculateRelevance(img, draftText),
-        }))
-        .filter((img) => img.relevance > 0)
-        .sort((a, b) => b.relevance - a.relevance);
-    }
-
-    function renderImages(images) {
-      if (images.length === 0) {
-        const hasSearch = searchInput && searchInput.value.trim();
-        const hasFilter = isDraftFilterActive;
-        let message = '이미지가 없습니다.';
-        if (hasSearch || hasFilter) {
-          message = '검색 결과가 없습니다.';
-        } else if (!allImages || allImages.length === 0) {
-          message = '자료 보관함이 비어있습니다.';
-        }
-        imageGalleryGrid.innerHTML = `<p style='text-align:center;color:#888;padding:20px;'>${message}</p>`;
-        imageCount.textContent = '0개';
-        return;
-      }
-
-      imageCount.textContent = `${images.length}개`;
-      const escapeHtml = (str) => {
-        if (!str) return '';
-        return String(str)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#039;');
-      };
-
-      // 성능 최적화: DocumentFragment를 사용하여 DOM 조작 최소화
-      const fragment = document.createDocumentFragment();
-
-      images.forEach((imgData) => {
-        const escapedUrl = escapeHtml(imgData.url);
-        const escapedTitle = escapeHtml(imgData.title || '이미지');
-
-        const div = document.createElement('div');
-        div.className = 'gallery-thumb-wrap';
-        div.draggable = true;
-        div.dataset.imageUrl = escapedUrl;
-        div.dataset.title = escapedTitle;
-        div.dataset.source = imgData.source;
-        div.dataset.urlSource = escapeHtml(imgData.url_source || '');
-        div.dataset.timestamp = imgData.timestamp;
-        div.dataset.scrapId = imgData.scrapId || '';
-        div.style.position = 'relative';
-        div.style.cursor = 'pointer';
-
-        div.innerHTML = `
-          <img src="${escapedUrl}" class="gallery-thumb" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:move;" alt="${escapedTitle}" loading="lazy" onerror="this.style.display='none';">
-          ${
-            imgData.source === '스크랩' && imgData.scrapId
-              ? `
-            <button class="gallery-image-delete-btn" data-scrap-id="${imgData.scrapId}" data-image-url="${escapedUrl}"
-              style="position: absolute; top: 4px; right: 4px; background: rgba(234,67,53,0.9); color: #fff; border: none; width: 24px; height: 24px; opacity: 0; transition: opacity 0.2s;" title="삭제">×</button>
-          `
-              : ''
-          }
-          <div class="gallery-thumb-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0); pointer-events: none; display: flex; align-items: center; justify-content: center;">
-            <span class="gallery-preview-icon" style="opacity: 0; color: #fff; font-size: 24px; pointer-events: auto; cursor: pointer;">🔍</span>
-          </div>`;
-
-        // 이벤트 리스너들을 각 div 요소에 추가
-        div.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/plain', div.dataset.imageUrl);
-          e.dataTransfer.effectAllowed = 'copy';
-        });
-
-        const deleteBtn = div.querySelector('.gallery-image-delete-btn');
-        if (deleteBtn) {
-          div.addEventListener('mouseenter', () => (deleteBtn.style.opacity = '1'));
-          div.addEventListener('mouseleave', () => (deleteBtn.style.opacity = '0'));
-          deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (confirm('이미지를 삭제하시겠습니까?')) {
-              chrome.runtime.sendMessage(
-                {
-                  action: 'remove_scrap_image',
-                  data: {
-                    scrapId: deleteBtn.dataset.scrapId,
-                    imageUrl: deleteBtn.dataset.imageUrl,
-                  },
-                },
-                (res) => {
-                  if (res && res.success) {
-                    chrome.storage.local.get('activeChannelId', (res) => {
-                      chrome.runtime.sendMessage(
-                        {
-                          action: 'get_all_scraps',
-                          channelId: res.activeChannelId,
-                        },
-                        (r) => {
-                          if (r && r.success)
-                            updateImageGalleryFromAllScraps(
-                              resourceLibrary,
-                              r.scraps,
-                              sendCommand,
-                              ideaData
-                            );
-                        }
-                      );
-                    });
-                  }
-                }
-              );
-            }
-          });
-        }
-
-        const img = div.querySelector('.gallery-thumb');
-        const icon = div.querySelector('.gallery-preview-icon');
-        const overlay = div.querySelector('.gallery-thumb-overlay');
-
-        if (overlay) {
-          div.addEventListener('mouseenter', () => {
-            overlay.style.background = 'rgba(0,0,0,0.5)';
-            if (icon) icon.style.opacity = '1';
-          });
-          div.addEventListener('mouseleave', () => {
-            overlay.style.background = 'rgba(0,0,0,0)';
-            if (icon) icon.style.opacity = '0';
-          });
-        }
-
-        const insertImage = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          sendCommand('insert-image', { url: div.dataset.imageUrl });
-          sendCommand('focus');
-        };
-
-        if (img) img.addEventListener('click', insertImage);
-        if (icon) {
-          icon.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            showImagePreview({
-              url: div.dataset.imageUrl,
-              title: div.dataset.title,
-              source: div.dataset.source,
-              url_source: div.dataset.urlSource,
-              timestamp: div.dataset.timestamp,
-            });
-          });
-        }
-
-        fragment.appendChild(div);
+      filteredImages = filteredImages.filter((img) => {
+        const imgText = (img.title || '').toLowerCase();
+        return draftWords.some((word) => imgText.includes(word));
       });
     }
 
-    function showImagePreview(imgData) {
-      previewImage.src = imgData.url;
-      const date = imgData.timestamp ? new Date(parseInt(imgData.timestamp)) : new Date();
-      imageMetadata.innerHTML = `<div>${
-        imgData.title
-      }</div><div style="font-size:11px;opacity:0.8;">${
-        imgData.source
-      } | ${date.toLocaleDateString()}</div>`;
-      previewModal.style.display = 'flex';
+    // 검색어 필터 적용
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    if (searchTerm) {
+      filteredImages = filteredImages.filter(
+        (img) =>
+          (img.title || '').toLowerCase().includes(searchTerm) ||
+          (img.tags || []).some((tag) => tag.toLowerCase().includes(searchTerm))
+      );
     }
 
-    closePreview.addEventListener('click', () => (previewModal.style.display = 'none'));
-    previewModal.addEventListener('click', (e) => {
-      if (e.target === previewModal) previewModal.style.display = 'none';
+    renderImages(filteredImages);
+  }
+
+  // 이미지 렌더링 함수
+  function renderImages(images) {
+    if (images.length === 0) {
+      imageGalleryGrid.innerHTML = `<p style='text-align:center;color:#888;padding:20px;'>이미지가 없습니다.</p>`;
+      imageCount.textContent = '0개';
+      return;
+    }
+
+    imageCount.textContent = `${images.length}개`;
+    imageGalleryGrid.innerHTML = '';
+
+    const fragment = document.createDocumentFragment();
+
+    // Precompute how many items are shown per scrap (in this flattened list)
+    const shownPerScrap = {};
+    const totalPerScrap = {};
+    images.forEach((it) => {
+      const sId = it.scrapId || it.id;
+      if (sId) {
+        shownPerScrap[sId] = (shownPerScrap[sId] || 0) + 1;
+        // total available count from originData (if present)
+        const origin = it.originData || {};
+        const total = Array.isArray(origin.allImages) ? origin.allImages.length : 1;
+        // store maximum seen for totalPerScrap
+        totalPerScrap[sId] = Math.max(totalPerScrap[sId] || 0, total);
+      }
     });
 
-    function getDraftContent() {
-      return new Promise((resolve) => {
-        if (ideaData && ideaData.draftContent) {
-          const text = extractTextFromDraft(ideaData.draftContent);
-          if (text.length >= 10) {
-            resolve(text);
-            return;
-          }
+    // track seen so far while rendering to detect last-shown item
+    const seenPerScrap = {};
+
+    images.forEach((imgData) => {
+      const div = document.createElement('div');
+      div.className = 'gallery-thumb-wrap';
+      div.style.cssText =
+        'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
+
+      // 소스 배지 추가
+      const sourceBadge = document.createElement('div');
+      sourceBadge.style.cssText =
+        'position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.6); color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; z-index: 5;';
+      sourceBadge.textContent = imgData.source === 'SCRAP' ? '스크랩' : '스토리지';
+      div.appendChild(sourceBadge);
+
+      // NOTE: gallery items sometimes carry `id` instead of `scrapId`.
+      const effectiveScrapId = imgData.scrapId || imgData.id;
+
+      // 이미지 요소 (개별 항목으로 출력)
+      const img = document.createElement('img');
+      img.className = 'gallery-thumb';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+      // don't set src directly — use data-src and observe for lazy loading
+      img.dataset.src = imgData.url || imgData.thumbnail || '';
+      img.classList.add('lazy-loading');
+      try {
+        ensureGalleryImageObserver().observe(img);
+      } catch (e) {
+        // fallback: set src if observer unavailable
+        img.src = img.dataset.src;
+      }
+
+      // 클릭 시 에디터에 삽입
+      img.addEventListener('click', () => {
+        const insertUrl = img.dataset?.src || img.src;
+        sendCommand('insert-image', { url: insertUrl });
+        sendCommand('focus');
+      });
+
+      // onerror fallback -> background proxy
+      img.onerror = () => {
+        img.style.display = 'none';
+        div.style.background = '#f0f0f0';
+        const errorText = document.createElement('div');
+        errorText.textContent = '이미지 로드 실패';
+        errorText.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
+        div.appendChild(errorText);
+
+        try {
+          chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url }, (response) => {
+            if (response && response.success && response.dataUrl) {
+              img.onerror = null;
+              img.src = response.dataUrl;
+              img.style.display = 'block';
+              if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+            }
+          });
+        } catch (e) {
+          // ignore
         }
-        const editorIframe = document.querySelector('#quill-editor-iframe');
-        if (!editorIframe || !editorIframe.contentWindow) {
-          resolve('');
+      };
+
+      // 삭제 버튼 (스크랩만 가능)
+      if (imgData.source === 'SCRAP' && effectiveScrapId) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'workspace-image-delete-btn';
+        delBtn.title = '이미지 삭제';
+        delBtn.style.cssText = 'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
+        delBtn.innerHTML = '×';
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!confirm('이 이미지를 삭제하시겠습니까?')) return;
+          const displayedUrl = img.dataset?.src || img.src;
+
+          // Prefer sending the canonical/original URL stored in originData when available
+          // This avoids sending data: or proxy/base64 URLs which won't match DB entries
+          const removedItem = allImageData.find((it) => (it.url === displayedUrl || it.thumbnail === displayedUrl));
+
+          const getAllFromOrigin = (origin) => {
+            if (!origin) return [];
+            const out = [];
+            if (origin.image) out.push(origin.image);
+            if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+            if (Array.isArray(origin.images)) out.push(...origin.images);
+            return [...new Set(out.filter(Boolean))];
+          };
+
+          const normalizeForMatch = (u) => {
+            if (!u) return '';
+            try {
+              if (u.startsWith('data:')) return u;
+              const clean = u.replace(/&amp;/g, '&');
+              const parsed = new URL(clean);
+              let p = parsed.pathname || '';
+              try { p = decodeURIComponent(p); } catch (e) {}
+              return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+            } catch (e) {
+              return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+            }
+          };
+
+          let canonicalDeleteUrl = displayedUrl;
+          if (removedItem && removedItem.originData) {
+            const originList = getAllFromOrigin(removedItem.originData);
+            const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl));
+            if (matched) {
+              canonicalDeleteUrl = matched;
+            }
+          }
+
+          chrome.runtime.sendMessage({ action: 'remove_scrap_image', data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId } }, (response) => {
+            // only proceed if backend reports a real DB change
+            if (response && response.success && response.changed) {
+              // Update local data to show next waiting image in the same grid position
+              try {
+                // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
+                const matchIndex = allImageData.findIndex((it) => (it.url === deleteUrl || it.thumbnail === deleteUrl));
+                if (matchIndex !== -1) {
+                  // Try to fill this slot from the same scrap's originData if there are more images
+                  const removedItem = allImageData[matchIndex];
+                  const scrapKey = removedItem.scrapId || removedItem.id;
+
+                  // Helper: extract all images from originData
+                  const getAllFromOrigin = (origin) => {
+                    if (!origin) return [];
+                    const out = [];
+                    if (origin.image) out.push(origin.image);
+                    if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+                    if (Array.isArray(origin.images)) out.push(...origin.images);
+                    return [...new Set(out.filter(Boolean))];
+                  };
+
+                  // small normalization helper to align with backend matching rules
+                  const normalizeForMatch = (u) => {
+                    if (!u) return '';
+                    try {
+                      // keep data: URIs unchanged
+                      if (u.startsWith('data:')) return u;
+                      const clean = u.replace(/&amp;/g, '&');
+                      const parsed = new URL(clean);
+                      let p = parsed.pathname || '';
+                      try {
+                        p = decodeURIComponent(p);
+                      } catch (e) {
+                        // ignore decode errors
+                      }
+                      return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+                    } catch (e) {
+                      return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+                    }
+                  };
+
+                  const origin = removedItem.originData || {};
+                  let originImages = getAllFromOrigin(origin);
+
+                  // Current displayed urls for this scrap (normalized)
+                  const displayed = allImageData
+                    .filter((it) => (it.scrapId || it.id) === scrapKey)
+                    .map((it) => it.url || it.thumbnail)
+                    .map((d) => normalizeForMatch(d));
+
+                  // Exclude the deleted image (normalized) from candidates and any already-displayed images
+                  const normalizedDelete = normalizeForMatch(deleteUrl);
+
+                  originImages = originImages.filter((o) => normalizeForMatch(o) !== normalizedDelete);
+
+                  // Find a candidate that's in originImages but not displayed (normalized comparison)
+                  let candidate = null;
+                  for (const o of originImages) {
+                    const normO = normalizeForMatch(o);
+                    if (!displayed.includes(normO) && normO !== normalizedDelete) {
+                      candidate = o;
+                      break;
+                    }
+                  }
+
+                  if (candidate) {
+                    // Replace the removed item with the candidate image entry
+                    const newEntry = {
+                      id: `${scrapKey}::${Date.now()}`,
+                      scrapId: scrapKey,
+                      source: removedItem.source || 'SCRAP',
+                      url: candidate,
+                      thumbnail: candidate,
+                      originData: origin,
+                      timestamp: removedItem.timestamp || Date.now(),
+                    };
+                    allImageData.splice(matchIndex, 1, newEntry);
+                  } else {
+                    // No candidate; just remove
+                    allImageData.splice(matchIndex, 1);
+                  }
+                }
+                // re-render gallery with updated data, keeping filter
+                renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+                showToast('✅ 이미지가 삭제되었습니다.');
+              } catch (e) {
+                // fallback: remove DOM node
+                if (div.parentNode) div.parentNode.removeChild(div);
+                showToast('✅ 이미지가 삭제되었습니다.');
+              }
+            } else if (response && response.success && !response.changed) {
+              // backend found nothing to delete; notify and don't update UI state
+              showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
+            } else {
+              showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
+            }
+          });
+        });
+
+        div.appendChild(delBtn);
+      }
+
+      // Append image element
+      div.appendChild(img);
+
+      // +N overlay for groups: show on the last shown image for a scrap when there are more images in the origin
+      const scrapKey = imgData.scrapId || imgData.id;
+      if (scrapKey) seenPerScrap[scrapKey] = (seenPerScrap[scrapKey] || 0) + 1;
+
+      const isLastShown = scrapKey && seenPerScrap[scrapKey] === shownPerScrap[scrapKey];
+      const totalCount = scrapKey ? totalPerScrap[scrapKey] || 0 : 0;
+      const shownCount = scrapKey ? shownPerScrap[scrapKey] || 0 : 0;
+      const extra = totalCount - shownCount;
+      if (isLastShown && extra > 0) {
+        const overlay = document.createElement('div');
+        overlay.className = 'gallery-more-overlay';
+        overlay.textContent = `+${extra}`;
+        overlay.title = `${extra}개 추가 이미지`; // tooltip
+        overlay.style.cssText = 'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
+        div.appendChild(overlay);
+      }
+
+      // 클릭 이벤트
+      div.addEventListener('click', () => {
+        sendCommand('insert-image', { url: imgData.url });
+        sendCommand('focus');
+      });
+
+      fragment.appendChild(div);
+    });
+    imageGalleryGrid.appendChild(fragment);
+
+    // Eager-load newly rendered images that are already within the visible grid viewport
+    // This prevents needing to switch tabs / re-focus to trigger IntersectionObserver
+    try {
+      setTimeout(() => {
+        const lazyImgs = imageGalleryGrid.querySelectorAll('img.lazy-loading');
+        if (!lazyImgs || lazyImgs.length === 0) return;
+        const gridRect = imageGalleryGrid.getBoundingClientRect();
+        lazyImgs.forEach((img) => {
+          try {
+            const r = img.getBoundingClientRect();
+            // follow same rootMargin logic: if within 200px range of viewport inside grid, load immediately
+            if (r.top < gridRect.bottom + 200 && r.bottom > gridRect.top - 200) {
+              const src = img.dataset && img.dataset.src;
+              if (src) {
+                img.src = src;
+                img.classList.remove('lazy-loading');
+                try {
+                  if (galleryImageObserver) galleryImageObserver.unobserve(img);
+                } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        });
+      }, 30);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  // 이벤트 리스너 설정
+  // 필터 탭 이벤트
+  galleryFilterTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      galleryFilterTabs.forEach((t) => {
+        t.classList.remove('active');
+        t.style.background = '#f1f3f4';
+        t.style.color = '#5f6368';
+      });
+      tab.classList.add('active');
+      tab.style.background = '#4285f4';
+      tab.style.color = 'white';
+
+      currentFilter = tab.dataset.filter;
+      loadUnifiedGallery(currentFilter);
+    });
+  });
+
+  // 검색 입력 이벤트
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+    });
+  }
+
+  // 초안 필터 버튼 이벤트
+  if (filterByDraftBtn) {
+    filterByDraftBtn.addEventListener('click', async () => {
+      if (!isDraftFilterActive) {
+        // 초안 내용 가져오기
+        draftContentText = await getDraftContent();
+        if (!draftContentText || draftContentText.length < 10) {
+          alert('초안 내용이 부족합니다.');
           return;
         }
 
-        const messageId = `draft-${Date.now()}`;
-        const handler = (event) => {
-          if (event.data.action === 'content-response' && event.data.requestId === messageId) {
-            window.removeEventListener('message', handler);
-            resolve(extractTextFromDraft(event.data.data?.html || ''));
-          }
-        };
-        window.addEventListener('message', handler);
-        editorIframe.contentWindow.postMessage(
-          { action: 'get-content', requestId: messageId },
-          '*'
-        );
-        setTimeout(() => {
-          window.removeEventListener('message', handler);
-          resolve('');
-        }, 2000);
-      });
-    }
-
-    async function toggleDraftFilter() {
-      if (!isDraftFilterActive) {
         filterByDraftBtn.style.background = '#e8f0fe';
         filterByDraftBtn.style.borderColor = '#1a73e8';
         const spanText = filterByDraftBtn.querySelector('span:last-child');
         if (spanText) spanText.textContent = '초안 필터 ON';
-        draftContentText = await getDraftContent();
-        if (!draftContentText || draftContentText.length < 10) {
-          alert('초안 내용이 부족합니다.');
-          filterByDraftBtn.style.background = '#fff';
-          filterByDraftBtn.style.borderColor = '#dadce0';
-          if (spanText) spanText.textContent = '초안 필터';
-          return;
-        }
         isDraftFilterActive = true;
-        renderImages(filterImagesByDraft(allImages, draftContentText));
       } else {
         filterByDraftBtn.style.background = '#fff';
         filterByDraftBtn.style.borderColor = '#dadce0';
         const spanText = filterByDraftBtn.querySelector('span:last-child');
         if (spanText) spanText.textContent = '초안 필터';
         isDraftFilterActive = false;
-        renderImages(allImages);
+        draftContentText = '';
       }
-    }
+      renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+    });
+  }
 
-    if (filterByDraftBtn) filterByDraftBtn.addEventListener('click', toggleDraftFilter);
+  // 미리보기 모달 이벤트
+  if (closePreview) {
+    closePreview.addEventListener('click', () => {
+      previewModal.style.display = 'none';
+    });
+  }
 
-    searchInput.addEventListener(
-      'input',
-      debounce((e) => {
-        const term = e.target.value.toLowerCase().trim();
-        let targetImages = isDraftFilterActive
-          ? filterImagesByDraft(allImages, draftContentText)
-          : allImages;
-        if (term) {
-          // 검색어가 있으면 필터링 (초안 필터 결과 내에서 검색)
-          targetImages = targetImages.filter((img) => {
-            const title = (img.title || '').toLowerCase();
-            const source = (img.source || '').toLowerCase();
-            const url = (img.url || '').toLowerCase();
-            return title.includes(term) || source.includes(term) || url.includes(term);
-          });
+  if (previewModal) {
+    previewModal.addEventListener('click', (e) => {
+      if (e.target === previewModal) {
+        previewModal.style.display = 'none';
+      }
+    });
+  }
+
+  // 초안 내용 가져오기 헬퍼 함수
+  async function getDraftContent() {
+    return new Promise((resolve) => {
+      const editorIframe = document.querySelector('#quill-editor-iframe');
+      if (!editorIframe || !editorIframe.contentWindow) {
+        resolve('');
+        return;
+      }
+
+      const messageId = `get-draft-${Date.now()}`;
+      const handler = (event) => {
+        if (event.data.action === 'content-response' && event.data.requestId === messageId) {
+          window.removeEventListener('message', handler);
+          resolve((event.data.data?.html || '').replace(/<[^>]*>/g, '').trim());
         }
-        renderImages(targetImages);
-      }, 300)
-    );
+      };
+      window.addEventListener('message', handler);
+      editorIframe.contentWindow.postMessage({ action: 'get-content', requestId: messageId }, '*');
+      setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve('');
+      }, 2000);
+    });
+  }
 
-    renderImages(allImages);
-  });
+  // 초기 데이터 로드
+  loadUnifiedGallery(currentFilter);
 }
 
 // -----------------------------------------------------------------------------
@@ -511,17 +691,23 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     'padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;';
   thumbBtn.textContent = '🎨 썸네일 만들기';
 
-  // '초안 삭제' 버튼이 있다면 그 앞에, 없으면 컨테이너 끝에 추가
+  // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
   const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
   if (deleteBtn) {
-    buttonContainer.insertBefore(thumbBtn, deleteBtn);
+    // buttonContainer.insertBefore(...) 대신 deleteBtn.parentNode.insertBefore(...) 사용
+    // deleteBtn이 div로 감싸져 있어도, 그 부모(div)에게 삽입을 요청하므로 안전함
+    deleteBtn.parentNode.insertBefore(thumbBtn, deleteBtn);
   } else {
+    // 삭제 버튼이 없으면(드문 경우) 컨테이너 끝에 추가
     buttonContainer.appendChild(thumbBtn);
   }
 
   // 이벤트 연결
   thumbBtn.onclick = () => {
-    // 즉시 모달 열기 (기존 데이터로)
+    // [추가] 워크스페이스의 텍스트 오버레이 체크박스 상태 확인
+    const checkbox = workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
+    const composeThumbnailText = checkbox ? checkbox.checked : false;
+
     const draftData = {
       seoTitle: ideaData.seoTitle || ideaData.title,
       thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null,
@@ -610,7 +796,17 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
     // 모달 즉시 열기
     Logger.info('[ThumbnailButton] 썸네일 모달 열기 (기존 데이터 사용)');
-    openThumbnailMaker(draftData, onInsert, onSave, null);
+    const shadowRoot = workspaceEl.getRootNode();
+    const targetContainer =
+      shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? shadowRoot : document.body;
+    openThumbnailMaker(
+      draftData,
+      onInsert,
+      onSave,
+      null,
+      { showText: composeThumbnailText },
+      targetContainer
+    );
 
     // 백그라운드에서 최신 데이터 가져오기 (선택적 업데이트)
     chrome.runtime.sendMessage(
@@ -666,16 +862,30 @@ function createScrapCard(scrap, isLinked) {
   const cleanedTitle = textContent.replace(/\s+/g, ' ').trim();
   const displayTitle = cleanedTitle.substring(0, 10);
 
+  // [수정] 연결된 스크랩 UI 개선 (이미지 썸네일 표시)
   if (isLinked) {
-    return `<div class="scrap-card-item linked-scrap-item" data-scrap-id="${
-      scrap.id
-    }" data-text="${textContent.replace(
-      /"/g,
-      '&quot;'
-    )}" draggable="true" style="margin:0; flex-shrink:0; position:relative;">
-        <div class="linked-scrap-tag">
-          <span class="tag-text">${displayTitle}...</span>
-          <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제">×</button>
+    const imageUrl = scrap.image || (Array.isArray(scrap.allImages) && scrap.allImages[0]);
+    const hasImage = !!imageUrl;
+
+    return `<div class="scrap-card-item linked-scrap-item ${hasImage ? 'has-thumbnail' : ''}" 
+        data-scrap-id="${scrap.id}" 
+        data-text="${textContent.replace(/"/g, '&quot;')}" 
+        draggable="true" 
+        style="margin:0; flex-shrink:0; position:relative; display:flex; align-items:center; background:#fff; border:1px solid #ddd; border-radius:20px; padding:4px 10px 4px 4px; gap:6px; height:32px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+        
+        ${
+          hasImage
+            ? `<div style="width:24px; height:24px; border-radius:50%; overflow:hidden; flex-shrink:0; border:1px solid #eee;">
+                 <img src="${imageUrl}" style="width:100%; height:100%; object-fit:cover;">
+               </div>`
+            : `<span style="font-size:14px; margin-left:4px;">📄</span>`
+        }
+        
+        <div class="linked-scrap-tag" style="border:none; background:none; padding:0;">
+          <span class="tag-text" style="font-size:12px; color:#333; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:middle;">
+            ${displayTitle}...
+          </span>
+          <button class="unlink-scrap-btn" data-scrap-id="${scrap.id}" title="연결 해제" style="margin-left:4px; border:none; background:none; color:#999; cursor:pointer; font-size:14px; padding:0 2px;">×</button>
         </div>
       </div>`;
   }
@@ -842,10 +1052,20 @@ function showScrapDetailModal(scrapData, container = null) {
             /"/g,
             '&quot;'
           )}" style="max-width: 90vw; max-height: 90vh; object-fit: contain;">`;
-          document.body.appendChild(fullModal);
+
+          // [수정] document.body 대신 Shadow DOM 내부 컨테이너에 추가
+          // container는 showScrapDetailModal의 인자로 전달된 Shadow DOM 내부 요소입니다.
+          if (container) {
+            container.appendChild(fullModal);
+          } else {
+            // container가 없는 예외 상황 (거의 없음)
+            document.body.appendChild(fullModal);
+          }
+
           fullModal.addEventListener('click', () => {
-            if (document.body.contains(fullModal)) {
-              document.body.removeChild(fullModal);
+            // [수정] 부모 요소에서 제거
+            if (fullModal.parentNode) {
+              fullModal.parentNode.removeChild(fullModal);
             }
           });
         });
@@ -1407,22 +1627,57 @@ ${contentHtml}
 // -----------------------------------------------------------------------------
 // 워크스페이스 액션 버튼 업데이트 헬퍼 함수
 // -----------------------------------------------------------------------------
-function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
+async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
   if (!buttonContainer) return;
 
+  // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
+  let composeThumbnailText = false;
+  try {
+    const storage = await chrome.storage.local.get('composeThumbnailText');
+    composeThumbnailText = storage.composeThumbnailText || false;
+  } catch (e) {
+    console.warn('[Workspace] 설정 로드 실패:', e);
+  }
+
+  // 체크박스 HTML 생성
+  const checkboxHtml = `
+    <div style="display:flex; align-items:center; gap:6px; margin-right:12px; padding-right:12px; border-right:1px solid #eee;" 
+         title="체크 시: AI는 글자 없는 이미지를 그리고, 코드가 정확한 한글을 입힙니다. (오타 없음)\n해제 시: AI가 직접 글자를 그립니다. (스타일 자연스러움, 오타 가능성)">
+      <input type="checkbox" id="compose-thumbnail-text-checkbox" ${composeThumbnailText ? 'checked' : ''} style="cursor:pointer;">
+      <label for="compose-thumbnail-text-checkbox" style="font-size:12px; color:#555; cursor:pointer; user-select:none; white-space:nowrap; font-weight:500;">
+        텍스트 오버레이
+      </label>
+    </div>
+  `;
+
+  // 버튼 렌더링 (체크박스 포함)
   if (hasDraft) {
     // 초안이 있을 때: 텍스트만/썸네일만 재생성 버튼
     buttonContainer.innerHTML = `
-      <button id="regenerate-draft-btn" style="flex:1; min-width:140px;">📝 텍스트만 다시 쓰기</button>
-      <button id="regenerate-thumbnail-btn" style="flex:1; min-width:140px;">🎨 썸네일만 다시 그리기</button>
-      <button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>
+      ${checkboxHtml}
+      <div style="flex:1; display:flex; gap:8px; overflow-x:auto;">
+        <button id="regenerate-draft-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">📝 텍스트만 다시 쓰기</button>
+        <button id="regenerate-thumbnail-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">🎨 썸네일만 다시 그리기</button>
+        <button id="delete-draft-in-workspace" class="draft-delete-btn" title="초안 삭제" style="cursor:pointer;">🗑️</button>
+      </div>
     `;
   } else {
     // 초안이 없을 때: 전체 생성 버튼
     buttonContainer.innerHTML = `
-      <button id="generate-draft-btn" style="flex:1;">✨ AI 초안 생성</button>
+      ${checkboxHtml}
+      <button id="generate-draft-btn" style="flex:1; cursor:pointer;">✨ AI 초안 생성</button>
     `;
+  }
+
+  // 체크박스 이벤트 리스너 (설정 자동 저장)
+  const checkbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
+  if (checkbox) {
+    checkbox.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      chrome.storage.local.set({ composeThumbnailText: isChecked });
+      console.log('[Workspace] 텍스트 오버레이 설정 변경:', isChecked ? 'ON' : 'OFF');
+    });
   }
 }
 
@@ -1989,8 +2244,10 @@ export function renderWorkspace(container, ideaData) {
 
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
 
-  // [추가] 초기 로드 시 조건이 맞으면 썸네일 버튼 표시
-  renderThumbnailButton(workspaceEl, ideaData);
+  // [수정] 순서 보장: 액션 버튼이 다 그려진 '후에' 썸네일 버튼을 추가해야 함
+  updateWorkspaceActionButtons(workspaceEl, hasDraft).then(() => {
+    renderThumbnailButton(workspaceEl, ideaData);
+  });
 
   // tracking_only 카드인 경우 publishedUrl에서 permalink 추출
   if (isTrackingOnly && ideaData.publishedUrl && !ideaData.publishInfo?.permalink) {
@@ -4621,7 +4878,7 @@ export function updateWorkspaceScraps(container, ideaData) {
 
 // ✅ [UI 갱신 추가] handleGenerateAction: 생성 성공 시 버튼 상태 즉시 변경
 // ✅ [버그 수정] handleGenerateAction: 썸네일 데이터 누락 방지 및 동기화 강화
-function handleGenerateAction(btn, options) {
+async function handleGenerateAction(btn, options) {
   if (!btn) return;
 
   // 1. 데이터 및 에디터 찾기
@@ -4644,6 +4901,11 @@ function handleGenerateAction(btn, options) {
     alert('에디터가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
     return;
   }
+
+  // [추가] 체크박스 값 읽기
+  const checkbox = workspaceContainer.querySelector('#compose-thumbnail-text-checkbox');
+  const composeThumbnailText = checkbox ? checkbox.checked : false;
+  options.composeThumbnailText = composeThumbnailText;
 
   // 2. 버튼 상태 변경
   const originalText = btn.dataset.originalText || btn.innerHTML;
@@ -4707,8 +4969,16 @@ function handleGenerateAction(btn, options) {
                 if (!chrome.runtime.lastError && r && r.success && r.scraps) {
                   linkedScrapsIds.forEach((id) => {
                     const s = r.scraps.find((item) => item.id === id);
-                    if (s)
-                      linkedScrapsContent.push({ title: s.title || '스크랩', text: s.text || '' });
+                    if (s) {
+                      linkedScrapsContent.push({
+                        title: s.title || '스크랩',
+                        text: s.text || '',
+                        url: s.url || '',
+                        // [추가] 이미지 URL 전달 (단일 image 또는 allImages의 첫 번째)
+                        image:
+                          s.image || (s.allImages && s.allImages.length > 0 ? s.allImages[0] : ''),
+                      });
+                    }
                   });
                 }
                 resolve();
@@ -4726,13 +4996,14 @@ function handleGenerateAction(btn, options) {
     btn.innerHTML = '✍️ 텍스트 작성 중...';
 
     const baseDraftData = {
+      ...ideaData, // ✅ [수정] ideaData를 맨 위로 올려야 합니다!
       title: title,
       description: ideaData.description || '',
       tags: ideaData.tags || [],
       outline: ideaData.outline || [],
       currentDraft: currentDraft || '',
-      linkedScrapsContent: linkedScrapsContent,
-      ...ideaData,
+      linkedScrapsContent: linkedScrapsContent, // ✅ 그래야 이 최신 데이터(URL 포함)가 덮어씌워지지 않고 유지됩니다.
+      // ...ideaData, // ❌ (기존 위치) 여기에 있으면 linkedScrapsContent를 옛날 데이터(빈 URL)로 덮어버립니다. 지워주세요.
     };
 
     const shouldSplitRequest = options.generateDraft && options.generateThumbnail;
@@ -4835,7 +5106,8 @@ function handleGenerateAction(btn, options) {
             }
             // 버튼 UI 갱신
             if (typeof updateWorkspaceActionButtons === 'function') {
-              updateWorkspaceActionButtons(workspaceEl, true);
+              // [수정] await를 추가하여 버튼 갱신이 끝날 때까지 기다립니다.
+              await updateWorkspaceActionButtons(workspaceEl, true);
             }
           }
         }
@@ -4865,7 +5137,11 @@ function handleGenerateAction(btn, options) {
           publishInfo: ideaData.publishInfo,
         };
 
-        const secondStepOptions = { generateDraft: false, generateThumbnail: true };
+        const secondStepOptions = {
+          generateDraft: false,
+          generateThumbnail: true,
+          composeThumbnailText: options.composeThumbnailText, // 👈 이 부분이 누락되어 있었습니다.
+        };
 
         chrome.runtime.sendMessage(
           {

@@ -25,17 +25,59 @@ import { AI_MODELS } from '../constants.js';
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
   try {
+    // First try background fetch via runtime message (helps bypass page CSP)
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const BG_FETCH_TIMEOUT_MS = 5000;
+        const bgMsgPromise = new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url }, (resp) => {
+              resolve(resp);
+            });
+          } catch (e) {
+            resolve(null);
+          }
+        });
+        const responseMsg = await Promise.race([
+          bgMsgPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)),
+        ]);
+        // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
+        if (responseMsg && responseMsg.success) {
+          try { console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url); } catch(e) {}
+          if (responseMsg.dataUrl) {
+            const m = responseMsg.dataUrl.match(/^data:(.+);base64,(.*)$/);
+            if (m) return { mimeType: m[1], data: m[2] };
+            return null;
+          }
+          if (responseMsg.data && responseMsg.mimeType) {
+            return { mimeType: responseMsg.mimeType, data: responseMsg.data };
+          }
+        }
+      } catch (e) {
+      Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
+      try { console.log('[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL', url); } catch(e) {}
+      }
+    }
+
+    Logger.debug('[fetchImageAsBase64] Falling back to fetch for URL:', url);
+    try { console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url); } catch(e) {}
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    try { console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url); } catch(e) {}
     const blob = await response.blob();
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
         try {
-          // "data:image/jpeg;base64,..." 형식에서 뒷부분 데이터만 추출
+          // "data:image/jpeg;base64,..." 형식에서 MIME 타입과 데이터 분리
           const dataUrl = reader.result || '';
-          const base64 = dataUrl.split(',')[1] || '';
-          resolve(base64);
+          const matches = dataUrl.match(/^data:(.+);base64,(.*)$/);
+          if (matches) {
+            resolve({ mimeType: matches[1], data: matches[2] });
+          } else {
+            resolve(null);
+          }
         } catch (err) {
           reject(err);
         }
@@ -49,28 +91,46 @@ async function fetchImageAsBase64(url) {
   }
 }
 
+// [신규] 스크랩 이미지 분석 함수
+async function analyzeScrapImage(imageUrl) {
+  try {
+    const imageData = await fetchImageAsBase64(imageUrl);
+    if (!imageData) return null;
+
+    const prompt =
+      '이 이미지를 상세히 분석해줘. 1. 이미지에 포함된 모든 텍스트를 추출해줘. 2. 이미지의 주요 객체와 요소들을 자세히 설명해줘. 3. 이미지의 전체적인 분위기와 스타일을 분석해줘. 4. 이 이미지가 어떤 맥락에서 사용될 수 있을지 제안해줘.';
+    // VISION 모델(gemini-2.0-flash) 사용
+    const analysis = await callGeminiAPI(prompt, AI_MODELS.VISION, [imageData]);
+    return analysis;
+  } catch (e) {
+    Logger.warn('[analyzeScrapImage] 분석 실패:', e);
+    return null;
+  }
+}
+
 // [삭제] PERSONA_TEMPLATES 상수 삭제 (PromptService로 이관됨)
 // [삭제] selectPersona 함수 삭제 (detectPersona로 대체 및 generateDraftFromIdea 내부로 통합)
 // [삭제] logPersona 함수 삭제 (PromptBuilder의 getPersonaName/getToneName으로 대체)
 
 // 썸네일 프롬프트 생성 시스템 메시지
-// [핵심 수정] 텍스트 금지 명령을 최상단에 영문/한글로 강력하게 추가
+// [수정] 텍스트 금지 명령을 최상단에 영문/한글로 강력하게 추가
 const THUMBNAIL_SYSTEM_PROMPT = `
-CRITICAL INSTRUCTION: THE FINAL IMAGE MUST NOT CONTAIN ANY WRITTEN TEXT, LETTERS, CHARACTERS, OR NUMBERS. NO EXCEPTIONS.
+// [수정] 텍스트 금지 명령 제거 -> 텍스트 렌더링 최적화 명령으로 변경
+You are an expert at creating prompts for blog thumbnails.
+Your goal is to generate a DALL-E 3 or Imagen 3 prompt that creates a high-quality, click-inducing thumbnail.
 
-당신은 블로그 썸네일 이미지 생성을 위한 프롬프트 작성 전문가입니다.
-주어진 정보(제목, 설명)를 바탕으로 이미지를 생성할 때, 입력된 텍스트 내용 자체가 이미지 안에 글자로 나타나서는 절대 안 됩니다.
-오직 내용을 시각적으로 상징하는 그래픽, 아이콘, 일러스트레이션 요소로만 구성된 DALL-E 3용 영어 프롬프트를 작성하십시오.
+[Text Rendering Rules - CRITICAL]
+1. If the user provides a specific text/title, you MUST instruct the model to render it explicitly using the format: "Render the text: 'TEXT_CONTENT'".
+2. For Korean text, emphasize strict typography to prevent typos (e.g., "Bold, clear Korean typography", "Legible text").
+3. Do NOT allow misspelled or gibberish text. If the text is too long (over 10 chars), summarize it into a short keyword for the image.
 
-스타일 가이드:
-- 현대적이고 트렌디한 플랫 디자인 일러스트레이션 스타일
-- 밝고 긍정적인 컬러 팔레트 (파스텔 톤 위주 + 포인트 컬러)
-- 추상적이고 은유적인 시각화 (텍스트 내용을 직관적인 아이콘이나 그래픽으로 표현)
-- 깔끔하고 미니멀한 구성, 여백의 미 활용
-- 웹/모바일 환경에 최적화된 시인성 높은 디자인
-- 유튜브 썸네일 느낌의 매력적인 아트워크
+[Design Style Guide]
+- Style: Modern, High-quality 3D render or Premium Flat Illustration
+- Composition: Center the main object/text with ample whitespace.
+- Lighting: Studio lighting, bright and vibrant.
+- Color: Use brand colors (Blue, Red, Yellow, Green) as accents on a neutral background.
 
-중요: 결과물은 오직 DALL-E 3에 입력할 영어 프롬프트 텍스트만 출력해야 합니다. 설명이나 다른 말은 필요 없습니다.
+Output ONLY the English prompt for the image generation model.
 `;
 
 // 3. 키워드 갭 분석 (AI 분석)
@@ -113,7 +173,7 @@ export async function getEmergingTopics(channelContext) {
 
 // Gemini 텍스트 모델 호출 유틸
 // Gemini 텍스트 모델 호출 유틸
-export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
+export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = []) {
   // 검사: API 키가 반드시 있어야 함
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey || !String(geminiApiKey).trim()) {
@@ -125,14 +185,38 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
   try {
+    // [수정] 멀티모달 입력을 위한 parts 구성
+    const parts = [];
+
+    // 텍스트 프롬프트 추가
+    if (prompt && typeof prompt === 'string') {
+      parts.push({ text: prompt });
+    }
+
+    // 이미지 데이터 추가 (Base64 형식)
+    if (Array.isArray(images)) {
+      for (const img of images) {
+        if (img && img.mimeType && img.data) {
+          parts.push({
+            inlineData: {
+              mimeType: img.mimeType,
+              data: img.data,
+            },
+          });
+        }
+      }
+    }
+
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // Referer 제한 우회를 위한 헤더 (Chrome 확장에서는 제한적)
+        'Origin': 'chrome-extension://' + chrome.runtime.id,
       },
-      // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }] }] })
+      // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts }],
       }),
     });
 
@@ -149,9 +233,9 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT) {
     const candidate = Array.isArray(json?.candidates) && json.candidates[0];
     if (!candidate) return '';
 
-    const parts = candidate?.content?.parts || [];
+    const responseParts = candidate?.content?.parts || [];
     // parts는 배열, 각 항목에 text가 있을 수 있음
-    for (const p of parts) {
+    for (const p of responseParts) {
       if (p && typeof p.text === 'string') return p.text;
     }
 
@@ -173,12 +257,12 @@ export async function callDraftAPI(prompt, opts = {}) {
 
   // 프롬프트 길이 보호 / 최적화
   let optimizedPrompt = prompt;
-  if (typeof prompt === 'string' && prompt.length > 30000) {
+  if (typeof prompt === 'string' && prompt.length > 300000) {
     Logger.warn(
       `[callDraftAPI] 프롬프트가 너무 깁니다 (${prompt.length}자). 압축된 버전으로 시도합니다.`
     );
     optimizedPrompt =
-      prompt.substring(0, 15000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
+      prompt.substring(0, 150000) + '\n\n[프롬프트가 길어 축소되었습니다. 핵심 내용만 포함합니다.]';
   }
 
   let attempt = 0;
@@ -296,6 +380,7 @@ export async function enhanceDraftWithFeatures({
   ideaData = {},
   jsonLdSchema = null,
   formattedDraft = '',
+  onProgress = null,
 } = {}) {
   let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null;
   let thumbnailGenerationPartialFailure = false;
@@ -310,21 +395,38 @@ export async function enhanceDraftWithFeatures({
       type: selectedThumbnail.type,
       permalink: permalink.substring(0, 30),
     });
+    // Emit progress: thumbnail generation started
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' }); } catch(e) {}
 
     // Image source selection
     let generatedImages = [];
     let isProductSynthesis = false;
 
-    const productLink = Array.isArray(affiliateLinks)
-      ? affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl)
-      : null;
+    let productLink = null;
+    if (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+      // Prefer exact affiliate link if provided in ideaData.origin
+      productLink = (ideaData?.origin?.affiliateLinkId
+        ? affiliateLinks.find((l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl)
+        : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
+    }
+    if (productLink) {
+      const reason = (ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId) ? 'origin_match' : 'best_candidate';
+      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', { id: productLink.id, url: productLink.url, reason });
+      try { console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', { id: productLink.id, url: productLink.url, reason }); } catch(e) {}
+    } else {
+      Logger.info('[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)');
+      try { console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected'); } catch(e) {}
+    }
 
     if (productLink) {
+      try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis', progress: 55, message: '상품 이미지 합성 시작...' }); } catch(e) {}
       const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
       if (productBase64) {
         const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
           generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+          Logger.info('[enhanceDraftWithFeatures] product synthesis images count:', generatedImages.length);
+          try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis_complete', progress: 70, message: '상품 합성 이미지 생성 완료' }); } catch(e) {}
           isProductSynthesis = true;
         } catch (err) {
           Logger.warn(
@@ -336,33 +438,68 @@ export async function enhanceDraftWithFeatures({
     }
 
     if (!generatedImages || generatedImages.length === 0) {
-      generatedImages = await generateAiImage(selectedThumbnail.thumbnailPromptEn, 1);
+      // [수정] 이중 안전장치: 오버레이 모드일 경우 프롬프트 강제 보정
+      let finalImagePrompt = selectedThumbnail.thumbnailPromptEn;
+
+      if (composeThumbnailText) {
+        // 1. 기존 프롬프트에서 텍스트 렌더링 관련 지시어가 있다면 무력화 (선택적)
+        // finalImagePrompt = finalImagePrompt.replace(/render text|typography|write/gi, '');
+
+        // 2. [핵심] 강력한 텍스트 금지 명령을 프롬프트 끝에 강제로 추가
+        finalImagePrompt +=
+          ' . CRITICAL: Do NOT render any text, letters, words, or typography in this image. Keep the background clean and clutter-free.';
+
+        Logger.debug(
+          '[enhanceDraftWithFeatures] 텍스트 오버레이 모드: 텍스트 금지 프롬프트 강제 주입됨'
+        );
+      }
+
+      // 수정된 프롬프트로 이미지 생성 요청
+      try { console.log('[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt', finalImagePrompt); } catch(e) {}
+      generatedImages = await generateAiImage(finalImagePrompt, 1);
+      try { console.log('[enhanceDraftWithFeatures DEBUG] generateAiImage returned:', Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages); } catch(e) {}
+      Logger.info('[enhanceDraftWithFeatures] AI generate images count:', generatedImages.length);
     }
 
     const sourceImageUrl = generatedImages[0];
+    Logger.info('[enhanceDraftWithFeatures] sourceImageUrl chosen:', sourceImageUrl);
 
     // Compose text overlay if requested
     let composedDataUrl = sourceImageUrl;
     if (composeThumbnailText) {
       const thumbnailText =
-        selectedThumbnail.thumbnailText || `${seoTitle || ideaData.title}`.substring(0, 12);
+        selectedThumbnail.thumbnailText ||
+        (ideaData.title.length > 10 ? ideaData.title.substring(0, 8) + '...' : ideaData.title);
       const textPosition = selectedThumbnail.textPosition || 'bottom';
+      // safety: protect offscreen operations with a timeout to avoid indefinite hangs in tests or runtime
       try {
-        composedDataUrl = await composeThumbnailInOffscreen(
+        try { console.log('[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for', sourceImageUrl); } catch(e) {}
+        const COMPOSE_TIMEOUT_MS = 8000;
+        const composePromise = composeThumbnailInOffscreen(
           sourceImageUrl,
           thumbnailText,
           textPosition
         );
+        // Promise.race to ensure the operation doesn't hang forever
+        composedDataUrl = await Promise.race([
+          composePromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)),
+        ]);
+        try { console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded'); } catch(e) {}
+        Logger.info('[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:', sourceImageUrl);
       } catch (composeErr) {
+          Logger.debug('[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:', composeErr && composeErr.message);
         Logger.warn(
           '[enhanceDraftWithFeatures] compose failed, will try fallback to source image dataUrl',
           composeErr && composeErr.message
         );
         try {
           const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
+          try { console.log('[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:', !!(sourceBase64 && sourceBase64.data)); } catch(e) {}
+          Logger.debug('[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:', sourceBase64 && !!sourceBase64.data);
           if (sourceBase64) {
-            // fetchImageAsBase64 returns base64 string; construct a data URL as a safe fallback (assume png)
-            const candidateDataUrl = `data:image/png;base64,${sourceBase64}`;
+            // fetchImageAsBase64 returns {mimeType, data} object; construct a data URL as a safe fallback (assume png)
+            const candidateDataUrl = `data:image/png;base64,${sourceBase64.data}`;
             composedDataUrl = candidateDataUrl;
             Logger.info(
               '[enhanceDraftWithFeatures] compose fallback: source image converted to dataURL'
@@ -378,11 +515,49 @@ export async function enhanceDraftWithFeatures({
       }
     }
 
-    // Cropping
+    // [핵심 수정] 16:9 이미지 업로드 준비 (URL -> Base64 변환 시도)
+    let final16x9Data = null; // 업로드용 데이터 (Base64)
+    let final16x9Url = null; // 최종 URL
+
+    if (
+      composedDataUrl &&
+      (composedDataUrl.startsWith('http') || composedDataUrl.startsWith('https'))
+    ) {
+      try {
+        Logger.debug('[enhanceDraftWithFeatures] 16:9 이미지 업로드를 위해 Base64 변환 시도');
+        const base64Result = await fetchImageAsBase64(composedDataUrl);
+        if (base64Result && base64Result.data) {
+          final16x9Data = `data:${base64Result.mimeType || 'image/png'};base64,${base64Result.data}`;
+        } else {
+          // 변환 실패 시 원본 URL 그대로 사용 (재업로드 건너뜀)
+          Logger.warn('[enhanceDraftWithFeatures] Base64 변환 실패, 원본 URL 사용');
+          final16x9Url = composedDataUrl;
+        }
+      } catch (e) {
+        Logger.warn('[enhanceDraftWithFeatures] Base64 변환 중 오류, 원본 URL 사용:', e);
+        final16x9Url = composedDataUrl;
+      }
+    } else {
+      // 이미 Base64인 경우
+      final16x9Data = composedDataUrl;
+    }
+
+    // Cropping (1x1, 4x3)
     const userId = await getCurrentUserId();
+    // composedDataUrl이 http URL이어도 cropImageInOffscreen이 처리할 수 있도록 시도 (CORS 주의)
+    // 안전을 위해 final16x9Data(Base64)가 있을 때만 크롭 시도
+    const sourceForCrop = final16x9Data || composedDataUrl;
+    // crop operations should have timeouts to avoid long-running tasks
+    const CROP_TIMEOUT_MS = 6000;
     const cropPromises = [
-      cropImageInOffscreen(composedDataUrl, 1).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
-      cropImageInOffscreen(composedDataUrl, 4 / 3).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
+      Promise.race([
+        cropImageInOffscreen(sourceForCrop, 1),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+      ]).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
+      Promise.race([
+        cropImageInOffscreen(sourceForCrop, 4 / 3),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+      ]).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
     ];
 
     let croppedResults;
@@ -401,7 +576,8 @@ export async function enhanceDraftWithFeatures({
     }
 
     // Upload
-    const [url_1x1, url_4x3, url_16x9] = await Promise.all([
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_start', progress: 85, message: '썸네일 업로드 시작...' }); } catch(e) {}
+    const uploadPromises = [
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
         `thumbnails/${userId}/${permalink}-1x1.png`,
@@ -412,12 +588,24 @@ export async function enhanceDraftWithFeatures({
         `thumbnails/${userId}/${permalink}-4x3.png`,
         userId
       ),
-      uploadImageToFirebaseStorage(
-        composedDataUrl,
+    ];
+
+    // 16:9 이미지 업로드 (Base64 데이터가 있으면 업로드, 없으면 원본 URL 사용)
+    let url_16x9 = null;
+    if (final16x9Data) {
+      // Base64 데이터가 있으면 Firebase에 업로드
+      url_16x9 = await uploadImageToFirebaseStorage(
+        final16x9Data,
         `thumbnails/${userId}/${permalink}-16x9.png`,
         userId
-      ),
-    ]);
+      );
+    } else if (final16x9Url) {
+      // Base64 변환 실패 시 원본 URL 그대로 사용 (업로드 건너뜀)
+      Logger.info('[enhanceDraftWithFeatures] 16:9 이미지 Base64 변환 실패로 원본 URL 사용');
+      url_16x9 = final16x9Url;
+    }
+
+    const [url_1x1, url_4x3] = await Promise.all(uploadPromises);
 
     thumbnailUrls = {
       url_1x1,
@@ -425,6 +613,7 @@ export async function enhanceDraftWithFeatures({
       url_16x9,
       altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
     };
+    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_complete', progress: 95, message: '썸네일 업로드 완료' }); } catch(e) {}
 
     // Update jsonLdSchema if present
     if (jsonLdSchema) {
@@ -458,6 +647,7 @@ export async function enhanceDraftWithFeatures({
       Logger.warn('[enhanceDraftWithFeatures] HTML insertion failed:', insertErr);
     }
 
+    try { if (typeof onProgress === 'function') onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' }); } catch(e) {}
     Logger.info('[enhanceDraftWithFeatures] 썸네일 생성 및 업로드 완료');
     return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
   } catch (e) {
@@ -468,7 +658,7 @@ export async function enhanceDraftWithFeatures({
 }
 
 // [신규] 제휴 링크 조회 및 필터링 헬퍼 함수
-async function getRelevantAffiliateLinks(userId, contextText) {
+async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
   try {
     const snap = await get(ref(getDb(), `affiliate_links/${userId}`));
     const linksMap = snap?.val();
@@ -484,42 +674,51 @@ async function getRelevantAffiliateLinks(userId, contextText) {
       return [];
     }
 
-    // contextText(제목+태그)에 키워드가 포함된 링크만 필터링 (토큰 절약 및 정확도 향상)
-    // 키워드가 없거나, 키워드가 문맥에 포함된 경우 선택
-    const contextLower = contextText.toLowerCase();
-    const relevantLinks = links.filter((link) => {
-      if (
-        !link.keywords ||
-        !Array.isArray(link.keywords) ||
-        link.keywords.length === 0 ||
-        !link.url
-      ) {
-        Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
-        return false;
-      }
+    // contextText(제목+태그)에 키워드/상품명이 포함된 링크를 스코어링하고 정렬
+    const contextLower = (contextText || '').toLowerCase();
+    const preferredId = options.preferredAffiliateId || null;
 
-      // keywords 배열에서 하나라도 contextText에 포함되는 키워드가 있는지 확인
-      const hasRelevantKeyword = link.keywords.some((keyword) => {
-        const keywordLower = keyword.toLowerCase();
-        return contextLower.includes(keywordLower);
+    const scored = links
+      .map((link) => {
+        const keywords = Array.isArray(link.keywords) ? link.keywords : [];
+        let score = 0;
+        // keywords matching score
+        keywords.forEach((keyword) => {
+          try {
+            if (keyword && contextLower.includes(String(keyword).toLowerCase())) score += 1;
+          } catch (e) {
+            /* ignore */
+          }
+        });
+        // product name match gives higher priority
+        const productNameLower = (link.productName || '').toLowerCase();
+        if (productNameLower && contextLower.includes(productNameLower)) score += 5;
+        // if preferred id provided, give a large bonus
+        if (preferredId && link.id === preferredId) score += 1000;
+        return { link, score };
+      })
+      // Exclude invalid entries (no keywords/url) or zero score, unless it's preferred
+      .filter(({ link, score }) => {
+        if (!link.keywords || !Array.isArray(link.keywords) || link.keywords.length === 0 || !link.url) {
+          Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
+          return false;
+        }
+        return score > 0;
       });
 
-      const productNameLower = (link.productName || '').toLowerCase();
-      const hasRelevantProductName = productNameLower && contextLower.includes(productNameLower);
-
-      // 키워드나 상품명이 문맥에 포함된 경우 선택
-      const isRelevant = hasRelevantKeyword || hasRelevantProductName;
-
-      if (isRelevant) {
-        Logger.debug(
-          `[getRelevantAffiliateLinks] 관련 링크 발견: ${link.keywords.join(
-            ', '
-          )} (${link.url.substring(0, 50)}...)`
-        );
-      }
-
-      return isRelevant;
+    // sort by score desc, then most recent
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (b.link.createdAt || 0) - (a.link.createdAt || 0);
     });
+
+    const relevantLinks = scored.map((s) => s.link);
+    try {
+      Logger.debug('[getRelevantAffiliateLinks] link scores:', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl, productName: s.link.productName })));
+    } catch (e) {
+      Logger.debug('[getRelevantAffiliateLinks] score logging failed', e);
+    }
+    try { console.log('[getRelevantAffiliateLinks DEBUG] link scores', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl }))); } catch(e) {}
 
     // 최대 10개까지만 반환 (프롬프트 과부하 방지)
     const result = relevantLinks.slice(0, 10);
@@ -532,6 +731,7 @@ async function getRelevantAffiliateLinks(userId, contextText) {
     return [];
   }
 }
+export { getRelevantAffiliateLinks };
 
 /**
  * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
@@ -701,10 +901,27 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
  */
 export async function generateDraftFromIdea(ideaData, options = {}) {
   try {
-    // 옵션 기본값 설정
+    // 1. 옵션 및 체크박스 상태 확인 [수정]
+    // options에서 composeThumbnailText 값을 명확히 가져옵니다.
     const { generateDraft = true, generateThumbnail = true } = options;
 
-    Logger.info('[generateDraftFromIdea] 실행 옵션:', { generateDraft, generateThumbnail });
+    // 사용자 설정 로드 (options에 값이 없으면 저장소에서 확인)
+    let composeThumbnailText = options.composeThumbnailText;
+    if (composeThumbnailText === undefined) {
+      // 비동기 함수 내부이므로 await 사용 가능
+      try {
+        const storage = await chrome.storage.local.get('composeThumbnailText');
+        composeThumbnailText = !!storage.composeThumbnailText;
+      } catch (e) {
+        composeThumbnailText = false;
+      }
+    }
+
+    Logger.info('[generateDraftFromIdea] 실행 옵션:', {
+      generateDraft,
+      generateThumbnail,
+      composeThumbnailText,
+    });
 
     // 1. 기본 제목 및 페르소나 결정 (사용자 설정 > 자동 감지)
     // title 변수를 함수 최상단에서 선언하여 generateDraft 옵션에 상관없이 사용 가능하게 함
@@ -744,31 +961,60 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const trends = ideaData.recommendedSearches || []; // 연관 검색어 활용
     builder.setTrendContext(keywords, trends);
 
+    // [핵심 수정] 3-1. 채널 정보 미리 가져오기 (내부 링크 매칭을 위해 위로 이동)
+    let channelInfo = null;
+    let targetSourceId = null;
+
+    try {
+      const userId = await getCurrentUserId();
+      const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+      const channelsData = channelsSnap?.val() || {};
+      const myBlogs = channelsData.myChannels?.blogs || [];
+      const myYoutubes = channelsData.myChannels?.youtubes || [];
+      const allChannels = [...myBlogs, ...myYoutubes];
+
+      // 카드의 channelId와 일치하는 채널 찾기 (UUID 비교)
+      let currentChannelId = ideaData.channelId;
+      if (!currentChannelId) {
+        const storage = await chrome.storage.local.get('activeChannelId');
+        currentChannelId = storage.activeChannelId;
+      }
+
+      if (currentChannelId) {
+        channelInfo = allChannels.find((ch) => {
+          // 1. UUID로 비교 (신규 방식)
+          if (ch.id === currentChannelId) return true;
+          // 2. apiUrl로 생성된 ID로 비교 (구버전 호환)
+          const generatedId = ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null;
+          return generatedId === currentChannelId;
+        });
+
+        // [중요] DB 매칭용 Source ID 계산 (RSS URL을 Base64로 변환)
+        // 이렇게 해야 DB에 저장된 'aHR0cHM...' 형식과 일치하게 됩니다.
+        if (channelInfo && channelInfo.apiUrl) {
+          targetSourceId = btoa(channelInfo.apiUrl).replace(/=/g, '');
+          Logger.debug(`[AI Service] 매칭용 Source ID 변환 완료: ${targetSourceId}`);
+        }
+      }
+    } catch (error) {
+      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
+    }
+
     // 4-A. 제휴 마케팅 링크 데이터 준비
     const userId = await getCurrentUserId();
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
       ' '
     )} ${ideaData.description || ''}`;
-    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
-
-    // 4-B. 채널 정보 가져오기 (JSON-LD용)
-    let channelInfo = null;
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, { preferredAffiliateId: ideaData?.origin?.affiliateLinkId });
     try {
-      const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
-      if (activeChannelId) {
-        const channelsSnap = await get(ref(getDb(), `channels/${userId}`));
-        const channelsData = channelsSnap?.val() || {};
-        const myBlogs = channelsData.myChannels?.blogs || [];
-        const myYoutubes = channelsData.myChannels?.youtubes || [];
-        const allChannels = [...myBlogs, ...myYoutubes];
-        channelInfo = allChannels.find((ch) => {
-          const chId = ch.id || (ch.apiUrl ? btoa(ch.apiUrl).replace(/=/g, '') : null);
-          return chId === activeChannelId;
-        });
-      }
-    } catch (error) {
-      Logger.warn('[generateDraftFromIdea] 채널 정보 조회 실패:', error);
+      Logger.info('[generateDraftFromIdea] affiliateLinks candidates:', {
+        preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
+        candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null }))
+      });
+    } catch (e) {
+      Logger.debug('[generateDraftFromIdea] affiliate candidate logging failed');
     }
+    try { console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', { preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null, candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null })) }); } catch(e) {}
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -803,13 +1049,70 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // Keywords prepared but not used directly in prompt at this time
 
     // 2. 연결된 자료 텍스트를 프롬프트 형식으로 만듭니다.
-    const linkedScrapsText = (ideaData.linkedScrapsContent || [])
-      .map((scrap, index) => {
-        const title = scrap.title || scrap.text?.substring(0, 50) || `참고 자료 ${index + 1}`;
-        const url = scrap.url || '';
-        return `[참고 자료 ${index + 1}]\n제목: ${title}\nURL: ${url}\n내용: ${scrap.text || ''}\n`;
+
+    // [디버깅 코드 시작] -------------------------------------------------------
+    const scraps = ideaData.linkedScrapsContent || [];
+    Logger.debug(`[External Link Debug] 전달받은 연결 자료 개수: ${scraps.length}`);
+
+    if (scraps.length > 0) {
+      scraps.forEach((s, i) => {
+        Logger.debug(`[External Link Debug] 자료 #${i + 1}:`, {
+          title: s.title,
+          url_exists: !!s.url, // URL 존재 여부 (true/false)
+          url: s.url ? s.url.substring(0, 30) + '...' : '(URL 없음)',
+          text_len: s.text ? s.text.length : 0,
+        });
+      });
+    } else {
+      Logger.warn(
+        `[External Link Debug] 연결된 자료가 없습니다. (ideaData.linkedScrapsContent 비어있음)`
+      );
+    }
+    // [디버깅 코드 끝] ---------------------------------------------------------
+
+    // [스마트 정제 함수] 불필요한 공백/줄바꿈 제거 및 압축
+    const compressText = (text) => {
+      if (!text) return '';
+      return text
+        .replace(/\n\s*\n/g, '\n') // 여러 줄 공백을 한 줄로 축소
+        .replace(/[ \t]+/g, ' ') // 연속된 스페이스/탭을 하나로 축소
+        .replace(/URL 복사 이웃추가 본문 기타 기능/g, '') // 네이버 블로그 상단 노이즈 제거
+        .trim();
+    };
+
+    // 2. 연결된 자료 텍스트 처리 (이미지 분석 추가)
+    const linkedScrapsContent = ideaData.linkedScrapsContent || [];
+    const processedScraps = [];
+
+    // [추가] 이미지 분석 병렬 처리
+    await Promise.all(
+      linkedScrapsContent.map(async (scrap, index) => {
+        let content = compressText(scrap.text || '');
+
+        // 이미지가 있고 텍스트가 적거나(500자 미만) 이미지를 강조하고 싶을 때 분석 시도
+        // 여기서는 이미지가 있으면 무조건 분석하도록 설정 (필요시 조건 조절)
+        let imageAnalysis = '';
+        if (scrap.image) {
+          Logger.info(`[generateDraft] 스크랩 #${index + 1} 이미지 분석 시작...`);
+          const analysisResult = await analyzeScrapImage(scrap.image);
+          if (analysisResult) {
+            imageAnalysis = `\n\n[이미지 분석 내용 (Vision AI)]:\n${analysisResult}`;
+          }
+        }
+
+        // 길이 제한 (2500자)
+        if (content.length > 2500) {
+          const front = content.substring(0, 2000);
+          const back = content.substring(content.length - 500);
+          content = `${front}\n...(중략)...\n${back}`;
+        }
+
+        processedScraps[index] =
+          `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n내용:\n${content}${imageAnalysis}\n`;
       })
-      .join('\n');
+    );
+
+    const linkedScrapsText = processedScraps.join('\n\n');
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
@@ -820,30 +1123,37 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       )}\n\n`;
     }
 
-    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회
+    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회 (수정됨)
     let myPastPostsText = '';
     try {
       const userId = await getCurrentUserId();
       const contentSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const allBlogs = contentSnap?.val() || {};
 
-      // 현재 채널의 글만 필터링 (channelId가 일치하는 경우)
+      // 현재 채널의 글만 필터링
       const myPosts = Object.values(allBlogs)
         .filter((item) => item !== null && item.title && item.fullLink)
         .filter((item) => {
-          // channelId가 있으면 일치하는 것만, 없으면 모두 포함
-          if (ideaData.channelId) {
-            return item.sourceId === ideaData.channelId;
-          }
-          return true; // channelId가 없으면 모든 글 포함
+          // channelId가 지정되지 않은 카드는 모든 글을 포함
+          if (!ideaData.channelId) return true;
+
+          // [핵심 수정] 변환된 ID(targetSourceId)와 비교
+          if (targetSourceId && item.sourceId === targetSourceId) return true;
+
+          // 기존 방식 호환 (혹시 모를 구버전 데이터 대응)
+          if (item.sourceId === ideaData.channelId) return true;
+
+          return false;
         })
         .sort((a, b) => {
-          // 최신순 정렬 (publishedAt 또는 createdAt 기준)
+          // 최신순 정렬
           const dateA = a.publishedAt || a.createdAt || 0;
           const dateB = b.publishedAt || b.createdAt || 0;
           return dateB - dateA;
         })
-        .slice(0, 20); // 최근 20개만 사용
+        .slice(0, 20); // 최근 20개
+
+      Logger.debug(`[Internal Link] 최종 매칭된 내 글 개수: ${myPosts.length}개`);
 
       if (myPosts.length > 0) {
         myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
@@ -861,8 +1171,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       Logger.warn('[generateDraftFromIdea] 내 과거 포스팅 조회 실패:', error);
       // 오류가 발생해도 계속 진행
     }
-
-    // 5. 추천 검색어와 롱테일 키워드 수집
     const recommendedSearches = ideaData.recommendedSearches || [];
     const longTailKeywords = ideaData.longTailKeywords || [];
     const tags = (ideaData.tags || []).filter((t) => t !== '#AI-추천');
@@ -880,6 +1188,20 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     });
 
     // 백업 파일의 상세한 프롬프트 구성
+    // [신규] 썸네일 프롬프트 가이드 동적 생성 (체크박스 상태에 따라 분기)
+    const thumbnailPromptGuide = composeThumbnailText
+      ? `
+        - **IMPORTANT**: The generated image MUST NOT contain any text, letters, or characters. 
+        - Keep the background clean and simple because text will be overlaid programmatically later.
+        - Focus on the visual elements and composition.
+      `
+      : `
+        - **Text Rendering Rules (CRITICAL)**:
+          1. You MUST instruct the model to render the title text explicitly using the format: "Render the text: 'TEXT_CONTENT'".
+          2. For Korean text, emphasize strict typography to prevent typos (e.g., "Bold, clear Korean typography", "Legible text").
+          3. If the text is too long (over 8 chars), summarize it into a short keyword.
+      `;
+
     const prompt = `
             ${systemPrompt}
             
@@ -1028,7 +1350,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ${
               affiliateLinks.length > 0
                 ? `
-            10. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
+            10. **페르소나 자기소개 금지 (Strict)**:
+               - AI가 페르소나를 연기하는 자기소개는 절대 사용하지 마세요.
+               - 예: "옆집 언니처럼 알려드릴게요", "전문가로서 말씀드리자면", "친구처럼 솔직하게 말하면" 등
+               - 자연스럽고 객관적인 톤으로 작성하세요. 독자가 AI가 쓴 글처럼 느껴지지 않도록 하세요.
+
+            11. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
               아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 키워드나 구매 의도가 나타나는 문맥에 **자연스럽게** 제휴 링크를 삽입해주세요.
 
               [제휴 링크 목록]
@@ -1150,6 +1477,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
               초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
               
+              [썸네일 생성 규칙]
+              ${thumbnailPromptGuide}
+              
               // ▼▼▼ [추가] 제휴 상품 반영 필수 규칙 시작 ▼▼▼
               [제휴 상품 반영 필수 규칙]
               - 앞서 제공된 **'제휴 마케팅 링크 (수익화)' 목록에 상품이 있는 경우**, 3가지 썸네일 프롬프트(thumbnailPromptEn) 중 최소 2개에는 **해당 상품의 구체적인 외형이나 상품명을 반드시 포함**시켜야 합니다.
@@ -1232,7 +1562,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
                 * 예: "High-quality, eye-catching background image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay."
-            11. **참고 자료 링크 통합 방법 (매우 중요):**
+            14. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
@@ -1271,6 +1601,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       thumbnailCandidates = ideaData.publishInfo?.thumbnailInfo || [];
     } else {
       Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
+      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'draft_generation', progress: 20, message: '초안 생성 중...' }); } catch (e) {}
 
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
@@ -1315,6 +1646,7 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
+      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'thumbnail_prepare', progress: 35, message: '썸네일 후보 분석 중...' }); } catch (e) {}
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;
@@ -1592,7 +1924,6 @@ ${defaultDescription}
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
 
-    const composeThumbnailText = !!options.composeThumbnailText; // default false unless explicitly true
     if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
       try {
@@ -1605,6 +1936,7 @@ ${defaultDescription}
           ideaData,
           jsonLdSchema,
           formattedDraft,
+          onProgress: options.onProgress,
         });
 
         // merge results back into local variables
@@ -2126,16 +2458,16 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       // [핵심 수정] 시스템 프롬프트(THUMBNAIL_SYSTEM_PROMPT) 제거!
       // 대신 "이미지를 생성하라"는 명확한 지시어를 추가합니다.
       const imageGenerationPrompt = `Generate a high-quality blog thumbnail image based on the following description: ${prompt}`;
-      
+
       const parts = [{ text: imageGenerationPrompt }];
-      
+
       // 참조 이미지(제품)가 있는 경우 추가
       if (referenceImage && referenceImage.data) {
         parts.push({
           inlineData: {
             mimeType: referenceImage.mimeType,
-            data: referenceImage.data
-          }
+            data: referenceImage.data,
+          },
         });
         Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
       }
@@ -2147,8 +2479,8 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
           contents: [{ parts: parts }],
           // [추가] 텍스트가 아닌 이미지를 강제로 반환하도록 설정
           generationConfig: {
-            responseModalities: ["IMAGE"]
-          }
+            responseModalities: ['IMAGE'],
+          },
         }),
       });
 
@@ -2165,7 +2497,7 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       if (!data.candidates || data.candidates.length === 0) {
         if (data.promptFeedback && data.promptFeedback.blockReason) {
-             throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
+          throw new Error(`이미지 생성 차단됨 (사유: ${data.promptFeedback.blockReason})`);
         }
         throw new Error('이미지 생성 응답에 candidates가 없습니다.');
       }
@@ -2174,7 +2506,7 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       // 안전 차단 확인
       if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-          throw new Error(`AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason}`);
+        throw new Error(`AI가 이미지 생성을 중단했습니다. 사유: ${candidate.finishReason}`);
       }
 
       let base64 = null;
@@ -2204,9 +2536,11 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       } else {
         // 이미지가 없고 텍스트만 온 경우 (거부 메시지 등)
         if (candidate.content?.parts?.[0]?.text) {
-            const textResponse = candidate.content.parts[0].text;
-            Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
-            throw new Error(`AI가 이미지를 생성하지 않고 텍스트로 응답했습니다. (내용: "${textResponse.substring(0, 50)}...")`);
+          const textResponse = candidate.content.parts[0].text;
+          Logger.warn('[generateAiImage] 이미지가 아닌 텍스트 응답이 왔습니다:', textResponse);
+          throw new Error(
+            `AI가 이미지를 생성하지 않고 텍스트로 응답했습니다. (내용: "${textResponse.substring(0, 50)}...")`
+          );
         }
         throw new Error('base64 데이터를 찾을 수 없습니다. (API 응답에 이미지 데이터 누락)');
       }

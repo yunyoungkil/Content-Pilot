@@ -5,7 +5,12 @@ import {
   addAffiliateLink,
   updateAffiliateLink,
   deleteAffiliateLink,
+  incrementAffiliateLinkClick,
 } from '../services/affiliateService.js';
+
+import { addIdeaToKanban } from '../services/kanbanService.js';
+import { callGeminiAPI } from '../services/aiService.js';
+import { showLoadingToast, hideLoadingToast } from '../utils.js';
 
 import { showToast, Logger, debounce } from '../utils.js';
 
@@ -18,24 +23,34 @@ export function renderAffiliateModal(container) {
   }
   // CSS 로드 (한 번만) — Shadow DOM에서 렌더링될 수 있으므로
   // 루트 노드(문서 또는 쉐도우 루트)에 스타일 시트를 삽입합니다.
-  try {
+    try {
     const rootNode = container?.getRootNode ? container.getRootNode() : document;
-    const alreadyLinked =
-      (rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]')) ||
-      document.querySelector('link[href*="affiliate-modal.css"]');
+    const alreadyLinkedInRoot = rootNode && rootNode.querySelector && rootNode.querySelector('link[href*="affiliate-modal.css"]');
+    const alreadyLinkedInDoc = document.querySelector && document.querySelector('link[href*="affiliate-modal.css"]');
 
-    if (!alreadyLinked) {
+    if (!alreadyLinkedInRoot || !alreadyLinkedInDoc) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = chrome.runtime.getURL('css/affiliate-modal.css');
 
-      // ShadowRoot에서도 append 가능 (open mode인 경우)
-      if (rootNode instanceof ShadowRoot) {
-        rootNode.appendChild(link);
-        console.info('[AffiliateModal] stylesheet injected into ShadowRoot:', link.href);
-      } else if (document.head) {
-        document.head.appendChild(link);
-        console.info('[AffiliateModal] stylesheet injected into document.head:', link.href);
+      // Inject into ShadowRoot (if using Shadow DOM) for scoped styles
+      if (rootNode instanceof ShadowRoot && !alreadyLinkedInRoot) {
+        try {
+          rootNode.appendChild(link.cloneNode());
+          console.info('[AffiliateModal] stylesheet injected into ShadowRoot:', link.href);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to inject stylesheet into ShadowRoot:', e);
+        }
+      }
+
+      // Always ensure there's a copy in document.head for portal / non-shadow modals
+      if (document.head && !alreadyLinkedInDoc) {
+        try {
+          document.head.appendChild(link);
+          console.info('[AffiliateModal] stylesheet injected into document.head:', link.href);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to inject stylesheet into document.head:', e);
+        }
       }
     }
   } catch (err) {
@@ -48,9 +63,9 @@ export function renderAffiliateModal(container) {
   try {
     const rootNode = container?.getRootNode ? container.getRootNode() : document;
     const inlineId = 'affiliate-inline-style';
-    const hasInline =
-      (rootNode.querySelector && rootNode.querySelector(`#${inlineId}`)) ||
-      document.querySelector(`#${inlineId}`);
+    const hasInlineInRoot = rootNode && rootNode.querySelector && rootNode.querySelector(`#${inlineId}`);
+    const hasInlineInDoc = document && document.querySelector && document.querySelector(`#${inlineId}`);
+    const hasInline = hasInlineInRoot || hasInlineInDoc;
     if (!hasInline) {
       const styleEl = document.createElement('style');
       styleEl.id = inlineId;
@@ -61,8 +76,21 @@ export function renderAffiliateModal(container) {
         .affiliate-form-section { background: #fff; border-radius: 8px; padding: 12px; }
       `;
 
-      if (rootNode instanceof ShadowRoot) rootNode.appendChild(styleEl);
-      else if (document.head) document.head.appendChild(styleEl);
+      // append to both shadow root and document head to ensure styles are present
+      if (rootNode instanceof ShadowRoot && !hasInlineInRoot) {
+        try {
+          rootNode.appendChild(styleEl.cloneNode(true));
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to append fallback style to ShadowRoot:', e);
+        }
+      }
+      if (document.head && !hasInlineInDoc) {
+        try {
+          document.head.appendChild(styleEl);
+        } catch (e) {
+          console.warn('[AffiliateModal] failed to append fallback style to document.head:', e);
+        }
+      }
 
       console.info('[AffiliateModal] minimal inline fallback styles injected.');
     }
@@ -163,7 +191,7 @@ export function renderAffiliateModal(container) {
                   <label for="aff-url" class="affiliate-form-label required">제휴 링크 URL</label>
                   <input type="url" id="aff-url" class="affiliate-form-input" placeholder="https://link.coupang.com/...">
                   <div class="form-help-text">제휴 프로그램에서 제공받은 추적 링크를 입력하세요.</div>
-
+                </div>
                 <div class="affiliate-form-group">
                   <label class="affiliate-form-label">자동 매칭 키워드</label>
                   <div class="affiliate-keyword-container">
@@ -174,6 +202,17 @@ export function renderAffiliateModal(container) {
                     <div class="keyword-suggestions" style="display: none;">
                       <div class="suggestion-title">💡 추천 키워드:</div>
                       <div class="suggestion-tags" id="keyword-suggestions"></div>
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+                      <button id="btn-generate-seo" class="cp-btn cp-btn-outline">🤖 AI 추천 생성</button>
+                      <div id="seo-suggestions" style="display:none;flex-direction:column;gap:6px;">
+                        <div style="font-size:12px;color:#444;">AI 추천 검색어:</div>
+                        <div id="seo-recommended" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                        <div style="font-size:12px;color:#444;margin-top:6px;">AI 롱테일 키워드:</div>
+                        <div id="seo-longtail" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                        <div style="font-size:12px;color:#444;margin-top:6px;">AI 목차(예시):</div>
+                        <div id="seo-outline" style="font-size:12px;color:#333;background:#fff;padding:8px;border-radius:6px;border:1px solid #eee;max-height:120px;overflow:auto;"></div>
+                      </div>
                     </div>
                   </div>
                   <div class="form-help-text">
@@ -957,6 +996,7 @@ function bindEvents(container) {
 
   // 저장 버튼
   const saveBtn = container.querySelector('#btn-save-link');
+  const aiBtn = container.querySelector('#btn-generate-seo');
   if (saveBtn) {
     saveBtn.addEventListener('click', async () => {
       const id = container.querySelector('#edit-link-id')?.value;
@@ -1021,7 +1061,28 @@ function bindEvents(container) {
         platform,
         keywords: tempKeywords, // 배열로 저장
         cardData,
+        // store original affiliate keywords for later reference
+        originalAffiliateKeywords: Array.isArray(tempKeywords) ? tempKeywords : [],
+        // include pre-generated SEO fields if user generated them manually earlier via UI
+        recommendedSearches: container.__seoGenerated?.recommendedSearches || undefined,
+        longTailKeywords: container.__seoGenerated?.longTailKeywords || undefined,
+        outline: container.__seoGenerated?.outline || undefined,
       };
+
+      // Ensure SEO suggestions exist — if not, auto-generate synchronously before saving
+      try {
+        if (!payloadHasSeo(payload)) {
+          const autoGenerated = await requestSeoSuggestions(name, tempKeywords, cardData ? cardData.productName || '' : '');
+          if (autoGenerated) {
+            payload.recommendedSearches = autoGenerated.recommendedSearches || [];
+            payload.longTailKeywords = autoGenerated.longTailKeywords || [];
+            payload.outline = autoGenerated.outline || [];
+          }
+        }
+      } catch (e) {
+        // don't block save on AI failure
+        console.warn('[AffiliateModal] SEO auto-generation failed:', e);
+      }
 
       try {
         if (id) {
@@ -1044,6 +1105,95 @@ function bindEvents(container) {
         saveBtn.innerHTML = '<span class="save-icon">💾</span> 저장하기';
       }
     });
+  }
+
+  // AI SEO generation button handler (on-demand)
+  if (aiBtn) {
+    aiBtn.addEventListener('click', async () => {
+      try {
+        aiBtn.disabled = true;
+        aiBtn.textContent = '생성 중...';
+        const gen = await requestSeoSuggestions(
+          container.querySelector('#aff-name')?.value?.trim(),
+          tempKeywords,
+          container.querySelector('#card-product-name')?.value?.trim() || ''
+        );
+        if (!gen) {
+          showToast('⚠️ AI 추천을 생성하지 못했습니다. 다시 시도해주세요.');
+          return;
+        }
+
+        // store generated results on container for save
+        container.__seoGenerated = gen;
+
+        // render generated suggestions into UI
+        const recEl = container.querySelector('#seo-recommended');
+        const ltEl = container.querySelector('#seo-longtail');
+        const outEl = container.querySelector('#seo-outline');
+        const seoWrap = container.querySelector('#seo-suggestions');
+
+        if (recEl) {
+          recEl.innerHTML = (gen.recommendedSearches || []).map(k => `<button class="suggestion-tag ai-suggest" data-keyword="${k}">${k}</button>`).join(' ');
+          recEl.querySelectorAll && recEl.querySelectorAll('.ai-suggest').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const kw = btn.dataset.keyword;
+              if (kw && !tempKeywords.includes(kw)) {
+                tempKeywords.push(kw);
+                renderTags(container);
+                updateKeywordSuggestions(container);
+                showToast(`✅ 추천 키워드 "${kw}"가 키워드 목록에 추가되었습니다.`);
+              }
+            });
+          });
+        }
+        if (ltEl) {
+          ltEl.innerHTML = (gen.longTailKeywords || []).map(k => `<span class="tag long-tail">${k}</span>`).join(' ');
+        }
+        if (outEl) {
+          outEl.textContent = (gen.outline || []).join('\n');
+        }
+        if (seoWrap) seoWrap.style.display = 'flex';
+
+        showToast('✅ AI 추천 검색어/롱테일/목차가 생성되었습니다. 원하는 키워드를 태그로 추가하세요.');
+      } catch (e) {
+        console.error('[AffiliateModal] AI generate error:', e);
+        showToast('⚠️ AI 생성 중 오류가 발생했습니다.');
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.textContent = '🤖 AI 추천 생성';
+      }
+    });
+  }
+
+  function payloadHasSeo(payload) {
+    if (!payload) return false;
+    const hasRec = Array.isArray(payload.recommendedSearches) && payload.recommendedSearches.length > 0;
+    const hasLong = Array.isArray(payload.longTailKeywords) && payload.longTailKeywords.length > 0;
+    const hasOut = Array.isArray(payload.outline) && payload.outline.length > 0;
+    return hasRec || hasLong || hasOut;
+  }
+
+  async function requestSeoSuggestions(name, keywords = [], description = '') {
+    try {
+      const prompt = `아래의 상품/키워드 정보를 바탕으로 SEO에 적합한 추천 검색어(recommendedSearches), 롱테일 키워드(longTailKeywords), 그리고 간단한 목차(outline) 세 항목을 JSON 형식으로 반환해 주세요. JSON 형식은 반드시 keys: recommendedSearches (array), longTailKeywords (array), outline (array) 를 포함해야 합니다.\n\n상품명: ${name}\n기존키워드: ${(Array.isArray(keywords) ? keywords.join(', ') : '')}\n설명: ${description}`;
+
+      const respText = await callGeminiAPI(prompt);
+      // Try parse JSON safely - extract first JSON block
+      const jsonTextMatch = respText.match(/\{[\s\S]*\}/);
+      const jsonText = jsonTextMatch ? jsonTextMatch[0] : respText;
+      const parsed = JSON.parse(jsonText);
+
+      // Normalize output
+      return {
+        recommendedSearches: Array.isArray(parsed.recommendedSearches) ? parsed.recommendedSearches : parsed.recommendedKeywords || [],
+        longTailKeywords: Array.isArray(parsed.longTailKeywords) ? parsed.longTailKeywords : [],
+        outline: Array.isArray(parsed.outline) ? parsed.outline : [],
+      };
+    } catch (e) {
+      // If parsing fails, fall back to empty results
+      Logger && Logger.warn && Logger.warn('[requestSeoSuggestions] parsing failed', e);
+      return null;
+    }
   }
 
   // ESC 키로 모달 닫기
@@ -1451,6 +1601,7 @@ async function loadLinks(container) {
       // 클릭 수 표시
       const clickCount = link.clickCount || 0;
 
+      item.title = 'Shift+Click: 템플릿 선택하여 아이디어로 추가';
       item.innerHTML = `
         <div class="link-header">
           <div class="link-platform-info">
@@ -1458,6 +1609,8 @@ async function loadLinks(container) {
             <span class="link-platform">${platformName}</span>
           </div>
           <div class="link-actions">
+            <button class="link-open-btn" title="링크 열기">🔗</button>
+            <button class="link-template-btn" title="템플릿 선택하여 아이디어 추가" aria-label="템플릿 선택하여 아이디어 추가">🧩</button>
             <button class="link-edit-btn" title="수정">✏️</button>
             <button class="link-delete-btn" title="삭제">🗑️</button>
           </div>
@@ -1481,6 +1634,111 @@ async function loadLinks(container) {
           )}</div>
         </div>
       `;
+
+      // 링크 열기 버튼 이벤트
+      const openBtn = item.querySelector('.link-open-btn');
+      if (openBtn) {
+        openBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+
+          // 버튼 비활성화 (중복 클릭 방지)
+          openBtn.disabled = true;
+          openBtn.textContent = '🔗 열기 중...';
+
+          try {
+            // 새 탭에서 링크 열기 (먼저 실행)
+            window.open(link.url, '_blank');
+
+            // 클릭 수 증가 시도
+            const clickResult = await incrementAffiliateLinkClick(link.id);
+
+            if (clickResult.success) {
+              // UI 업데이트 (클릭 수 표시)
+              const clickCountEl = item.querySelector('.click-count');
+              if (clickCountEl) {
+                clickCountEl.textContent = `클릭: ${clickResult.newClickCount.toLocaleString()}`;
+              }
+              showToast('🔗 링크가 열렸습니다.');
+            } else {
+              // 클릭 수 증가 실패
+              showToast('⚠️ 링크는 열렸지만 클릭 수 기록에 실패했습니다.');
+            }
+
+          } catch (error) {
+            console.error('[AffiliateModal] 링크 열기/클릭 수 증가 실패:', error);
+
+            // 링크는 이미 열렸으므로 사용자에게 상황 설명
+            if (error.message?.includes('네트워크 오류')) {
+              showToast('⚠️ 링크는 열렸지만 네트워크 문제로 클릭 수를 저장할 수 없습니다.');
+            } else if (error.message?.includes('링크를 찾을 수 없습니다')) {
+              showToast('⚠️ 링크는 열렸지만 해당 링크 정보를 찾을 수 없습니다.');
+            } else {
+              showToast('⚠️ 링크는 열렸지만 클릭 수 기록 중 오류가 발생했습니다.');
+            }
+          } finally {
+            // 버튼 상태 복원
+            openBtn.disabled = false;
+            openBtn.textContent = '🔗';
+          }
+        });
+      }
+
+      // 템플릿 버튼 이벤트: 템플릿 선택 UI를 통해 아이디어를 추가
+      const templateBtn = item.querySelector('.link-template-btn');
+      if (templateBtn) {
+        templateBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          templateBtn.disabled = true;
+          templateBtn.textContent = '🧩 선택 중...';
+          try {
+            const mainModal = document.querySelector('#affiliate-modal');
+            let originalDisplay = '';
+            if (mainModal) {
+              originalDisplay = mainModal.style.display;
+              mainModal.style.display = 'none';
+            }
+            const selectedTemplate = await showIdeaTemplateSelector(container, link);
+            if (mainModal) mainModal.style.display = originalDisplay;
+            if (!selectedTemplate) return;
+            const ideaData = convertAffiliateLinkToIdeaWithTemplate(link, selectedTemplate);
+            // Debug: log which affiliate link and image are used to create the idea
+            try {
+              Logger.info('[AffiliateModal] Creating idea from affiliate link', {
+                affiliateLinkId: link.id,
+                imageUrl: link.cardData?.imageUrl || null,
+                template: selectedTemplate?.id,
+              });
+            } catch (e) {
+              Console && Console.debug && Console.debug('[AffiliateModal] Logger not available for idea creation debug');
+            }
+            // Also print to the console directly so it's visible in page console
+            try {
+              console.log('[AffiliateModal DEBUG] Creating idea from affiliate link', {
+                affiliateLinkId: link.id,
+                imageUrl: link.cardData?.imageUrl || null,
+                template: selectedTemplate?.id,
+              });
+            } catch (e) {
+              /* ignore */
+            }
+            // Provide immediate loading feedback to the user while background generates images
+            try { showLoadingToast('이미지 및 썸네일을 생성 중입니다...'); } catch(e) {}
+            const result = await addIdeaToKanban(ideaData);
+            try { hideLoadingToast(); } catch(e) {}
+            if (result.success) showToast(`💡 "${link.name}"이(가) ${selectedTemplate.name} 템플릿으로 아이디어에 추가되었습니다!`);
+            else showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
+          } catch (error) {
+            console.error('[AffiliateModal] template button idea add failed', error);
+            showToast('❌ 아이디어 추가 중 오류가 발생했습니다.');
+          } finally {
+            templateBtn.disabled = false;
+            templateBtn.textContent = '🧩';
+          }
+        });
+      }
+
+      // 기존: 카드 클릭의 Shift+Click으로 템플릿 선택 UI를 통해 추가합니다.
+      // (이전에는 개별 버튼으로 제공되었으나 디자인 변경으로 제거되었습니다.)
 
       // 수정 버튼 이벤트
       const editBtn = item.querySelector('.link-edit-btn');
@@ -1514,13 +1772,47 @@ async function loadLinks(container) {
         });
       }
 
-      // 카드 클릭으로 수정 모드 (삭제 버튼 제외)
+      // 카드 클릭으로 수정 모드 (링크 열기/아이디어 추가/삭제 버튼 제외)
       item.addEventListener('click', (e) => {
         if (
           !e.target.classList.contains('link-delete-btn') &&
-          !e.target.classList.contains('link-edit-btn')
+          !e.target.classList.contains('link-edit-btn') &&
+          !e.target.classList.contains('link-open-btn')
         ) {
-          openEditForm(container, link);
+          // Shift+Click on the card opens template selector (to add as idea)
+          if (e.shiftKey) {
+            e.stopPropagation();
+            (async () => {
+              // Hide main modal while template selector is open to avoid stacking context problems
+              const mainModal = document.querySelector('#affiliate-modal');
+              let originalDisplay = '';
+              if (mainModal) {
+                originalDisplay = mainModal.style.display;
+                mainModal.style.display = 'none';
+              }
+
+              const selectedTemplate = await showIdeaTemplateSelector(container, link);
+
+              if (mainModal) mainModal.style.display = originalDisplay;
+
+              if (!selectedTemplate) return;
+
+              try {
+                const ideaData = convertAffiliateLinkToIdeaWithTemplate(link, selectedTemplate);
+                const result = await addIdeaToKanban(ideaData);
+                if (result.success) {
+                  showToast(`💡 "${link.name}"이(가) ${selectedTemplate.name} 템플릿으로 아이디어에 추가되었습니다!`);
+                } else {
+                  showToast(`❌ 아이디어 추가 실패: ${result.error || '알 수 없는 오류'}`);
+                }
+              } catch (error) {
+                console.error('[AffiliateModal] 아이디어 추가(템플릿 선택) 실패:', error);
+                showToast('❌ 아이디어 추가 중 오류가 발생했습니다.');
+              }
+            })();
+          } else {
+            openEditForm(container, link);
+          }
         }
       });
 
@@ -1596,4 +1888,383 @@ function openEditForm(container, link) {
 
   // 폼이 열리면 상품명 입력창에 포커스
   if (nameInput) setTimeout(() => nameInput.focus(), 100);
+}
+
+/**
+ * 제휴 링크를 아이디어 카드로 변환
+ * @param {Object} link - 제휴 링크 데이터
+ * @returns {Object} 아이디어 카드 데이터
+ */
+function convertAffiliateLinkToIdea(link) {
+  const cardData = link.cardData || {};
+
+  return {
+    title: link.name,
+    description: `제휴 링크: ${link.platform} - ${cardData.productName || link.name}
+
+가격: ${cardData.salePrice ? cardData.salePrice.toLocaleString() + '원' : '정보 없음'}
+${cardData.originalPrice ? `원가: ${cardData.originalPrice.toLocaleString()}원` : ''}
+${cardData.discountRate ? `할인율: ${cardData.discountRate}%` : ''}
+키워드: ${link.keywords?.join(', ') || '없음'}
+
+${cardData.rating ? `별점: ${cardData.rating}/5` : ''}
+${cardData.reviewCount ? `리뷰: ${cardData.reviewCount.toLocaleString()}개` : ''}
+
+원본 링크: ${link.url}`,
+    // Use SEO-optimized keywords when available; fall back to user-provided keywords
+    tags: (Array.isArray(link.recommendedSearches) && link.recommendedSearches.length > 0)
+      ? link.recommendedSearches
+      : link.keywords || [],
+    url: link.url,
+    publishedUrl: link.url,
+    origin: {
+      type: 'affiliate_link',
+      platform: link.platform,
+      affiliateLinkId: link.id,
+      createdAt: link.createdAt
+    },
+    affiliateData: {
+      platform: link.platform,
+      originalPrice: cardData.originalPrice,
+      salePrice: cardData.salePrice,
+      discountRate: cardData.discountRate,
+      imageUrl: cardData.imageUrl,
+      rating: cardData.rating,
+      reviewCount: cardData.reviewCount,
+      isRocket: cardData.isRocket,
+      badges: cardData.badges,
+      insertMode: cardData.insertMode
+    }
+    // Include SEO fields if present so downstream idea creation uses them
+    recommendedSearches: link.recommendedSearches || link.recommendedKeywords || [],
+    longTailKeywords: link.longTailKeywords || [],
+    outline: link.outline || [],
+  };
+}
+
+/**
+ * 제휴 링크를 아이디어 카드로 변환 (템플릿 선택 기능 추가)
+ * @param {Object} link - 제휴 링크 데이터
+ * @param {Object} template - 선택된 템플릿
+ * @returns {Object} 아이디어 카드 데이터
+ */
+function convertAffiliateLinkToIdeaWithTemplate(link, template) {
+  const cardData = link.cardData || {};
+  const baseData = convertAffiliateLinkToIdea(link);
+
+  // 템플릿별 description 생성
+  let templateDescription = '';
+
+  switch (template.id) {
+    case 'product-review':
+      templateDescription = generateProductReviewTemplate(link, cardData);
+      break;
+    case 'advertisement':
+      templateDescription = generateAdvertisementTemplate(link, cardData);
+      break;
+    case 'comparison':
+      templateDescription = generateComparisonTemplate(link, cardData);
+      break;
+    default:
+      templateDescription = baseData.description;
+  }
+
+  return {
+    ...baseData,
+    title: template.titlePrefix ? `${template.titlePrefix} ${link.name}` : link.name,
+    description: templateDescription,
+    tags: [...(baseData.tags || []), ...(template.defaultTags || [])],
+    template: {
+      id: template.id,
+      name: template.name,
+      type: template.type
+    }
+  };
+}
+
+/**
+ * 제품 리뷰 템플릿 생성
+ */
+function generateProductReviewTemplate(link, cardData) {
+  return `📝 제품 리뷰 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+${cardData.originalPrice ? `원가: ${cardData.originalPrice.toLocaleString()}원` : ''}
+${cardData.discountRate ? `할인율: ${cardData.discountRate}%` : ''}
+
+리뷰 포인트:
+• 외관 및 디자인
+• 성능 및 기능
+• 장단점 분석
+• 추천 대상
+• 총평 및 별점 (${cardData.rating || 'N/A'}/5)
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 솔직한 사용 후기
+- 장단점 비교
+- 구매 가이드 제공
+- 시각적 리뷰 강조`;
+}
+
+/**
+ * 광고 콘텐츠 템플릿 생성
+ */
+function generateAdvertisementTemplate(link, cardData) {
+  return `📢 광고 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+${cardData.discountRate ? `할인 혜택: ${cardData.discountRate}% OFF` : ''}
+
+광고 포인트:
+• 제품의 핵심 가치 제안
+• 시각적으로 매력적인 요소 강조
+• 구매 유도 문구
+• 신뢰할 수 있는 증거 제시
+• 긴급성 또는 희소성 강조
+
+타겟 오디언스: ${link.keywords?.join(', ') || '일반 소비자'}
+CTA (Call-to-Action): 지금 바로 구매하기
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 감성적 어필
+- 시각적 임팩트
+- 구매 동기 부여
+- 브랜드 스토리텔링`;
+}
+
+/**
+ * 비교 콘텐츠 템플릿 생성
+ */
+function generateComparisonTemplate(link, cardData) {
+  return `⚖️ 비교 콘텐츠 아이디어
+
+제품명: ${link.name}
+플랫폼: ${link.platform}
+가격: ${cardData.salePrice ? `${cardData.salePrice.toLocaleString()}원` : '정보 없음'}
+
+비교 분석 포인트:
+• 가격 대비 성능
+• 주요 특징 비교
+• 장단점 대조
+• 사용자 리뷰 분석
+• 추천도 평가
+
+비교 대상 제안:
+• 동일 카테고리 내 경쟁 제품
+• 이전 버전과의 차이점
+• 비슷한 가격대의 대안 제품
+
+키워드: ${link.keywords?.join(', ') || '없음'}
+원본 링크: ${link.url}
+
+콘텐츠 방향:
+- 객관적 데이터 기반
+- 시각적 비교표 활용
+- 결론과 추천 제시
+- 사용자 선택 가이드`;
+}
+
+/**
+ * 아이디어 템플릿 선택 UI 표시
+ * @param {HTMLElement} container - 모달 컨테이너
+ * @param {Object} link - 제휴 링크 데이터
+ * @returns {Promise<Object|null>} 선택된 템플릿 또는 null (취소)
+ */
+function showIdeaTemplateSelector(container, link) {
+  return new Promise((resolve) => {
+    // 템플릿 옵션들
+    const templates = [
+      {
+        id: 'basic',
+        name: '기본 템플릿',
+        type: 'basic',
+        description: '제휴 링크 정보를 기본 형식으로 변환',
+        icon: '📄'
+      },
+      {
+        id: 'product-review',
+        name: '제품 리뷰',
+        type: 'content',
+        titlePrefix: '[리뷰]',
+        defaultTags: ['리뷰', '사용후기'],
+        description: '제품 사용 후기 및 평가 콘텐츠',
+        icon: '📝'
+      },
+      {
+        id: 'advertisement',
+        name: '광고 콘텐츠',
+        type: 'marketing',
+        titlePrefix: '[광고]',
+        defaultTags: ['광고', '마케팅'],
+        description: '제품 홍보 및 판매 촉진 콘텐츠',
+        icon: '📢'
+      },
+      {
+        id: 'comparison',
+        name: '비교 콘텐츠',
+        type: 'analysis',
+        titlePrefix: '[비교]',
+        defaultTags: ['비교', '분석'],
+        description: '제품 비교 및 분석 콘텐츠',
+        icon: '⚖️'
+      }
+    ];
+
+    // 템플릿 선택 모달 HTML
+    const modalHTML = `
+      <div id="template-selector-modal" class="cp-modal-wrap">
+        <div class="cp-modal-backdrop"></div>
+        <div class="cp-modal template-selector-modal">
+            <div class="cp-modal-header affiliate-modal-header">
+              <div class="cp-modal-title cp-modal-title--affiliate">
+              <span class="template-icon">💡</span>
+              아이디어 템플릿 선택
+            </div>
+              <div class="cp-modal-title-subtitle">
+              "${link.name}"을(를) 어떤 콘텐츠로 만들까요?
+            </div>
+              <div class="affiliate-modal-actions">
+                <button class="cp-modal-close affiliate-close-btn" title="닫기">×</button>
+              </div>
+          </div>
+
+          <div class="cp-modal-body template-selector-body">
+            <div class="template-grid">
+              ${templates.map(template => `
+                <div class="template-card" data-template-id="${template.id}">
+                  <div class="template-header">
+                    <span class="template-icon">${template.icon}</span>
+                    <h3 class="template-name">${template.name}</h3>
+                  </div>
+                  <p class="template-description">${template.description}</p>
+                  ${template.titlePrefix ? `<div class="template-preview">예: ${template.titlePrefix} ${link.name}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="cp-modal-footer template-selector-footer">
+            <button class="cp-btn cp-btn-secondary template-cancel-btn">취소</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 모달 추가: 최상단 포털 컨테이너에 삽입하여 어떤 부모 stacking-context에도 영향받지 않게 함
+    let portal = document.querySelector('#cp-modal-portal');
+    if (!portal) {
+      portal = document.createElement('div');
+      portal.id = 'cp-modal-portal';
+      // 포털이 다른 요소보다 무조건 위에 오도록 초기 스타일 지정
+      portal.style.position = 'fixed';
+      portal.style.inset = '0';
+      portal.style.zIndex = '10000000000';
+      portal.style.pointerEvents = 'none'; // 기본적으로 이벤트는 하위 모달에 전달되지 않음
+      document.body.appendChild(portal);
+    }
+
+    // 포털에 모달 삽입
+    portal.insertAdjacentHTML('beforeend', modalHTML);
+    const modal = portal.querySelector('#template-selector-modal');
+
+    // 강제로 z-index 설정 (CSS가 제대로 적용되지 않을 경우를 대비)
+    if (modal) {
+      // 강제 inline 스타일로 우선 적용 - 스타일시트 우선순위/로딩 순서 충돌을 우회
+      modal.style.zIndex = '10000000000';
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100vw';
+      modal.style.height = '100vh';
+      modal.style.pointerEvents = 'auto'; // 포털 자체는 none, 모달은 상호작용 가능
+
+      const backdrop = modal.querySelector('.cp-modal-backdrop');
+      if (backdrop) {
+        backdrop.style.zIndex = '9999999998';
+        backdrop.style.position = 'fixed';
+        backdrop.style.inset = '0';
+        // Set a strong black backdrop using important so it applies regardless of CSS load timing
+        try {
+          backdrop.style.setProperty('background', '#000', 'important');
+        } catch (e) {
+          // Fallback: inline background if setProperty fails
+          backdrop.style.background = '#000';
+        }
+        backdrop.style.pointerEvents = 'auto';
+        try {
+          // Debug: print computed backdrop background to help verify which style is applied
+          console.debug('[AffiliateModal] template backdrop computed background:', window.getComputedStyle(backdrop).backgroundColor);
+        } catch (e) {}
+      }
+
+      const modalContent = modal.querySelector('.cp-modal');
+      if (modalContent) {
+        // ensure modal content is fixed+centered and above backdrop
+        modalContent.style.position = 'fixed';
+        modalContent.style.top = '50%';
+        modalContent.style.left = '50%';
+        modalContent.style.transform = 'translate(-50%, -50%)';
+        modalContent.style.zIndex = '10000000000';
+        modalContent.style.pointerEvents = 'auto';
+        modalContent.style.maxWidth = 'calc(100vw - 48px)';
+        modalContent.style.boxShadow = '0 20px 60px rgba(0,0,0,0.45)';
+      }
+      // 개발/디버깅용: 현재 연관 모달과 템플릿 모달의 계산된 z-index 확인
+      try {
+        const computedTpl = modal.querySelector('.cp-modal')
+          ? window.getComputedStyle(modal.querySelector('.cp-modal')).zIndex
+          : 'n/a';
+        const affiliate = document.querySelector('#affiliate-modal');
+        const computedAff = affiliate ? window.getComputedStyle(affiliate).zIndex : 'n/a';
+        console.debug('[AffiliateModal] computed z-index - template:', computedTpl, 'affiliate:', computedAff);
+      } catch (e) {
+        console.debug('[AffiliateModal] computed z-index check failed', e && e.message);
+      }
+    }
+
+    // 이벤트 리스너
+    const templateCards = modal.querySelectorAll('.template-card');
+    const cancelBtn = modal.querySelector('.template-cancel-btn');
+    const closeBtn = modal.querySelector('.cp-modal-close');
+
+    // 템플릿 선택
+    templateCards.forEach(card => {
+      card.addEventListener('click', () => {
+        const templateId = card.dataset.templateId;
+        const selectedTemplate = templates.find(t => t.id === templateId);
+        modal.remove();
+        resolve(selectedTemplate);
+      });
+    });
+
+    // 닫기 버튼
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        modal.remove();
+        resolve(null);
+      });
+    }
+
+    // 취소
+    cancelBtn.addEventListener('click', () => {
+      modal.remove();
+      resolve(null);
+    });
+
+    // 배경 클릭으로 취소
+    modal.querySelector('.cp-modal-backdrop').addEventListener('click', () => {
+      modal.remove();
+      resolve(null);
+    });
+  });
 }

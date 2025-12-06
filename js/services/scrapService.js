@@ -2,8 +2,26 @@
 // 스크랩 관련 서비스
 
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { get, remove, push, getDb } from './firebaseService.js';
+import { get, remove, push, update, getDb, ref } from './firebaseService.js';
 import { Logger } from '../utils.js';
+
+// [추가] URL 정규화 헬퍼 함수
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    const u = new URL(cleanUrl);
+    let decodedPath;
+    try {
+      decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+      decodedPath = u.pathname;
+    }
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    return url.trim();
+  }
+}
 
 /**
  * 스크랩 요소 저장
@@ -334,5 +352,131 @@ export async function deleteScrap(scrapId) {
   } catch (_error) {
     Logger.error('[deleteScrap] 오류:', _error);
     return { success: false, error: _error.message };
+  }
+}
+
+/**
+ * [수정됨] 스크랩 내 특정 이미지 삭제 및 캐시 초기화
+ */
+export async function removeScrapImage(scrapId, imageUrl) {
+  try {
+    const userId = await getCurrentUserId();
+    const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
+
+    // 1. 데이터 조회
+    const snapshot = await get(scrapRef);
+    if (!snapshot.exists()) return { success: false, error: 'Scrap not found' };
+
+    const scrap = snapshot.val();
+    const updates = {};
+    let updated = false;
+    const targetUrl = normalizeUrlForDeletion(imageUrl);
+
+    Logger.debug(`[removeScrapImage] 삭제 시도 - Target: ${targetUrl}`);
+
+    // 2. allImages 필터링
+    if (scrap.allImages && Array.isArray(scrap.allImages)) {
+      const originalLen = scrap.allImages.length;
+      const newAllImages = scrap.allImages.filter(
+        (img) => normalizeUrlForDeletion(img) !== targetUrl
+      );
+      if (newAllImages.length !== originalLen) {
+        updates.allImages = newAllImages;
+        updated = true;
+      }
+    }
+
+    // 3. images 필터링 (Legacy)
+    if (scrap.images && Array.isArray(scrap.images)) {
+      const originalLen = scrap.images.length;
+      const newImages = scrap.images.filter((img) => normalizeUrlForDeletion(img) !== targetUrl);
+      if (newImages.length !== originalLen) {
+        updates.images = newImages;
+        updated = true;
+      }
+    }
+
+    // 4. image 필드 (Legacy)
+    if (scrap.image && normalizeUrlForDeletion(scrap.image) === targetUrl) {
+      updates.image = null;
+      updated = true;
+    }
+
+    // 5. DB 업데이트 및 캐시 초기화
+    if (updated) {
+      await update(scrapRef, updates);
+
+      // [핵심 해결책] 캐시를 강제로 비워서 다음 조회 시 DB에서 새 데이터를 가져오게 함
+      if (typeof scrapCache !== 'undefined') {
+        scrapCache.clear();
+        Logger.info('[removeScrapImage] 캐시 초기화 완료');
+      }
+
+      Logger.info(`[removeScrapImage] 이미지 삭제 완료`);
+      // indicate that a DB change actually occurred so callers can rely on this
+      return { success: true, changed: true };
+    } else {
+      Logger.warn('[removeScrapImage] 매칭되는 이미지가 없습니다.');
+      // no DB change performed
+      return { success: true, changed: false };
+    }
+  } catch (error) {
+    Logger.error('[removeScrapImage] 오류:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * 스크랩의 공유 상태를 토글하고 캐시를 초기화합니다.
+ * (공용 <-> 전용)
+ * @param {string} scrapId
+ * @param {string|null} currentChannelId - 현재 활성 채널 ID (전용으로 변경할 때 필요)
+ * @returns {Promise<{success: boolean, newChannelId?: string|null, message?: string, error?: string}>}
+ */
+export async function toggleScrapSharing(scrapId, currentChannelId = null) {
+  if (!scrapId) {
+    return { success: false, error: '스크랩 ID가 필요합니다.' };
+  }
+
+  try {
+    const userId = await getCurrentUserId();
+    const scrapRef = ref(getDb(), `scraps/${userId}/${scrapId}`);
+    const snap = await get(scrapRef);
+    const scrapData = snap?.val();
+
+    if (!scrapData) {
+      return { success: false, error: '스크랩을 찾을 수 없습니다.' };
+    }
+
+    const currentChannelIdValue = scrapData.channelId;
+    const isCurrentlyPublic = currentChannelIdValue === null || currentChannelIdValue === undefined;
+
+    // 토글: 공용(null/undefined) ↔ 전용(currentChannelId)
+    const newChannelId = isCurrentlyPublic ? currentChannelId : null;
+
+    // 활성 채널이 없으면 전용으로 변경 불가
+    if (isCurrentlyPublic && !currentChannelId) {
+      return {
+        success: false,
+        error: '활성 채널이 선택되지 않아 전용으로 변경할 수 없습니다.',
+      };
+    }
+
+    await update(scrapRef, { channelId: newChannelId });
+
+    // 캐시 초기화: 변경 직후 바로 재조회하면 최신 데이터가 나오도록 함
+    if (typeof scrapCache !== 'undefined') {
+      scrapCache.clear();
+      Logger.info('[toggleScrapSharing] scrapCache 초기화 완료');
+    }
+
+    return {
+      success: true,
+      newChannelId,
+      message: newChannelId === null ? '공용 스크랩으로 변경되었습니다.' : '전용 스크랩으로 변경되었습니다.',
+    };
+  } catch (error) {
+    Logger.error('[toggleScrapSharing] 오류:', error);
+    return { success: false, error: error.message };
   }
 }

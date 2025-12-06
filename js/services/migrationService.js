@@ -226,3 +226,69 @@ export async function checkMigrationNeeded(userId) {
     };
   }
 }
+
+/**
+ * 채널 ID 변경에 따른 연관 데이터(칸반, 스크랩) 일괄 마이그레이션
+ * @param {string} oldId - 변경 전 채널 ID
+ * @param {string} newId - 변경 후 채널 ID
+ */
+export async function migrateChannelIdCascade(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+
+  const userId = await getCurrentUserId();
+  Logger.info(
+    `[Migration] 채널 ID 변경 감지: ${oldId} -> ${newId}. 연관 데이터 이관을 시작합니다.`
+  );
+
+  try {
+    const updates = {};
+    let migrationCount = 0;
+
+    // 1. 칸반 데이터 스캔 (ideas, in-progress, done)
+    const kanbanStatuses = ['ideas', 'in-progress', 'done'];
+
+    for (const status of kanbanStatuses) {
+      const path = `kanban/${userId}/${status}`;
+      const snapshot = await get(ref(getDb(), path));
+      const data = snapshot.val() || {};
+
+      Object.entries(data).forEach(([cardId, card]) => {
+        // channelId가 oldId와 일치하는 카드 찾기
+        if (card.channelId === oldId) {
+          // Firebase Multi-location Update 문법 사용
+          updates[`kanban/${userId}/${status}/${cardId}/channelId`] = newId;
+          migrationCount++;
+        }
+      });
+    }
+
+    // 2. 스크랩 데이터 스캔
+    const scrapPath = `scraps/${userId}`;
+    const scrapSnapshot = await get(ref(getDb(), scrapPath));
+    const scrapData = scrapSnapshot.val() || {};
+
+    Object.entries(scrapData).forEach(([scrapId, scrap]) => {
+      // channelId가 oldId와 일치하는 스크랩 찾기
+      if (scrap.channelId === oldId) {
+        updates[`scraps/${userId}/${scrapId}/channelId`] = newId;
+        migrationCount++;
+      }
+    });
+
+    // 3. 일괄 업데이트 실행
+    if (migrationCount > 0) {
+      // 루트 경로에서 업데이트 실행 (매우 효율적)
+      await update(ref(getDb(), '/'), updates);
+      Logger.biz(
+        `✅ [Migration] 채널 데이터 이관 완료: 총 ${migrationCount}개의 항목이 업데이트되었습니다.`
+      );
+      return { success: true, count: migrationCount };
+    } else {
+      Logger.info('[Migration] 이관할 연관 데이터가 없습니다.');
+      return { success: true, count: 0 };
+    }
+  } catch (error) {
+    Logger.error('[Migration] 데이터 이관 중 오류 발생:', error);
+    return { success: false, error: error.message };
+  }
+}

@@ -16,9 +16,19 @@
     "contextMenus",
     "alarms",
     "offscreen",
-    "identity"
+    "identity",
+    "declarativeNetRequest"
   ],
   "host_permissions": ["*://*/*"],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "naver_images",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "background": {
     "service_worker": "dist/background.bundle.js"
   },

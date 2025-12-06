@@ -240,7 +240,10 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     // 태그 중복 제거
     tags = [...new Set(tags)];
 
-    const workspaceKeywords = tags.filter((t) => t !== '#AI-추천');
+    // 우선순위: AI가 추천한 검색어(recommendedSearches) 또는 recommendedKeywords를 사용
+    // 없으면 기존 태그/키워드를 사용
+    const workspaceKeywords =
+      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     // ▼▼▼ [중요] PRD v1.0에 따라 workspace 객체는 반드시 생성되어야 합니다.
@@ -252,10 +255,15 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
       channelId: channelId, // 👈 핵심: 채널 ID 저장 (없으면 null = 공용/미지정)
       tags: tags,
       origin: origin,
-      workspace: {
+        workspace: {
         // PRD v1.0 모델 - workspaceMode.js에서 필수로 사용
+        // keywords: 포스팅에 포함될 SEO 최적화 키워드를 우선으로 저장
         keywords: workspaceKeywords || [],
+        // 추천 목차: AI로 생성된 경우 ideaData.outline에 채워져 올 수 있음
         outline: ideaData.outline || ideaData.workspace?.outline || [],
+        // 추천 검색어 및 롱테일도 workspace에 보관하여 UI/작성 프롬프트에서 사용 가능
+        recommendedKeywords: ideaData.recommendedSearches || ideaData.recommendedKeywords || [],
+        longTailKeywords: ideaData.longTailKeywords || [],
         draft: ideaData.draft_content || ideaData.draft || ideaData.workspace?.draft || '',
         linkedScraps: ideaData.workspace?.linkedScraps || {},
       },
@@ -269,6 +277,8 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     const userId = await getCurrentUserId();
     const newCardRef = push(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}/${targetStatus}`));
     const newCardKey = newCardRef.key;
+    // Debug: Log origin and any thumbnail info before saving
+    try { console.log('[addIdeaToKanban DEBUG] Saving idea', { origin: newCard.origin, thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null }); } catch(e) {}
     await set(newCardRef, cleanDataForFirebase(newCard));
 
     // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)
@@ -384,12 +394,14 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     // 태그 중복 제거
     tags = [...new Set(tags)];
 
-    const workspaceKeywords = tags.filter((t) => t !== '#AI-추천');
+    const workspaceKeywords =
+      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     const newCard = {
       title: ideaData.title,
       description: ideaData.description || '',
+      seoTitle: ideaData.seoTitle || ideaData.title || '',
       createdAt: ideaData.createdAt || Date.now(),
       channelId: channelId,
       tags: tags,
@@ -397,6 +409,8 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       workspace: {
         keywords: workspaceKeywords || [],
         outline: ideaData.outline || ideaData.workspace?.outline || [],
+        recommendedKeywords: ideaData.recommendedSearches || ideaData.recommendedKeywords || [],
+        longTailKeywords: ideaData.longTailKeywords || [],
         draft: ideaData.draft_content || ideaData.draft || ideaData.workspace?.draft || '',
         linkedScraps: ideaData.workspace?.linkedScraps || {},
       },
@@ -457,19 +471,27 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
           originType || 'undefined'
         }, status: ${status}`
       );
-      generateIdeaBriefing(cardId, ideaData.title, ideaData.description || '', {
-        status: status,
-        generateOutline: true,
-        generateKeywords: true,
-        generateLongTail: true,
-        generateMainKeywords: true,
-      })
-        .then(() => {
+
+      // Background를 통해서 AI 브리핑 생성 (referer 문제 해결)
+      chrome.runtime.sendMessage({
+        action: 'generate_idea_briefing',
+        cardId: cardId,
+        title: ideaData.title,
+        description: ideaData.description || '',
+        options: {
+          status: status,
+          generateOutline: true,
+          generateKeywords: true,
+          generateLongTail: true,
+          generateMainKeywords: true,
+        }
+      }, (response) => {
+        if (response && response.success) {
           Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        })
-        .catch((error) => {
-          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', error);
-        });
+        } else {
+          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', response?.error || 'Unknown error');
+        }
+      });
     } else {
       Logger.debug(
         `[addIdeaToKanban] AI 브리핑 자동 생성 건너뜀 - originType: ${

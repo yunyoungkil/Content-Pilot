@@ -57,6 +57,9 @@ const {
   uploadImageToFirebaseStorage,
   cleanDataForFirebase,
   getCurrentUserId,
+  getUnifiedGalleryImages,
+  deleteImageFromStorage,
+  getUploadedImagesLog,
 } = require('./js/services/firebaseService.js');
 const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
@@ -129,6 +132,8 @@ const {
   getScrapDetail,
   saveEntireAnalysis,
   deleteScrap,
+  removeScrapImage, // 👈 추가!
+  toggleScrapSharing,
 } = require('./js/services/scrapService.js');
 
 const {
@@ -153,6 +158,24 @@ const {
 
 // Firebase 초기화
 initializeFirebase();
+
+// [추가] URL 정규화 함수 (스마트 매칭용)
+function normalizeUrlForDeletion(url) {
+  if (!url) return '';
+  try {
+    let cleanUrl = url.replace(/&amp;/g, '&');
+    const u = new URL(cleanUrl);
+    let decodedPath;
+    try {
+      decodedPath = decodeURIComponent(u.pathname);
+    } catch (e) {
+      decodedPath = u.pathname;
+    }
+    return (u.hostname + decodedPath).replace(/\/$/, '').trim();
+  } catch (e) {
+    return url.trim();
+  }
+}
 
 // Service Worker 전역 변수 (window 대신 사용)
 let kanbanRealtimeListenerAttached = false;
@@ -411,7 +434,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })()
     );
   }
-  if (msg.action === 'fetch_image_as_base64') return handleAsync(fetchImageAsBase64(msg.url));
+  if (msg.action === 'fetch_image_as_base64') {
+    return handleAsync(
+      (async () => {
+        try {
+          // 네이버 이미지 특별 처리
+          if (msg.url.includes('postfiles.pstatic.net') || msg.url.includes('blogfiles.naver.net')) {
+            const response = await fetch(msg.url, {
+              method: 'GET',
+              headers: {
+                'Referer': 'https://blog.naver.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              },
+              credentials: 'omit',
+              cache: 'no-cache'
+            });
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const blob = await response.blob();
+            const buffer = await blob.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+            const mimeType = blob.type || 'image/jpeg';
+            return { success: true, dataUrl: `data:${mimeType};base64,${base64}` };
+          }
+          
+          // 일반 이미지 처리
+          return await fetchImageAsBase64(msg.url);
+        } catch (error) {
+          Logger.warn('[Background] fetch_image_as_base64 실패:', error.message);
+          return { success: false, error: error.message };
+        }
+      })()
+    );
+  }
 
   // === [Analytics Service] 성과 분석 & 진단 ===
   if (msg.action === 'trigger_performance_refresh')
@@ -428,10 +486,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(Promise.reject(new Error('testAdSenseGa4Access: 아직 구현되지 않음')));
 
   // === [AI Service] 생성 및 분석 ===
-  if (msg.action === 'generate_draft_from_idea')
-    return handleAsync(generateDraftFromIdea(msg.data, msg.options || {}));
+  if (msg.action === 'generate_draft_from_idea') {
+    const opts = msg.options || {};
+    opts.onProgress = (p) => {
+      if (sender.tab?.id) {
+        chrome.tabs
+          .sendMessage(sender.tab.id, {
+            action: 'thumbnail_progress',
+            progress: p,
+            cardId: msg.data?.cardId || null,
+            message: p?.message || null,
+            step: p?.step || null,
+          })
+          .catch((err) => {
+            if (
+              err?.message &&
+              !err.message.includes('message port closed') &&
+              !err.message.includes('Could not establish connection')
+            ) {
+              Logger.debug('[sendMessage] thumbnail_progress 전송 실패:', err.message);
+            }
+          });
+      }
+    };
+    return handleAsync(generateDraftFromIdea(msg.data, opts));
+  }
   if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, ...opts } = msg.data;
+    // Support callers that send payload either top-level or under `data`
+    const payload = msg.data || msg || {};
+    const { cardId, title, description, ...opts } = payload;
     opts.onProgress = (p) => {
       if (sender.tab?.id) {
         chrome.tabs
@@ -1745,15 +1828,65 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const { scrapId, imageUrl } = msg.data;
-        const scrapRef = ref(getDb(), `scraps/${CONSTANTS.USER_ID}/${scrapId}`);
-        const scrapSnap = await get(scrapRef);
-        const scrap = scrapSnap?.val();
-        if (scrap) {
-          if (scrap.images && Array.isArray(scrap.images)) {
-            scrap.images = scrap.images.filter((img) => img !== imageUrl);
-            await update(scrapRef, { images: scrap.images });
+        const result = await removeScrapImage(scrapId, imageUrl);
+        // broadcast so other UI contexts can refresh
+        try {
+          // only broadcast if DB actually changed so other contexts don't react to no-op deletions
+          if (result && result.success && result.changed) {
+            chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
           }
+        } catch (e) {
+          const { Logger } = require('./js/utils.js');
+          Logger.warn('[Background] 브로드캐스트 실패:', e.message);
         }
+        return result;
+      })()
+    );
+  }
+
+  if (msg.action === 'get_unified_gallery') {
+    return handleAsync(
+      (async () => {
+        const filter = msg.filter || 'ALL';
+        const images = await getUnifiedGalleryImages(filter);
+        return { success: true, images };
+      })()
+    );
+  }
+
+  if (msg.action === 'delete_image_from_storage') {
+    return handleAsync(
+      (async () => {
+        const { imageUrl } = msg.data;
+        if (!imageUrl) {
+          return { success: false, error: '이미지 URL이 필요합니다.' };
+        }
+        return await deleteImageFromStorage(imageUrl);
+      })()
+    );
+  }
+
+  if (msg.action === 'get_uploaded_images_log') {
+    return handleAsync(
+      (async () => {
+        const images = await getUploadedImagesLog();
+        return { success: true, images };
+      })()
+    );
+  }
+
+  if (msg.action === 'delete_storage_image') {
+    return handleAsync(
+      (async () => {
+        const { id, storagePath } = msg.data;
+        const userId = await getCurrentUserId();
+
+        // 1. 스토리지 원본 삭제
+        await deleteImageFromStorage(storagePath);
+
+        // 2. DB 메타데이터 삭제
+        await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+
         return { success: true };
       })()
     );
@@ -1800,17 +1933,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           };
         }
 
-        // 업데이트
-        await update(scrapRef, { channelId: newChannelId });
-
-        return {
-          success: true,
-          newChannelId,
-          message:
-            newChannelId === null
-              ? '공용 스크랩으로 변경되었습니다.'
-              : '전용 스크랩으로 변경되었습니다.',
-        };
+        // 중앙 서비스에 위임하여 DB 업데이트 + 캐시 초기화를 수행
+        try {
+          const result = await toggleScrapSharing(scrapId, currentChannelId);
+          return result;
+        } catch (error) {
+          Logger.error('[toggle_scrap_sharing] toggleScrapSharing 호출 오류:', error);
+          return { success: false, error: error?.message || 'Unknown error' };
+        }
       })()
     );
   }
