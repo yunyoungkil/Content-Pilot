@@ -512,7 +512,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(generateDraftFromIdea(msg.data, opts));
   }
   if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, ...opts } = msg.data;
+    // Support callers that send payload either top-level or under `data`
+    const payload = msg.data || msg || {};
+    const { cardId, title, description, ...opts } = payload;
     opts.onProgress = (p) => {
       if (sender.tab?.id) {
         chrome.tabs

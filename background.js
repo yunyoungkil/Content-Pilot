@@ -479,7 +479,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(generateDraftFromIdea(msg.data, opts));
   }
   if (msg.action === 'generate_idea_briefing') {
-    const { cardId, title, description, options } = msg;
+    const payload = msg.data || msg || {};
+    const { cardId, title, description, options } = payload;
     return handleAsync(
       generateIdeaBriefing(cardId, title, description, options)
         .then(() => ({ success: true }))

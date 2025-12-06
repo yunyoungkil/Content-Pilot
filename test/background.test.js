@@ -197,6 +197,52 @@ describe('Background Message Handlers', () => {
     });
   });
 
+  describe('AI handlers (generate_idea_briefing)', () => {
+    test('should handle generate_idea_briefing message with top-level payload', async () => {
+      const mockGenerate = jest.fn().mockResolvedValue(true);
+      jest.doMock('../js/services/aiService.js', () => ({
+        generateIdeaBriefing: mockGenerate,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = {
+        action: 'generate_idea_briefing',
+        cardId: 'card-123',
+        title: 'Example title',
+        description: 'Some description',
+      };
+
+      await runtimeHandler(message, {}, mockSendResponse);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockGenerate).toHaveBeenCalledWith('card-123', 'Example title', 'Some description', undefined);
+      expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('should handle generate_idea_briefing message with nested data payload', async () => {
+      const mockGenerate2 = jest.fn().mockResolvedValue(true);
+      jest.doMock('../js/services/aiService.js', () => ({
+        generateIdeaBriefing: mockGenerate2,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = {
+        action: 'generate_idea_briefing',
+        data: { cardId: 'card-234', title: 'Nested title', description: 'Nested desc' },
+      };
+
+      await runtimeHandler(message, {}, mockSendResponse);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockGenerate2).toHaveBeenCalledWith('card-234', 'Nested title', 'Nested desc', undefined);
+      expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+    });
+  });
+
     describe('collector handlers (fetch_all_channel_data / refresh_channel_data / fetch_and_save_single_post / delete_channel)', () => {
       test('should handle fetch_all_channel_data via fetchAllChannelData', async () => {
         const mockFetchAll = jest.fn().mockResolvedValue({ success: true, count: 3 });
