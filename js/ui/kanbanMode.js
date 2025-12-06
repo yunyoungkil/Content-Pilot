@@ -1215,16 +1215,6 @@ function showAddCardInput(container, status, addCardBtn) {
       "
     ></textarea>
     <div style="display: flex; gap: 8px; margin-top: 8px;">
-      <button class="kanban-add-card-ai-btn" style="
-        padding: 6px 12px;
-        background: #2e7d32;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-      ">AI 제안</button>
       <button class="kanban-add-card-submit-btn" style="
         padding: 6px 12px;
         background: #4285f4;
@@ -1244,49 +1234,7 @@ function showAddCardInput(container, status, addCardBtn) {
         cursor: pointer;
         font-size: 13px;
       ">취소</button>
-      <div style="display: flex; gap: 8px; margin-top: 8px;">
-        <button class="kanban-add-card-ai-btn" style="
-          padding: 6px 12px;
-          background: #2e7d32;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-        ">AI 제안</button>
-        <button class="kanban-add-card-submit-btn" style="
-          padding: 6px 12px;
-          background: #4285f4;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-        ">추가</button>
-        <button class="kanban-add-card-cancel-btn" style="
-          padding: 6px 12px;
-          background: transparent;
-          color: #666;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-        ">취소</button>
-      </div>
-
-      <div class="kanban-add-card-ai-suggestions" style="display:none; margin-top:10px; padding:8px; border-radius:6px; background:#fff; border:1px solid #eee;">
-        <div class="kanban-ai-suggestions-loading" style="display:none; color:#666; font-size:13px;">🤖 AI 제안 생성 중...</div>
-        <div class="kanban-ai-suggestions-content" style="display:none;">
-          <div style="font-weight:600; margin-bottom:6px;">AI 추천 검색어</div>
-          <div class="kanban-ai-recommended-searches" style="margin-bottom:8px; color:#333"></div>
-          <div style="font-weight:600; margin-bottom:6px;">롱테일 키워드</div>
-          <div class="kanban-ai-longtail" style="margin-bottom:8px; color:#333"></div>
-          <div style="font-weight:600; margin-bottom:6px;">추천 목차 (outline)</div>
-          <div class="kanban-ai-outline" style="color:#333; white-space:pre-wrap"></div>
-        </div>
-      </div>
+      
   `;
 
   // 버튼 다음에 입력 필드 삽입
@@ -1296,13 +1244,13 @@ function showAddCardInput(container, status, addCardBtn) {
 
   const textarea = inputWrapper.querySelector('.kanban-add-card-input');
   const submitBtn = inputWrapper.querySelector('.kanban-add-card-submit-btn');
-  const aiBtn = inputWrapper.querySelector('.kanban-add-card-ai-btn');
-  const suggestionsWrap = inputWrapper.querySelector('.kanban-add-card-ai-suggestions');
-  const suggestionsLoading = inputWrapper.querySelector('.kanban-ai-suggestions-loading');
-  const suggestionsContent = inputWrapper.querySelector('.kanban-ai-suggestions-content');
-  const suggestionsSearchesEl = inputWrapper.querySelector('.kanban-ai-recommended-searches');
-  const suggestionsLongTailEl = inputWrapper.querySelector('.kanban-ai-longtail');
-  const suggestionsOutlineEl = inputWrapper.querySelector('.kanban-ai-outline');
+  const aiBtn = null;
+  const suggestionsWrap = null;
+  const suggestionsLoading = null;
+  const suggestionsContent = null;
+  const suggestionsSearchesEl = null;
+  const suggestionsLongTailEl = null;
+  const suggestionsOutlineEl = null;
   const cancelBtn = inputWrapper.querySelector('.kanban-add-card-cancel-btn');
 
   // 포커스 및 자동 포커스
@@ -1323,60 +1271,7 @@ function showAddCardInput(container, status, addCardBtn) {
     submitCard(container, status, textarea.value.trim(), inputWrapper);
   });
 
-  // AI 제안 버튼 클릭
-  if (aiBtn) {
-    aiBtn.addEventListener('click', async () => {
-      const title = textarea.value.trim();
-      if (!title) {
-        showToast('⚠️ 제목을 입력한 뒤 AI 제안을 실행해주세요.');
-        return;
-      }
-
-      // UI 상태 변경
-      aiBtn.disabled = true;
-      const prevText = aiBtn.textContent;
-      aiBtn.textContent = '생성 중...';
-      if (suggestionsWrap) {
-        suggestionsWrap.style.display = 'block';
-        suggestionsLoading.style.display = 'block';
-        suggestionsContent.style.display = 'none';
-      }
-
-      const data = await fetchSeoSuggestionsForTitle(title);
-
-      // restore UI
-      aiBtn.disabled = false;
-      aiBtn.textContent = prevText;
-      if (!data) {
-        if (suggestionsWrap) {
-          suggestionsLoading.style.display = 'none';
-          suggestionsContent.style.display = 'block';
-          suggestionsSearchesEl.textContent = 'AI 응답을 파싱할 수 없습니다.';
-        }
-        return;
-      }
-
-      // Attach parsed suggestions to input wrapper for submit use
-      inputWrapper._aiSuggestions = data;
-
-      // Render suggestions
-      if (suggestionsWrap) {
-        suggestionsLoading.style.display = 'none';
-        suggestionsContent.style.display = 'block';
-        suggestionsSearchesEl.innerHTML = Array.isArray(data.recommendedSearches)
-          ? data.recommendedSearches.map((s) => `<span style="display:inline-block;padding:3px 6px;margin:3px;background:#f1f3f5;border-radius:4px;font-size:12px;">${s}</span>`).join('')
-          : '없음';
-
-        suggestionsLongTailEl.innerHTML = Array.isArray(data.longTailKeywords)
-          ? data.longTailKeywords.map((s) => `<div style="font-size:13px;padding:3px 0;">• ${s}</div>`).join('')
-          : '없음';
-
-        suggestionsOutlineEl.innerHTML = Array.isArray(data.outline)
-          ? data.outline.map((s, idx) => `${idx + 1}. ${s}`).join('\n')
-          : (data.outline || '없음');
-      }
-    });
-  }
+  // AI feature removed — no handler
 
   // 취소 버튼 클릭
   cancelBtn.addEventListener('click', () => {
@@ -1395,37 +1290,7 @@ function showAddCardInput(container, status, addCardBtn) {
   }, 100);
 }
 
-  // AI 제안 생성 함수
-  async function fetchSeoSuggestionsForTitle(title) {
-    try {
-      const prompt = `아이디어 제목을 바탕으로 SEO에 적합한 추천 검색어(recommendedSearches), 롱테일 키워드(longTailKeywords), 그리고 글의 목차(outline)를 JSON 형식으로 반환해 주세요.\n\nTitle: ${title}\n\n출력 형식: {\n  \"recommendedSearches\": ["..."],\n  \"longTailKeywords\": ["..."],\n  \"outline\": ["챕터 1", "챕터 2", ...]\n}`;
-
-      return new Promise((resolve) => {
-        try {
-          chrome.runtime.sendMessage({ action: 'call_gemini', prompt }, (resp) => {
-            if (!resp || !resp.text) return resolve(null);
-            let text = String(resp.text || '').trim();
-
-            // Remove fenced code blocks if present
-            if (text.startsWith('```json')) text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-            else if (text.startsWith('```')) text = text.replace(/```\n?/g, '').trim();
-
-            try {
-              const parsed = JSON.parse(text);
-              resolve(parsed);
-            } catch (e) {
-              // If JSON parse failed, attempt to extract arrays by regex
-              resolve(null);
-            }
-          });
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    } catch (e) {
-      return null;
-    }
-  }
+  // (removed) fetchSeoSuggestionsForTitle
 
 /**
  * 카드를 제출하는 함수
@@ -1447,18 +1312,7 @@ function submitCard(container, status, title, inputWrapper) {
     createdAt: Date.now(),
   };
 
-  // AI 제안이 있을 경우 페이로드에 포함
-  try {
-    if (inputWrapper && inputWrapper._aiSuggestions) {
-      const s = inputWrapper._aiSuggestions;
-      if (s.recommendedSearches) ideaData.recommendedSearches = Array.isArray(s.recommendedSearches) ? s.recommendedSearches : [];
-      if (s.longTailKeywords) ideaData.longTailKeywords = Array.isArray(s.longTailKeywords) ? s.longTailKeywords : [];
-      if (s.outline) ideaData.outline = Array.isArray(s.outline) ? s.outline : (typeof s.outline === 'string' ? [s.outline] : []);
-    }
-  } catch (e) {
-    // 안전하게 무시
-    console.warn('[KanbanMode] AI suggestions parse error', e);
-  }
+  // (removed) AI suggestions not supported for quick-add
 
   // [수정] 활성 채널 ID를 가져와서 함께 전송
   chrome.storage.local.get('activeChannelId', (res) => {
