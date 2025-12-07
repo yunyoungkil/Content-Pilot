@@ -132,13 +132,23 @@ describe('kanbanService workspace fields', () => {
     // Mock sendRuntimeMessageWithTimeout to capture payload
     const sendMessageMock = jest.fn().mockResolvedValue({ success: true });
     jest.doMock('../js/utils.js', () => ({
-      Logger: { debug: jest.fn(), biz: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() },
+      Logger: {
+        debug: jest.fn(),
+        biz: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+      },
       showToast: jest.fn(),
       sendRuntimeMessageWithTimeout: sendMessageMock,
     }));
 
     const { addIdeaToKanban } = await import('../js/services/kanbanService.js');
-    const idea = { title: 'SimTitle', description: 'SimDesc', keywords: ['tag1', '#유사-아이디어'] };
+    const idea = {
+      title: 'SimTitle',
+      description: 'SimDesc',
+      keywords: ['tag1', '#유사-아이디어'],
+    };
 
     const res = await addIdeaToKanban(idea, 'ideas', null);
     expect(res.success).toBe(true);
@@ -165,13 +175,23 @@ describe('kanbanService workspace fields', () => {
 
     const sendMessageMock = jest.fn().mockResolvedValue({ success: true });
     jest.doMock('../js/utils.js', () => ({
-      Logger: { debug: jest.fn(), biz: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() },
+      Logger: {
+        debug: jest.fn(),
+        biz: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+      },
       showToast: jest.fn(),
       sendRuntimeMessageWithTimeout: sendMessageMock,
     }));
 
     const { addIdeaToKanban } = await import('../js/services/kanbanService.js');
-    const idea = { title: 'RenewTitle', description: 'RenewDesc', keywords: ['tag2', '#리뉴얼-제안'] };
+    const idea = {
+      title: 'RenewTitle',
+      description: 'RenewDesc',
+      keywords: ['tag2', '#리뉴얼-제안'],
+    };
 
     const res = await addIdeaToKanban(idea, 'ideas', null);
     expect(res.success).toBe(true);
@@ -195,7 +215,13 @@ describe('kanbanService workspace fields', () => {
 
     const sendMessageMock = jest.fn().mockResolvedValue({ success: true });
     jest.doMock('../js/utils.js', () => ({
-      Logger: { debug: jest.fn(), biz: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() },
+      Logger: {
+        debug: jest.fn(),
+        biz: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+      },
       showToast: jest.fn(),
       sendRuntimeMessageWithTimeout: sendMessageMock,
     }));
@@ -231,7 +257,13 @@ describe('kanbanService workspace fields', () => {
 
     const sendMessageMock = jest.fn().mockResolvedValue({ success: true });
     jest.doMock('../js/utils.js', () => ({
-      Logger: { debug: jest.fn(), biz: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() },
+      Logger: {
+        debug: jest.fn(),
+        biz: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+      },
       showToast: jest.fn(),
       sendRuntimeMessageWithTimeout: sendMessageMock,
     }));
@@ -260,7 +292,7 @@ describe('kanbanService workspace fields', () => {
     jest.doMock('../js/services/firebaseService.js', () => ({
       getCurrentUserId: jest.fn().mockResolvedValue('user-1'),
       getDb: jest.fn(),
-      
+
       ref: jest.fn(),
       push: mockPush,
       set: mockSetTop,
@@ -281,9 +313,54 @@ describe('kanbanService workspace fields', () => {
     expect(res.success).toBe(true);
 
     expect(mockSetTop).toHaveBeenCalled();
-    const saved = mockSetTop.mock.calls[0][1] ? mockSetTop.mock.calls[0][1] : mockSetTop.mock.calls[0][0];
+    const saved = mockSetTop.mock.calls[0][1]
+      ? mockSetTop.mock.calls[0][1]
+      : mockSetTop.mock.calls[0][0];
     expect(saved.workspace.keywords).toEqual(['seo-1']);
     expect(saved.workspace.recommendedKeywords).toEqual(['seo-1']);
     expect(saved.workspace.longTailKeywords).toEqual(['long-tail-1']);
+  });
+
+  test('addIdeaToKanban writes briefingStatus queued to workspace/draft', async () => {
+    jest.resetModules();
+
+    const mockSet = jest.fn().mockResolvedValue();
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+      getDb: jest.fn(),
+      ref: jest.fn(() => 'REF_PLACEHOLDER'),
+      push: (ref) => ({ key: 'card-queue', set: mockSet }),
+      set: jest.fn(),
+      update: jest.fn().mockResolvedValue(),
+      cleanDataForFirebase: (d) => d,
+      serverTimestamp: () => 'SERVER_TS',
+    }));
+
+    // To avoid the runtime message helper blocking the test add a fast-resolving stub
+    const sendMessageMock = jest.fn().mockResolvedValue({ success: true });
+    jest.doMock('../js/utils.js', () => ({
+      Logger: {
+        debug: jest.fn(),
+        biz: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+      },
+      showToast: jest.fn(),
+      sendRuntimeMessageWithTimeout: sendMessageMock,
+    }));
+
+    const { addIdeaToKanban } = await import('../js/services/kanbanService.js');
+
+    const idea = { title: 'QTitle', description: 'QDesc', keywords: ['tag'] };
+    await addIdeaToKanban(idea, 'ideas', null);
+
+    // verify update was called to set briefingStatus queued
+    const firebase = await import('../js/services/firebaseService.js');
+    expect(firebase.update).toHaveBeenCalled();
+    const updatePayload = firebase.update.mock.calls[0][1];
+    expect(updatePayload).toBeDefined();
+    expect(updatePayload.briefingStatus).toBe('queued');
+    expect(updatePayload.briefingQueuedAt).toBeDefined();
   });
 });

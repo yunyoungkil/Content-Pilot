@@ -247,7 +247,7 @@ export function showLoadingToast(message = '로딩 중...', options = {}) {
  * @param {number} timeoutMs - Timeout in milliseconds (defaults to 5000)
  * @returns {Promise<Object>} resolves with response object or {success:false, error:'timeout'}
  */
-export function sendRuntimeMessageWithTimeout(message, timeoutMs = 5000) {
+export function sendRuntimeMessageWithTimeout(message, timeoutMs = 15000) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (res) => {
@@ -257,12 +257,27 @@ export function sendRuntimeMessageWithTimeout(message, timeoutMs = 5000) {
     };
 
     try {
-      if (!globalThis.chrome || !globalThis.chrome.runtime || !globalThis.chrome.runtime.sendMessage) {
+      if (
+        !globalThis.chrome ||
+        !globalThis.chrome.runtime ||
+        !globalThis.chrome.runtime.sendMessage
+      ) {
         finish({ success: false, error: 'chrome.runtime.sendMessage not available' });
         return;
       }
 
       chrome.runtime.sendMessage(message, (resp) => {
+        // Prevent "Unchecked runtime.lastError: The message port closed before a response was received" logs
+        // by checking chrome.runtime.lastError and returning an explicit error object.
+        try {
+          if (chrome.runtime.lastError) {
+            finish({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+        } catch (e) {
+          // ignore
+        }
+
         finish(resp || { success: true });
       });
     } catch (err) {
@@ -281,7 +296,8 @@ export function updateLoadingToast(message, progress, id = 'cp-loading-toast-mod
   const span = el.querySelector('.cp-loading-toast-message');
   if (span && message) span.textContent = message;
   const bar = el.querySelector('.cp-loading-progress-bar');
-  if (bar && typeof progress === 'number') bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
+  if (bar && typeof progress === 'number')
+    bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
 }
 
 export function hideLoadingToast(id = 'cp-loading-toast-modal') {

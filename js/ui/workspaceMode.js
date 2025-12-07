@@ -25,14 +25,13 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
     `
     )
     .join('');
+  // Ensure a single delegated click handler is attached to the grid.
+  // This prevents multiple handlers from being attached when the grid is
+  // re-rendered repeatedly.
+  ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand);
+
+  // Attach per-image handlers for loading/fallback/observer (delegated click is on grid)
   imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
-    // 클릭 이벤트
-    img.addEventListener('click', () => {
-      // if not yet loaded, use data-src; otherwise src
-      const url = img.dataset.src || img.src;
-      sendCommand('insert-image', { url });
-      sendCommand('focus');
-    });
 
     // 이미지 로드 실패 시 백그라운드 프록시로 재시도
     img.onerror = () => {
@@ -41,39 +40,60 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
       const parent = img.parentElement || imageGalleryGrid;
       const loading = document.createElement('div');
       loading.textContent = '이미지 불러오는 중...';
-      loading.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
+      loading.style.cssText =
+        'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
       parent.appendChild(loading);
 
       try {
-        chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset.src || img.src }, (response) => {
-          if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
-            parent.removeChild(loading);
-            const err = document.createElement('div');
-            err.textContent = '이미지 로드 실패';
-            err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
-            parent.appendChild(err);
-            return;
-          }
+        chrome.runtime.sendMessage(
+          { action: 'fetch_image_as_base64', url: img.dataset.src || img.src },
+          (response) => {
+            if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
+              parent.removeChild(loading);
+              const err = document.createElement('div');
+              err.textContent = '이미지 로드 실패';
+              err.style.cssText =
+                'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+              parent.appendChild(err);
+              return;
+            }
 
-          img.onerror = null; // prevent loop
-          img.src = response.dataUrl;
-          img.style.display = 'block';
-          parent.removeChild(loading);
-        });
+            img.onerror = null; // prevent loop
+            img.src = response.dataUrl;
+            img.style.display = 'block';
+            parent.removeChild(loading);
+          }
+        );
       } catch (e) {
         parent.removeChild(loading);
         const err = document.createElement('div');
         err.textContent = '이미지 로드 실패';
-        err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
+        err.style.cssText =
+          'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
         parent.appendChild(err);
       }
     };
     // register intersection observer for lazy loading
-    try {
-      ensureGalleryImageObserver().observe(img);
-    } catch (e) {
-      /* ignore */
-    }
+      try {
+        ensureGalleryImageObserver().observe(img);
+      } catch (e) {
+        /* ignore */
+      }
+  });
+}
+
+// Helper: attach a single delegated click listener on an image gallery grid.
+// This makes it safe to re-render the grid from multiple code paths.
+function ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand) {
+  if (!imageGalleryGrid) return;
+  if (imageGalleryGrid.dataset.cpGalleryGridListenerAttached === '1') return;
+  imageGalleryGrid.dataset.cpGalleryGridListenerAttached = '1';
+  imageGalleryGrid.addEventListener('click', (e) => {
+    const targetImg = e.target && e.target.closest ? e.target.closest('.gallery-thumb') : null;
+    if (!targetImg) return;
+    const url = targetImg.dataset.src || targetImg.src;
+    sendCommand('insert-image', { url });
+    sendCommand('focus');
   });
 }
 
@@ -218,16 +238,16 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         }
       }
     );
-      // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
-      if (!imageGalleryArea.dataset.scrapListenerAttached) {
-        chrome.runtime.onMessage.addListener((msg) => {
-          if (msg?.action === 'scrap_image_removed') {
-            // 현재 필터 상태로 갤러리 다시 로드
-            loadUnifiedGallery(currentFilter);
-          }
-        });
-        imageGalleryArea.dataset.scrapListenerAttached = '1';
-      }
+    // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
+    if (!imageGalleryArea.dataset.scrapListenerAttached) {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg?.action === 'scrap_image_removed') {
+          // 현재 필터 상태로 갤러리 다시 로드
+          loadUnifiedGallery(currentFilter);
+        }
+      });
+      imageGalleryArea.dataset.scrapListenerAttached = '1';
+    }
   }
 
   // 필터링 및 렌더링 함수
@@ -328,12 +348,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         img.src = img.dataset.src;
       }
 
-      // 클릭 시 에디터에 삽입
-      img.addEventListener('click', () => {
-        const insertUrl = img.dataset?.src || img.src;
-        sendCommand('insert-image', { url: insertUrl });
-        sendCommand('focus');
-      });
+      // Click handling is done via delegated listener on the gallery grid
+      // (attached once when the grid is initialized) so no per-image
+      // click listeners are added here.
 
       // onerror fallback -> background proxy
       img.onerror = () => {
@@ -341,18 +358,22 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         div.style.background = '#f0f0f0';
         const errorText = document.createElement('div');
         errorText.textContent = '이미지 로드 실패';
-        errorText.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
+        errorText.style.cssText =
+          'display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;';
         div.appendChild(errorText);
 
         try {
-          chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url }, (response) => {
-            if (response && response.success && response.dataUrl) {
-              img.onerror = null;
-              img.src = response.dataUrl;
-              img.style.display = 'block';
-              if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+          chrome.runtime.sendMessage(
+            { action: 'fetch_image_as_base64', url: img.dataset?.src || img.src || imgData.url },
+            (response) => {
+              if (response && response.success && response.dataUrl) {
+                img.onerror = null;
+                img.src = response.dataUrl;
+                img.style.display = 'block';
+                if (errorText.parentNode) errorText.parentNode.removeChild(errorText);
+              }
             }
-          });
+          );
         } catch (e) {
           // ignore
         }
@@ -363,7 +384,8 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         const delBtn = document.createElement('button');
         delBtn.className = 'workspace-image-delete-btn';
         delBtn.title = '이미지 삭제';
-        delBtn.style.cssText = 'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
+        delBtn.style.cssText =
+          'position:absolute; top:4px; right:4px; width:20px; height:20px; border:none; border-radius:50%; background: rgba(255,255,255,0.9); color:#666; cursor:pointer; font-size:14px; display:flex;align-items:center;justify-content:center;z-index:10;';
         delBtn.innerHTML = '×';
         delBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -372,7 +394,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 
           // Prefer sending the canonical/original URL stored in originData when available
           // This avoids sending data: or proxy/base64 URLs which won't match DB entries
-          const removedItem = allImageData.find((it) => (it.url === displayedUrl || it.thumbnail === displayedUrl));
+          const removedItem = allImageData.find(
+            (it) => it.url === displayedUrl || it.thumbnail === displayedUrl
+          );
 
           const getAllFromOrigin = (origin) => {
             if (!origin) return [];
@@ -390,7 +414,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
               const clean = u.replace(/&amp;/g, '&');
               const parsed = new URL(clean);
               let p = parsed.pathname || '';
-              try { p = decodeURIComponent(p); } catch (e) {}
+              try {
+                p = decodeURIComponent(p);
+              } catch (e) {}
               return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
             } catch (e) {
               return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
@@ -400,110 +426,127 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           let canonicalDeleteUrl = displayedUrl;
           if (removedItem && removedItem.originData) {
             const originList = getAllFromOrigin(removedItem.originData);
-            const matched = originList.find((o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl));
+            const matched = originList.find(
+              (o) => normalizeForMatch(o) === normalizeForMatch(displayedUrl)
+            );
             if (matched) {
               canonicalDeleteUrl = matched;
             }
           }
 
-          chrome.runtime.sendMessage({ action: 'remove_scrap_image', data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId } }, (response) => {
-            // only proceed if backend reports a real DB change
-            if (response && response.success && response.changed) {
-              // Update local data to show next waiting image in the same grid position
-              try {
-                // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
-                const matchIndex = allImageData.findIndex((it) => (it.url === deleteUrl || it.thumbnail === deleteUrl));
-                if (matchIndex !== -1) {
-                  // Try to fill this slot from the same scrap's originData if there are more images
-                  const removedItem = allImageData[matchIndex];
-                  const scrapKey = removedItem.scrapId || removedItem.id;
+          chrome.runtime.sendMessage(
+            {
+              action: 'remove_scrap_image',
+              data: { imageUrl: canonicalDeleteUrl, scrapId: effectiveScrapId },
+            },
+            (response) => {
+              // only proceed if backend reports a real DB change
+              if (response && response.success && response.changed) {
+                // Update local data to show next waiting image in the same grid position
+                try {
+                  // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
+                  const matchIndex = allImageData.findIndex(
+                    (it) => it.url === deleteUrl || it.thumbnail === deleteUrl
+                  );
+                  if (matchIndex !== -1) {
+                    // Try to fill this slot from the same scrap's originData if there are more images
+                    const removedItem = allImageData[matchIndex];
+                    const scrapKey = removedItem.scrapId || removedItem.id;
 
-                  // Helper: extract all images from originData
-                  const getAllFromOrigin = (origin) => {
-                    if (!origin) return [];
-                    const out = [];
-                    if (origin.image) out.push(origin.image);
-                    if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
-                    if (Array.isArray(origin.images)) out.push(...origin.images);
-                    return [...new Set(out.filter(Boolean))];
-                  };
-
-                  // small normalization helper to align with backend matching rules
-                  const normalizeForMatch = (u) => {
-                    if (!u) return '';
-                    try {
-                      // keep data: URIs unchanged
-                      if (u.startsWith('data:')) return u;
-                      const clean = u.replace(/&amp;/g, '&');
-                      const parsed = new URL(clean);
-                      let p = parsed.pathname || '';
-                      try {
-                        p = decodeURIComponent(p);
-                      } catch (e) {
-                        // ignore decode errors
-                      }
-                      return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
-                    } catch (e) {
-                      return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
-                    }
-                  };
-
-                  const origin = removedItem.originData || {};
-                  let originImages = getAllFromOrigin(origin);
-
-                  // Current displayed urls for this scrap (normalized)
-                  const displayed = allImageData
-                    .filter((it) => (it.scrapId || it.id) === scrapKey)
-                    .map((it) => it.url || it.thumbnail)
-                    .map((d) => normalizeForMatch(d));
-
-                  // Exclude the deleted image (normalized) from candidates and any already-displayed images
-                  const normalizedDelete = normalizeForMatch(deleteUrl);
-
-                  originImages = originImages.filter((o) => normalizeForMatch(o) !== normalizedDelete);
-
-                  // Find a candidate that's in originImages but not displayed (normalized comparison)
-                  let candidate = null;
-                  for (const o of originImages) {
-                    const normO = normalizeForMatch(o);
-                    if (!displayed.includes(normO) && normO !== normalizedDelete) {
-                      candidate = o;
-                      break;
-                    }
-                  }
-
-                  if (candidate) {
-                    // Replace the removed item with the candidate image entry
-                    const newEntry = {
-                      id: `${scrapKey}::${Date.now()}`,
-                      scrapId: scrapKey,
-                      source: removedItem.source || 'SCRAP',
-                      url: candidate,
-                      thumbnail: candidate,
-                      originData: origin,
-                      timestamp: removedItem.timestamp || Date.now(),
+                    // Helper: extract all images from originData
+                    const getAllFromOrigin = (origin) => {
+                      if (!origin) return [];
+                      const out = [];
+                      if (origin.image) out.push(origin.image);
+                      if (Array.isArray(origin.allImages)) out.push(...origin.allImages);
+                      if (Array.isArray(origin.images)) out.push(...origin.images);
+                      return [...new Set(out.filter(Boolean))];
                     };
-                    allImageData.splice(matchIndex, 1, newEntry);
-                  } else {
-                    // No candidate; just remove
-                    allImageData.splice(matchIndex, 1);
+
+                    // small normalization helper to align with backend matching rules
+                    const normalizeForMatch = (u) => {
+                      if (!u) return '';
+                      try {
+                        // keep data: URIs unchanged
+                        if (u.startsWith('data:')) return u;
+                        const clean = u.replace(/&amp;/g, '&');
+                        const parsed = new URL(clean);
+                        let p = parsed.pathname || '';
+                        try {
+                          p = decodeURIComponent(p);
+                        } catch (e) {
+                          // ignore decode errors
+                        }
+                        return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
+                      } catch (e) {
+                        return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
+                      }
+                    };
+
+                    const origin = removedItem.originData || {};
+                    let originImages = getAllFromOrigin(origin);
+
+                    // Current displayed urls for this scrap (normalized)
+                    const displayed = allImageData
+                      .filter((it) => (it.scrapId || it.id) === scrapKey)
+                      .map((it) => it.url || it.thumbnail)
+                      .map((d) => normalizeForMatch(d));
+
+                    // Exclude the deleted image (normalized) from candidates and any already-displayed images
+                    const normalizedDelete = normalizeForMatch(deleteUrl);
+
+                    originImages = originImages.filter(
+                      (o) => normalizeForMatch(o) !== normalizedDelete
+                    );
+
+                    // Find a candidate that's in originImages but not displayed (normalized comparison)
+                    let candidate = null;
+                    for (const o of originImages) {
+                      const normO = normalizeForMatch(o);
+                      if (!displayed.includes(normO) && normO !== normalizedDelete) {
+                        candidate = o;
+                        break;
+                      }
+                    }
+
+                    if (candidate) {
+                      // Replace the removed item with the candidate image entry
+                      const newEntry = {
+                        id: `${scrapKey}::${Date.now()}`,
+                        scrapId: scrapKey,
+                        source: removedItem.source || 'SCRAP',
+                        url: candidate,
+                        thumbnail: candidate,
+                        originData: origin,
+                        timestamp: removedItem.timestamp || Date.now(),
+                      };
+                      allImageData.splice(matchIndex, 1, newEntry);
+                    } else {
+                      // No candidate; just remove
+                      allImageData.splice(matchIndex, 1);
+                    }
                   }
+                  // re-render gallery with updated data, keeping filter
+                  renderFilteredImages(
+                    allImageData,
+                    currentFilter,
+                    isDraftFilterActive,
+                    draftContentText
+                  );
+                  showToast('✅ 이미지가 삭제되었습니다.');
+                } catch (e) {
+                  // fallback: remove DOM node
+                  if (div.parentNode) div.parentNode.removeChild(div);
+                  showToast('✅ 이미지가 삭제되었습니다.');
                 }
-                // re-render gallery with updated data, keeping filter
-                renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
-                showToast('✅ 이미지가 삭제되었습니다.');
-              } catch (e) {
-                // fallback: remove DOM node
-                if (div.parentNode) div.parentNode.removeChild(div);
-                showToast('✅ 이미지가 삭제되었습니다.');
+              } else if (response && response.success && !response.changed) {
+                // backend found nothing to delete; notify and don't update UI state
+                showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
+              } else {
+                showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
               }
-            } else if (response && response.success && !response.changed) {
-              // backend found nothing to delete; notify and don't update UI state
-              showToast('⚠️ 삭제 대상이 데이터베이스에서 발견되지 않았습니다.', 'warning');
-            } else {
-              showToast('❌ 이미지 삭제에 실패했습니다.', 'error');
             }
-          });
+          );
         });
 
         div.appendChild(delBtn);
@@ -525,15 +568,12 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         overlay.className = 'gallery-more-overlay';
         overlay.textContent = `+${extra}`;
         overlay.title = `${extra}개 추가 이미지`; // tooltip
-        overlay.style.cssText = 'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
+        overlay.style.cssText =
+          'position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.6); color: #fff; padding: 4px 6px; border-radius: 12px; font-size: 11px; z-index: 12;';
         div.appendChild(overlay);
       }
 
-      // 클릭 이벤트
-      div.addEventListener('click', () => {
-        sendCommand('insert-image', { url: imgData.url });
-        sendCommand('focus');
-      });
+      // click handling is delegated to the grid (avoid per-item listeners)
 
       fragment.appendChild(div);
     });
@@ -566,6 +606,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
     } catch (e) {
       /* ignore */
     }
+
+    // ensure the delegated click handler exists for the grid after rendering
+    ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand);
   }
 
   // 이벤트 리스너 설정
@@ -665,6 +708,83 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   loadUnifiedGallery(currentFilter);
 }
 
+// Helper to apply draft response fields into ideaData (kept small and testable)
+export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
+  console.debug(
+    '[DIAG applyDraftResponseToIdea] called with response:',
+    response,
+    'ideaData before:',
+    {
+      id: ideaData?.id,
+      seoTitle: ideaData?.seoTitle,
+      publishInfo: ideaData?.publishInfo,
+      draftContent: ideaData?.draftContent,
+    }
+  );
+  if (!ideaData) ideaData = {};
+  if (!response) return ideaData;
+
+  if (response.draft) {
+    ideaData.draftContent = response.draft;
+    if (!ideaData.workspace) ideaData.workspace = {};
+    ideaData.workspace.draft = response.draft;
+    console.debug(
+      '[DIAG applyDraftResponseToIdea] draft content set:',
+      response.draft.substring(0, 100) + '...'
+    );
+  }
+
+  // ensure seoTitle is stored both top-level and inside publishInfo
+  if (response.seoTitle) {
+    ideaData.seoTitle = response.seoTitle;
+    if (!ideaData.publishInfo) ideaData.publishInfo = {};
+    ideaData.publishInfo.seoTitle = response.seoTitle;
+    console.debug('[DIAG applyDraftResponseToIdea] seoTitle set:', response.seoTitle);
+  }
+
+  // If this idea is currently open in the workspace UI, refresh the publish-info panel
+  try {
+    const currentWorkspace = document.querySelector('.workspace-container');
+    if (currentWorkspace && window.__cp_workspace_idea_data?.id === ideaData.id) {
+      console.debug(
+        '[DIAG applyDraftResponseToIdea] refreshing publish-info UI for ideaId:',
+        ideaData.id,
+        'seoTitle:',
+        ideaData.seoTitle || ideaData.publishInfo?.seoTitle
+      );
+      // safe call: showPublishInfo may be defined later in this module
+      if (typeof showPublishInfo === 'function') {
+        const tagsForDisplay = Array.isArray(ideaData.publishInfo?.tags)
+          ? ideaData.publishInfo.tags.join(', ')
+          : ideaData.publishInfo?.tags || '';
+        showPublishInfo(
+          currentWorkspace,
+          ideaData.publishInfo?.permalink,
+          tagsForDisplay,
+          ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
+          ideaData
+        );
+      }
+      // Also refresh thumbnail button after draft generation
+      if (typeof renderThumbnailButton === 'function') {
+        console.debug('[DIAG applyDraftResponseToIdea] calling renderThumbnailButton');
+        renderThumbnailButton(currentWorkspace, ideaData);
+      }
+    }
+  } catch (e) {
+    console.error('[DIAG applyDraftResponseToIdea] error during UI refresh:', e);
+    // non-fatal; do not block draft application
+  }
+
+  if (!ideaData.publishInfo) ideaData.publishInfo = {};
+  if (response.permalink) ideaData.publishInfo.permalink = response.permalink;
+  if (response.tags) ideaData.publishInfo.tags = response.tags;
+  if (response.jsonLdSchema) ideaData.publishInfo.jsonLdSchema = response.jsonLdSchema;
+  if (response.thumbnailUrls) ideaData.publishInfo.thumbnailUrls = response.thumbnailUrls;
+
+  return ideaData;
+}
+
 // -----------------------------------------------------------------------------
 // 2. 헬퍼 함수들 (반드시 최상위 레벨에 있어야 함)
 // -----------------------------------------------------------------------------
@@ -674,22 +794,78 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
  * 초안이 있거나 썸네일 정보가 저장되어 있으면 버튼을 표시
  */
 function renderThumbnailButton(workspaceEl, ideaData) {
+  console.debug('[DIAG renderThumbnailButton] called with ideaData:', {
+    id: ideaData?.id,
+    draftContent: !!ideaData?.draftContent,
+    thumbnailInfo: !!ideaData?.publishInfo?.thumbnailInfo,
+  });
   const buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
   // 이미 버튼이 있으면 중단
-  if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) return;
+  if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) {
+    console.debug(
+      '[DIAG renderThumbnailButton] button already exists or container not found',
+      { hasContainer: !!buttonContainer, existingBtn: !!buttonContainer?.querySelector('#btn-create-thumbnail') }
+    );
+    return;
+  }
 
   // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
   // 단, publishInfo에 썸네일 정보가 저장되어 있다면 표시 가능
   const hasDraft = !!ideaData.draftContent || !!ideaData.workspace?.draft;
   const hasThumbInfo = !!ideaData.publishInfo?.thumbnailInfo;
+  const hasThumbnailUrls = !!ideaData.publishInfo?.thumbnailUrls || !!ideaData.thumbnailUrls;
 
-  if (!hasDraft && !hasThumbInfo) return;
+  console.debug(
+    '[DIAG renderThumbnailButton] hasDraft:',
+    hasDraft,
+    'hasThumbInfo:',
+    hasThumbInfo,
+    'hasThumbnailUrls:',
+    hasThumbnailUrls
+  );
+
+  if (!hasDraft && !hasThumbInfo && !hasThumbnailUrls) {
+    console.debug('[DIAG renderThumbnailButton] conditions not met, not rendering button');
+    return;
+  }
 
   const thumbBtn = document.createElement('button');
   thumbBtn.id = 'btn-create-thumbnail';
   thumbBtn.style.cssText =
     'padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;';
   thumbBtn.textContent = '🎨 썸네일 만들기';
+
+  // If thumbnail URLs exist already, show a small preview indicator
+  if (hasThumbnailUrls) {
+    const urlObj = ideaData.publishInfo?.thumbnailUrls || ideaData.thumbnailUrls;
+    // choose first non-empty url
+    const finalUrl = (urlObj?.url_16x9 || urlObj?.url_4x3 || urlObj?.url_1x1 || '')?.trim();
+    if (finalUrl) {
+      const preview = document.createElement('img');
+      preview.style.cssText = 'width:32px; height:32px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle;';
+      preview.src = finalUrl;
+      // set a helpful alt text to avoid showing raw fallback characters like '?'
+      preview.alt = urlObj?.altText || ideaData.seoTitle || ideaData.title || '썸네일 이미지';
+      // if image fails to load, remove it to prevent broken icon or stray alt rendering
+      preview.onerror = () => {
+        try {
+          if (preview.parentNode) preview.parentNode.removeChild(preview);
+        } catch (e) {
+          /* ignore */
+        }
+      };
+    const wrapper = document.createElement('span');
+    wrapper.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
+    wrapper.appendChild(preview);
+    const textNode = document.createElement('span');
+    textNode.textContent = thumbBtn.textContent;
+    wrapper.appendChild(textNode);
+    // replace text content with wrapper
+    thumbBtn.textContent = '';
+    thumbBtn.appendChild(wrapper);
+  }
+  // close hasThumbnailUrls block
+}
 
   // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
   const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
@@ -702,8 +878,14 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     buttonContainer.appendChild(thumbBtn);
   }
 
+  console.debug('[DIAG renderThumbnailButton] creating thumbnail button, hasThumbnailUrls:', hasThumbnailUrls);
+
   // 이벤트 연결
   thumbBtn.onclick = () => {
+    console.debug(
+      '[DIAG thumbnail button] clicked, composeThumbnailText checkbox:',
+      !!workspaceEl.querySelector('#compose-thumbnail-text-checkbox')?.checked
+    );
     // [추가] 워크스페이스의 텍스트 오버레이 체크박스 상태 확인
     const checkbox = workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
     const composeThumbnailText = checkbox ? checkbox.checked : false;
@@ -1203,19 +1385,49 @@ function extractPermalinkFromUrl(publishedUrl) {
 }
 
 function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
+  console.log('[DEBUG showPublishInfo] called - seoTitle:', seoTitle, 'ideaId:', ideaData?.id);
+  // Debugging: capture incoming param types and publishInfo snapshot
+  try {
+    console.debug('[DIAG showPublishInfo] params:', { permalink, tags, seoTitle });
+    console.debug('[DIAG showPublishInfo] ideaData.publishInfo snapshot:', ideaData?.publishInfo);
+  } catch (e) {}
   // 기존 패널 제거
   const existingInfo = workspaceEl.querySelector('.publish-info-panel');
   if (existingInfo) existingInfo.remove();
 
   // 파라미터 정규화 (null, undefined 처리)
   permalink = permalink || '';
-  tags = tags || '';
+  // tags may be provided as an array or a string; normalize safely
+  const originalTags = tags;
+  if (Array.isArray(tags)) {
+    // Display form uses a comma-joined string, but keep original array for DB updates
+    tags = tags.join(', ');
+  } else {
+    tags = tags || '';
+  }
   seoTitle = seoTitle || '';
+
+  // If caller didn't pass seoTitle but ideaData has publishInfo.seoTitle,
+  // prefer that value so the UI shows the stored publishInfo title.
+  if (!seoTitle && ideaData?.publishInfo?.seoTitle) {
+    seoTitle = ideaData.publishInfo.seoTitle;
+  }
+
+  console.debug('[DIAG showPublishInfo] final seoTitle for UI:', seoTitle);
 
   // Firebase 업데이트 (값이 있을 때만)
   // 모든 값이 빈 문자열이면 Firebase 업데이트를 건너뛰어야 함 (초안 삭제 후 재생성 방지)
   // 하지만 permalink나 tags가 이미 있더라도 업데이트할 수 있도록 수정
   if (ideaData && ideaData.id) {
+    // Extra logging for db update decisions
+    console.debug(
+      '[DIAG showPublishInfo] db-update decision - permalink:',
+      permalink,
+      'tags:',
+      tags,
+      'seoTitle:',
+      seoTitle
+    );
     const updates = {};
     const publishInfoUpdates = {};
     let hasNonEmptyValue = false;
@@ -1235,10 +1447,26 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
 
     // tags가 제공되었으면 항상 업데이트 (빈 문자열이 아닌 경우)
-    if (tags !== undefined && tags.trim() !== '') {
-      publishInfoUpdates.tags = tags;
-      hasNonEmptyValue = true;
-    } else if (tags !== undefined && tags.trim() === '' && ideaData.publishInfo?.tags) {
+    if (originalTags !== undefined && originalTags !== null) {
+      // If tags were originally an array, preserve that shape for DB updates
+      if (Array.isArray(originalTags)) {
+        if (originalTags.length > 0) {
+          publishInfoUpdates.tags = originalTags;
+          hasNonEmptyValue = true;
+        }
+      } else if (String(tags).trim() !== '') {
+        // Normalize incoming comma-separated string into array for DB
+        publishInfoUpdates.tags = String(tags)
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean);
+        hasNonEmptyValue = publishInfoUpdates.tags.length > 0;
+      }
+    } else if (
+      originalTags !== undefined &&
+      String(tags).trim() === '' &&
+      ideaData.publishInfo?.tags
+    ) {
       // 빈 문자열이 제공되었지만 기존 tags가 있으면 유지 (삭제하지 않음)
       publishInfoUpdates.tags = ideaData.publishInfo.tags;
       hasNonEmptyValue = true;
@@ -1312,14 +1540,10 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
           <input type="text" id="idea-title-input" value="${ideaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
         </div>
-        ${
-          seoTitle
-            ? `<div>
+        <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
           <input type="text" id="seo-title-input" value="${seoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
-        </div>`
-            : ''
-        }
+        </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
           <div style="display: flex; gap: 8px; align-items: center;">
@@ -1356,6 +1580,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     const publishInfoArea = workspaceEl.querySelector('#publish-info-content');
     if (publishInfoArea) {
       publishInfoArea.innerHTML = '';
+      console.debug('[DIAG showPublishInfo] appending publish-info-panel to #publish-info-content');
       publishInfoArea.appendChild(publishInfoPanel);
     } else {
       // publish-info-content가 없으면 publish-info-area에 직접 추가
@@ -1365,6 +1590,15 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         publishInfoAreaContainer.appendChild(publishInfoPanel);
       }
     }
+
+    // Diagnostic: check if seo-title-input is present in DOM after rendering
+    const seoInput = publishInfoPanel.querySelector('#seo-title-input');
+    console.debug(
+      '[DIAG showPublishInfo] seo-title-input in DOM:',
+      !!seoInput,
+      'value:',
+      seoInput?.value
+    );
 
     // 이벤트 리스너
     const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
@@ -1396,6 +1630,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           }
         );
       });
+      console.debug('[DIAG showPublishInfo] connect-permalink-btn listener attached');
     }
 
     const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
@@ -1627,7 +1862,7 @@ ${contentHtml}
 // -----------------------------------------------------------------------------
 // 워크스페이스 액션 버튼 업데이트 헬퍼 함수
 // -----------------------------------------------------------------------------
-async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
+export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
   if (!buttonContainer) return;
 
@@ -1641,36 +1876,7 @@ async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   }
 
   // 체크박스 HTML 생성
-  const checkboxHtml = `
-    <div style="display:flex; align-items:center; gap:6px; margin-right:12px; padding-right:12px; border-right:1px solid #eee;" 
-         title="체크 시: AI는 글자 없는 이미지를 그리고, 코드가 정확한 한글을 입힙니다. (오타 없음)\n해제 시: AI가 직접 글자를 그립니다. (스타일 자연스러움, 오타 가능성)">
-      <input type="checkbox" id="compose-thumbnail-text-checkbox" ${composeThumbnailText ? 'checked' : ''} style="cursor:pointer;">
-      <label for="compose-thumbnail-text-checkbox" style="font-size:12px; color:#555; cursor:pointer; user-select:none; white-space:nowrap; font-weight:500;">
-        텍스트 오버레이
-      </label>
-    </div>
-  `;
 
-  // 버튼 렌더링 (체크박스 포함)
-  if (hasDraft) {
-    // 초안이 있을 때: 텍스트만/썸네일만 재생성 버튼
-    buttonContainer.innerHTML = `
-      ${checkboxHtml}
-      <div style="flex:1; display:flex; gap:8px; overflow-x:auto;">
-        <button id="regenerate-draft-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">📝 텍스트만 다시 쓰기</button>
-        <button id="regenerate-thumbnail-btn" style="flex:1; min-width:130px; white-space:nowrap; cursor:pointer;">🎨 썸네일만 다시 그리기</button>
-        <button id="delete-draft-in-workspace" class="draft-delete-btn" title="초안 삭제" style="cursor:pointer;">🗑️</button>
-      </div>
-    `;
-  } else {
-    // 초안이 없을 때: 전체 생성 버튼
-    buttonContainer.innerHTML = `
-      ${checkboxHtml}
-      <button id="generate-draft-btn" style="flex:1; cursor:pointer;">✨ AI 초안 생성</button>
-    `;
-  }
-
-  // 체크박스 이벤트 리스너 (설정 자동 저장)
   const checkbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
   if (checkbox) {
     checkbox.addEventListener('change', (e) => {
@@ -1679,10 +1885,83 @@ async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       console.log('[Workspace] 텍스트 오버레이 설정 변경:', isChecked ? 'ON' : 'OFF');
     });
   }
+
+    // Ensure the action buttons reflect current draft state
+    try {
+      const hasGenerateBtn = !!buttonContainer.querySelector('#generate-draft-btn');
+      const hasRegenerateBtn = !!buttonContainer.querySelector('#regenerate-draft-btn');
+      const hasRegenerateThumbBtn = !!buttonContainer.querySelector('#regenerate-thumbnail-btn');
+      const hasDeleteDraftBtn = !!buttonContainer.querySelector('#delete-draft-in-workspace');
+
+      // If draft exists but regenerate buttons are missing, create them
+      if (hasDraft) {
+        if (!hasRegenerateBtn) {
+          // remove generate button (if present)
+          const genBtn = buttonContainer.querySelector('#generate-draft-btn');
+          if (genBtn && genBtn.parentNode) genBtn.remove();
+
+          const fragment = document.createDocumentFragment();
+
+          const regenTextBtn = document.createElement('button');
+          regenTextBtn.id = 'regenerate-draft-btn';
+          regenTextBtn.style.cssText = 'flex:1; min-width:140px;';
+          regenTextBtn.textContent = '📝 텍스트만 다시 쓰기';
+          fragment.appendChild(regenTextBtn);
+
+          if (!hasRegenerateThumbBtn) {
+            const regenThumbBtn = document.createElement('button');
+            regenThumbBtn.id = 'regenerate-thumbnail-btn';
+            regenThumbBtn.style.cssText = 'flex:1; min-width:140px;';
+            regenThumbBtn.textContent = '🎨 썸네일만 다시 그리기';
+            fragment.appendChild(regenThumbBtn);
+          }
+
+          if (!hasDeleteDraftBtn) {
+            const delBtn = document.createElement('button');
+            delBtn.id = 'delete-draft-in-workspace';
+            delBtn.className = 'draft-delete-btn';
+            delBtn.textContent = '❌ 초안 삭제';
+            fragment.appendChild(delBtn);
+          }
+
+          // Insert at beginning to match original ordering
+          buttonContainer.insertBefore(fragment, buttonContainer.firstChild);
+        }
+      } else {
+        // no draft: ensure generate button exists, and remove regenerate / delete
+        if (!hasGenerateBtn) {
+          // remove any regenerate/delete buttons
+          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
+            (id) => {
+              const el = buttonContainer.querySelector(`#${id}`);
+              if (el && el.parentNode) el.remove();
+            }
+          );
+
+          const genBtn = document.createElement('button');
+          genBtn.id = 'generate-draft-btn';
+          genBtn.style.cssText = 'flex:1;';
+          genBtn.textContent = '✨ AI 초안 생성';
+          buttonContainer.appendChild(genBtn);
+        }
+      }
+    } catch (e) {
+      // non-fatal
+      console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
+    }
 }
 
 export function renderWorkspace(container, ideaData) {
   Logger.debug('[Workspace] renderWorkspace 함수 호출됨');
+  // Diagnostic: surface the idea id and publishInfo for tracing SEO bug
+  console.debug(
+    '[DIAG renderWorkspace] ideaId:',
+    ideaData?.id,
+    'seoTitle:',
+    ideaData?.seoTitle,
+    'publishInfo:',
+    ideaData?.publishInfo
+  );
   Logger.debug('[Workspace] container:', container);
   Logger.debug('[Workspace] ideaData:', ideaData);
 
@@ -1692,6 +1971,11 @@ export function renderWorkspace(container, ideaData) {
   ideaData.workspace.outline = ideaData.workspace.outline || [];
   ideaData.workspace.draft = ideaData.workspace.draft || '';
   ideaData.workspace.linkedScraps = ideaData.workspace.linkedScraps || {};
+
+  // Keep top-level thumbnailUrls in sync (legacy fields may exist at top-level)
+  if (!ideaData.thumbnailUrls && ideaData.publishInfo?.thumbnailUrls) {
+    ideaData.thumbnailUrls = ideaData.publishInfo.thumbnailUrls;
+  }
 
   // [수정] 1. 데이터 동기화 로직 추가
   // workspace 안에 숨어있는 linkedScraps를 바깥으로 꺼내줍니다.
@@ -1731,8 +2015,8 @@ export function renderWorkspace(container, ideaData) {
     (!ideaData.tags || ideaData.tags.length <= 1)
   ) {
     Logger.debug(`[Workspace] 브리핑 요청 - cardId: ${ideaData.id}, title: ${ideaData.title}`);
-    chrome.runtime
-      .sendMessage({
+    try {
+      const _sm = chrome.runtime.sendMessage({
         action: 'generate_idea_briefing',
         data: {
           cardId: ideaData.id,
@@ -1743,10 +2027,16 @@ export function renderWorkspace(container, ideaData) {
           generateKeywords: true,
           generateLongTail: true,
         },
-      })
-      .catch((err) => {
-        Logger.warn(`[Workspace] 브리핑 요청 실패:`, err);
       });
+      if (_sm && typeof _sm.catch === 'function') {
+        _sm.catch((err) => {
+          Logger.warn(`[Workspace] 브리핑 요청 실패:`, err);
+        });
+      }
+    } catch (e) {
+      // sendMessage might use callback API in test environment; ignore synchronous exceptions
+      Logger.debug('[Workspace] sendMessage returned non-promise or threw:', e?.message || e);
+    }
   } else {
     if (isTrackingOnly) {
       Logger.debug(`[Workspace] 브리핑 요청 건너뜀 - tracking_only 카드`);
@@ -1797,11 +2087,15 @@ export function renderWorkspace(container, ideaData) {
           return;
         }
 
-        chrome.runtime.sendMessage({
-          action: 'save_idea_draft',
-          ideaId: window.__cp_workspace_idea_id,
-          draft: event.data.content,
-        });
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          chrome.runtime
+            .sendMessage({
+              action: 'save_idea_draft',
+              ideaId: window.__cp_workspace_idea_id,
+              draft: event.data.content,
+            })
+            .catch(() => {});
+        }
       }
     });
     window.__cp_workspace_save_listener = true;
@@ -1834,6 +2128,52 @@ export function renderWorkspace(container, ideaData) {
             .join('')
         : '<span>주요 키워드 없음</span>';
 
+  // 브리핑 메타 정보 HTML 생성 (워크스페이스 우측 패널에 표시)
+  // 우선 top-level card fields를 우선 사용하고, 없으면 nested workspace.draft 경로를 사용합니다.
+  let briefingMetaHtml = '';
+  const draftObj = ideaData.workspace?.draft || ideaData.draft || null;
+  const cardLevelStatus = ideaData.briefingStatus ?? null;
+  const cardLevelProgress =
+    typeof ideaData.briefingProgress === 'number' ? ideaData.briefingProgress : null;
+  const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
+  const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+
+  if (bs) {
+    let bsHtml = '';
+    switch (bs) {
+      case 'queued':
+        bsHtml = `<span class="briefing-status-badge queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
+        break;
+      case 'processing':
+        if (progressValue !== null && typeof progressValue === 'number') {
+          bsHtml = `
+            <span class="briefing-status-badge processing" title="AI 브리핑 생성 중 - ${progressValue}%">
+              <span class="briefing-spinner">🔄</span>
+              <span class="briefing-progress-label">브리핑 생성 중 (${progressValue}%)</span>
+              <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressValue}%"></div></div>
+            </span>`;
+        } else {
+          bsHtml = `<span class="briefing-status-badge processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
+        }
+        break;
+      case 'done':
+        bsHtml = `<span class="briefing-status-badge done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
+        break;
+      case 'failed':
+        const errMsg = draftObj?.briefingError || ideaData.briefingError || '브리핑 실패';
+        bsHtml = `<span class="briefing-status-badge failed" title="${errMsg}">❌ 브리핑 실패</span>`;
+        // retry 버튼 (워크스페이스 상세에서 사용)
+        bsHtml += ` <button class="workspace-briefing-retry-btn" data-card-id="${ideaData.id}" data-status="${ideaData.status || 'ideas'}">↻ 재시도</button>`;
+        break;
+      default:
+        break;
+    }
+
+    if (bsHtml) {
+      briefingMetaHtml = `<div class="workspace-briefing-meta">${bsHtml}</div>`;
+    }
+    Logger.debug('[Workspace] briefingMetaHtml generated:', briefingMetaHtml);
+  }
   const longTailHtml =
     ideaData.longTailKeywords?.length > 0
       ? ideaData.longTailKeywords
@@ -1965,6 +2305,7 @@ export function renderWorkspace(container, ideaData) {
         
         <div class="resource-content-area publish-info-area" id="publish-info-area" style="display:block;"><div id="publish-info-content"></div></div>
         <div class="resource-content-area ai-briefing-area" id="ai-briefing-area" style="display:none;">
+          ${briefingMetaHtml}
             <div class="editor-keyword-section">
                 <div class="keyword-list">${mainKeywordsHtml}</div>
                 <div class="keyword-list" style="margin-top: 12px;">${longTailHtml}</div>
@@ -2280,7 +2621,14 @@ export function renderWorkspace(container, ideaData) {
     }
   }
 
-  if (ideaData && (ideaData.publishInfo || ideaData.seoTitle)) {
+  // Always show publish-info panel initially since it's the default active tab
+  if (ideaData) {
+    console.debug(
+      '[DIAG renderWorkspace] initial showPublishInfo call - seoTitle:',
+      ideaData.seoTitle,
+      'publishInfo.seoTitle:',
+      ideaData.publishInfo?.seoTitle
+    );
     // tags가 배열인 경우 쉼표로 조인
     let tagsForDisplay = ideaData.publishInfo?.tags || '';
     if (Array.isArray(tagsForDisplay)) {
@@ -2292,7 +2640,7 @@ export function renderWorkspace(container, ideaData) {
           container.querySelector('.workspace-container'),
           ideaData.publishInfo?.permalink,
           tagsForDisplay,
-          ideaData.seoTitle,
+          ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
           ideaData
         ),
       200
@@ -2300,7 +2648,7 @@ export function renderWorkspace(container, ideaData) {
   }
 }
 
-function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
+export function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
   console.log('[Workspace] addWorkspaceEventListeners 함수 호출됨');
 
   // "즉시 추적" 카드인지 확인
@@ -2350,8 +2698,39 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
     }
   }
 
+  // Briefing retry button handling (workspace detail)
+  workspaceEl.addEventListener('click', (e) => {
+    const retryBtn = e.target.closest && e.target.closest('.workspace-briefing-retry-btn');
+    if (retryBtn) {
+      e.stopPropagation();
+      const cardId = retryBtn.dataset.cardId || ideaData.id;
+      const status = retryBtn.dataset.status || ideaData.status || 'ideas';
+      chrome.runtime.sendMessage(
+        { action: 'retry_idea_briefing', data: { cardId, status } },
+        (res) => {
+          if (res && res.success) {
+            showToast('🔁 브리핑 재시도 요청이 큐에 추가되었습니다.');
+          } else {
+            showToast('❌ 브리핑 재시도 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+          }
+        }
+      );
+    }
+  });
+
   tabBtns.forEach((btn) => {
     btn.addEventListener('click', async () => {
+      console.log('[DEBUG tab click] clicked tab:', btn.dataset?.tab);
+      try {
+        console.debug(
+          '[DIAG tab click] ideaId:',
+          ideaData?.id,
+          'seoTitle:',
+          ideaData?.seoTitle,
+          'publishInfo:',
+          ideaData?.publishInfo
+        );
+      } catch (e) {}
       tabBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       workspaceEl
@@ -2443,7 +2822,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                         workspaceEl,
                         publishInfo.permalink,
                         publishInfo.tags,
-                        ideaData.seoTitle,
+                        ideaData.seoTitle || publishInfo.seoTitle || '',
                         ideaData
                       );
                     }
@@ -2454,7 +2833,7 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
                       workspaceEl,
                       publishInfo.permalink,
                       publishInfo.tags,
-                      ideaData.seoTitle,
+                      ideaData.seoTitle || publishInfo.seoTitle || '',
                       ideaData
                     );
                   }
@@ -4325,57 +4704,73 @@ function addWorkspaceEventListeners(workspaceEl, ideaData, container = null) {
   }
 
   // [신규] 채널 변경 감지 -> 워크스페이스 스크랩 목록 새로고침
-  chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.activeChannelId) {
-      console.log('[Workspace] 채널 변경 감지, 스크랩 목록 새로고침');
-      // 현재 활성화된 탭이 'all-scraps' 또는 'image-gallery'인 경우에만 새로고침
-      const activeTab = workspaceEl.querySelector('.resource-tab-btn.active');
-      if (activeTab) {
-        const tab = activeTab.dataset.tab;
-        if (tab === 'all-scraps') {
-          chrome.storage.local.get('activeChannelId', (res) => {
-            // 로딩 표시
-            allScrapsList.innerHTML =
-              "<p style='text-align: center; padding: 20px; color: #666;'>로딩 중...</p>";
-            chrome.runtime.sendMessage(
-              { action: 'get_all_scraps', channelId: res.activeChannelId },
-              (r) => {
-                if (r && r.success) {
-                  window.__cp_scrap_filter.allScraps = r.scraps;
-                  window.__cp_updateScrapList(r.scraps, allScrapsList, linkedScrapsList, ideaData);
-                } else {
-                  allScrapsList.innerHTML =
-                    "<p style='text-align: center; padding: 20px; color: #666;'>자료를 불러오는데 실패했습니다.</p>";
-                }
-              }
-            );
-          });
-        } else if (tab === 'image-gallery') {
-          chrome.storage.local.get('activeChannelId', (res) => {
-            // 로딩 표시
-            const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
-            if (imageGalleryGrid) {
-              imageGalleryGrid.innerHTML =
+  if (
+    chrome.storage &&
+    chrome.storage.onChanged &&
+    typeof chrome.storage.onChanged.addListener === 'function'
+  ) {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'local' && changes.activeChannelId) {
+        console.log('[Workspace] 채널 변경 감지, 스크랩 목록 새로고침');
+        // 현재 활성화된 탭이 'all-scraps' 또는 'image-gallery'인 경우에만 새로고침
+        const activeTab = workspaceEl.querySelector('.resource-tab-btn.active');
+        if (activeTab) {
+          const tab = activeTab.dataset.tab;
+          if (tab === 'all-scraps') {
+            chrome.storage.local.get('activeChannelId', (res) => {
+              // 로딩 표시
+              allScrapsList.innerHTML =
                 "<p style='text-align: center; padding: 20px; color: #666;'>로딩 중...</p>";
-            }
-            chrome.runtime.sendMessage(
-              { action: 'get_all_scraps', channelId: res.activeChannelId },
-              (r) => {
-                if (r && r.success) {
-                  updateImageGalleryFromAllScraps(resourceLibrary, r.scraps, sendCommand, ideaData);
-                } else {
-                  if (imageGalleryGrid) {
-                    imageGalleryGrid.innerHTML =
+              chrome.runtime.sendMessage(
+                { action: 'get_all_scraps', channelId: res.activeChannelId },
+                (r) => {
+                  if (r && r.success) {
+                    window.__cp_scrap_filter.allScraps = r.scraps;
+                    window.__cp_updateScrapList(
+                      r.scraps,
+                      allScrapsList,
+                      linkedScrapsList,
+                      ideaData
+                    );
+                  } else {
+                    allScrapsList.innerHTML =
                       "<p style='text-align: center; padding: 20px; color: #666;'>자료를 불러오는데 실패했습니다.</p>";
                   }
                 }
+              );
+            });
+          } else if (tab === 'image-gallery') {
+            chrome.storage.local.get('activeChannelId', (res) => {
+              // 로딩 표시
+              const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
+              if (imageGalleryGrid) {
+                imageGalleryGrid.innerHTML =
+                  "<p style='text-align: center; padding: 20px; color: #666;'>로딩 중...</p>";
               }
-            );
-          });
+              chrome.runtime.sendMessage(
+                { action: 'get_all_scraps', channelId: res.activeChannelId },
+                (r) => {
+                  if (r && r.success) {
+                    updateImageGalleryFromAllScraps(
+                      resourceLibrary,
+                      r.scraps,
+                      sendCommand,
+                      ideaData
+                    );
+                  } else {
+                    if (imageGalleryGrid) {
+                      imageGalleryGrid.innerHTML =
+                        "<p style='text-align: center; padding: 20px; color: #666;'>자료를 불러오는데 실패했습니다.</p>";
+                    }
+                  }
+                }
+              );
+            });
+          }
         }
       }
-    }
-  });
+    });
+  }
 }
 
 window.__cp_scrap_filter = { keyword: null, searchText: null, allScraps: [] };
@@ -4879,6 +5274,12 @@ export function updateWorkspaceScraps(container, ideaData) {
 // ✅ [UI 갱신 추가] handleGenerateAction: 생성 성공 시 버튼 상태 즉시 변경
 // ✅ [버그 수정] handleGenerateAction: 썸네일 데이터 누락 방지 및 동기화 강화
 async function handleGenerateAction(btn, options) {
+  console.debug(
+    '[DIAG handleGenerateAction] called with options:',
+    options,
+    'ideaData id:',
+    window.__cp_workspace_idea_data?.id
+  );
   if (!btn) return;
 
   // 1. 데이터 및 에디터 찾기
@@ -5048,22 +5449,8 @@ async function handleGenerateAction(btn, options) {
             utils.showToast('✅ 텍스트 작성이 완료되었습니다.')
           );
 
-          // 데이터 메모리 업데이트
-          ideaData.draftContent = response.draft;
-          if (!ideaData.workspace) ideaData.workspace = {};
-          ideaData.workspace.draft = response.draft;
-          if (response.seoTitle) ideaData.seoTitle = response.seoTitle;
-
-          // 발행 정보 업데이트
-          if (!ideaData.publishInfo) ideaData.publishInfo = {};
-          if (response.permalink) ideaData.publishInfo.permalink = response.permalink;
-          if (response.tags) ideaData.publishInfo.tags = response.tags;
-          if (response.jsonLdSchema) ideaData.publishInfo.jsonLdSchema = response.jsonLdSchema;
-
-          // [버그 수정] 썸네일 URL 정보가 있다면 메모리에도 업데이트 (중요)
-          if (response.thumbnailUrls) {
-            ideaData.publishInfo.thumbnailUrls = response.thumbnailUrls;
-          }
+          // 데이터 메모리 업데이트 (helper 뷰 로직으로 통합)
+          applyDraftResponseToIdea(ideaData, response);
 
           // 저장
           chrome.runtime.sendMessage(
@@ -5081,6 +5468,7 @@ async function handleGenerateAction(btn, options) {
               // 메타데이터 저장
               if (Object.keys(ideaData.publishInfo).length > 0 || response.seoTitle) {
                 const updates = { publishInfo: ideaData.publishInfo };
+                // keep top-level seoTitle in sync as well (backwards compatibility)
                 if (response.seoTitle) updates.seoTitle = response.seoTitle;
                 chrome.runtime.sendMessage({
                   action: 'update_kanban_card',
@@ -5100,7 +5488,7 @@ async function handleGenerateAction(btn, options) {
                 workspaceEl,
                 ideaData.publishInfo.permalink,
                 tagsForDisplay,
-                ideaData.seoTitle,
+                ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
                 ideaData
               );
             }
@@ -5207,3 +5595,5 @@ async function handleGenerateAction(btn, options) {
     );
   });
 }
+
+  

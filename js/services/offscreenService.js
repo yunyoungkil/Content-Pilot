@@ -313,7 +313,10 @@ export async function ensureOffscreenDocument() {
                     offscreenPort.postMessage({ action: 'offscreen_ping' });
                   } catch (e) {
                     try {
-                      chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch(() => {});
+                      if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                        const p = chrome.runtime.sendMessage({ action: 'offscreen_ping' });
+                        if (p && typeof p.catch === 'function') p.catch(() => {});
+                      }
                     } catch (se) {
                       Logger.debug(
                         '[OffscreenService] runtime ping fallback failed',
@@ -323,7 +326,10 @@ export async function ensureOffscreenDocument() {
                   }
                 } else {
                   try {
-                    chrome.runtime.sendMessage({ action: 'offscreen_ping' }).catch(() => {});
+                    if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                      const p = chrome.runtime.sendMessage({ action: 'offscreen_ping' });
+                      if (p && typeof p.catch === 'function') p.catch(() => {});
+                    }
                   } catch (e) {
                     Logger.debug('[OffscreenService] suppressed error', e && e.message);
                   }
@@ -739,10 +745,24 @@ async function sendToOffscreen(action, data, timeout = 30000) {
         offscreenPort.postMessage({ action, requestId, ...data });
       } catch (err) {
         // 실패 시 런타임으로 폴백
-        chrome.runtime.sendMessage({ action, requestId, ...data }).catch(() => {});
+        try {
+          if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+            const p = chrome.runtime.sendMessage({ action, requestId, ...data });
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+          }
+        } catch (se) {
+          Logger.debug('[OffscreenService] runtime sendMessage fallback failed', se && se.message);
+        }
       }
     } else {
-      chrome.runtime.sendMessage({ action, requestId, ...data }).catch(() => {});
+      try {
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          const p = chrome.runtime.sendMessage({ action, requestId, ...data });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+      } catch (se) {
+        Logger.debug('[OffscreenService] runtime sendMessage suppressed error', se && se.message);
+      }
     }
 
     chrome.runtime.onMessage.addListener(responseListener);

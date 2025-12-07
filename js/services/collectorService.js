@@ -582,7 +582,12 @@ export async function fetchAllChannelData() {
       // chrome.runtime.sendMessage로 브로드캐스트합니다. 또한 콘텐츠 스크립트
       // (탭) 쪽에서도 필요할 수 있으므로 tabs.query -> sendMessage도 실행합니다.
       try {
-        chrome.runtime.sendMessage({ action: 'cp_data_refreshed' });
+        // Use promise-based API and swallow rejections so unhandled rejections
+        // or unchecked chrome.runtime.lastError warnings don't appear in logs.
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          const p = chrome.runtime.sendMessage({ action: 'cp_data_refreshed' });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
       } catch (e) {
         Logger.debug('[fetchAllChannelData] chrome.runtime.sendMessage 실패:', e && e.message);
       }
@@ -593,7 +598,23 @@ export async function fetchAllChannelData() {
             tabs.forEach((tab) => {
               if (tab && tab.id) {
                 try {
-                  chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }, () => {});
+                  // Ensure runtime.lastError is checked in the callback so the console
+                  // doesn't emit "Unchecked runtime.lastError" when a tab doesn't
+                  // have a receiver (normal case for some pages).
+                  chrome.tabs.sendMessage(tab.id, { action: 'cp_data_refreshed' }, (resp) => {
+                    if (chrome.runtime.lastError) {
+                      const errMsg = chrome.runtime.lastError.message || '';
+                      // treat port closed / no receiver as benign (debug level)
+                      if (
+                        !errMsg.includes('message port closed') &&
+                        !errMsg.includes('Could not establish connection')
+                      ) {
+                        Logger.warn('[sendMessage] 탭 메시지 전송 실패:', errMsg);
+                      } else {
+                        Logger.debug('[sendMessage] 탭 메시지 포트 닫힘 (정상):', errMsg);
+                      }
+                    }
+                  });
                 } catch (e) {
                   // 탭에 content script가 없거나 메시지 실패는 조용히 무시
                 }
@@ -604,7 +625,6 @@ export async function fetchAllChannelData() {
       } catch (e) {
         Logger.debug('[fetchAllChannelData] chrome.tabs 쿼리/전송 실패:', e && e.message);
       }
-
     } catch (error) {
       Logger.error('[fetchAllChannelData] 수집 중 오류 발생:', error);
     }
@@ -651,26 +671,26 @@ export async function fetchImageAsBase64(url) {
       // background script를 통해 fetch (Service Worker에서는 더 나은 권한)
       const response = await chrome.runtime.sendMessage({
         action: 'fetch_image_as_base64',
-        url: url
+        url: url,
       });
-      
+
       if (response && response.success) {
         return { success: true, dataUrl: response.dataUrl };
       }
-      
+
       // 폴백: img 태그를 사용한 로딩 시도
       return await fetchImageViaImgTag(url);
     }
-    
+
     // 일반 이미지
     const res = await fetch(url, {
       mode: 'cors',
       credentials: 'omit',
-      cache: 'no-cache'
+      cache: 'no-cache',
     });
-    
+
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    
+
     const blob = await res.blob();
     const reader = new FileReader();
     return new Promise((resolve) => {
@@ -690,11 +710,11 @@ async function fetchImageViaImgTag(url) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    
+
     const timeout = setTimeout(() => {
       resolve({ success: false, error: 'Timeout' });
     }, 10000);
-    
+
     img.onload = () => {
       clearTimeout(timeout);
       try {
@@ -709,12 +729,12 @@ async function fetchImageViaImgTag(url) {
         resolve({ success: false, error: e.message });
       }
     };
-    
+
     img.onerror = () => {
       clearTimeout(timeout);
       resolve({ success: false, error: 'Image load failed' });
     };
-    
+
     img.src = url;
   });
 }

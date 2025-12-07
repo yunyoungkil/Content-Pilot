@@ -439,28 +439,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           // 네이버 이미지 특별 처리
-          if (msg.url.includes('postfiles.pstatic.net') || msg.url.includes('blogfiles.naver.net')) {
+          if (
+            msg.url.includes('postfiles.pstatic.net') ||
+            msg.url.includes('blogfiles.naver.net')
+          ) {
             const response = await fetch(msg.url, {
               method: 'GET',
               headers: {
-                'Referer': 'https://blog.naver.com/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                Referer: 'https://blog.naver.com/',
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
               },
               credentials: 'omit',
-              cache: 'no-cache'
+              cache: 'no-cache',
             });
-            
+
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}`);
             }
-            
+
             const blob = await response.blob();
             const buffer = await blob.arrayBuffer();
             const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
             const mimeType = blob.type || 'image/jpeg';
             return { success: true, dataUrl: `data:${mimeType};base64,${base64}` };
           }
-          
+
           // 일반 이미지 처리
           return await fetchImageAsBase64(msg.url);
         } catch (error) {
@@ -509,7 +513,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
       }
     };
-    return handleAsync(generateDraftFromIdea(msg.data, opts));
+    const resultPromise = generateDraftFromIdea(msg.data, opts);
+    resultPromise
+      .then((result) => {
+        console.debug('[DIAG background generate_draft_from_idea] AI response:', {
+          success: result?.success,
+          hasSeoTitle: !!result?.seoTitle,
+          seoTitle: result?.seoTitle,
+          hasDraft: !!result?.draft,
+        });
+      })
+      .catch(() => {});
+    return handleAsync(resultPromise);
   }
   if (msg.action === 'generate_idea_briefing') {
     // Support callers that send payload either top-level or under `data`. Normalize options so both
@@ -711,12 +726,60 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ideaData = JSON.parse(msg.data);
         const status = msg.status || 'ideas';
         const channelId = msg.channelId || null;
-        const result = await addIdeaToKanban(ideaData, status, channelId);
+        // When running inside the background worker, avoid nested runtime
+        // messaging for generate_idea_briefing (that causes port/response races).
+        // Ask the kanban service to skip auto-briefing so background can
+        // perform briefing directly and reliably.
+        const result = await addIdeaToKanban(ideaData, status, channelId, true);
 
         // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
         kanbanDataCache = null;
         kanbanDataCacheTimestamp = 0;
         Logger.debug(`[add_idea_to_kanban] 캐시 무효화 완료`);
+
+        // If the card was added successfully, trigger AI briefing here
+        // in the background asynchronously (best-effort) so the request
+        // that added the card doesn't block on long LLM calls.
+        (async () => {
+          try {
+            if (result && result.success && result.firebaseKey) {
+              const cardId = result.firebaseKey;
+              Logger.info(
+                '[add_idea_to_kanban] 백그라운드에서 AI 브리핑 생성 시작 - cardId:',
+                cardId
+              );
+              // Extract title/description/origin from ideaData for context
+              const title = ideaData?.title || '';
+              const description = ideaData?.description || '';
+              const options = {
+                status,
+                generateOutline: true,
+                generateKeywords: true,
+                generateLongTail: true,
+                generateMainKeywords: true,
+                originType: ideaData?.origin?.type ?? null,
+                origin: ideaData?.origin ?? null,
+              };
+              const resultBrief = await generateIdeaBriefing(cardId, title, description, options);
+              // generateIdeaBriefing returns undefined on success for backward
+              // compatibility; treat undefined or {success:true} as success.
+              if (resultBrief === undefined || (resultBrief && resultBrief.success)) {
+                Logger.biz('[add_idea_to_kanban] AI 브리핑 백그라운드 생성 성공 - cardId:', cardId);
+              } else {
+                Logger.warn(
+                  '[add_idea_to_kanban] AI 브리핑 백그라운드 생성 실패 - cardId:',
+                  cardId,
+                  resultBrief
+                );
+              }
+            }
+          } catch (err) {
+            Logger.error(
+              '[add_idea_to_kanban] 백그라운드 AI 브리핑 처리 중 예외:',
+              err && err.message
+            );
+          }
+        })();
 
         return result;
       })()
@@ -1855,7 +1918,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           // only broadcast if DB actually changed so other contexts don't react to no-op deletions
           if (result && result.success && result.changed) {
-            chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
+            try {
+              if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                chrome.runtime
+                  .sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } })
+                  .catch(() => {});
+              }
+            } catch (e) {
+              const { Logger } = require('./js/utils.js');
+              Logger.debug('[Background] broadcast sendMessage failed:', e && e.message);
+            }
           }
         } catch (e) {
           const { Logger } = require('./js/utils.js');

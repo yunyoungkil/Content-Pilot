@@ -21,9 +21,13 @@
       // Uncaught(in promise) error when other listeners mis-handle
       // the message channel (we don't require a response here)
       try {
-        chrome.runtime
-          .sendMessage({ action: 'offscreen_ready_beacon', immediate: true })
-          .catch(() => {});
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          const p = chrome.runtime.sendMessage({
+            action: 'offscreen_ready_beacon',
+            immediate: true,
+          });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
       } catch (e) {}
       console.debug('[Offscreen-Beacon] sent offscreen_ready_beacon via sendMessage');
       return true;
