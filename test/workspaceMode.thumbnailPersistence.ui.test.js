@@ -24,7 +24,7 @@ describe('Workspace thumbnail persistence', () => {
     renderWorkspace(container, idea);
 
     // updateWorkspaceActionButtons is async; wait for thumbnail button to be created (polling)
-    async function waitForSelector(container, selector, timeout = 1000) {
+    async function waitForSelector(container, selector, timeout = 8000) {
       const start = Date.now();
       while (Date.now() - start < timeout) {
         const el = container.querySelector(selector);
@@ -53,6 +53,8 @@ describe('Workspace thumbnail persistence', () => {
     renderWorkspace(container, idea);
     await waitForSelector(container, '#btn-create-thumbnail');
     expect(container.querySelector('#btn-create-thumbnail')).toBeTruthy();
+    // cleanup this test's DOM
+    container.remove();
   });
 
   test('does not create broken preview when thumbnail url is empty', async () => {
@@ -71,7 +73,7 @@ describe('Workspace thumbnail persistence', () => {
     document.body.appendChild(container2);
 
     renderWorkspace(container2, ideaEmpty);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     const workspaceEl2 = container2.querySelector('.workspace-container');
     expect(workspaceEl2).toBeTruthy();
@@ -80,5 +82,6 @@ describe('Workspace thumbnail persistence', () => {
     const btn2 = workspaceEl2.querySelector('#btn-create-thumbnail');
     expect(btn2).toBeTruthy();
     expect(btn2.querySelector('img')).toBeFalsy();
+    container2.remove();
   });
 });

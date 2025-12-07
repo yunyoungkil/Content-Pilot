@@ -32,10 +32,20 @@ describe('Workspace UI - publish info after draft generation', () => {
     const response = { draft: '## content', seoTitle: 'SEO From Draft' };
     applyDraftResponseToIdea(idea, response);
 
-    // small wait and assert that publish-info shows updated seoTitle
-    await global.testHelpers.waitForMs(50);
-    const seoInput = container.querySelector('#seo-title-input');
+    // Poll until the seo-title input reflects the draft response
+    async function waitForValue(selector, expected, timeout = 2000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el && el.value === expected) return el;
+        await global.testHelpers.waitForMs(30);
+      }
+      return null;
+    }
+
+    const seoInput = await waitForValue('#seo-title-input', 'SEO From Draft', 2000);
     expect(seoInput).toBeTruthy();
     expect(seoInput.value).toBe('SEO From Draft');
+    container.remove();
   });
 });

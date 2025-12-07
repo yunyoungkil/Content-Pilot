@@ -28,7 +28,7 @@ describe('Workspace UI - publish info SEO title', () => {
     document.body.appendChild(container);
     renderWorkspace(container, idea);
 
-    // wait for initial render / setTimeouts to settle then click publish-info tab to force area refresh
+    // wait for initial render / async handlers to settle then click publish-info tab to force area refresh
     await global.testHelpers.waitForMs(300);
     // click publish-info tab to force the area to refresh and call showPublishInfo
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
@@ -42,11 +42,20 @@ describe('Workspace UI - publish info SEO title', () => {
     // eslint-disable-next-line no-console
     console.log('[TEST] full container HTML:', container.innerHTML);
 
-    // Wait a little longer to allow any asynchronous callbacks (chrome.runtime.sendMessage) to finish
-    await global.testHelpers.waitForMs(200);
+    // Wait until the seo-title input is present with the expected value (poll to be robust)
+    async function waitForValue(selector, expected, timeout = 2000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el && el.value === expected) return el;
+        await global.testHelpers.waitForMs(50);
+      }
+      return null;
+    }
 
-    const seoInput = container.querySelector('#seo-title-input');
+    const seoInput = await waitForValue('#seo-title-input', 'SEO Title from PublishInfo', 3000);
     expect(seoInput).toBeTruthy();
     expect(seoInput.value).toBe('SEO Title from PublishInfo');
+    container.remove();
   });
 });

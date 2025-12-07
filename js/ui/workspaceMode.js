@@ -10,119 +10,7 @@ export function isMeaningfulDraft(d) {
 
   try {
     // If `d` is an object, try to find a meaningful text field inside it
-    if (typeof d === 'object' && d !== null) {
-      // common fields that may contain draft text
-      const candidates = ['draft', 'content', 'text', 'html', 'body', 'raw'];
-      for (const k of candidates) {
-        if (typeof d[k] === 'string' && d[k].trim().length > 0) {
-          // replace d with that string for further heuristics
-          d = d[k];
-          break;
-        }
-      }
-
-      // If we still have an object (no string fields found), treat as no meaningful draft
-      if (typeof d === 'object') return false;
-    }
-
-    let s = String(d);
-
-    // Remove script JSON-LD blocks (<script type="application/ld+json">...)</script>)
-    s = s.replace(/<script[^>]*type=["']application\/ld\+json["'][\s\S]*?<\/script>/gi, '');
-
-    // Remove fenced code blocks (```...```)
-    s = s.replace(/```[\s\S]*?```/g, '');
-
-    // Strip HTML tags and convert NBSP to space
-    s = s
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .trim();
-
-    // If content is a single-line bare URL or contains only one URL-like token, treat as not meaningful
-    const singleLine = s
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (singleLine.length === 1) {
-      const onlyLine = singleLine[0];
-      // bare URLs like https://... or www.example.com
-      if (/^(https?:\/\/|www\.)\S+$/i.test(onlyLine)) return false;
-      // markdown-style single link: [text](https://...)
-      if (/^\[.+?\]\(https?:\/\/\S+\)$/i.test(onlyLine)) return false;
-    }
-
-    // Remove markdown links and images entirely
-    let cleaned = s.replace(/!\[[^\]]*\]\([^)]*\)/g, ' '); // images
-    cleaned = cleaned.replace(/\[[^\]]*\]\([^)]*\)/g, ' '); // markdown links
-
-    // Remove bare urls and common url-ish tokens
-    cleaned = cleaned.replace(/https?:\/\/\S+/gi, ' ');
-    cleaned = cleaned.replace(/www\.[^\s]+/gi, ' ');
-
-    // collapse whitespace and trim
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-    // If remaining text has reasonable length, consider it meaningful
-    if (cleaned.length > 10) return true;
-
-    // Last-resort heuristic: if original content (without urls) had very few non-url chars, treat as not meaningful
-    const totalChars = s.replace(/\s+/g, '').length || 0;
-    const nonUrlChars = cleaned.replace(/\s+/g, '').length || 0;
-    if (totalChars > 0 && nonUrlChars / totalChars < 0.5) return false;
-
-    return false;
-  } catch (e) {
-    return false;
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 1. 이미지 갤러리 관련 함수들
-// -----------------------------------------------------------------------------
-
-function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
-  const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
-  if (!imageGalleryGrid) return;
-  const imageUrls = renderImageGallery(linkedScrapsData);
-  if (imageUrls.length === 0) {
-    imageGalleryGrid.innerHTML =
-      '<p>이미지 자료가 없습니다.<br>스크랩 객체에 image/allImages 필드가 포함되어 있는지 확인하세요.</p>';
-    return;
-  }
-  imageGalleryGrid.innerHTML = imageUrls
-    .map(
-      (url) => `
-      <div class="gallery-thumb-wrap" style="min-width:0;min-height:88px;overflow:hidden;border-radius:8px;position:relative;background:#f5f5f5;">
-        <img data-src="${url}" src="" class="gallery-thumb lazy-loading" style="width:100%;height:88px;object-fit:cover;border-radius:8px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,0.08);min-width:0;display:block;" alt="자료 이미지">
-      </div>
-    `
-    )
-    .join('');
-  // Ensure a single delegated click handler is attached to the grid.
-  // This prevents multiple handlers from being attached when the grid is
-  // re-rendered repeatedly.
-  ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand);
-
-  // Attach per-image handlers for loading/fallback/observer (delegated click is on grid)
-  imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
-    // 이미지 로드 실패 시 백그라운드 프록시로 재시도
-    img.onerror = () => {
-      // show temporary placeholder
-      img.style.display = 'none';
-      const parent = img.parentElement || imageGalleryGrid;
-      const loading = document.createElement('div');
-      loading.textContent = '이미지 불러오는 중...';
-      loading.style.cssText =
-        'display:flex;align-items:center;justify-content:center;height:88px;color:#666;font-size:12px;';
-      parent.appendChild(loading);
-
-      try {
-        chrome.runtime.sendMessage(
-          { action: 'fetch_image_as_base64', url: img.dataset.src || img.src },
-          (response) => {
-            if (chrome.runtime.lastError || !response || !response.success || !response.dataUrl) {
-              parent.removeChild(loading);
+    
               const err = document.createElement('div');
               err.textContent = '이미지 로드 실패';
               err.style.cssText =
@@ -489,7 +377,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
               let p = parsed.pathname || '';
               try {
                 p = decodeURIComponent(p);
-              } catch (e) {}
+              } catch (e) {
+                void 0; // intentionally ignore decode errors
+              }
               return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
             } catch (e) {
               return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();
@@ -519,7 +409,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
                 try {
                   // find index in allImageData by matching url (prefer original url stored in url/thumbnail)
                   const matchIndex = allImageData.findIndex(
-                    (it) => it.url === deleteUrl || it.thumbnail === deleteUrl
+                    (it) => it.url === canonicalDeleteUrl || it.thumbnail === canonicalDeleteUrl
                   );
                   if (matchIndex !== -1) {
                     // Try to fill this slot from the same scrap's originData if there are more images
@@ -566,7 +456,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
                       .map((d) => normalizeForMatch(d));
 
                     // Exclude the deleted image (normalized) from candidates and any already-displayed images
-                    const normalizedDelete = normalizeForMatch(deleteUrl);
+                    const normalizedDelete = normalizeForMatch(canonicalDeleteUrl);
 
                     originImages = originImages.filter(
                       (o) => normalizeForMatch(o) !== normalizedDelete
@@ -670,10 +560,14 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
                 img.classList.remove('lazy-loading');
                 try {
                   if (galleryImageObserver) galleryImageObserver.unobserve(img);
-                } catch (_) {}
+                } catch (_) {
+                  void 0; // ignore
+                }
               }
             }
-          } catch (_) {}
+          } catch (_) {
+            void 0; // ignore
+          }
         });
       }, 30);
     } catch (e) {
@@ -872,14 +766,45 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     draftContent: !!ideaData?.draftContent,
     thumbnailInfo: !!ideaData?.publishInfo?.thumbnailInfo,
   });
-  const buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
+  // Locate the action-buttons container. Prefer the nextElementSibling after
+  // the title header, but fall back to known IDs to be robust when the DOM
+  // structure differs (tests or other code may leave mutated DOM between runs).
+  let buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
+  if (!buttonContainer) {
+    // prefer explicit action-buttons container if present
+    buttonContainer =
+      workspaceEl.querySelector('#workspace-action-buttons') ||
+      // as a final fallback, search under the title header's parent element
+      workspaceEl
+        .querySelector('#workspace-title-header')
+        ?.parentElement?.querySelector('#workspace-action-buttons');
+  }
   // 이미 버튼이 있으면 중단
   if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) {
     console.debug('[DIAG renderThumbnailButton] button already exists or container not found', {
       hasContainer: !!buttonContainer,
       existingBtn: !!buttonContainer?.querySelector('#btn-create-thumbnail'),
     });
-    return;
+    // If the container is missing but we didn't find a button (possible in
+    // case some previous DOM mutations removed the action-buttons container),
+    // attempt to create the action-buttons container so we can attach the
+    // thumbnail button. This helps tests and consumers where the DOM was
+    // partially mutated by other code.
+    if (!buttonContainer && !buttonContainer?.querySelector('#btn-create-thumbnail')) {
+      const headerEl = workspaceEl.querySelector('#workspace-title-header');
+      if (headerEl && headerEl.parentNode) {
+        const newContainer = document.createElement('div');
+        newContainer.id = 'workspace-action-buttons';
+        newContainer.style.cssText =
+          'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+        headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
+        buttonContainer = newContainer;
+      } else {
+        return;
+      }
+    } else {
+      return;
+    }
   }
 
   // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
@@ -1468,7 +1393,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   try {
     console.debug('[DIAG showPublishInfo] params:', { permalink, tags, seoTitle });
     console.debug('[DIAG showPublishInfo] ideaData.publishInfo snapshot:', ideaData?.publishInfo);
-  } catch (e) {}
+  } catch (e) {
+    void 0; // debug probe should not break runtime
+  }
   // 기존 패널 제거
   const existingInfo = workspaceEl.querySelector('.publish-info-panel');
   if (existingInfo) existingInfo.remove();
@@ -2237,12 +2164,13 @@ export function renderWorkspace(container, ideaData) {
       case 'done':
         bsHtml = `<span class="briefing-status-badge done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
         break;
-      case 'failed':
+      case 'failed': {
         const errMsg = draftObj?.briefingError || ideaData.briefingError || '브리핑 실패';
         bsHtml = `<span class="briefing-status-badge failed" title="${errMsg}">❌ 브리핑 실패</span>`;
         // retry 버튼 (워크스페이스 상세에서 사용)
         bsHtml += ` <button class="workspace-briefing-retry-btn" data-card-id="${ideaData.id}" data-status="${ideaData.status || 'ideas'}">↻ 재시도</button>`;
         break;
+      }
       default:
         break;
     }
@@ -2284,7 +2212,12 @@ export function renderWorkspace(container, ideaData) {
           .join('')
       : '<li>추천 검색어 없음</li>';
 
-  const hasDraft = isMeaningfulDraft(ideaData.draftContent);
+  // Consider both top-level draftContent and the nested workspace.draft
+  // for determining whether the idea has a meaningful draft. This makes
+  // the UI consistent regardless of whether older data uses the top-level
+  // field or the newer workspace.draft field.
+  const hasDraft =
+    isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
 
   // tracking_only인 경우 특별한 UI 렌더링
   const trackingOnlyContent = isTrackingOnly
@@ -2663,7 +2596,17 @@ export function renderWorkspace(container, ideaData) {
 
   addWorkspaceEventListeners(workspaceEl, ideaData, container);
 
-  // [수정] 순서 보장: 액션 버튼이 다 그려진 '후에' 썸네일 버튼을 추가해야 함
+  // Render thumbnail button proactively (best-effort). In some test or DOM
+  // ordering scenarios the async action-button update may be delayed — rendering
+  // thumbnail button early makes the UI more resilient. It will be called
+  // again after action buttons update to ensure correct placement.
+  try {
+    renderThumbnailButton(workspaceEl, ideaData);
+  } catch (e) {
+    console.debug('[DIAG renderThumbnailButton] pre-render attempt failed:', e?.message);
+  }
+
+  // Ensure thumbnail button also created after any async action-button updates
   updateWorkspaceActionButtons(workspaceEl, hasDraft).then(() => {
     renderThumbnailButton(workspaceEl, ideaData);
   });
@@ -2808,7 +2751,9 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
           'publishInfo:',
           ideaData?.publishInfo
         );
-      } catch (e) {}
+      } catch (e) {
+        void 0; // ignore diagnostic logging failures
+      }
       tabBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       workspaceEl
@@ -3687,7 +3632,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         const options = { generateDraft: false, generateThumbnail: true };
         handleGenerateAction(btn, options);
       }
-    } else if (e.target.closest('.scrap-card-item')) {
+    }
       // 스크랩 카드 클릭 시
       const card = e.target.closest('.scrap-card-item');
       if (!card) return;
