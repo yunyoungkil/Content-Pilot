@@ -32,7 +32,6 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
 
   // Attach per-image handlers for loading/fallback/observer (delegated click is on grid)
   imageGalleryGrid.querySelectorAll('.gallery-thumb').forEach((img) => {
-
     // 이미지 로드 실패 시 백그라운드 프록시로 재시도
     img.onerror = () => {
       // show temporary placeholder
@@ -74,11 +73,11 @@ function _updateImageGallery(resourceLibrary, linkedScrapsData, sendCommand) {
       }
     };
     // register intersection observer for lazy loading
-      try {
-        ensureGalleryImageObserver().observe(img);
-      } catch (e) {
-        /* ignore */
-      }
+    try {
+      ensureGalleryImageObserver().observe(img);
+    } catch (e) {
+      /* ignore */
+    }
   });
 }
 
@@ -802,10 +801,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   const buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
   // 이미 버튼이 있으면 중단
   if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) {
-    console.debug(
-      '[DIAG renderThumbnailButton] button already exists or container not found',
-      { hasContainer: !!buttonContainer, existingBtn: !!buttonContainer?.querySelector('#btn-create-thumbnail') }
-    );
+    console.debug('[DIAG renderThumbnailButton] button already exists or container not found', {
+      hasContainer: !!buttonContainer,
+      existingBtn: !!buttonContainer?.querySelector('#btn-create-thumbnail'),
+    });
     return;
   }
 
@@ -842,7 +841,8 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     const finalUrl = (urlObj?.url_16x9 || urlObj?.url_4x3 || urlObj?.url_1x1 || '')?.trim();
     if (finalUrl) {
       const preview = document.createElement('img');
-      preview.style.cssText = 'width:32px; height:32px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle;';
+      preview.style.cssText =
+        'width:32px; height:32px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle;';
       preview.src = finalUrl;
       // set a helpful alt text to avoid showing raw fallback characters like '?'
       preview.alt = urlObj?.altText || ideaData.seoTitle || ideaData.title || '썸네일 이미지';
@@ -854,18 +854,18 @@ function renderThumbnailButton(workspaceEl, ideaData) {
           /* ignore */
         }
       };
-    const wrapper = document.createElement('span');
-    wrapper.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
-    wrapper.appendChild(preview);
-    const textNode = document.createElement('span');
-    textNode.textContent = thumbBtn.textContent;
-    wrapper.appendChild(textNode);
-    // replace text content with wrapper
-    thumbBtn.textContent = '';
-    thumbBtn.appendChild(wrapper);
+      const wrapper = document.createElement('span');
+      wrapper.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
+      wrapper.appendChild(preview);
+      const textNode = document.createElement('span');
+      textNode.textContent = thumbBtn.textContent;
+      wrapper.appendChild(textNode);
+      // replace text content with wrapper
+      thumbBtn.textContent = '';
+      thumbBtn.appendChild(wrapper);
+    }
+    // close hasThumbnailUrls block
   }
-  // close hasThumbnailUrls block
-}
 
   // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
   const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
@@ -878,7 +878,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     buttonContainer.appendChild(thumbBtn);
   }
 
-  console.debug('[DIAG renderThumbnailButton] creating thumbnail button, hasThumbnailUrls:', hasThumbnailUrls);
+  console.debug(
+    '[DIAG renderThumbnailButton] creating thumbnail button, hasThumbnailUrls:',
+    hasThumbnailUrls
+  );
 
   // 이벤트 연결
   thumbBtn.onclick = () => {
@@ -1886,69 +1889,69 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
     });
   }
 
-    // Ensure the action buttons reflect current draft state
-    try {
-      const hasGenerateBtn = !!buttonContainer.querySelector('#generate-draft-btn');
-      const hasRegenerateBtn = !!buttonContainer.querySelector('#regenerate-draft-btn');
-      const hasRegenerateThumbBtn = !!buttonContainer.querySelector('#regenerate-thumbnail-btn');
-      const hasDeleteDraftBtn = !!buttonContainer.querySelector('#delete-draft-in-workspace');
+  // Ensure the action buttons reflect current draft state
+  try {
+    const hasGenerateBtn = !!buttonContainer.querySelector('#generate-draft-btn');
+    const hasRegenerateBtn = !!buttonContainer.querySelector('#regenerate-draft-btn');
+    const hasRegenerateThumbBtn = !!buttonContainer.querySelector('#regenerate-thumbnail-btn');
+    const hasDeleteDraftBtn = !!buttonContainer.querySelector('#delete-draft-in-workspace');
 
-      // If draft exists but regenerate buttons are missing, create them
-      if (hasDraft) {
-        if (!hasRegenerateBtn) {
-          // remove generate button (if present)
-          const genBtn = buttonContainer.querySelector('#generate-draft-btn');
-          if (genBtn && genBtn.parentNode) genBtn.remove();
+    // If draft exists but regenerate buttons are missing, create them
+    if (hasDraft) {
+      if (!hasRegenerateBtn) {
+        // remove generate button (if present)
+        const genBtn = buttonContainer.querySelector('#generate-draft-btn');
+        if (genBtn && genBtn.parentNode) genBtn.remove();
 
-          const fragment = document.createDocumentFragment();
+        const fragment = document.createDocumentFragment();
 
-          const regenTextBtn = document.createElement('button');
-          regenTextBtn.id = 'regenerate-draft-btn';
-          regenTextBtn.style.cssText = 'flex:1; min-width:140px;';
-          regenTextBtn.textContent = '📝 텍스트만 다시 쓰기';
-          fragment.appendChild(regenTextBtn);
+        const regenTextBtn = document.createElement('button');
+        regenTextBtn.id = 'regenerate-draft-btn';
+        regenTextBtn.style.cssText = 'flex:1; min-width:140px;';
+        regenTextBtn.textContent = '📝 텍스트만 다시 쓰기';
+        fragment.appendChild(regenTextBtn);
 
-          if (!hasRegenerateThumbBtn) {
-            const regenThumbBtn = document.createElement('button');
-            regenThumbBtn.id = 'regenerate-thumbnail-btn';
-            regenThumbBtn.style.cssText = 'flex:1; min-width:140px;';
-            regenThumbBtn.textContent = '🎨 썸네일만 다시 그리기';
-            fragment.appendChild(regenThumbBtn);
-          }
-
-          if (!hasDeleteDraftBtn) {
-            const delBtn = document.createElement('button');
-            delBtn.id = 'delete-draft-in-workspace';
-            delBtn.className = 'draft-delete-btn';
-            delBtn.textContent = '❌ 초안 삭제';
-            fragment.appendChild(delBtn);
-          }
-
-          // Insert at beginning to match original ordering
-          buttonContainer.insertBefore(fragment, buttonContainer.firstChild);
+        if (!hasRegenerateThumbBtn) {
+          const regenThumbBtn = document.createElement('button');
+          regenThumbBtn.id = 'regenerate-thumbnail-btn';
+          regenThumbBtn.style.cssText = 'flex:1; min-width:140px;';
+          regenThumbBtn.textContent = '🎨 썸네일만 다시 그리기';
+          fragment.appendChild(regenThumbBtn);
         }
-      } else {
-        // no draft: ensure generate button exists, and remove regenerate / delete
-        if (!hasGenerateBtn) {
-          // remove any regenerate/delete buttons
-          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
-            (id) => {
-              const el = buttonContainer.querySelector(`#${id}`);
-              if (el && el.parentNode) el.remove();
-            }
-          );
 
-          const genBtn = document.createElement('button');
-          genBtn.id = 'generate-draft-btn';
-          genBtn.style.cssText = 'flex:1;';
-          genBtn.textContent = '✨ AI 초안 생성';
-          buttonContainer.appendChild(genBtn);
+        if (!hasDeleteDraftBtn) {
+          const delBtn = document.createElement('button');
+          delBtn.id = 'delete-draft-in-workspace';
+          delBtn.className = 'draft-delete-btn';
+          delBtn.textContent = '❌ 초안 삭제';
+          fragment.appendChild(delBtn);
         }
+
+        // Insert at beginning to match original ordering
+        buttonContainer.insertBefore(fragment, buttonContainer.firstChild);
       }
-    } catch (e) {
-      // non-fatal
-      console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
+    } else {
+      // no draft: ensure generate button exists, and remove regenerate / delete
+      if (!hasGenerateBtn) {
+        // remove any regenerate/delete buttons
+        ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
+          (id) => {
+            const el = buttonContainer.querySelector(`#${id}`);
+            if (el && el.parentNode) el.remove();
+          }
+        );
+
+        const genBtn = document.createElement('button');
+        genBtn.id = 'generate-draft-btn';
+        genBtn.style.cssText = 'flex:1;';
+        genBtn.textContent = '✨ AI 초안 생성';
+        buttonContainer.appendChild(genBtn);
+      }
     }
+  } catch (e) {
+    // non-fatal
+    console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
+  }
 }
 
 export function renderWorkspace(container, ideaData) {
@@ -5595,5 +5598,3 @@ async function handleGenerateAction(btn, options) {
     );
   });
 }
-
-  
