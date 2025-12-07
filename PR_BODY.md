@@ -40,7 +40,7 @@ Summary:
 
 Tests:
 
-- `npm test` passes locally: 10 suites, 99 tests passed (8 skipped)
+- Full test-suite run completed locally: all suites passed after the latest changes (including new draft-detection tests).
 - `npm run build` compiles successfully
 
 Lint:
@@ -49,7 +49,8 @@ Lint:
 
 Additional change (this push):
 
-- `js/services/aiService.js`: switched the hard-coded `CONSTANTS.USER_ID` to the dynamic `getCurrentUserId()` when uploading AI-generated images so uploads go under the correct per-user path instead of `default_user`.
+ - `js/services/aiService.js`: switched the hard-coded `CONSTANTS.USER_ID` to the dynamic `getCurrentUserId()` when uploading AI-generated images so uploads go under the correct per-user path instead of `default_user`.
+ - `js/ui/workspaceMode.js` + `js/ui/kanbanMode.js`: added a centralized `isMeaningfulDraft` helper (improved heuristics) and updated UI logic so link-only/placeholder drafts are not treated as meaningful. This includes tests that ensure Markdown-link-only or bare-URL-only outputs do not cause '초안 완료' badges or action-button flips.
   Notes & Follow-up:
 - Remove `globalThis.initializeFirebase` alias and convert all callers to `import { initializeFirebase }`.
 - Address remaining `no-unused-vars` warnings via small PRs grouped by file.
