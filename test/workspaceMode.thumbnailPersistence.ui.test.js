@@ -23,8 +23,17 @@ describe('Workspace thumbnail persistence', () => {
 
     renderWorkspace(container, idea);
 
-    // updateWorkspaceActionButtons is async; wait a tick for thumbnail button to be created
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // updateWorkspaceActionButtons is async; wait for thumbnail button to be created (polling)
+    async function waitForSelector(container, selector, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el) return el;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return null;
+    }
+    await waitForSelector(container, '#btn-create-thumbnail');
 
     const workspaceEl = container.querySelector('.workspace-container');
     expect(workspaceEl).toBeTruthy();
@@ -42,7 +51,7 @@ describe('Workspace thumbnail persistence', () => {
     // simulate leaving and re-entering: re-render workspace with same idea object
     // ensure the thumbnail button still exists (persistence)
     renderWorkspace(container, idea);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForSelector(container, '#btn-create-thumbnail');
     expect(container.querySelector('#btn-create-thumbnail')).toBeTruthy();
   });
 

@@ -725,18 +725,20 @@ function createKanbanCard(id, data, status) {
   const hasDraftContent = isMeaningfulDraft(data.draftContent);
   const hasWorkspaceDraft = isMeaningfulDraft(data.workspace?.draft);
 
+  // 브리핑 상태 retrieval: prefer top-level card fields but fall back to nested draft object
+  const draftObj = data.workspace?.draft || data.draft || null;
+  const cardLevelStatus = data.briefingStatus ?? null;
+  const cardLevelProgress = typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
+  const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
+  const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+
+  // If draft textual content exists, show the '초안 완료' meta. Object-only drafts will not count.
   if (hasDraftContent || hasWorkspaceDraft) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
+  }
 
-    // 브리핑 상태가 있으면 카드에 상태 배지 표시
-    const draftObj = data.workspace?.draft || data.draft || null;
-    // Prefer top-level card fields but fall back to nested draft object
-    const cardLevelStatus = data.briefingStatus ?? null;
-    const cardLevelProgress =
-      typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
-    const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
-    const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
-    if (bs) {
+  // 브리핑 상태가 있으면 카드에 상태 배지 표시 — show status badges regardless of whether textual draft exists
+  if (bs) {
       let bsHtml = '';
       let bsTitle = '';
       switch (bs) {
@@ -772,7 +774,6 @@ function createKanbanCard(id, data, status) {
 
       if (bsHtml) metaInfoHtml += bsHtml;
     }
-  }
 
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;

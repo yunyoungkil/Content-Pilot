@@ -145,4 +145,28 @@ describe('Kanban UI - briefing status badges', () => {
     expect(mdBadge).toBeFalsy();
     expect(urlBadge).toBeFalsy();
   });
+
+  test('does not show draft badge for draft object that only contains status metadata', async () => {
+    const { renderKanban, updateKanbanUI } = await import('../js/ui/kanbanMode.js');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderKanban(container);
+
+    const allCards = {
+      ideas: {
+        'card-status-only': {
+          title: 'Status only draft',
+          workspace: { draft: { briefingStatus: 'done', briefingCompletedAt: Date.now() } },
+        },
+      },
+      'in-progress': {},
+      done: {},
+    };
+
+    await updateKanbanUI(allCards);
+
+    const badge = container.querySelector('[data-id="card-status-only"] .draft-status-count');
+    expect(badge).toBeFalsy();
+  });
 });

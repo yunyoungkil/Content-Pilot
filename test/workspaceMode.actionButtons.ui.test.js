@@ -79,4 +79,27 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });
+
+  test('draft object with only status metadata should not be treated as a draft', async () => {
+    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+
+    const idea = {
+      id: 'card-action-4',
+      title: 'Status-Only Draft Test',
+      status: 'ideas',
+      workspace: { draft: { briefingStatus: 'done', briefingCompletedAt: Date.now() } },
+    };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    renderWorkspace(container, idea);
+
+    const workspaceEl = container.querySelector('.workspace-container');
+    expect(workspaceEl).toBeTruthy();
+
+    // object-only draft should not be considered as having content
+    await new Promise((r) => setTimeout(r, 20));
+    expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
+    expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
+  });
 });

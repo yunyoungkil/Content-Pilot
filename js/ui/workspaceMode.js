@@ -9,6 +9,22 @@ export function isMeaningfulDraft(d) {
   if (!d) return false;
 
   try {
+    // If `d` is an object, try to find a meaningful text field inside it
+    if (typeof d === 'object' && d !== null) {
+      // common fields that may contain draft text
+      const candidates = ['draft', 'content', 'text', 'html', 'body', 'raw'];
+      for (const k of candidates) {
+        if (typeof d[k] === 'string' && d[k].trim().length > 0) {
+          // replace d with that string for further heuristics
+          d = d[k];
+          break;
+        }
+      }
+
+      // If we still have an object (no string fields found), treat as no meaningful draft
+      if (typeof d === 'object') return false;
+    }
+
     let s = String(d);
 
     // Remove script JSON-LD blocks (<script type="application/ld+json">...)</script>)
