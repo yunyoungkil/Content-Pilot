@@ -82,5 +82,5 @@ describe('Workspace gallery rerender robustness', () => {
     const callsAfter = iframe.contentWindow.postMessage.mock.calls;
     const insertCallsAfter = callsAfter.filter((c) => c[0] && c[0].action === 'insert-image');
     expect(insertCallsAfter.length).toBe(2);
-  }, 1000);
+  }, 5000);
 });

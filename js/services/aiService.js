@@ -368,6 +368,58 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
     cleanedDraft = String(rawDraft || '').trim();
   }
 
+  // Heuristic: remove trailing/standalone example-only links that sometimes come from LLMs
+  // Example problematic outputs look like:
+  //   [완벽 가이드] ...](https://some-site/entry/long-url)
+  // or a file containing only a raw URL. These are not useful as the draft body
+  // and should be filtered out so the app can treat them as a failed generation.
+  try {
+    const lines = cleanedDraft.split(/\r?\n/).map((l) => l.trim());
+    const isLinkOnly = (ln) => {
+      if (!ln) return false;
+      try {
+        // direct URL only
+        if (/^https?:\/\/[\S]+$/i.test(ln)) return true;
+        // angled url: <https://...>
+        if (/^<https?:\/\/[^>]+>$/i.test(ln)) return true;
+
+        // markdown link: [text](https://...)
+        if (/^\[[^\]]+\]\(https?:\/\/[^)]+\)$/i.test(ln)) return true;
+
+        // More robust heuristic: if the line contains one or more URLs and
+        // after stripping URLs and simple markdown tokens the remaining text is small,
+        // treat it as a link-only example line.
+        const urls = ln.match(/https?:\/\/[\S]+/gi) || [];
+        if (urls.length > 0) {
+          const withoutUrls = ln.replace(/https?:\/\/[\S]+/gi, '').replace(/\[.*?\]|\(.*?\)|<.*?>/g, '').trim();
+          if (withoutUrls.length < 15) return true;
+        }
+      } catch (e) {
+        return false;
+      }
+      return false;
+    };
+
+    let filtered = lines.filter((l) => !isLinkOnly(l));
+    // If the draft is a single line containing a URL, treat it as example-only
+    // (many LLM outputs can be a single-line example link). Force fallback.
+    if (lines.length === 1 && /https?:\/\//i.test(lines[0])) {
+      filtered = [];
+    }
+    if (filtered.length > 0 && filtered.join('\n').trim().length >= 40) {
+      // Replace cleanedDraft with filtered text when filtering likely removed only noise
+      cleanedDraft = filtered.join('\n').trim();
+    } else if (
+      filtered.length === 0 &&
+      (lines.some((l) => isLinkOnly(l)) || lines.some((l) => /https?:\/\//i.test(l)))
+    ) {
+      // The whole draft was link/example-only — treat as failure and use fallback
+      cleanedDraft = `# ${ideaData.title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
+    }
+  } catch (e) {
+    Logger.debug('[processDraftResponse] example link filter failed', e);
+  }
+
   if (!cleanedDraft || cleanedDraft.trim().length === 0) {
     // last fallback - minimal placeholder
     cleanedDraft = `# ${ideaData.title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;

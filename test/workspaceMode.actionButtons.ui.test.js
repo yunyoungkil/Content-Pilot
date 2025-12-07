@@ -38,4 +38,45 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });
+
+  test('empty/placeholder draft is treated as no draft (generate button remains)', async () => {
+    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+
+    const idea = { id: 'card-action-2', title: 'Empty Draft Test', status: 'ideas', workspace: { draft: '<p><br></p>' } };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    renderWorkspace(container, idea);
+
+    const workspaceEl = container.querySelector('.workspace-container');
+    expect(workspaceEl).toBeTruthy();
+
+    // placeholder draft should not be treated as a real draft
+    await new Promise((r) => setTimeout(r, 20));
+    expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
+    expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
+  });
+
+  test('link-only or markdown-link-only draft is treated as no draft', async () => {
+    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+
+    const idea = {
+      id: 'card-action-3',
+      title: 'Link Only Draft Test',
+      status: 'ideas',
+      workspace: { draft: '[Example](https://example.com)' },
+    };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    renderWorkspace(container, idea);
+
+    const workspaceEl = container.querySelector('.workspace-container');
+    expect(workspaceEl).toBeTruthy();
+
+    // link-only content should not be treated as a real draft
+    await new Promise((r) => setTimeout(r, 20));
+    expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
+    expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
+  });
 });

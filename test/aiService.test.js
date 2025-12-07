@@ -368,6 +368,19 @@ describe('AI Service', () => {
       expect(jsonLdSchema.headline).toBe('H');
       expect(Array.isArray(thumbnailCandidates)).toBe(true);
       expect(thumbnailCandidates[0].type).toBe('curiosity');
+      });
+
+      test('filters out example-only link outputs and falls back to placeholder', () => {
+        const svc = require('../js/services/aiService.js');
+        const rawExample = "[완벽 가이드] 쿠진아트 에어프라이어 그릴 오븐 청소 꿀팁 총정리!](https://costcatcher.k-posting.info/entry/abcdefg)";
+        const { cleanedDraft } = svc.processDraftResponse(rawExample, { title: '샘플 제목' });
+
+        // If the model returned only an example link line, we should not keep the raw link.
+        expect(cleanedDraft).not.toContain('https://');
+        // Should fallback to a helpful placeholder message
+        expect(cleanedDraft).toMatch(/내용을 생성하는 중 오류/);
+        // Should include the idea's title in the fallback
+        expect(cleanedDraft).toContain('샘플 제목');
     });
   });
 

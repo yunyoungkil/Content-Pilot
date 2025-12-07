@@ -3,6 +3,58 @@ import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
 
+// Helper: determine if a draft contains meaningful content (non-empty after
+// stripping HTML tags). Used across workspace UI and card-detection logic.
+export function isMeaningfulDraft(d) {
+  if (!d) return false;
+
+  try {
+    let s = String(d);
+
+    // Remove script JSON-LD blocks (<script type="application/ld+json">...)</script>)
+    s = s.replace(/<script[^>]*type=["']application\/ld\+json["'][\s\S]*?<\/script>/gi, '');
+
+    // Remove fenced code blocks (```...```)
+    s = s.replace(/```[\s\S]*?```/g, '');
+
+    // Strip HTML tags and convert NBSP to space
+    s = s.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+
+    // If content is a single-line bare URL or contains only one URL-like token, treat as not meaningful
+    const singleLine = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (singleLine.length === 1) {
+      const onlyLine = singleLine[0];
+      // bare URLs like https://... or www.example.com
+      if (/^(https?:\/\/|www\.)\S+$/i.test(onlyLine)) return false;
+      // markdown-style single link: [text](https://...)
+      if (/^\[.+?\]\(https?:\/\/\S+\)$/i.test(onlyLine)) return false;
+    }
+
+    // Remove markdown links and images entirely
+    let cleaned = s.replace(/!\[[^\]]*\]\([^)]*\)/g, ' '); // images
+    cleaned = cleaned.replace(/\[[^\]]*\]\([^)]*\)/g, ' '); // markdown links
+
+    // Remove bare urls and common url-ish tokens
+    cleaned = cleaned.replace(/https?:\/\/\S+/gi, ' ');
+    cleaned = cleaned.replace(/www\.[^\s]+/gi, ' ');
+
+    // collapse whitespace and trim
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+    // If remaining text has reasonable length, consider it meaningful
+    if (cleaned.length > 10) return true;
+
+    // Last-resort heuristic: if original content (without urls) had very few non-url chars, treat as not meaningful
+    const totalChars = s.replace(/\s+/g, '').length || 0;
+    const nonUrlChars = cleaned.replace(/\s+/g, '').length || 0;
+    if (totalChars > 0 && nonUrlChars / totalChars < 0.5) return false;
+
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
 // -----------------------------------------------------------------------------
 // 1. 이미지 갤러리 관련 함수들
 // -----------------------------------------------------------------------------
@@ -811,7 +863,7 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
   // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
   // 단, publishInfo에 썸네일 정보가 저장되어 있다면 표시 가능
-  const hasDraft = !!ideaData.draftContent || !!ideaData.workspace?.draft;
+  const hasDraft = isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
   const hasThumbInfo = !!ideaData.publishInfo?.thumbnailInfo;
   const hasThumbnailUrls = !!ideaData.publishInfo?.thumbnailUrls || !!ideaData.thumbnailUrls;
 
@@ -2206,7 +2258,7 @@ export function renderWorkspace(container, ideaData) {
           .join('')
       : '<li>추천 검색어 없음</li>';
 
-  const hasDraft = !!ideaData.draftContent;
+  const hasDraft = isMeaningfulDraft(ideaData.draftContent);
 
   // tracking_only인 경우 특별한 UI 렌더링
   const trackingOnlyContent = isTrackingOnly

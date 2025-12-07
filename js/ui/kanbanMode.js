@@ -1,6 +1,6 @@
 // js/ui/kanbanMode.js (수정 완료된 최종 버전)
 
-import { renderWorkspace } from './workspaceMode.js';
+import { renderWorkspace, isMeaningfulDraft } from './workspaceMode.js';
 import { showToast, Logger, debounce } from '../utils.js';
 import { renderHeaderAndTabs } from './header.js';
 
@@ -719,20 +719,11 @@ function createKanbanCard(id, data, status) {
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }
-  // K-1: draftContent 또는 workspace.draft가 있으면 초안 완료 표시
-  // null, 빈 문자열, 빈 객체는 제외
-  const hasDraftContent =
-    data.draftContent &&
-    data.draftContent !== null &&
-    data.draftContent !== '' &&
-    data.draftContent !== '<p><br></p>' &&
-    data.draftContent !== '<p></p>';
-  const hasWorkspaceDraft =
-    data.workspace?.draft &&
-    data.workspace.draft !== null &&
-    data.workspace.draft !== '' &&
-    data.workspace.draft !== '<p><br></p>' &&
-    data.workspace.draft !== '<p></p>';
+  // K-1: Use centralized helper (workspaceMode.isMeaningfulDraft) to determine
+  // whether a card actually contains a meaningful draft — this avoids showing
+  // '초안 완료' for link-only / placeholder drafts.
+  const hasDraftContent = isMeaningfulDraft(data.draftContent);
+  const hasWorkspaceDraft = isMeaningfulDraft(data.workspace?.draft);
 
   if (hasDraftContent || hasWorkspaceDraft) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;

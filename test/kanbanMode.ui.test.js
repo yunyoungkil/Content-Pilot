@@ -89,4 +89,60 @@ describe('Kanban UI - briefing status badges', () => {
     expect(procBar).toBeTruthy();
     expect(procBar.style.width).toContain('42%');
   });
+
+  test('does not show draft badge when draft content is empty or placeholder', async () => {
+    const { renderKanban, updateKanbanUI } = await import('../js/ui/kanbanMode.js');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderKanban(container);
+
+    const allCards = {
+      ideas: {
+        'card-empty-draft': {
+          title: 'Empty draft card',
+          draftContent: '',
+          workspace: { draft: '<p><br></p>' },
+        },
+      },
+      'in-progress': {},
+      done: {},
+    };
+
+    await updateKanbanUI(allCards);
+
+    const draftBadge = container.querySelector('[data-id="card-empty-draft"] .draft-status-count');
+    expect(draftBadge).toBeFalsy();
+  });
+
+  test('does not show draft badge for link-only or markdown-link-only drafts', async () => {
+    const { renderKanban, updateKanbanUI } = await import('../js/ui/kanbanMode.js');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderKanban(container);
+
+    const allCards = {
+      ideas: {
+        'card-markdown-link': {
+          title: 'Markdown link only',
+          workspace: { draft: '[Example](https://example.com)' },
+        },
+        'card-bare-url': {
+          title: 'Bare url only',
+          workspace: { draft: 'https://example.com' },
+        },
+      },
+      'in-progress': {},
+      done: {},
+    };
+
+    await updateKanbanUI(allCards);
+
+    const mdBadge = container.querySelector('[data-id="card-markdown-link"] .draft-status-count');
+    const urlBadge = container.querySelector('[data-id="card-bare-url"] .draft-status-count');
+
+    expect(mdBadge).toBeFalsy();
+    expect(urlBadge).toBeFalsy();
+  });
 });
