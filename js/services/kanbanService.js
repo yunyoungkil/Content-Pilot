@@ -12,7 +12,7 @@ import {
   encodeUrlForFirebaseKey,
 } from './collectorService.js';
 import { updateSinglePerformanceMetric } from './analyticsService.js';
-import { Logger } from '../utils.js';
+import { Logger, sendRuntimeMessageWithTimeout } from '../utils.js';
 // [추가] 상수 임포트
 import { COLLECTIONS } from '../constants.js';
 // [추가] 성능 최적화 서비스 임포트
@@ -366,9 +366,10 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       tags = [...(ideaData.tags || [])];
     }
 
-    // origin이 없는 경우 판별
+    // origin이 없는 경우 판별: keywords나 tags가 존재하면 AI가 생성한 것으로 간주
     if (!origin) {
-      if (ideaData.keywords && ideaData.keywords.length > 0) {
+      const inferredKeywords = ideaData.keywords || ideaData.tags || [];
+      if (inferredKeywords && inferredKeywords.length > 0) {
         origin = { type: 'ai_generated' };
       } else {
         origin = { type: 'manual_entry' };
@@ -458,7 +459,8 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
 
     // AI 브리핑 자동 생성
     // 성과 추적 전용(tracking_only)은 이미 발행된 포스트이므로 브리핑 생성하지 않음
-    const originType = ideaData.origin?.type;
+    // Use the normalized `origin` variable (not ideaData.origin) since we may set default origin earlier
+    const originType = origin?.type;
     const shouldGenerateBriefing =
       originType !== 'manual_entry' &&
       originType !== 'tracking_only' &&
@@ -473,25 +475,40 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       );
 
       // Background를 통해서 AI 브리핑 생성 (referer 문제 해결)
-      chrome.runtime.sendMessage({
-        action: 'generate_idea_briefing',
-        cardId: cardId,
-        title: ideaData.title,
-        description: ideaData.description || '',
-        options: {
-          status: status,
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-          generateMainKeywords: true,
+      // Use the timeout-based message helper so we can detect timeouts and bubble useful errors
+      (async () => {
+        try {
+          const payload = {
+            action: 'generate_idea_briefing',
+            cardId: cardId,
+            title: ideaData.title,
+            description: ideaData.description || '',
+            options: {
+              status: status,
+              generateOutline: true,
+              generateKeywords: true,
+              generateLongTail: true,
+              generateMainKeywords: true,
+              originType: origin.type,
+              origin: origin,
+            },
+          };
+
+          const response = await sendRuntimeMessageWithTimeout(payload, 3000);
+          Logger.debug(`[addIdeaToKanban] generate_idea_briefing raw response:`, response);
+          if (response && response.success) {
+            Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
+          } else {
+            let errorMsg = response?.error || 'Unknown error';
+            try {
+              if (!response?.error && response && typeof response === 'object') errorMsg = JSON.stringify(response);
+            } catch (e) {}
+            Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', errorMsg);
+          }
+        } catch (err) {
+          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패 (send error):', err?.message || String(err));
         }
-      }, (response) => {
-        if (response && response.success) {
-          Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        } else {
-          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', response?.error || 'Unknown error');
-        }
-      });
+      })();
     } else {
       Logger.debug(
         `[addIdeaToKanban] AI 브리핑 자동 생성 건너뜀 - originType: ${

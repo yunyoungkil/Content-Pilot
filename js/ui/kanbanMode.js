@@ -1538,6 +1538,10 @@ function generateSimilarIdea(cardId, status, cardData) {
               keywords: [...(cardData.tags || []), '#유사-아이디어'],
               createdAt: Date.now(),
             };
+            // 명시적으로 origin 정보 추가 (AI 생성)
+            ideaData.origin = ideaData.origin || {};
+            ideaData.origin.type = 'ai_generated';
+            ideaData.origin.meta = { reason: 'similar_idea_from_ui', sourceCardId: cardId };
 
             // [수정] 활성 채널 ID를 가져와서 함께 전송
             chrome.storage.local.get('activeChannelId', (res) => {
@@ -1627,6 +1631,10 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
           keywords: [...(cardData.tags || []), '#리뉴얼-제안'],
           createdAt: Date.now(),
         };
+        // 명시적으로 origin 정보 추가 (리뉴얼 제안)
+        ideaData.origin = ideaData.origin || {};
+        ideaData.origin.type = 'my_post_renewal';
+        ideaData.origin.meta = { sourcePostUrl: cardData.publishedUrl, reason: 'renewal_suggestion_from_ui' };
 
         // [수정] 활성 채널 ID를 가져와서 함께 전송
         chrome.storage.local.get('activeChannelId', (res) => {

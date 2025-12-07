@@ -480,9 +480,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === 'generate_idea_briefing') {
     const payload = msg.data || msg || {};
-    const { cardId, title, description, options } = payload;
+    const { cardId, title, description } = payload;
+    // Normalize options: accept flags in top-level payload or in nested options
+    let normalizedOptions;
+    const hasAnyFlag =
+      !!payload.options ||
+      payload.generateOutline !== undefined ||
+      payload.generateKeywords !== undefined ||
+      payload.generateLongTail !== undefined ||
+      payload.generateMainKeywords !== undefined ||
+      payload.status !== undefined ||
+      payload.originType !== undefined ||
+      payload.origin !== undefined ||
+      payload.onProgress !== undefined;
+
+    if (hasAnyFlag) {
+      normalizedOptions = {
+        ...(payload.options || {}),
+        generateOutline: payload.options?.generateOutline ?? payload.generateOutline ?? false,
+        generateKeywords: payload.options?.generateKeywords ?? payload.generateKeywords ?? false,
+        generateLongTail: payload.options?.generateLongTail ?? payload.generateLongTail ?? false,
+        generateMainKeywords:
+          payload.options?.generateMainKeywords ?? payload.generateMainKeywords ?? false,
+        status: payload.options?.status ?? payload.status ?? 'ideas',
+        originType: payload.options?.originType ?? payload.originType ?? null,
+        origin: payload.options?.origin ?? payload.origin ?? null,
+        onProgress: payload.options?.onProgress ?? payload.onProgress ?? null,
+      };
+    } else {
+      normalizedOptions = undefined;
+    }
+
     return handleAsync(
-      generateIdeaBriefing(cardId, title, description, options)
+      generateIdeaBriefing(cardId, title, description, normalizedOptions)
         .then(() => ({ success: true }))
         .catch((error) => ({ success: false, error: error.message }))
     );

@@ -2040,7 +2040,7 @@ ${defaultDescription}
 
 // 6. 아이디어 브리핑
 export async function generateIdeaBriefing(cardId, title, description, options = {}) {
-  const { onProgress, status = 'ideas' } = options; // status 옵션 추가
+  const { onProgress, status = 'ideas', originType = null, origin = null } = options; // status 옵션 추가 + origin context
   const userId = await getCurrentUserId(); // 동적으로 사용자 ID 가져오기
   const updates = {};
 
@@ -2071,9 +2071,46 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       return; // 에러를 throw하지 않고 조용히 종료
     }
 
+    // helper to parse array responses robustly (try JSON parse, extract array, code block)
+    const tryParseArray = (res) => {
+      try {
+        if (!res) return null;
+        let arr = null;
+        try { arr = JSON.parse(res.trim()); } catch (e1) {}
+        if (!Array.isArray(arr)) {
+          const arrayMatch = res.match(/\[[\s\S]*?\]/);
+          if (arrayMatch) {
+            try { arr = JSON.parse(arrayMatch[0]); } catch (e2) { arr = null; }
+          }
+          if (!Array.isArray(arr)) {
+            const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+            if (codeBlockMatch) {
+              try { arr = JSON.parse(codeBlockMatch[1]); } catch (e3) { arr = null; }
+            }
+          }
+        }
+        return Array.isArray(arr) ? arr : null;
+      } catch (e) { return null; }
+    };
+
+    // Build context text for prompts: include title + description + affiliate/product info when available
+    const buildContextText = () => {
+      let ctx = title;
+      if (description && description.trim()) ctx += ` - ${description.trim()}`;
+      if (originType === 'affiliate_link' && origin) {
+        const name = origin.productName || origin.productName || origin.name || '';
+        if (name) ctx += ` - 상품명: ${name}`;
+        if (origin.platform) ctx += ` - 플랫폼: ${origin.platform}`;
+      }
+      return ctx;
+    };
+
+    const contextText = buildContextText();
+
     if (options.generateOutline) {
       Logger.debug(`[generateIdeaBriefing] 목차 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
+      // include context (title + description + affiliate info) to improve quality
+      const prompt = `"${contextText}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2109,8 +2146,15 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          // JSON 배열 추출 시도 (여러 방법)
-          let outlineArray = null;
+          let outlineArray = tryParseArray(res);
+          // if parsing failed, retry once with explicit instruction
+          if (!Array.isArray(outlineArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 목차 5개를 반드시 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              outlineArray = tryParseArray(retryRes);
+            } catch (retryErr) { /* ignore retry error */ }
+          }
 
           // 방법 1: 직접 JSON 파싱 시도
           try {
@@ -2164,7 +2208,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     // 주요 키워드 생성
     if (options.generateMainKeywords) {
       Logger.debug(`[generateIdeaBriefing] 주요 키워드 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2184,7 +2228,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let keywordsArray = null;
+          let keywordsArray = tryParseArray(res);
+          if (!Array.isArray(keywordsArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              keywordsArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             keywordsArray = JSON.parse(res.trim());
           } catch (e1) {
@@ -2227,7 +2278,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     // 롱테일 키워드 생성
     if (options.generateLongTail) {
       Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2247,7 +2298,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let longTailArray = null;
+          let longTailArray = tryParseArray(res);
+          if (!Array.isArray(longTailArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              longTailArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             longTailArray = JSON.parse(res.trim());
           } catch (e1) {
@@ -2290,7 +2348,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     // 일반 키워드/추천 검색어 생성
     if (options.generateKeywords) {
       Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2310,7 +2368,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let keywordsArray = null;
+          let keywordsArray = tryParseArray(res);
+          if (!Array.isArray(keywordsArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              keywordsArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             keywordsArray = JSON.parse(res.trim());
           } catch (e1) {

@@ -239,6 +239,42 @@ export function showLoadingToast(message = '로딩 중...', options = {}) {
   }
 }
 
+/**
+ * Send a runtime message and resolve with its response, but fall back to a timed 'timeout' error
+ * if the target never responds. This is useful for service-worker or background calls that may
+ * not always call the callback when the receiver crashes or times out.
+ * @param {Object} message - The runtime message payload
+ * @param {number} timeoutMs - Timeout in milliseconds (defaults to 5000)
+ * @returns {Promise<Object>} resolves with response object or {success:false, error:'timeout'}
+ */
+export function sendRuntimeMessageWithTimeout(message, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (res) => {
+      if (done) return;
+      done = true;
+      resolve(res);
+    };
+
+    try {
+      if (!globalThis.chrome || !globalThis.chrome.runtime || !globalThis.chrome.runtime.sendMessage) {
+        finish({ success: false, error: 'chrome.runtime.sendMessage not available' });
+        return;
+      }
+
+      chrome.runtime.sendMessage(message, (resp) => {
+        finish(resp || { success: true });
+      });
+    } catch (err) {
+      finish({ success: false, error: String(err) });
+    }
+
+    setTimeout(() => {
+      finish({ success: false, error: 'timeout' });
+    }, timeoutMs);
+  });
+}
+
 export function updateLoadingToast(message, progress, id = 'cp-loading-toast-modal') {
   const el = document.getElementById(id);
   if (!el) return;

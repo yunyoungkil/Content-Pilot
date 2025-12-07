@@ -512,10 +512,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(generateDraftFromIdea(msg.data, opts));
   }
   if (msg.action === 'generate_idea_briefing') {
-    // Support callers that send payload either top-level or under `data`
+    // Support callers that send payload either top-level or under `data`. Normalize options so both
+    // top-level flags and nested `options` are accepted.
     const payload = msg.data || msg || {};
-    const { cardId, title, description, ...opts } = payload;
-    opts.onProgress = (p) => {
+    const { cardId, title, description, ...rest } = payload;
+    const normalizedOptions = {
+      ...(payload.options || {}),
+      generateOutline: payload.options?.generateOutline ?? payload.generateOutline ?? false,
+      generateKeywords: payload.options?.generateKeywords ?? payload.generateKeywords ?? false,
+      generateLongTail: payload.options?.generateLongTail ?? payload.generateLongTail ?? false,
+      generateMainKeywords:
+        payload.options?.generateMainKeywords ?? payload.generateMainKeywords ?? false,
+      status: payload.options?.status ?? payload.status ?? 'ideas',
+      originType: payload.options?.originType ?? payload.originType ?? null,
+      origin: payload.options?.origin ?? payload.origin ?? null,
+      onProgress: payload.options?.onProgress ?? payload.onProgress ?? null,
+    };
+    normalizedOptions.onProgress = (p) => {
       if (sender.tab?.id) {
         chrome.tabs
           .sendMessage(sender.tab.id, {
@@ -535,7 +548,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
       }
     };
-    return handleAsync(generateIdeaBriefing(cardId, title, description, opts));
+    return handleAsync(
+      generateIdeaBriefing(cardId, title, description, normalizedOptions)
+        .then((res) => {
+          if (res && res.success === false) {
+            return { success: false, error: res.error || 'Unknown error from AI service' };
+          }
+          return { success: true };
+        })
+        .catch((error) => ({ success: false, error: error?.message || String(error) }))
+    );
   }
   if (msg.action === 'ai_generate_images') {
     return handleAsync(

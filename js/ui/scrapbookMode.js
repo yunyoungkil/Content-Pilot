@@ -1000,6 +1000,7 @@ function renderDetailView(scrapId, container) {
         description: ideaDescription,
         keywords: ideaTags.filter((tag) => tag !== '#스크랩-전환'), // 스크랩 태그는 keywords로
         origin: {
+          type: 'scrap',
           postUrl: scrap.url || '', // 중복 검사를 위해 origin.postUrl로 저장
           sourceScrapId: scrapId, // 원본 스크랩 ID 저장 (나중에 연결 가능)
         },

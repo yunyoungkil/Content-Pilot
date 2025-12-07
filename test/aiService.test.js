@@ -777,8 +777,32 @@ describe('AI Service', () => {
   });
 
   describe('generateIdeaBriefing', () => {
-    test.skip('should generate briefing for idea', async () => {
-      // 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
+    test('generate briefing for affiliate link', async () => {
+      // Mock callGeminiAPI to return JSON arrays for prompts
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI');
+      mock.mockImplementation(async (prompt) => {
+        if (prompt.includes('목차')) return '["1. 소개", "2. 기능", "3. 사용법", "4. 팁", "5. 결론"]';
+        if (prompt.includes('주요 키워드')) return '["제품명", "리뷰", "할인", "구매", "비교"]';
+        if (prompt.includes('롱테일')) return '["제품명 사용법", "제품명 리뷰 후기", "제품명 vs 경쟁제품", "제품명 할인 정보", "제품명 구매처"]';
+        if (prompt.includes('추천 검색어')) return '["#제품명", "#리뷰", "#할인", "#구매", "#추천"]';
+        return '[]';
+      });
+
+      // Call generateIdeaBriefing directly with affiliate origin context
+      await expect(
+        svc.generateIdeaBriefing('card-123', '제품명 베타', '효율적인 사용법', {
+          status: 'ideas',
+          generateOutline: true,
+          generateKeywords: true,
+          generateLongTail: true,
+          generateMainKeywords: true,
+          originType: 'affiliate_link',
+          origin: { productName: '제품명' },
+        })
+      ).resolves.toBeUndefined();
+
+      mock.mockRestore();
     });
 
     test.skip('should handle JSON parsing errors', async () => {
