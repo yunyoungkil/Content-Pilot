@@ -68,8 +68,8 @@ export async function addAffiliateLink(data) {
       recommendedSearches: Array.isArray(data.recommendedSearches)
         ? data.recommendedSearches
         : Array.isArray(data.recommendedKeywords)
-        ? data.recommendedKeywords
-        : [],
+          ? data.recommendedKeywords
+          : [],
       longTailKeywords: Array.isArray(data.longTailKeywords) ? data.longTailKeywords : [],
       outline: Array.isArray(data.outline) ? data.outline : [],
     };
@@ -138,8 +138,8 @@ export async function updateAffiliateLink(linkId, data) {
     cleanData.recommendedSearches = Array.isArray(data.recommendedSearches)
       ? data.recommendedSearches
       : Array.isArray(data.recommendedKeywords)
-      ? data.recommendedKeywords
-      : [];
+        ? data.recommendedKeywords
+        : [];
     cleanData.longTailKeywords = Array.isArray(data.longTailKeywords) ? data.longTailKeywords : [];
     cleanData.outline = Array.isArray(data.outline) ? data.outline : [];
     await dbRequest('PATCH', path, cleanData);
@@ -183,9 +183,10 @@ export async function incrementAffiliateLinkClick(linkId) {
     const clickCountPath = `${linkPath}/clickCount`;
     await dbRequest('PUT', clickCountPath, newClickCount);
 
-    Logger.debug(`[AffiliateService] 링크 클릭 수 증가 성공: ${linkId} (${currentClickCount} → ${newClickCount})`);
+    Logger.debug(
+      `[AffiliateService] 링크 클릭 수 증가 성공: ${linkId} (${currentClickCount} → ${newClickCount})`
+    );
     return { success: true, newClickCount };
-
   } catch (error) {
     Logger.error(`[AffiliateService] 링크 클릭 수 증가 실패 (${linkId}):`, error);
 
