@@ -391,7 +391,10 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
         // treat it as a link-only example line.
         const urls = ln.match(/https?:\/\/[\S]+/gi) || [];
         if (urls.length > 0) {
-          const withoutUrls = ln.replace(/https?:\/\/[\S]+/gi, '').replace(/\[.*?\]|\(.*?\)|<.*?>/g, '').trim();
+          const withoutUrls = ln
+            .replace(/https?:\/\/[\S]+/gi, '')
+            .replace(/\[.*?\]|\(.*?\)|<.*?>/g, '')
+            .trim();
           if (withoutUrls.length < 15) return true;
         }
       } catch (e) {

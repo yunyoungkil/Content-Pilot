@@ -323,15 +323,16 @@ export function renderChannelMode(container) {
       // 데이터 구조: { inputUrl, url, apiUrl, gaPropertyId, adSenseAccountId, competitors: [] }
       let blogs = [];
       // [수정] 데이터 경로 안전하게 접근
-      if (response.data && response.data.myChannels && Array.isArray(response.data.myChannels.blogs)) {
+      if (
+        response.data &&
+        response.data.myChannels &&
+        Array.isArray(response.data.myChannels.blogs)
+      ) {
         blogs = response.data.myChannels.blogs;
       } else {
         blogs = [];
       }
-      Logger.debug(
-        '[ChannelMode] processChannelDataResponse - 블로그 데이터 개수:',
-        blogs.length
-      );
+      Logger.debug('[ChannelMode] processChannelDataResponse - 블로그 데이터 개수:', blogs.length);
 
       let needSave = false;
 

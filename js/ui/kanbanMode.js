@@ -728,7 +728,8 @@ function createKanbanCard(id, data, status) {
   // 브리핑 상태 retrieval: prefer top-level card fields but fall back to nested draft object
   const draftObj = data.workspace?.draft || data.draft || null;
   const cardLevelStatus = data.briefingStatus ?? null;
-  const cardLevelProgress = typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
+  const cardLevelProgress =
+    typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
   const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
   const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
 
@@ -739,41 +740,41 @@ function createKanbanCard(id, data, status) {
 
   // 브리핑 상태가 있으면 카드에 상태 배지 표시 — show status badges regardless of whether textual draft exists
   if (bs) {
-      let bsHtml = '';
-      let bsTitle = '';
-      switch (bs) {
-        case 'queued':
-          bsHtml = `<span class="kanban-card-meta briefing-status-tag queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
-          break;
-        case 'processing':
-          if (progressValue !== null) {
-            bsHtml = `
+    let bsHtml = '';
+    let bsTitle = '';
+    switch (bs) {
+      case 'queued':
+        bsHtml = `<span class="kanban-card-meta briefing-status-tag queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
+        break;
+      case 'processing':
+        if (progressValue !== null) {
+          bsHtml = `
               <span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중 - ${progressValue}%">
                 <span class="briefing-spinner">🔄</span>
                 <span class="briefing-progress-label">브리핑 생성 중 (${progressValue}%)</span>
                 <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressValue}%"></div></div>
               </span>`;
-          } else {
-            bsHtml = `<span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
-          }
-          break;
-        case 'done':
-          bsHtml = `<span class="kanban-card-meta briefing-status-tag done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
-          break;
-        case 'failed':
-          bsTitle = draftObj.briefingError || '브리핑 실패';
-          // add a retry button that allows user to re-queue the briefing
-          bsHtml = `
+        } else {
+          bsHtml = `<span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
+        }
+        break;
+      case 'done':
+        bsHtml = `<span class="kanban-card-meta briefing-status-tag done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
+        break;
+      case 'failed':
+        bsTitle = draftObj.briefingError || '브리핑 실패';
+        // add a retry button that allows user to re-queue the briefing
+        bsHtml = `
             <span class="kanban-card-meta briefing-status-tag failed" title="${bsTitle}">❌ 브리핑 실패</span>
             <button class="briefing-retry-btn" data-card-id="${id}" data-status="${status}" title="브리핑 다시 시도">↻ 재시도</button>`;
-          break;
-        default:
-          // unknown statuses are ignored
-          break;
-      }
-
-      if (bsHtml) metaInfoHtml += bsHtml;
+        break;
+      default:
+        // unknown statuses are ignored
+        break;
     }
+
+    if (bsHtml) metaInfoHtml += bsHtml;
+  }
 
   // 성과 지표가 있으면 카드에 시각적 표시 추가
   const performance = data.performance;
