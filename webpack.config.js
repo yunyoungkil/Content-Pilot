@@ -27,9 +27,11 @@ module.exports = {
       }),
     ],
     splitChunks: {
+      // allow code splitting for content bundle to extract large shared modules
+      // but keep background and offscreen single-file to avoid service worker
+      // dynamic-loading pitfalls
       chunks: (chunk) => {
-        // content script와 background script는 코드 분할하지 않음 (동적 로딩 제한)
-        return chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen';
+        return chunk.name !== 'background' && chunk.name !== 'offscreen';
       },
       cacheGroups: {
         // UI 관련 모듈들을 별도 청크로 분리 (content, background 제외)
@@ -45,6 +47,38 @@ module.exports = {
           name: 'services',
           chunks: (chunk) => chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
           priority: 10,
+        },
+        // firebaseService는 매우 큰 편이므로 content 번들에서 별도의 청크로 분리하여
+        // content 초기 로드 크기를 낮춘다. background 번들의 분리는 피함.
+        firebase_vendor: {
+          test: /[\\/]node_modules[\\/](firebase|@firebase)[\\/]/,
+          name: 'firebase-vendor',
+          chunks: 'all',
+          priority: 60,
+          enforce: true,
+        },
+        services_firebase: {
+          test: /[\\/]js[\\/]services[\\/]firebaseService\.js$/,
+          name: 'services-firebase',
+          // Extract firebaseService for all chunks (including background)
+          // so it can be loaded as its own chunk and reduce initial background bundle size.
+          chunks: 'all',
+          priority: 50,
+          enforce: true,
+        },
+        services_ai: {
+          test: /[\\/]js[\\/]services[\\/]aiService\.js$/,
+          name: 'services-ai',
+          chunks: 'all',
+          priority: 55,
+          enforce: true,
+        },
+        ui_workspace: {
+          test: /[\\/]js[\\/]ui[\\/]workspaceMode\.js$/,
+          name: 'ui-workspace',
+          chunks: 'all',
+          priority: 45,
+          enforce: true,
         },
         // 코어 모듈들을 별도 청크로 분리 (content, background 제외)
         core: {
@@ -89,6 +123,9 @@ module.exports = {
       ],
     }),
     // Image optimization for build assets (lossy defaults tuned for web)
+    // Use imageminMinify for lossy compression and imageminGenerate to produce
+    // generated WebP variants. imageminMinify does not support generating
+    // formats like WebP from other image types which caused warnings.
     new ImageMinimizerPlugin({
       minimizer: {
         implementation: ImageMinimizerPlugin.imageminMinify,
@@ -96,10 +133,20 @@ module.exports = {
           plugins: [
             ['imagemin-mozjpeg', { quality: 75 }],
             ['imagemin-pngquant', { quality: [0.6, 0.8] }],
-            ['imagemin-webp', { quality: 75 }],
           ],
         },
       },
+      // generator will create additional converted images (e.g. WebP)
+      generator: [
+        {
+          preset: 'webp',
+          implementation: ImageMinimizerPlugin.imageminGenerate,
+          filename: 'images/[path][name].webp',
+          options: {
+            plugins: [['imagemin-webp', { quality: 75 }]],
+          },
+        },
+      ],
     }),
   ],
   module: {

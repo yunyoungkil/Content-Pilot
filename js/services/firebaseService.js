@@ -1,14 +1,11 @@
 // js/services/firebaseService.js (Final REST API Version)
 // Firebase Web SDK의 불안정성을 해결하기 위해 REST API로 완전히 대체된 버전입니다.
 
-import { initializeApp } from 'firebase/app';
-// [중요] firebase/database import를 제거하여 SDK 충돌을 원천 차단합니다.
-import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithCredential,
-  onAuthStateChanged,
-} from 'firebase/auth';
+// NOTE: Avoid importing firebase SDK statically. The SDK is large and
+// causes big initial bundles (firebase/auth in particular). Instead we
+// dynamically import `firebase/app` and `firebase/auth` only when
+// required (see initializeFirebase and internal helpers). This keeps
+// initial bundles small and moves SDK code into async chunks.
 import { getValidToken } from './authService.js';
 import { Logger } from '../utils.js';
 
@@ -381,9 +378,16 @@ function dataURLtoBlob(dataUrl) {
 /**
  * Firebase Auth 상태 리스너 초기화
  */
-function _initializeAuthStateListener() {
+async function _initializeAuthStateListener() {
+  // Ensure the SDK auth module is loaded and firebaseAuth exists
   if (!firebaseAuth) {
-    firebaseAuth = getAuth(firebaseApp);
+    try {
+      const authModule = await import('firebase/auth');
+      firebaseAuth = authModule.getAuth(firebaseApp);
+    } catch (e) {
+      Logger.warn('[Firebase Auth] auth module import failed:', e?.message || e);
+      return;
+    }
   }
 
   // 기존 리스너가 있으면 해제
@@ -392,7 +396,7 @@ function _initializeAuthStateListener() {
   }
 
   // 인증 상태 변경 리스너 등록
-  authStateUnsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+  authStateUnsubscribe = (await import('firebase/auth')).onAuthStateChanged(firebaseAuth, async (user) => {
     authState = {
       authenticated: !!user,
       user: user
@@ -430,26 +434,29 @@ function _initializeAuthStateListener() {
  * - 여러 번 호출되어도 안전하도록 동작합니다.
  */
 export function initializeFirebase() {
+  // Keep initializeFirebase API synchronous for callers — it will
+  // kick off async SDK loading in the background but return `true`
+  // immediately so existing call-sites that expect a boolean keep
+  // working.
   if (firebaseInitialized) return true;
 
-  try {
-    // SDK의 initializeApp을 호출하되, 이미 초기화된 경우에도 문제 없게 처리
-    firebaseApp = initializeApp(firebaseConfig);
-  } catch (e) {
-    Logger.warn(
-      '[initializeFirebase] initializeApp 호출 중 예외 발생(무시):',
-      e && e.message ? e.message : e
-    );
-  }
+  firebaseInitialized = true; // mark early to prevent re-entry
 
-  // Auth 초기화
-  try {
-    _initializeAuthStateListener();
-  } catch (error) {
-    Logger.warn('[initializeFirebase] _initializeAuthStateListener 예외:', error);
-  }
+  (async () => {
+    try {
+      // Dynamic import of firebase/app + firebase/auth reduces static
+      // dependency footprint. If import fails, we log and continue.
+      const appModule = await import('firebase/app');
+      firebaseApp = appModule.initializeApp(firebaseConfig);
 
-  firebaseInitialized = true;
+      // Initialize auth listener asynchronously but do not block
+      // current caller.
+      await _initializeAuthStateListener();
+    } catch (e) {
+      Logger.warn('[initializeFirebase] async SDK init failed:', e?.message || e);
+    }
+  })();
+
   return true;
 }
 
@@ -511,27 +518,81 @@ export async function ensureFirebaseAuthenticated() {
  * Firebase Auth 상태 변경 리스너 등록
  */
 export function onFirebaseAuthStateChanged(callback) {
-  if (!firebaseAuth) {
-    initializeFirebase();
-    firebaseAuth = getAuth(firebaseApp);
+  // If auth is already ready, attach directly.
+  if (firebaseAuth) {
+    // eslint-disable-next-line no-undef
+    return (async () => {
+      const authModule = await import('firebase/auth');
+      return authModule.onAuthStateChanged(firebaseAuth, (user) => {
+        callback({
+          authenticated: !!user,
+          user: user
+            ? { uid: user.uid, email: user.email, displayName: user.displayName }
+            : null,
+        });
+      });
+    })();
   }
 
-  return onAuthStateChanged(firebaseAuth, (user) => {
-    callback({
-      authenticated: !!user,
-      user: user
-        ? {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-          }
-        : null,
-    });
-  });
+  // Otherwise, start initialization and attach once ready. Return a
+  // placeholder unsubscribe (no-op) so callers receive a function
+  // synchronously; once the real listener is attached we'll override
+  // the unsubscribe to call the real one if necessary.
+  initializeFirebase();
+  let unsub = () => {};
+
+  // Defer attachment until auth module is loaded
+  (async () => {
+    try {
+      const authModule = await import('firebase/auth');
+      if (!firebaseAuth && firebaseApp) firebaseAuth = authModule.getAuth(firebaseApp);
+      if (!firebaseAuth) return;
+      const realUnsub = authModule.onAuthStateChanged(firebaseAuth, (user) => {
+        callback({
+          authenticated: !!user,
+          user: user
+            ? { uid: user.uid, email: user.email, displayName: user.displayName }
+            : null,
+        });
+      });
+      unsub = realUnsub;
+    } catch (e) {
+      Logger.warn('[onFirebaseAuthStateChanged] failed to attach listener:', e?.message || e);
+    }
+  })();
+
+  return () => {
+    try {
+      unsub();
+    } catch (e) {
+      // ignore
+    }
+  };
 }
 
-// export
-export { initializeApp, getAuth, signInWithCredential, GoogleAuthProvider };
+// Backwards-compatible proxies: provide minimal async wrappers for a
+// small set of Firebase helper exports. These are only used by a few
+// places/tests; importing the real SDK still happens lazily when these
+// are called.
+export async function initializeAppProxy(...args) {
+  const appModule = await import('firebase/app');
+  return appModule.initializeApp(...args);
+}
+
+export async function getAuthProxy(...args) {
+  const authModule = await import('firebase/auth');
+  return authModule.getAuth(...args);
+}
+
+export async function signInWithCredentialProxy(...args) {
+  const authModule = await import('firebase/auth');
+  return authModule.signInWithCredential(...args);
+}
+
+export async function GoogleAuthProviderProxy(...args) {
+  const authModule = await import('firebase/auth');
+  return new authModule.GoogleAuthProvider(...args);
+}
 
 /**
  * [New] 통합 갤러리 데이터 가져오기
@@ -666,7 +727,4 @@ export async function getUploadedImagesLog() {
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
-// 즉시 초기화
-initializeFirebase();
-
-Logger.info('[System] firebaseService 모듈 로드 완료 (REST API 모드)');
+Logger.info('[System] firebaseService 모듈 로드 (REST API mode) - lazy SDK load enabled');

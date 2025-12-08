@@ -1,6 +1,167 @@
 // js/ui/thumbnailMaker.js
 import { renderTemplateFromData, createSmartTemplate } from './thumbnailGenerator.js';
-import { showToast, Logger, debounce } from '../utils.js';
+import { showToast, Logger } from '../utils.js';
+
+/**
+ * Render a thumbnail action button inside the workspace UI.
+ * This was previously in workspaceMode.js and has been moved here so it can
+ * be maintained as part of the thumbnail UI bundle. The function keeps a
+ * lightweight local check for "meaningful draft" when needed, but callers
+ * can pass the computed hasDraft boolean as the third parameter to avoid
+ * duplication.
+ */
+export function renderThumbnailButton(workspaceEl, ideaData, hasDraft = null) {
+  // small local version of isMeaningfulDraft used only when caller doesn't pass hasDraft
+  const _isMeaningfulDraft = (d) => {
+    if (!d) return false;
+    let s = typeof d === 'string' ? d : d.text || d.content || d.html || d.body || d.description || '';
+    if (!s || typeof s !== 'string') return false;
+    s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+    s = s.replace(/\[[^\]]*\]\([^)]*\)/g, '');
+    s = s.replace(/<a\b[^>]*>(?:.|\n|\r)*?<\/a>/gi, '');
+    s = s.replace(/<[^>]*>/g, '');
+    s = s.replace(/https?:\/\/\S+|www\.[^\s]+/g, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s.length >= 10;
+  };
+
+  try {
+    // If caller did not compute hasDraft, do a simple check here
+    const meaningful = hasDraft !== null ? hasDraft : _isMeaningfulDraft(ideaData.draftContent) || _isMeaningfulDraft(ideaData.workspace?.draft);
+
+    // Locate the action-buttons container
+    let buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
+    if (!buttonContainer) {
+      buttonContainer = workspaceEl.querySelector('#workspace-action-buttons') ||
+        workspaceEl.querySelector('#workspace-title-header')?.parentElement?.querySelector('#workspace-action-buttons');
+    }
+
+    if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) {
+      // try to create container if missing
+      if (!buttonContainer) {
+        const headerEl = workspaceEl.querySelector('#workspace-title-header');
+        if (headerEl && headerEl.parentNode) {
+          const newContainer = document.createElement('div');
+          newContainer.id = 'workspace-action-buttons';
+          newContainer.style.cssText = 'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+          headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
+          buttonContainer = newContainer;
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    const hasThumbInfo = !!ideaData.publishInfo?.thumbnailInfo;
+    const hasThumbnailUrls = !!ideaData.publishInfo?.thumbnailUrls || !!ideaData.thumbnailUrls;
+    if (!meaningful && !hasThumbInfo && !hasThumbnailUrls) return;
+
+    // Create the button
+    const thumbBtn = document.createElement('button');
+    thumbBtn.id = 'btn-create-thumbnail';
+    thumbBtn.style.cssText = 'padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;';
+    thumbBtn.textContent = '🎨 썸네일 만들기';
+
+    if (hasThumbnailUrls) {
+      const urlObj = ideaData.publishInfo?.thumbnailUrls || ideaData.thumbnailUrls;
+      const finalUrl = (urlObj?.url_16x9 || urlObj?.url_4x3 || urlObj?.url_1x1 || '')?.trim();
+      if (finalUrl) {
+        const preview = document.createElement('img');
+        preview.style.cssText = 'width:32px; height:32px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle;';
+        preview.src = finalUrl;
+        preview.alt = urlObj?.altText || ideaData.seoTitle || ideaData.title || '썸네일 이미지';
+        preview.onerror = () => { try { if (preview.parentNode) preview.parentNode.removeChild(preview); } catch (e) {} };
+        const wrapper = document.createElement('span');
+        wrapper.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
+        wrapper.appendChild(preview);
+        const textNode = document.createElement('span');
+        textNode.textContent = thumbBtn.textContent;
+        wrapper.appendChild(textNode);
+        thumbBtn.textContent = '';
+        thumbBtn.appendChild(wrapper);
+      }
+    }
+
+    const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
+    if (deleteBtn) deleteBtn.parentNode.insertBefore(thumbBtn, deleteBtn);
+    else buttonContainer.appendChild(thumbBtn);
+
+    // Basic event handler that delegates to the real openThumbnailMaker exported in this file
+    thumbBtn.onclick = () => {
+      const checkbox = workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
+      const composeThumbnailText = checkbox ? checkbox.checked : false;
+      const draftData = {
+        seoTitle: ideaData.seoTitle || ideaData.title,
+        thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null,
+        selectedThumbnailIndex: ideaData.publishInfo?.selectedThumbnailIndex ?? (Array.isArray(ideaData.publishInfo?.thumbnailInfo) ? 0 : undefined),
+      };
+
+      const onInsert = (dataUrl, altText) => {
+        const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage({ action: 'insert-image', data: { url: dataUrl, alt: altText || draftData.seoTitle || '썸네일 이미지' } }, '*');
+          showToast('✅ 썸네일이 본문에 삽입되었습니다!');
+        } else {
+          Logger.error('[ThumbnailMaker] 에디터 iframe을 찾을 수 없습니다.');
+          showToast('❌ 에디터를 찾을 수 없습니다.');
+        }
+      };
+
+      const onSave = (newThumbnailInfo) => {
+        if (!ideaData.publishInfo) ideaData.publishInfo = {};
+        if (Array.isArray(ideaData.publishInfo.thumbnailInfo)) {
+          const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
+          if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
+            const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
+            ideaData.publishInfo.thumbnailInfo[selectedIndex] = { ...ideaData.publishInfo.thumbnailInfo[selectedIndex], ...infoToUpdate };
+          }
+          ideaData.publishInfo.selectedThumbnailIndex = selectedIndex;
+        } else {
+          ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+          if (newThumbnailInfo.selectedThumbnailIndex !== undefined) ideaData.publishInfo.selectedThumbnailIndex = newThumbnailInfo.selectedThumbnailIndex;
+        }
+
+        const publishInfoUpdates = { ...(ideaData.publishInfo || {}), thumbnailInfo: ideaData.publishInfo.thumbnailInfo, selectedThumbnailIndex: ideaData.publishInfo.selectedThumbnailIndex };
+
+        chrome.runtime.sendMessage({ action: 'update_kanban_card', data: { cardId: ideaData.id, status: ideaData.status || 'ideas', updates: { publishInfo: publishInfoUpdates } } }, (response) => {
+          if (chrome.runtime.lastError) Logger.error('[Thumbnail] 저장 오류:', chrome.runtime.lastError);
+          else if (response && response.success) Logger.biz('[Thumbnail] 작업 상태 자동 저장됨:', newThumbnailInfo);
+          else Logger.error('[Thumbnail] 저장 실패:', response?.error);
+        });
+      };
+
+      const shadowRoot = workspaceEl.getRootNode();
+      const targetContainer = shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? shadowRoot : document.body;
+      openThumbnailMaker(draftData, onInsert, onSave, null, { showText: composeThumbnailText }, targetContainer);
+
+      // Try to refresh data from background (non-blocking)
+      chrome.runtime.sendMessage({ action: 'get_kanban_card_status', data: { cardId: ideaData.id } }, (statusResponse) => {
+        if (chrome.runtime.lastError) {
+          Logger.warn('[ThumbnailButton] 상태 조회 실패:', chrome.runtime.lastError);
+          return;
+        }
+        if (statusResponse && statusResponse.success) {
+          chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (kanbanResponse) => {
+            if (chrome.runtime.lastError) {
+              Logger.warn('[ThumbnailButton] 데이터 조회 실패:', chrome.runtime.lastError);
+              return;
+            }
+            if (kanbanResponse && kanbanResponse.success && kanbanResponse.data) {
+              const cardData = kanbanResponse.data[statusResponse.status || ideaData.status || 'ideas']?.[ideaData.id];
+              if (cardData && cardData.publishInfo?.thumbnailInfo) ideaData.publishInfo.thumbnailInfo = cardData.publishInfo.thumbnailInfo;
+            }
+          });
+        }
+      });
+    };
+  } catch (e) {
+    // non-fatal
+    Logger.warn('[renderThumbnailButton] error:', e && e.message ? e.message : e);
+  }
+}
+import { debounce } from '../utils.js';
 
 /**
  * 썸네일 제작 모달을 엽니다.
