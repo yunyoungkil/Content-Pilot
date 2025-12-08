@@ -1,15 +1,14 @@
 // background.js (Final Router Version)
 
-// Firebase 초기화 (가장 먼저 실행)
+console.log('[SW START] Service Worker starting...');
+try { persistDiagnostic({ event: 'sw_starting' }); } catch (e) {}
+
 try {
-  const { initializeFirebase } = require('./js/services/firebaseService.js');
-  initializeFirebase();
-  const { Logger } = require('./js/utils.js');
-  Logger.info('[Background] Firebase 초기화 완료');
-} catch (error) {
-  const { Logger } = require('./js/utils.js');
-  Logger.error('[Background] Firebase 초기화 실패:', error);
-}
+
+// NOTE: Do not eagerly initialize Firebase on background startup.
+// Firebase SDK is lazy-loaded by `js/services/firebaseService.js` when
+// required. Initializing here would force the SDK to load in the
+// background worker at startup and increase initial bundle/runtime cost.
 
 // 오프스크린 문서 미리 생성 (성능 향상 및 안정성 확보)
 (async () => {
@@ -30,24 +29,208 @@ try {
 // 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
 chrome.action.onClicked.addListener(async (tab) => {
   try {
-    // 현재 탭에 content script 삽입
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      files: ['dist/content.bundle.js'],
-    });
+    // 빠른 시각적 피드백: 클릭 수신 확인을 위해 배지 텍스트를 잠깐 표시
+    try {
+      await chrome.action.setBadgeText({ text: 'ON' });
+      await chrome.action.setBadgeBackgroundColor({ color: '#2ECC71' });
+      // 2초 뒤 배지 제거 (비동기지만 실패해도 주 흐름을 막지 않음)
+      setTimeout(() => {
+        try {
+          chrome.action.setBadgeText({ text: '' });
+        } catch (e) {
+          // 무시
+        }
+      }, 2000);
+    } catch (e) {
+      // badge API 실패 시 로그만 남김
+      const { Logger } = require('./js/utils.js');
+      Logger.debug('[Background] setBadgeText 실패 (디버그용):', e?.message || e);
+    }
+    // 현재 탭에 content script 삽입 - 여러 경로를 시도하고, 실패 시 동적 스크립트 태그 삽입을 시도합니다.
+    try { persistDiagnostic({ event: 'icon_click', tabId: tab?.id, url: tab?.url }); } catch (e) {}
+    let injected = false;
+    const tryExecFiles = async (filePath) => {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: [filePath] });
+        Logger.info('[Background] executeScript succeeded:', filePath);
+        try { persistDiagnostic({ event: 'exec_script_ok', path: filePath, tabId: tab?.id }); } catch (e) {}
+        injected = true;
+        return true;
+      } catch (e) {
+        Logger.debug('[Background] executeScript failed for', filePath, e?.message || e);
+        try { persistDiagnostic({ event: 'exec_script_failed', path: filePath, tabId: tab?.id, error: e?.message || String(e) }); } catch (_err) {}
+        return false;
+      }
+    };
 
-    // CSS도 삽입
-    await chrome.scripting.insertCSS({
-      target: { tabId: tab.id, allFrames: true },
-      files: ['css/style.css'],
-    });
+    // 1) try the path that's used when extension root is project root
+    await tryExecFiles('dist/content.bundle.js');
+    // 2) try the path that works when extension root is dist/ itself
+    if (!injected) await tryExecFiles('content.bundle.js');
+
+    // 3) fallback: inject a script tag using chrome.runtime.getURL (works regardless of root path)
+    if (!injected) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (srcUrl) => {
+            try {
+              // avoid duplicate injection
+              const existing = document.querySelector(`script[data-cp-src="${srcUrl}"]`);
+              if (!existing) {
+                const script = document.createElement('script');
+                script.setAttribute('data-cp-src', srcUrl);
+                script.src = srcUrl;
+                script.async = false; // execute in-order
+                document.documentElement.appendChild(script);
+              }
+              return 'scriptTagInjected';
+            } catch (e) {
+              return `scriptTagInjectionError:${e?.message || e}`;
+            }
+          },
+          args: [chrome.runtime.getURL('content.bundle.js')],
+        });
+        injected = true;
+        Logger.info('[Background] Fallback script-tag injection attempted');
+        try { persistDiagnostic({ event: 'fallback_script_tag_attempt', tabId: tab?.id }); } catch (e) {}
+      } catch (e) {
+        Logger.error('[Background] Fallback script-tag injection failed:', e?.message || e);
+        try { persistDiagnostic({ event: 'fallback_script_tag_failed', tabId: tab?.id, error: e?.message || String(e) }); } catch (_e) {}
+      }
+    }
+
+    // CSS도 삽입 — 두 경로를 시도하고, 실패 시 동적 링크 삽입을 시도
+    let cssInjected = false;
+    try {
+      try {
+        await chrome.scripting.insertCSS({ target: { tabId: tab.id, allFrames: true }, files: ['css/style.css'] });
+        cssInjected = true;
+        try { persistDiagnostic({ event: 'exec_css_ok', path: 'css/style.css', tabId: tab?.id }); } catch (e) {}
+      } catch (e) {
+        Logger.debug('[Background] insertCSS failed for css/style.css:', e?.message || e);
+      }
+      if (!cssInjected) await (async () => {
+        try {
+          await chrome.scripting.insertCSS({ target: { tabId: tab.id, allFrames: true }, files: ['dist/css/style.css'] });
+          cssInjected = true;
+          try { persistDiagnostic({ event: 'exec_css_ok', path: 'dist/css/style.css', tabId: tab?.id }); } catch (e) {}
+        } catch (e) {
+          Logger.debug('[Background] insertCSS failed for dist/css/style.css:', e?.message || e);
+        }
+      })();
+      if (!cssInjected) {
+        // fallback: dynamic link insertion
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (href) => {
+            try {
+              if (!document.querySelector(`link[data-cp-href="${href}"]`)) {
+                const l = document.createElement('link');
+                l.rel = 'stylesheet';
+                l.setAttribute('data-cp-href', href);
+                l.href = href;
+                document.head.appendChild(l);
+              }
+              return 'cssInjected';
+            } catch (e) {
+              return `cssError:${e?.message || e}`;
+            }
+          },
+          args: [chrome.runtime.getURL('css/style.css')],
+        });
+        cssInjected = true;
+        try { persistDiagnostic({ event: 'fallback_css_link_injected', tabId: tab?.id, href: chrome.runtime.getURL('css/style.css') }); } catch (e) {}
+      }
+    } catch (e) {
+      Logger.warn('[Background] CSS injection attempts failed overall:', e?.message || e);
+    }
 
     const { Logger } = require('./js/utils.js');
     Logger.info('[Background] Content Pilot activated via icon click');
-  } catch (error) {
-    const { Logger } = require('./js/utils.js');
-    Logger.error('[Background] Failed to activate Content Pilot:', error);
-  }
+    try { persistDiagnostic({ event: 'content_activation_attempt', tabId: tab?.id, injected, cssInjected }); } catch (e) {}
+    // 주입 성공 뒤에 탭으로 ping을 보내 응답을 확인합니다
+    try {
+      chrome.tabs.sendMessage(tab.id, { action: 'cp_ping' }, (response) => {
+        if (chrome.runtime.lastError) {
+          Logger.warn('[Background] cp_ping 전송/응답 실패:', chrome.runtime.lastError.message);
+          try { persistDiagnostic({ event: 'cp_ping_error', tabId: tab?.id, error: chrome.runtime.lastError.message }); } catch (_e) {}
+          try {
+            chrome.action.setBadgeText({ text: 'ERR' });
+            chrome.action.setBadgeBackgroundColor({ color: '#E74C3C' });
+            setTimeout(() => {
+              try {
+                chrome.action.setBadgeText({ text: '' });
+              } catch (e) {}
+            }, 3000);
+          } catch (e) {}
+        } else {
+          Logger.info('[Background] cp_ping 응답 수신:', response?.action || 'no-action', response?.href);
+          try { persistDiagnostic({ event: 'cp_ping_response', tabId: tab?.id, payload: response }); } catch (_e) {}
+          try {
+            chrome.action.setBadgeText({ text: 'OK' });
+            chrome.action.setBadgeBackgroundColor({ color: '#2ECC71' });
+            setTimeout(() => {
+              try {
+                chrome.action.setBadgeText({ text: '' });
+              } catch (e) {}
+            }, 1500);
+          } catch (e) {}
+        }
+      });
+    } catch (e) {
+      Logger.debug('[Background] cp_ping 호출 실패', e?.message || e);
+      try { persistDiagnostic({ event: 'cp_ping_call_failed', tabId: tab?.id, error: e?.message || String(e) }); } catch (_e) {}
+    }
+
+    // --- 개발/디버깅 보조: 탭에 인라인 스크립트를 직접 실행해 주입 가능 여부를 검증합니다 ---
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          try {
+            // 최상위 프레임에서만 동작
+            if (window.self !== window.top) return 'not-top';
+            const id = 'cp-inline-test';
+            if (!document.getElementById(id)) {
+              const el = document.createElement('div');
+              el.id = id;
+              el.textContent = 'Content Pilot — inline injection OK';
+              el.style.cssText = 'position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,0.7);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;z-index:2147483647';
+              el.onclick = () => el.remove();
+              document.documentElement.appendChild(el);
+            }
+            // return value will be visible to the caller
+            return 'injected';
+          } catch (e) {
+            try { console.error('cp-inline-test failed', e); } catch (_e) {}
+            return 'error';
+          }
+        },
+      });
+      Logger.info('[Background] inline injection attempted');
+      try { persistDiagnostic({ event: 'inline_injection_attempt', tabId: tab?.id }); } catch (e) {}
+    } catch (e) {
+      Logger.warn('[Background] inline injection failed:', e?.message || e);
+      try { persistDiagnostic({ event: 'inline_injection_failed', tabId: tab?.id, error: e?.message || String(e) }); } catch (_e) {}
+    }
+    } catch (error) {
+      const { Logger } = require('./js/utils.js');
+      Logger.error('[Background] Failed to activate Content Pilot:', error);
+
+      // content.bundle.js 파일 누락 등으로 삽입이 실패하면 배지에 ERR 표시 (사용자에게 빠른 피드백)
+      try {
+        chrome.action.setBadgeText({ text: 'ERR' });
+        chrome.action.setBadgeBackgroundColor({ color: '#E74C3C' });
+        setTimeout(() => {
+          try {
+            chrome.action.setBadgeText({ text: '' });
+          } catch (e) {}
+        }, 4000);
+      } catch (e) {
+        // 무시
+      }
+    }
 });
 
 const {
@@ -156,8 +339,8 @@ const {
   onValue,
 } = require('./js/services/firebaseService.js');
 
-// Firebase 초기화
-initializeFirebase();
+// Do NOT initialize Firebase at startup here — the service module will
+// lazy-load the SDK when features require it.
 
 // [추가] URL 정규화 함수 (스마트 매칭용)
 function normalizeUrlForDeletion(url) {
@@ -199,7 +382,95 @@ const KANBAN_CACHE_TTL = 30 * 1000; // 30초 TTL
   }
 })();
 
+// --- 진단용 영구 로깅 (서비스워커가 즉시 종료되더라도 chrome.storage에 상태 저장) ---
+async function persistDiagnostic(entry) {
+  try {
+    const now = Date.now();
+    const payload = Object.assign({ ts: now }, entry || {});
+    try {
+      chrome?.storage?.local?.set({ cp_last_diagnostic: payload });
+    } catch (e) {
+      // 일부 실행환경(테스트 등)에서는 chrome.storage가 없을 수 있으므로 무시
+    }
+    const { Logger } = require('./js/utils.js');
+    Logger.info('[Background] persisted diagnostic:', payload);
+  } catch (e) {
+    // 안전하게 무시
+  }
+}
+
+// 전역 예외 및 unhandled rejection 캐치 — 서비스워커가 즉시 종료되기 직전의 상태를 남기기 위함
+try {
+  // 브라우저 서비스워커 환경에서 self는 worker global
+  if (typeof self !== 'undefined' && self) {
+    self.addEventListener('error', (evt) => {
+      try {
+        const payload = {
+          event: 'sw_uncaught_error',
+          message: evt?.message || String(evt),
+          filename: evt?.filename,
+          lineno: evt?.lineno,
+          colno: evt?.colno,
+        };
+        try { persistDiagnostic(payload); } catch (e) {}
+        const { Logger } = require('./js/utils.js');
+        Logger.error('[Background] Uncaught error:', payload);
+      } catch (e) {}
+    });
+
+    self.addEventListener('unhandledrejection', (evt) => {
+      try {
+        const reason = evt?.reason;
+        const payload = {
+          event: 'sw_unhandled_rejection',
+          reason: typeof reason === 'object' && reason ? (reason.message || JSON.stringify(reason)) : String(reason),
+        };
+        try { persistDiagnostic(payload); } catch (e) {}
+        const { Logger } = require('./js/utils.js');
+        Logger.error('[Background] Unhandled promise rejection:', payload);
+      } catch (e) {}
+    });
+  }
+} catch (e) {}
+
+
+  // 디버그: content script가 탭에서 로드되었음을 알리는 신호
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'cp_content_loaded') {
+      try {
+        const senderTab = sender?.tab?.id ? `tab:${sender.tab.id}` : 'unknown-tab';
+        Logger.info(`[Background] content script loaded — ${senderTab} isTop=${msg.isTop} href=${msg.href}`);
+
+        // 수신 확인 배지 표시 (짧게)
+        chrome.action.setBadgeText({ text: 'OK' });
+        chrome.action.setBadgeBackgroundColor({ color: '#3498DB' });
+        setTimeout(() => {
+          chrome.action.setBadgeText({ text: '' });
+        }, 1500);
+      } catch (e) {
+        Logger.debug('[Background] cp_content_loaded 처리 실패:', e?.message || e);
+      }
+    }
+  });
 Logger.info('🚀 [System] Service Worker Started (Lightweight Router)');
+// persist basic start state so we can inspect after crashes
+try {
+  persistDiagnostic({ event: 'sw_started' });
+} catch (e) {}
+  // persist event so we can confirm content actually loaded for this tab
+  try { persistDiagnostic({ event: 'cp_content_loaded', tabId: sender?.tab?.id, href: msg.href, isTop: msg.isTop }); } catch (e) {}
+// 디버그: 서비스 워커가 실제로 시작했는지 빠르게 식별할 수 있도록 배지를 잠깐 표시
+try {
+  chrome.action.setBadgeText({ text: 'SW' });
+  chrome.action.setBadgeBackgroundColor({ color: '#8E44AD' });
+  setTimeout(() => {
+    try {
+      chrome.action.setBadgeText({ text: '' });
+    } catch (e) {}
+  }, 2000);
+} catch (e) {
+  Logger.debug('[Background] service worker startup badge failed:', e?.message || e);
+}
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
 chrome.action.onClicked.addListener((tab) => {
@@ -301,6 +572,18 @@ chrome.runtime.onInstalled.addListener((details) => {
  */
 console.log('[Background] 메시지 라우터 등록 시작');
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'cp_get_last_diagnostic') {
+    try {
+      chrome.storage.local.get('cp_last_diagnostic', (res) => {
+        try { sendResponse({ ok: true, lastDiagnostic: res?.cp_last_diagnostic || null }); } catch (e) {}
+      });
+      // indicate async response
+      return true;
+    } catch (e) {
+      try { sendResponse({ ok: false, error: e?.message || String(e) }); } catch (ee) {}
+      return false;
+    }
+  }
   console.log('[Background] 메시지 수신:', msg.action);
   // Offscreen 관련 메시지(ready / beacon / responses)는 라우터에서 제외
   // (OffscreenService 내부 Promise가 처리하거나 별도 경로로 처리됨).
@@ -2595,3 +2878,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // === [Migration Function] 데이터 마이그레이션 함수 ===
 // migrationService.js로 이동됨 - import로 사용
+
+} catch (swError) {
+  console.error('[SW ERROR] Service Worker failed to start:', swError);
+  try { persistDiagnostic({ event: 'sw_start_failed', error: swError.message || String(swError) }); } catch (e) {}
+}

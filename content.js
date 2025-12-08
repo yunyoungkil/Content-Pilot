@@ -48,6 +48,66 @@ import "./js/ui/workspaceMode.js";
 
 // content.js 초기화 시점에 메시지 리스너 등록 확인
 Logger.debug("🔧 [Content] content.js 모듈 로드 완료");
+// 항상 보이는 로그로 content bundle 로드 확인을 쉽게 함 (디버깅용)
+try {
+  console.info('[Content Pilot] content.bundle.js loaded — content script active');
+} catch (e) {
+  // 노출 불가 환경 안전 장치
+}
+
+// 디버깅 보조: 페이지에서 확장 스크립트가 로드되었는지 즉시 시각 확인할 수 있도록
+// 최상위 프레임에만 8초간 표시되는 작은 오버레이 배너를 추가합니다.
+if (typeof window !== 'undefined' && window.self === window.top) {
+  try {
+    const existing = document.getElementById('cp-debug-banner');
+    if (!existing) {
+      const banner = document.createElement('div');
+      banner.id = 'cp-debug-banner';
+      banner.textContent = 'Content Pilot active — content.bundle.js loaded';
+      banner.style.cssText = [
+        'position:fixed',
+        'right:12px',
+        'top:12px',
+        'z-index:2147483647',
+        'background:rgba(39, 174, 96, 0.95)',
+        'color:white',
+        'padding:6px 10px',
+        'border-radius:6px',
+        'font-family:system-ui, -apple-system, Roboto, "Noto Sans", "Segoe UI", sans-serif',
+        'font-size:12px',
+        'box-shadow:0 6px 18px rgba(0,0,0,0.35)',
+      ].join(' !important;');
+
+      // 클릭하면 사라지도록 해두어 사용자 방해 최소화
+      banner.addEventListener('click', () => banner.remove());
+
+      document.documentElement.appendChild(banner);
+
+      // 8초 뒤 자동 제거
+      setTimeout(() => {
+        try {
+          banner.remove();
+        } catch (e) {}
+      }, 8000);
+    }
+  } catch (e) {
+    // 안전 장치: 어떤 CSP/페이지 환경에서의 실패를 무시
+    try {
+      console.debug('[Content Pilot] cp-debug-banner 추가 실패:', e?.message || e);
+    } catch (ignore) {}
+  }
+}
+
+// 서비스 워커 / background에 로드 완료 시그널을 보냅니다 (디버깅 목적)
+try {
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({ action: 'cp_content_loaded', href: window.location?.href, isTop: window.self === window.top });
+  }
+} catch (e) {
+  try {
+    console.debug('[Content Pilot] cp_content_loaded 메시지 전송 실패:', e?.message || e);
+  } catch (_) {}
+}
 Logger.debug("🔧 [Content] window.location:", window.location?.href);
 Logger.debug("🔧 [Content] window === window.top:", window === window.top);
 
@@ -276,6 +336,14 @@ if (window.self === window.top) {
           }
         }
         break;
+      }
+      case 'cp_ping': {
+        // background에서 보낸 펑(ping)에 대해 응답(pong)을 즉시 반환
+        try {
+          return Promise.resolve({ action: 'cp_pong', href: window.location?.href, isTop: window.self === window.top });
+        } catch (e) {
+          return Promise.resolve({ action: 'cp_pong', href: 'unknown', isTop: window.self === window.top });
+        }
       }
 
       // [체크리스트 1-A] 스크랩 저장 후 프리뷰 UI 표시
