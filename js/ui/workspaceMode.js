@@ -1621,7 +1621,10 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
     if (connectBtn && fullUrl) {
       connectBtn.addEventListener('click', () => {
-        console.debug('[Workspace] connect-permalink-btn clicked', { cardId: ideaData.id, fullUrl });
+        console.debug('[Workspace] connect-permalink-btn clicked', {
+          cardId: ideaData.id,
+          fullUrl,
+        });
         // 현재 카드의 실제 status 가져오기
         const currentStatus =
           ideaData.status || window.__cp_workspace_idea_data?.status || 'in-progress';
@@ -1968,7 +1971,8 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       const regenTextBtn = buttonContainer.querySelector('#regenerate-draft-btn');
       const wrapper = document.createElement('label');
       wrapper.id = 'compose-thumbnail-text-wrapper';
-      wrapper.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-left:8px;';
+      wrapper.style.cssText =
+        'display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-left:8px;';
 
       const input = document.createElement('input');
       input.type = 'checkbox';
@@ -1986,11 +1990,17 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       if (regenTextBtn && regenTextBtn.parentNode) {
         // insert checkbox as the first child in the buttons container so it appears first
         regenTextBtn.parentNode.insertBefore(wrapper, regenTextBtn.parentNode.firstChild);
-        console.debug('[Workspace] compose-thumbnail-text checkbox inserted after regenerate-draft-btn, checked:', input.checked);
+        console.debug(
+          '[Workspace] compose-thumbnail-text checkbox inserted after regenerate-draft-btn, checked:',
+          input.checked
+        );
       } else {
         // fallback to appending to container
         buttonContainer.appendChild(wrapper);
-        console.debug('[Workspace] compose-thumbnail-text checkbox appended to container, checked:', input.checked);
+        console.debug(
+          '[Workspace] compose-thumbnail-text checkbox appended to container, checked:',
+          input.checked
+        );
       }
     }
 
@@ -2029,7 +2039,12 @@ export function renderWorkspace(container, ideaData) {
   ideaData.workspace.outline = ideaData.workspace.outline || [];
   ideaData.workspace.draft = ideaData.workspace.draft || '';
   ideaData.workspace.linkedScraps = ideaData.workspace.linkedScraps || {};
-  console.debug('[Workspace] normalize linkedScraps — workspace.linkedScraps/raw:', ideaData.workspace.linkedScraps, 'ideaData.linkedScraps:', ideaData.linkedScraps);
+  console.debug(
+    '[Workspace] normalize linkedScraps — workspace.linkedScraps/raw:',
+    ideaData.workspace.linkedScraps,
+    'ideaData.linkedScraps:',
+    ideaData.linkedScraps
+  );
 
   // Keep top-level thumbnailUrls in sync (legacy fields may exist at top-level)
   if (!ideaData.thumbnailUrls && ideaData.publishInfo?.thumbnailUrls) {
@@ -2040,7 +2055,10 @@ export function renderWorkspace(container, ideaData) {
   // workspace 안에 숨어있는 linkedScraps를 바깥으로 꺼내줍니다.
   if (!ideaData.linkedScraps && ideaData.workspace.linkedScraps) {
     ideaData.linkedScraps = ideaData.workspace.linkedScraps;
-    console.debug('[Workspace] migrated linkedScraps from workspace to ideaData:', ideaData.linkedScraps);
+    console.debug(
+      '[Workspace] migrated linkedScraps from workspace to ideaData:',
+      ideaData.linkedScraps
+    );
   }
 
   // linkedScraps를 배열로 정규화 (Firebase에서 객체로 올 수 있음)
@@ -4079,7 +4097,12 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
           ? Object.keys(ideaData.linkedScraps)
           : [];
 
-      console.debug('[Workspace] drop event — scrapData:', scrapData, 'linkedScrapsIds:', linkedScrapsIds);
+      console.debug(
+        '[Workspace] drop event — scrapData:',
+        scrapData,
+        'linkedScrapsIds:',
+        linkedScrapsIds
+      );
       if (linkedScrapsIds.includes(scrapData.id)) {
         console.debug('[Workspace] drop ignored — scrap already linked:', scrapData.id);
         showToast('⚠️ 이미 연결된 스크랩입니다.');
@@ -4147,7 +4170,10 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
   function setupLinkedScrapItem(item) {
     if (!item || linkedScrapItems.has(item)) return;
     try {
-      console.debug('[Workspace] setupLinkedScrapItem - attaching listeners for item:', item?.dataset?.scrapId);
+      console.debug(
+        '[Workspace] setupLinkedScrapItem - attaching listeners for item:',
+        item?.dataset?.scrapId
+      );
     } catch (e) {
       console.warn('[Workspace] setupLinkedScrapItem debug failed:', e);
     }
@@ -4815,25 +4841,25 @@ window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData)
           });
         });
       });
-    // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
-    allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
-      // avoid duplicate listeners
-      if (scrapItem.dataset.dragListenerAttached) return;
-      scrapItem.dataset.dragListenerAttached = 'true';
-      scrapItem.addEventListener('dragstart', (e) => {
-        try {
-          const data = {
-            id: scrapItem.dataset.scrapId,
-            text: scrapItem.dataset.text,
-            isLinked: false,
-          };
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('application/json', JSON.stringify(data));
-        } catch (err) {
-          console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
-        }
+      // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
+      allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
+        // avoid duplicate listeners
+        if (scrapItem.dataset.dragListenerAttached) return;
+        scrapItem.dataset.dragListenerAttached = 'true';
+        scrapItem.addEventListener('dragstart', (e) => {
+          try {
+            const data = {
+              id: scrapItem.dataset.scrapId,
+              text: scrapItem.dataset.text,
+              isLinked: false,
+            };
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('application/json', JSON.stringify(data));
+          } catch (err) {
+            console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
+          }
+        });
       });
-    });
     });
   } else {
     const searchInput = document.querySelector('#scrap-search-input');

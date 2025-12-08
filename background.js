@@ -1196,9 +1196,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (verifyData) {
               // 필드가 존재하는지 확인 (undefined가 아니면 필드가 존재함)
               // Treat null as removed: only consider a field present if it's !== undefined and !== null
-              const hasDraftField = verifyData.draftContent !== undefined && verifyData.draftContent !== null;
-              const hasPublishInfoField = verifyData.publishInfo !== undefined && verifyData.publishInfo !== null;
-              const hasSeoTitleField = verifyData.seoTitle !== undefined && verifyData.seoTitle !== null;
+              const hasDraftField =
+                verifyData.draftContent !== undefined && verifyData.draftContent !== null;
+              const hasPublishInfoField =
+                verifyData.publishInfo !== undefined && verifyData.publishInfo !== null;
+              const hasSeoTitleField =
+                verifyData.seoTitle !== undefined && verifyData.seoTitle !== null;
               const hasWorkspaceDraftField =
                 verifyData.workspace?.draft !== undefined && verifyData.workspace?.draft !== null;
 
@@ -1242,13 +1245,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const finalVerifyData = finalVerifySnap?.val();
 
                 const finalHasDraft =
-                  finalVerifyData?.draftContent !== undefined && finalVerifyData?.draftContent !== null;
+                  finalVerifyData?.draftContent !== undefined &&
+                  finalVerifyData?.draftContent !== null;
                 const finalHasPublishInfo =
-                  finalVerifyData?.publishInfo !== undefined && finalVerifyData?.publishInfo !== null;
+                  finalVerifyData?.publishInfo !== undefined &&
+                  finalVerifyData?.publishInfo !== null;
                 const finalHasSeoTitle =
                   finalVerifyData?.seoTitle !== undefined && finalVerifyData?.seoTitle !== null;
                 const finalHasWorkspaceDraft =
-                  finalVerifyData?.workspace?.draft !== undefined && finalVerifyData?.workspace?.draft !== null;
+                  finalVerifyData?.workspace?.draft !== undefined &&
+                  finalVerifyData?.workspace?.draft !== null;
 
                 if (
                   finalHasDraft ||

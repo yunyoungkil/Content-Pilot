@@ -61,7 +61,7 @@ global.Response = class {
   constructor(body, options = {}) {
     this.body = body;
     this.status = options.status || 200;
-    this.statusText = options.statusText || "";
+    this.statusText = options.statusText || '';
     this.headers = options.headers || new Map();
   }
 
@@ -75,7 +75,7 @@ global.Response = class {
 };
 
 // Marked library mock
-jest.mock("marked", () => ({
+jest.mock('marked', () => ({
   marked: {
     parse: jest.fn((text) => `<p>${text}</p>`),
   },
@@ -109,7 +109,7 @@ global.firebase = {
 };
 
 // DOM compatibility helpers
-Object.defineProperty(window, "self", { value: window, writable: false });
+Object.defineProperty(window, 'self', { value: window, writable: false });
 global.ServiceWorkerGlobalScope = class {};
 
 // Export nothing — this file intentionally only sets globals

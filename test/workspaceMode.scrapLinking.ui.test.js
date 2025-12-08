@@ -60,7 +60,16 @@ describe('Workspace scrap drag/drop linking', () => {
     expect(scrapItem).toBeTruthy();
 
     // simulate dragstart — the app's handler will write application/json into dataTransfer
-    const dt = { data: {}, setData(k, v) { this.data[k] = v; }, getData(k) { return this.data[k]; }, effectAllowed: '' };
+    const dt = {
+      data: {},
+      setData(k, v) {
+        this.data[k] = v;
+      },
+      getData(k) {
+        return this.data[k];
+      },
+      effectAllowed: '',
+    };
     const dragStartEvt = new Event('dragstart', { bubbles: true });
     dragStartEvt.dataTransfer = dt;
     scrapItem.dispatchEvent(dragStartEvt);

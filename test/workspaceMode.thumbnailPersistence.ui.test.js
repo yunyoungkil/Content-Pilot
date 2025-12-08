@@ -87,7 +87,10 @@ describe('Workspace thumbnail persistence', () => {
 
   test('compose-thumbnail-text-checkbox appears and respects stored state', async () => {
     // Simulate stored preference: text overlay should be ON
-    chrome.storage.local.get.mockResolvedValueOnce({ composeThumbnailText: true, activeChannelId: 'channel-1' });
+    chrome.storage.local.get.mockResolvedValueOnce({
+      composeThumbnailText: true,
+      activeChannelId: 'channel-1',
+    });
 
     const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
 
@@ -129,7 +132,10 @@ describe('Workspace thumbnail persistence', () => {
   });
 
   test('compose-thumbnail-text-checkbox is placed adjacent to regenerate-draft-btn', async () => {
-    chrome.storage.local.get.mockResolvedValueOnce({ composeThumbnailText: false, activeChannelId: 'channel-1' });
+    chrome.storage.local.get.mockResolvedValueOnce({
+      composeThumbnailText: false,
+      activeChannelId: 'channel-1',
+    });
     const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
 
     const ideaWithDraft = {
