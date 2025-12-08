@@ -1621,6 +1621,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
     if (connectBtn && fullUrl) {
       connectBtn.addEventListener('click', () => {
+        console.debug('[Workspace] connect-permalink-btn clicked', { cardId: ideaData.id, fullUrl });
         // 현재 카드의 실제 status 가져오기
         const currentStatus =
           ideaData.status || window.__cp_workspace_idea_data?.status || 'in-progress';
@@ -1634,6 +1635,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             },
           },
           (res) => {
+            console.debug('[Workspace] link_published_url response for', ideaData.id, res);
             if (res && res.success) {
               showToast('✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.');
               // 로컬 데이터 업데이트
@@ -1892,16 +1894,8 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
     console.warn('[Workspace] 설정 로드 실패:', e);
   }
 
-  // 체크박스 HTML 생성
-
-  const checkbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
-  if (checkbox) {
-    checkbox.addEventListener('change', (e) => {
-      const isChecked = e.target.checked;
-      chrome.storage.local.set({ composeThumbnailText: isChecked });
-      console.log('[Workspace] 텍스트 오버레이 설정 변경:', isChecked ? 'ON' : 'OFF');
-    });
-  }
+  // NOTE: checkbox insertion moved later (after buttons creation) so it can be
+  // positioned next to the regenerate-draft button for visibility.
 
   // Ensure the action buttons reflect current draft state
   try {
@@ -1966,6 +1960,53 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
     // non-fatal
     console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
   }
+
+  // Insert the compose-thumbnail-text checkbox next to the regenerate-draft button
+  try {
+    const existingCheckbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
+    if (!existingCheckbox) {
+      const regenTextBtn = buttonContainer.querySelector('#regenerate-draft-btn');
+      const wrapper = document.createElement('label');
+      wrapper.id = 'compose-thumbnail-text-wrapper';
+      wrapper.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-left:8px;';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = 'compose-thumbnail-text-checkbox';
+      input.checked = !!composeThumbnailText;
+      input.style.cssText = 'margin:0;cursor:pointer;accent-color:#6c5ce7;';
+
+      const span = document.createElement('span');
+      span.textContent = '썸네일 텍스트 오버레이';
+      span.style.userSelect = 'none';
+
+      wrapper.appendChild(input);
+      wrapper.appendChild(span);
+
+      if (regenTextBtn && regenTextBtn.parentNode) {
+        // insert checkbox as the first child in the buttons container so it appears first
+        regenTextBtn.parentNode.insertBefore(wrapper, regenTextBtn.parentNode.firstChild);
+        console.debug('[Workspace] compose-thumbnail-text checkbox inserted after regenerate-draft-btn, checked:', input.checked);
+      } else {
+        // fallback to appending to container
+        buttonContainer.appendChild(wrapper);
+        console.debug('[Workspace] compose-thumbnail-text checkbox appended to container, checked:', input.checked);
+      }
+    }
+
+    // re-query for checkbox after insertion
+    const checkbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
+    if (checkbox && !checkbox.__compose_listener_attached) {
+      checkbox.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        chrome.storage.local.set({ composeThumbnailText: isChecked });
+        console.log('[Workspace] 텍스트 오버레이 설정 변경:', isChecked ? 'ON' : 'OFF');
+      });
+      checkbox.__compose_listener_attached = true;
+    }
+  } catch (e) {
+    console.warn('[Workspace] compose-thumbnail-text-checkbox 생성 실패:', e);
+  }
 }
 
 export function renderWorkspace(container, ideaData) {
@@ -1988,6 +2029,7 @@ export function renderWorkspace(container, ideaData) {
   ideaData.workspace.outline = ideaData.workspace.outline || [];
   ideaData.workspace.draft = ideaData.workspace.draft || '';
   ideaData.workspace.linkedScraps = ideaData.workspace.linkedScraps || {};
+  console.debug('[Workspace] normalize linkedScraps — workspace.linkedScraps/raw:', ideaData.workspace.linkedScraps, 'ideaData.linkedScraps:', ideaData.linkedScraps);
 
   // Keep top-level thumbnailUrls in sync (legacy fields may exist at top-level)
   if (!ideaData.thumbnailUrls && ideaData.publishInfo?.thumbnailUrls) {
@@ -1998,6 +2040,7 @@ export function renderWorkspace(container, ideaData) {
   // workspace 안에 숨어있는 linkedScraps를 바깥으로 꺼내줍니다.
   if (!ideaData.linkedScraps && ideaData.workspace.linkedScraps) {
     ideaData.linkedScraps = ideaData.workspace.linkedScraps;
+    console.debug('[Workspace] migrated linkedScraps from workspace to ideaData:', ideaData.linkedScraps);
   }
 
   // linkedScraps를 배열로 정규화 (Firebase에서 객체로 올 수 있음)
@@ -4036,13 +4079,16 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
           ? Object.keys(ideaData.linkedScraps)
           : [];
 
+      console.debug('[Workspace] drop event — scrapData:', scrapData, 'linkedScrapsIds:', linkedScrapsIds);
       if (linkedScrapsIds.includes(scrapData.id)) {
+        console.debug('[Workspace] drop ignored — scrap already linked:', scrapData.id);
         showToast('⚠️ 이미 연결된 스크랩입니다.');
         return;
       }
 
       // 이미 DOM에 존재하는지도 확인
       if (linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`)) {
+        console.debug('[Workspace] drop ignored — DOM already has scrap item for:', scrapData.id);
         showToast('⚠️ 이미 연결된 스크랩입니다.');
         return;
       }
@@ -4063,6 +4109,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             linkedScrapsList.classList.remove('empty-state');
             linkedScrapsList.insertAdjacentHTML('beforeend', createScrapCard(scrapData, true));
             // linkedScraps를 배열로 초기화 (객체인 경우 배열로 변환)
+            console.debug('[Workspace] linking scrap — id:', scrapData.id);
             if (!ideaData.linkedScraps) {
               ideaData.linkedScraps = [];
             } else if (!Array.isArray(ideaData.linkedScraps)) {
@@ -4071,6 +4118,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             }
             if (!ideaData.linkedScraps.includes(scrapData.id)) {
               ideaData.linkedScraps.push(scrapData.id);
+              console.debug('[Workspace] linkedScraps updated:', ideaData.linkedScraps);
             }
             showToast('✅ 스크랩이 연결되었습니다.');
             // 새로 추가된 스크랩에 드래그 이벤트 리스너 추가 (연결 해제는 이벤트 위임으로 처리됨)
@@ -4079,6 +4127,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             );
             if (newScrapItem) {
               setupLinkedScrapItem(newScrapItem);
+              console.debug('[Workspace] new linked scrap item setup completed for:', scrapData.id);
             }
           } else {
             console.error('[Workspace] 스크랩 연결 실패:', res);
@@ -4097,6 +4146,11 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
   const linkedScrapItems = new WeakSet();
   function setupLinkedScrapItem(item) {
     if (!item || linkedScrapItems.has(item)) return;
+    try {
+      console.debug('[Workspace] setupLinkedScrapItem - attaching listeners for item:', item?.dataset?.scrapId);
+    } catch (e) {
+      console.warn('[Workspace] setupLinkedScrapItem debug failed:', e);
+    }
     linkedScrapItems.add(item);
 
     // 드래그 시작 이벤트
@@ -4761,6 +4815,25 @@ window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData)
           });
         });
       });
+    // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
+    allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
+      // avoid duplicate listeners
+      if (scrapItem.dataset.dragListenerAttached) return;
+      scrapItem.dataset.dragListenerAttached = 'true';
+      scrapItem.addEventListener('dragstart', (e) => {
+        try {
+          const data = {
+            id: scrapItem.dataset.scrapId,
+            text: scrapItem.dataset.text,
+            isLinked: false,
+          };
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('application/json', JSON.stringify(data));
+        } catch (err) {
+          console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
+        }
+      });
+    });
     });
   } else {
     const searchInput = document.querySelector('#scrap-search-input');
