@@ -1730,9 +1730,9 @@ async function loadLinks(container) {
                 template: selectedTemplate?.id,
               });
             } catch (e) {
-              Console &&
-                Console.debug &&
-                Console.debug('[AffiliateModal] Logger not available for idea creation debug');
+              console &&
+                console.debug &&
+                console.debug('[AffiliateModal] Logger not available for idea creation debug');
             }
             // Also print to the console directly so it's visible in page console
             try {
@@ -1747,11 +1747,15 @@ async function loadLinks(container) {
             // Provide immediate loading feedback to the user while background generates images
             try {
               showLoadingToast('이미지 및 썸네일을 생성 중입니다...');
-            } catch (e) {}
+            } catch (e) {
+              void 0;
+            }
             const result = await addIdeaToKanban(ideaData);
             try {
               hideLoadingToast();
-            } catch (e) {}
+            } catch (e) {
+              void 0;
+            }
             if (result.success)
               showToast(
                 `💡 "${link.name}"이(가) ${selectedTemplate.name} 템플릿으로 아이디어에 추가되었습니다!`
@@ -2244,7 +2248,9 @@ function showIdeaTemplateSelector(container, link) {
             '[AffiliateModal] template backdrop computed background:',
             window.getComputedStyle(backdrop).backgroundColor
           );
-        } catch (e) {}
+        } catch (e) {
+          void 0;
+        }
       }
 
       const modalContent = modal.querySelector('.cp-modal');

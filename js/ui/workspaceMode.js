@@ -1,51 +1,55 @@
-import { shortenLink, showToast, showConfirmationToast, Logger, debounce } from '../utils.js';
+import { shortenLink, showToast, showConfirmationToast, Logger } from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
-
-// Helper: determine if a draft contains meaningful content (non-empty after
-// stripping HTML tags). Used across workspace UI and card-detection logic.
 export function isMeaningfulDraft(d) {
   if (!d) return false;
 
-  try {
-    // If `d` is an object, try to find a meaningful text field inside it
-    
-              const err = document.createElement('div');
-              err.textContent = '이미지 로드 실패';
-              err.style.cssText =
-                'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
-              parent.appendChild(err);
-              return;
-            }
+  // If the draft is a string, detect if it contains non-link/anchor meaningful text.
+  function _stringCheck(s) {
+    if (!s || typeof s !== 'string') return false;
 
-            img.onerror = null; // prevent loop
-            img.src = response.dataUrl;
-            img.style.display = 'block';
-            parent.removeChild(loading);
-          }
-        );
-      } catch (e) {
-        parent.removeChild(loading);
-        const err = document.createElement('div');
-        err.textContent = '이미지 로드 실패';
-        err.style.cssText =
-          'display:flex;align-items:center;justify-content:center;height:88px;color:#999;font-size:12px;';
-        parent.appendChild(err);
+    // 1) Remove markdown images: ![alt](url)
+    s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+
+    // 2) Remove markdown links including link text: [text](url)
+    // The tests expect '[Example](https://example.com)' to be FALSE.
+    s = s.replace(/\[[^\]]*\]\([^)]*\)/g, '');
+
+    // 3) Remove HTML anchor tags entirely: <a ...>content</a> -- treat anchor content as non-meaningful
+    s = s.replace(/<a\b[^>]*>(?:.|\n|\r)*?<\/a>/gi, '');
+
+    // 4) Remove leftover HTML tags
+    s = s.replace(/<[^>]*>/g, '');
+
+    // 5) Remove URLs (http(s) or www.)
+    s = s.replace(/https?:\/\/\S+|www\.[^\s]+/g, '');
+
+    // normalize whitespace
+    s = s.replace(/\s+/g, ' ').trim();
+
+    // Consider it meaningful if the remaining plain text is longer than threshold
+    const THRESHOLD = 10; // characters
+    return s.length >= THRESHOLD;
+  }
+
+  if (typeof d === 'string') return _stringCheck(d);
+
+  if (typeof d === 'object') {
+    const textFields = ['text', 'content', 'html', 'body', 'description'];
+    for (const field of textFields) {
+      if (d[field] && typeof d[field] === 'string') {
+        if (_stringCheck(d[field])) return true;
       }
-    };
-    // register intersection observer for lazy loading
-    try {
-      ensureGalleryImageObserver().observe(img);
-    } catch (e) {
-      /* ignore */
     }
-  });
+  }
+
+  return false;
 }
 
 // Helper: attach a single delegated click listener on an image gallery grid.
 // This makes it safe to re-render the grid from multiple code paths.
-function ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand) {
+export function ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand) {
   if (!imageGalleryGrid) return;
   if (imageGalleryGrid.dataset.cpGalleryGridListenerAttached === '1') return;
   imageGalleryGrid.dataset.cpGalleryGridListenerAttached = '1';
@@ -60,6 +64,8 @@ function ensureGalleryGridClickHandler(imageGalleryGrid, sendCommand) {
 
 // --- Lazy loader using IntersectionObserver for gallery images ---
 let galleryImageObserver = null;
+// Track whether we've attached a single runtime.onMessage listener for gallery updates
+let galleryRuntimeMessageHandlerAttached = false;
 function ensureGalleryImageObserver() {
   if (galleryImageObserver) return galleryImageObserver;
 
@@ -170,7 +176,11 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
 
   // 초기 그리드 설정 및 이벤트 리스너
   adjustGridColumns();
-  window.addEventListener('resize', adjustGridColumns);
+  // Ensure we only attach a single resize handler per gallery area
+  if (!imageGalleryArea.dataset.cpResizeListenerAttached) {
+    window.addEventListener('resize', adjustGridColumns);
+    imageGalleryArea.dataset.cpResizeListenerAttached = '1';
+  }
 
   // 통합 갤러리 데이터 로드 함수
   function loadUnifiedGallery(filter = 'ALL') {
@@ -199,15 +209,17 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         }
       }
     );
-    // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신
-    if (!imageGalleryArea.dataset.scrapListenerAttached) {
+    // 메시지를 통해 다른 컨텍스트에서 이미지가 삭제되었는지 감지하여 갤러리 자동 갱신.
+    // Attach a single global runtime listener per module to avoid multiple listeners across
+    // repeated renders or test runs.
+    if (!galleryRuntimeMessageHandlerAttached) {
       chrome.runtime.onMessage.addListener((msg) => {
         if (msg?.action === 'scrap_image_removed') {
           // 현재 필터 상태로 갤러리 다시 로드
           loadUnifiedGallery(currentFilter);
         }
       });
-      imageGalleryArea.dataset.scrapListenerAttached = '1';
+      galleryRuntimeMessageHandlerAttached = true;
     }
   }
 
@@ -2684,6 +2696,81 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
   console.log('[Workspace] editorIframe 찾기:', editorIframe);
   console.log('[Workspace] isTrackingOnly:', isTrackingOnly);
 
+  // 모든 스크랩 리스트의 삭제 버튼 이벤트 리스너 (이벤트 위임)
+  if (allScrapsList) {
+    allScrapsList.addEventListener('click', (e) => {
+      const deleteBtn = e.target.closest('.scrap-card-delete-btn');
+      if (!deleteBtn) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const card = deleteBtn.closest('.scrap-card-item');
+      if (!card) return;
+
+      const scrapId = card.dataset.scrapId;
+      if (!scrapId) {
+        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+        return;
+      }
+
+      showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
+        chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
+            showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+            return;
+          }
+          if (response && response.success) {
+            showToast('✅ 스크랩이 삭제되었습니다.');
+            // 스크랩 리스트 새로고침
+            chrome.storage.local.get('activeChannelId', (res) => {
+              chrome.runtime.sendMessage(
+                { action: 'get_all_scraps', channelId: res.activeChannelId },
+                (r) => {
+                  if (r && r.success) {
+                    const linkedScrapIds = ideaData.linkedScraps || [];
+                    const availableScraps = r.scraps.filter((s) => !linkedScrapIds.includes(s.id));
+                    if (availableScraps.length > 0) {
+                      allScrapsList.innerHTML = availableScraps
+                        .map((s) => createScrapCard(s, false))
+                        .join('');
+                    } else {
+                      allScrapsList.innerHTML =
+                        "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
+                    }
+                    // 이미지 갤러리도 갱신
+                    if (resourceLibrary) {
+                      const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
+                      if (imageGalleryGrid) {
+                        const sendCommand = (action, data = {}) => {
+                          const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+                          if (editorIframe && editorIframe.contentWindow) {
+                            editorIframe.contentWindow.postMessage({ action, data }, '*');
+                          }
+                        };
+                        updateImageGalleryFromAllScraps(
+                          resourceLibrary,
+                          r.scraps,
+                          sendCommand,
+                          ideaData
+                        );
+                      }
+                    }
+                  }
+                }
+              );
+            });
+          } else {
+            const errorMsg = response?.error || '알 수 없는 오류';
+            console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
+            showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
+          }
+        });
+      });
+    });
+  }
+
   // 연결된 스크랩 목록 초기 렌더링
   if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
     chrome.storage.local.get('activeChannelId', (res) => {
@@ -3633,58 +3720,142 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         handleGenerateAction(btn, options);
       }
     }
-      // 스크랩 카드 클릭 시
-      const card = e.target.closest('.scrap-card-item');
-      if (!card) return;
-
-      // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
-      if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
-        return;
-      }
-
-      // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
-      if (
-        e.target.classList.contains('scrap-card-snippet') ||
-        e.target.closest('.scrap-card-snippet') ||
-        e.target.classList.contains('scrap-link-btn') ||
-        e.target.closest('.scrap-link-btn')
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        const url = card.dataset.previewUrl || card.dataset.url;
-        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-          window.open(url, '_blank');
-          showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
-        } else {
-          showToast('❌ 유효한 URL이 없습니다.');
-        }
-        return;
-      }
-
-      // 3. 태그 클릭은 무시
-      if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
-        return;
-      }
-
-      // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
+    // delete-draft-in-workspace handler (moved here to avoid fall-through)
+    if (
+      e.target.id === 'delete-draft-in-workspace' ||
+      e.target.closest('#delete-draft-in-workspace')
+    ) {
       e.preventDefault();
       e.stopPropagation();
+      console.log('[Workspace] 초안 삭제 버튼 클릭됨');
 
-      const scrapId = card.dataset.scrapId;
-      if (!scrapId) {
-        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+      const deleteBtn =
+        e.target.id === 'delete-draft-in-workspace'
+          ? e.target
+          : e.target.closest('#delete-draft-in-workspace');
+      if (!deleteBtn) {
+        console.error('[Workspace] 삭제 버튼을 찾을 수 없습니다.');
         return;
       }
 
-      // 스크랩 상세 정보 가져오기
-      chrome.runtime.sendMessage({ action: 'get_scrap_detail', scrapId: scrapId }, (response) => {
-        if (response && response.success && response.scrap) {
-          const scrap = response.scrap;
+      if (!confirm('초안을 삭제하시겠습니까?')) return;
 
-          // 모달 생성
-          const modal = document.createElement('div');
-          modal.className = 'scrap-detail-modal';
-          modal.style.cssText = `
+      // 에디터 즉시 초기화
+      const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+      if (editorIframe && editorIframe.contentWindow) {
+        let attemptCount = 0;
+        const clearEditor = () => {
+          attemptCount++;
+          try {
+            editorIframe.contentWindow.postMessage(
+              { action: 'set-content', data: { html: '' } },
+              '*'
+            );
+          } catch (err) {
+            console.error('[Workspace] 에디터 초기화 오류:', err);
+          }
+        };
+        clearEditor();
+        setTimeout(clearEditor, 50);
+        setTimeout(clearEditor, 150);
+        setTimeout(clearEditor, 300);
+        setTimeout(clearEditor, 500);
+        setTimeout(() => {
+          try {
+            editorIframe.contentWindow.postMessage({ action: 'focus' }, '*');
+          } catch (err) {
+            console.error('[Workspace] 에디터 포커스 오류:', err);
+          }
+        }, 600);
+      }
+
+      // Firebase에서 초안과 발행 정보 모두 삭제
+      chrome.runtime.sendMessage(
+        {
+          action: 'delete_draft_and_publish_info',
+          data: { ideaId: ideaData.id, status: ideaData.status || 'ideas' },
+        },
+        (response) => {
+          if (response && response.success) {
+            window.__cp_draft_deletion_block_time = Date.now();
+            ideaData.draftContent = '';
+            if (ideaData.workspace) ideaData.workspace.draft = '';
+            if (ideaData.publishInfo) ideaData.publishInfo = {};
+            ideaData.seoTitle = '';
+            if (window.__cp_workspace_idea_data) {
+              window.__cp_workspace_idea_data.draftContent = '';
+              if (window.__cp_workspace_idea_data.workspace)
+                window.__cp_workspace_idea_data.workspace.draft = '';
+              if (window.__cp_workspace_idea_data.publishInfo)
+                window.__cp_workspace_idea_data.publishInfo = {};
+              window.__cp_workspace_idea_data.seoTitle = '';
+            }
+            const publishInfoArea = workspaceEl.querySelector('#publish-info-area');
+            if (publishInfoArea) {
+              const existingInfo = workspaceEl.querySelector('.publish-info-panel');
+              if (existingInfo) existingInfo.remove();
+              const emptyInfoHtml = `<div class="publish-info-panel" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px;"><p style="color: #999; font-size: 13px;">발행 정보가 없습니다.</p></div>`;
+              publishInfoArea.insertAdjacentHTML('beforeend', emptyInfoHtml);
+            }
+            const thumbBtn = workspaceEl.querySelector('#btn-create-thumbnail');
+            if (thumbBtn && thumbBtn.parentNode) thumbBtn.remove();
+            if (deleteBtn && deleteBtn.parentNode) deleteBtn.remove();
+            updateWorkspaceActionButtons(workspaceEl, false);
+            showToast('✅ 초안과 발행 정보가 삭제되었습니다.');
+          } else {
+            console.error('[Workspace] 초안 삭제 실패:', response);
+            showToast(`❌ 초안 삭제에 실패했습니다: ${response?.error || '알 수 없는 오류'}`);
+          }
+        }
+      );
+      return;
+    }
+    // 스크랩 카드 클릭 시
+    const card = e.target.closest('.scrap-card-item');
+    if (!card) return;
+
+    // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
+    if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
+      return;
+    }
+
+    // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
+    if (
+      e.target.classList.contains('scrap-card-snippet') ||
+      e.target.closest('.scrap-card-snippet') ||
+      e.target.classList.contains('scrap-link-btn') ||
+      e.target.closest('.scrap-link-btn')
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = card.dataset.previewUrl || card.dataset.url;
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        window.open(url, '_blank');
+        showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
+      } else {
+        showToast('❌ 유효한 URL이 없습니다.');
+      }
+      return;
+    }
+
+    // 3. 태그 클릭은 무시
+    if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
+      return;
+    }
+
+    // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 스크랩 상세 정보 가져오기
+    chrome.runtime.sendMessage({ action: 'get_scrap_detail', scrapId: scrapId }, (response) => {
+      if (response && response.success && response.scrap) {
+        const scrap = response.scrap;
+
+        // 모달 생성
+        const modal = document.createElement('div');
+        modal.className = 'scrap-detail-modal';
+        modal.style.cssText = `
               position: fixed;
               top: 0;
               left: 0;
@@ -3698,7 +3869,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             `;
 
-          modal.innerHTML = `
+        modal.innerHTML = `
               <div style="background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
                 <div style="padding: 24px; border-bottom: 1px solid #e1e5e9;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -3728,385 +3899,99 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               </div>
             `;
 
-          // 닫기 버튼 이벤트
-          modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+        // 닫기 버튼 이벤트
+        modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+          modal.remove();
+        });
+
+        // 배경 클릭으로 닫기
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) {
             modal.remove();
-          });
+          }
+        });
 
-          // 배경 클릭으로 닫기
-          modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-              modal.remove();
-            }
-          });
+        document.body.appendChild(modal);
+        return;
+      } else {
+        showToast('❌ 스크랩 정보를 불러올 수 없습니다.');
+        return;
+      }
+    });
+    // delete draft handling moved earlier
 
-          document.body.appendChild(modal);
-        } else {
-          showToast('❌ 스크랩 정보를 불러올 수 없습니다.');
-        }
-      });
-    } else if (
-      e.target.id === 'delete-draft-in-workspace' ||
-      e.target.closest('#delete-draft-in-workspace')
+    // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
+    if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
+      return;
+    }
+
+    // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
+    if (
+      e.target.classList.contains('scrap-card-snippet') ||
+      e.target.closest('.scrap-card-snippet') ||
+      e.target.classList.contains('scrap-link-btn') ||
+      e.target.closest('.scrap-link-btn')
     ) {
       e.preventDefault();
       e.stopPropagation();
-      console.log('[Workspace] 초안 삭제 버튼 클릭됨');
-
-      const deleteBtn =
-        e.target.id === 'delete-draft-in-workspace'
-          ? e.target
-          : e.target.closest('#delete-draft-in-workspace');
-      if (!deleteBtn) {
-        console.error('[Workspace] 삭제 버튼을 찾을 수 없습니다.');
-        return;
+      const url = card.dataset.previewUrl || card.dataset.url;
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        window.open(url, '_blank');
+        showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
+      } else {
+        showToast('❌ 유효한 URL이 없습니다.');
       }
-
-      if (confirm('초안을 삭제하시겠습니까?')) {
-        console.log('[Workspace] 초안 삭제 확인됨, 에디터 초기화 시작');
-
-        // 에디터 즉시 초기화
-        const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
-        if (!editorIframe) {
-          console.error('[Workspace] 에디터 iframe을 찾을 수 없습니다.');
-        } else if (!editorIframe.contentWindow) {
-          console.error('[Workspace] 에디터 iframe의 contentWindow에 접근할 수 없습니다.');
-        } else {
-          // 에디터에 직접 메시지 전송 (여러 번 시도하여 확실하게)
-          let attemptCount = 0;
-          const clearEditor = () => {
-            attemptCount++;
-            try {
-              console.log(`[Workspace] 에디터 초기화 시도 ${attemptCount}회`);
-              editorIframe.contentWindow.postMessage(
-                {
-                  action: 'set-content',
-                  data: { html: '' },
-                },
-                '*'
-              );
-            } catch (err) {
-              console.error('[Workspace] 에디터 초기화 오류:', err);
-            }
-          };
-
-          clearEditor();
-          // 에디터가 준비될 때까지 재시도
-          setTimeout(clearEditor, 50);
-          setTimeout(clearEditor, 150);
-          setTimeout(clearEditor, 300);
-          setTimeout(clearEditor, 500);
-
-          // 포커스도 전송
-          setTimeout(() => {
-            try {
-              editorIframe.contentWindow.postMessage(
-                {
-                  action: 'focus',
-                },
-                '*'
-              );
-            } catch (err) {
-              console.error('[Workspace] 에디터 포커스 오류:', err);
-            }
-          }, 600);
-        }
-
-        // Firebase에서 초안과 발행 정보 모두 삭제
-        console.log('[Workspace] Firebase 삭제 요청 전송:', {
-          ideaId: ideaData.id,
-          status: ideaData.status || 'ideas',
-        });
-        chrome.runtime.sendMessage(
-          {
-            action: 'delete_draft_and_publish_info',
-            data: {
-              ideaId: ideaData.id,
-              status: ideaData.status || 'ideas',
-            },
-          },
-          (response) => {
-            console.log('[Workspace] Firebase 삭제 응답:', response);
-            if (response && response.success) {
-              // 초안 삭제 후 자동 저장 차단 플래그 설정 (5초간)
-              window.__cp_draft_deletion_block_time = Date.now();
-              Logger.debug(`[Workspace] 초안 삭제 후 자동 저장 차단 시작 (5초)`);
-
-              // ideaData에서도 제거 (모든 관련 필드)
-              ideaData.draftContent = '';
-              if (ideaData.workspace) {
-                ideaData.workspace.draft = '';
-              }
-              if (ideaData.publishInfo) {
-                ideaData.publishInfo = {};
-              }
-              ideaData.seoTitle = '';
-
-              // 전역 ideaData도 동기화
-              if (window.__cp_workspace_idea_data) {
-                window.__cp_workspace_idea_data.draftContent = '';
-                if (window.__cp_workspace_idea_data.workspace) {
-                  window.__cp_workspace_idea_data.workspace.draft = '';
-                }
-                if (window.__cp_workspace_idea_data.publishInfo) {
-                  window.__cp_workspace_idea_data.publishInfo = {};
-                }
-                window.__cp_workspace_idea_data.seoTitle = '';
-              }
-
-              // 발행 정보 UI 즉시 업데이트 (Firebase 업데이트 없이 UI만 갱신)
-              const publishInfoArea = workspaceEl.querySelector('#publish-info-area');
-              if (publishInfoArea) {
-                // showPublishInfo를 호출하면 빈 값으로도 publishInfo가 재생성될 수 있으므로
-                // UI만 직접 업데이트 (Firebase 업데이트는 하지 않음)
-                const existingInfo = workspaceEl.querySelector('.publish-info-panel');
-                if (existingInfo) {
-                  existingInfo.remove();
-                }
-                // 빈 발행 정보 패널 표시 (Firebase 업데이트 없이)
-                const emptyInfoHtml = `
-                                <div class="publish-info-panel" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px;">
-                                    <p style="color: #999; font-size: 13px;">발행 정보가 없습니다.</p>
-                                </div>
-                            `;
-                publishInfoArea.insertAdjacentHTML('beforeend', emptyInfoHtml);
-              }
-
-              // 썸네일 버튼도 제거 (초안이 없으면 썸네일 정보도 없어야 함)
-              const thumbBtn = workspaceEl.querySelector('#btn-create-thumbnail');
-              if (thumbBtn && thumbBtn.parentNode) {
-                thumbBtn.remove();
-                console.log('[Workspace] 썸네일 버튼이 UI에서 제거되었습니다.');
-              }
-
-              // 초안 삭제 버튼 제거
-              if (deleteBtn && deleteBtn.parentNode) {
-                deleteBtn.remove();
-                console.log('[Workspace] 초안 삭제 버튼이 UI에서 제거되었습니다.');
-              }
-
-              // 버튼 UI 업데이트 (초안 없음 상태로 변경)
-              updateWorkspaceActionButtons(workspaceEl, false);
-
-              // 에디터가 정말 비워졌는지 최종 확인
-              setTimeout(() => {
-                if (editorIframe && editorIframe.contentWindow) {
-                  try {
-                    editorIframe.contentWindow.postMessage(
-                      {
-                        action: 'get-content',
-                        data: { requestId: 'verify-clear' },
-                      },
-                      '*'
-                    );
-
-                    // 응답 확인을 위한 리스너
-                    const verifyListener = (event) => {
-                      if (
-                        event.data &&
-                        event.data.action === 'content-response' &&
-                        event.data.requestId === 'verify-clear'
-                      ) {
-                        const content = event.data.data?.html || '';
-                        if (
-                          content &&
-                          content.trim() !== '' &&
-                          content !== '<p><br></p>' &&
-                          content !== '<p></p>'
-                        ) {
-                          console.warn(
-                            '[Workspace] 에디터가 완전히 비워지지 않았습니다. 재시도합니다.'
-                          );
-                          editorIframe.contentWindow.postMessage(
-                            {
-                              action: 'set-content',
-                              data: { html: '' },
-                            },
-                            '*'
-                          );
-                        } else {
-                          console.log('[Workspace] 에디터 초기화 확인 완료');
-                        }
-                        window.removeEventListener('message', verifyListener);
-                      }
-                    };
-                    window.addEventListener('message', verifyListener);
-                    setTimeout(() => window.removeEventListener('message', verifyListener), 2000);
-                  } catch (err) {
-                    console.error('[Workspace] 에디터 검증 오류:', err);
-                  }
-                }
-              }, 1000);
-
-              showToast('✅ 초안과 발행 정보가 삭제되었습니다.');
-            } else {
-              console.error('[Workspace] 초안 삭제 실패:', response);
-              showToast(`❌ 초안 삭제에 실패했습니다: ${response?.error || '알 수 없는 오류'}`);
-            }
-          }
-        );
-      }
-    } else if (e.target.closest('.scrap-card-item')) {
-      // 스크랩 카드 클릭 시
-      const card = e.target.closest('.scrap-card-item');
-      if (!card) return;
-
-      // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
-      if (e.target.closest('.unlink-scrap-btn') || e.target.closest('.scrap-card-delete-btn')) {
-        return;
-      }
-
-      // 2. 링크 클릭 처리 (URL 텍스트나 링크 아이콘 클릭 시)
-      if (
-        e.target.classList.contains('scrap-card-snippet') ||
-        e.target.closest('.scrap-card-snippet') ||
-        e.target.classList.contains('scrap-link-btn') ||
-        e.target.closest('.scrap-link-btn')
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        const url = card.dataset.previewUrl || card.dataset.url;
-        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-          window.open(url, '_blank');
-          showToast(`🔗 링크 열기: ${url.substring(0, 50)}...`);
-        } else {
-          showToast('❌ 유효한 URL이 없습니다.');
-        }
-        return;
-      }
-
-      // 3. 태그 클릭은 무시
-      if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
-        return;
-      }
-
-      // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
-      e.preventDefault();
-      e.stopPropagation();
-
-      const scrapId = card.dataset.scrapId;
-      if (!scrapId) {
-        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
-        return;
-      }
-
-      console.log('[Workspace] 스크랩 카드 클릭:', scrapId);
-
-      // 전체 데이터를 가져오기 위해 background에 요청 (allImages 등 상세 정보 필요)
-      chrome.storage.local.get('activeChannelId', (res) => {
-        chrome.runtime.sendMessage(
-          {
-            action: 'get_scrap_detail',
-            scrapId: scrapId,
-            channelId: res.activeChannelId,
-          },
-          (response) => {
-            if (response && response.success && response.data) {
-              console.log('[Workspace] 스크랩 상세 데이터 수신:', response.data);
-              // shadow DOM 내부의 모달을 찾기 위해 container 전달
-              showScrapDetailModal(response.data, container || workspaceEl);
-            } else {
-              // 실패 시 dataset에 있는 정보로라도 띄움 (Fallback)
-              console.warn('[Workspace] 스크랩 상세 데이터 가져오기 실패, dataset 정보 사용');
-              const fallbackData = {
-                text: card.dataset.text || card.dataset.previewText || '(내용 없음)',
-                url: card.dataset.previewUrl || '',
-                image: card.dataset.previewImage || '',
-                allImages: card.dataset.previewImage ? [card.dataset.previewImage] : [],
-                tags: [],
-              };
-              // shadow DOM 내부의 모달을 찾기 위해 container 전달
-              showScrapDetailModal(fallbackData, container || workspaceEl);
-            }
-          }
-        );
-      });
+      return;
     }
-  });
 
-  if (allScrapsList) {
-    allScrapsList.addEventListener('dragstart', (e) => {
-      const card = e.target.closest('.scrap-card-item');
-      if (card)
-        e.dataTransfer.setData(
-          'application/json',
-          JSON.stringify({ id: card.dataset.scrapId, text: card.dataset.text })
-        );
-    });
+    // 3. 태그 클릭은 무시
+    if (e.target.classList.contains('tag') || e.target.closest('.tag')) {
+      return;
+    }
 
-    // 모든 스크랩 리스트의 삭제 버튼 이벤트 리스너 (이벤트 위임)
-    allScrapsList.addEventListener('click', (e) => {
-      const deleteBtn = e.target.closest('.scrap-card-delete-btn');
-      if (!deleteBtn) return;
+    // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
+    e.preventDefault();
+    e.stopPropagation();
 
-      e.preventDefault();
-      e.stopPropagation();
+    const scrapId = card.dataset.scrapId;
+    if (!scrapId) {
+      console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+      return;
+    }
 
-      const card = deleteBtn.closest('.scrap-card-item');
-      if (!card) return;
+    console.log('[Workspace] 스크랩 카드 클릭:', scrapId);
 
-      const scrapId = card.dataset.scrapId;
-      if (!scrapId) {
-        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
-        return;
-      }
-
-      showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
-        chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
-            showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
-            return;
-          }
-          if (response && response.success) {
-            showToast('✅ 스크랩이 삭제되었습니다.');
-            // 스크랩 리스트 새로고침
-            chrome.storage.local.get('activeChannelId', (res) => {
-              chrome.runtime.sendMessage(
-                { action: 'get_all_scraps', channelId: res.activeChannelId },
-                (r) => {
-                  if (r && r.success) {
-                    const linkedScrapIds = ideaData.linkedScraps || [];
-                    const availableScraps = r.scraps.filter((s) => !linkedScrapIds.includes(s.id));
-                    if (availableScraps.length > 0) {
-                      allScrapsList.innerHTML = availableScraps
-                        .map((s) => createScrapCard(s, false))
-                        .join('');
-                    } else {
-                      allScrapsList.innerHTML =
-                        "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
-                    }
-                    // 이미지 갤러리도 갱신
-                    if (resourceLibrary) {
-                      const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
-                      if (imageGalleryGrid) {
-                        const sendCommand = (action, data = {}) => {
-                          const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
-                          if (editorIframe && editorIframe.contentWindow) {
-                            editorIframe.contentWindow.postMessage({ action, data }, '*');
-                          }
-                        };
-                        updateImageGalleryFromAllScraps(
-                          resourceLibrary,
-                          r.scraps,
-                          sendCommand,
-                          ideaData
-                        );
-                      }
-                    }
-                  }
-                }
-              );
-            });
+    // 전체 데이터를 가져오기 위해 background에 요청 (allImages 등 상세 정보 필요)
+    chrome.storage.local.get('activeChannelId', (res) => {
+      chrome.runtime.sendMessage(
+        {
+          action: 'get_scrap_detail',
+          scrapId: scrapId,
+          channelId: res.activeChannelId,
+        },
+        (response) => {
+          if (response && response.success && response.data) {
+            console.log('[Workspace] 스크랩 상세 데이터 수신:', response.data);
+            // shadow DOM 내부의 모달을 찾기 위해 container 전달
+            showScrapDetailModal(response.data, container || workspaceEl);
           } else {
-            const errorMsg = response?.error || '알 수 없는 오류';
-            console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
-            showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
+            // 실패 시 dataset에 있는 정보로라도 띄움 (Fallback)
+            console.warn('[Workspace] 스크랩 상세 데이터 가져오기 실패, dataset 정보 사용');
+            const fallbackData = {
+              text: card.dataset.text || card.dataset.previewText || '(내용 없음)',
+              url: card.dataset.previewUrl || '',
+              image: card.dataset.previewImage || '',
+              allImages: card.dataset.previewImage ? [card.dataset.previewImage] : [],
+              tags: [],
+            };
+            // shadow DOM 내부의 모달을 찾기 위해 container 전달
+            showScrapDetailModal(fallbackData, container || workspaceEl);
           }
-        });
-      });
+        }
+      );
     });
-  }
+    return; // Prevent fall-through to other click handlers
+  });
 
   // dragover 이벤트: 드롭 영역 시각적 피드백
   workspaceEl.addEventListener('dragover', (e) => {
@@ -4795,7 +4680,6 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     });
   }
 }
-
 window.__cp_scrap_filter = { keyword: null, searchText: null, allScraps: [] };
 window.__cp_filterScraps = function (scraps, keyword, searchText) {
   if (!keyword && !searchText) return scraps;

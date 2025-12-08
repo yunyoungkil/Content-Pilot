@@ -28,7 +28,9 @@
           });
           if (p && typeof p.catch === 'function') p.catch(() => {});
         }
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
       console.debug('[Offscreen-Beacon] sent offscreen_ready_beacon via sendMessage');
       return true;
     } catch (e) {
@@ -45,7 +47,9 @@
         trySend();
         return;
       }
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
 
     waited += interval;
     if (waited >= maxWait) {

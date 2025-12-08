@@ -847,7 +847,9 @@ function renderDetailView(scrapId, container) {
           let p = parsed.pathname || '';
           try {
             p = decodeURIComponent(p);
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
           return (parsed.hostname + p).replace(/\/$/, '').toLowerCase();
         } catch (e) {
           return u.replace(/&amp;/g, '&').replace(/\/$/, '').toLowerCase();

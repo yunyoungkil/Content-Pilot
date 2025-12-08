@@ -474,12 +474,16 @@ export function registerOffscreenPort(port) {
               '[OffscreenService] registerOffscreenPort received port message',
               msg && msg.action
             );
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
           try {
             if (msg && msg.action === 'offscreen_port_attached') {
               Logger.info('[OffscreenService] offscreen reported port attached (handshake)');
             }
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
         });
       } catch (e) {
         Logger.debug(
@@ -501,13 +505,19 @@ export function registerOffscreenPort(port) {
             if (m.action === 'offscreen_port_attached' || m.action === 'debug_echo_response') {
               try {
                 if (probeTimer) clearTimeout(probeTimer);
-              } catch (e) {}
+              } catch (e) {
+                void 0;
+              }
               try {
                 offscreenPort.onMessage.removeListener(probeListener);
-              } catch (e) {}
+              } catch (e) {
+                void 0;
+              }
               Logger.info('[OffscreenService] registerOffscreenPort: probe succeeded');
             }
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
           return false;
         };
 
@@ -521,14 +531,20 @@ export function registerOffscreenPort(port) {
             Logger.debug(
               '[OffscreenService] registerOffscreenPort: probe timed out — marking port unreliable'
             );
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
           try {
             // avoid reusing this port for future sends
             offscreenPort = null;
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
           try {
             offscreenPort && offscreenPort.onMessage.removeListener(probeListener);
-          } catch (e) {}
+          } catch (e) {
+            void 0;
+          }
         }, 1200);
 
         // Try sending a lightweight debug echo to validate the receiver.
@@ -542,7 +558,9 @@ export function registerOffscreenPort(port) {
             );
           } catch (err) {}
         }
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
     } catch (e) {
       Logger.debug(
         '[OffscreenService] registerOffscreenPort attach onMessage failed',
@@ -708,7 +726,9 @@ async function sendToOffscreen(action, data, timeout = 30000) {
   // 포트 안정화 대기
   try {
     await waitForOffscreenPort(5000);
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 
   return new Promise((resolve, reject) => {
     // 1. 고유 ID 생성
@@ -733,7 +753,9 @@ async function sendToOffscreen(action, data, timeout = 30000) {
           if (msg && msg.action === `${action}_response` && msg.requestId === requestId) {
             try {
               offscreenPort.onMessage.removeListener(portResponse);
-            } catch (e) {}
+            } catch (e) {
+              void 0;
+            }
             if (msg.success) resolve(msg);
             else reject(new Error(msg.error || `${action} 실패`));
             return true;

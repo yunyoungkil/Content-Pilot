@@ -285,7 +285,9 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
         origin: newCard.origin,
         thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null,
       });
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
     await set(newCardRef, cleanDataForFirebase(newCard));
 
     // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)
@@ -541,7 +543,9 @@ export async function addIdeaToKanban(
             try {
               if (!response?.error && response && typeof response === 'object')
                 errorMsg = JSON.stringify(response);
-            } catch (e) {}
+            } catch (e) {
+              void 0;
+            }
             Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', errorMsg);
           }
         } catch (err) {

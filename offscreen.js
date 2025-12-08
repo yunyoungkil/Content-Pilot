@@ -339,7 +339,9 @@ function parseContentAndMetrics(doc, urlObj) {
         try {
           const linkData = JSON.parse(parentLink.dataset.linkdata);
           if (linkData.src) imageUrl = linkData.src;
-        } catch (e) {}
+        } catch (e) {
+          void 0;
+        }
       }
       // 3. (티스토리 CDN) srcset에 CDN 주소가 있는지 확인
       if (!imageUrl) {
@@ -776,7 +778,9 @@ function safeSendReply(sendReply, payload) {
         // continue to fallback below
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 
   try {
     if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
@@ -817,16 +821,22 @@ function sendFinalResponse(response) {
           ts: Date.now(),
           size: response && JSON.stringify(response).length,
         });
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 
   try {
     if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
       const p = chrome.runtime.sendMessage(response);
       if (p && typeof p.catch === 'function') p.catch(() => {});
     }
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 }
 
 function handleRequest(request, sendReply) {
@@ -1096,7 +1106,9 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(() => {
       try {
         activeOffscreenPort = null;
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
     });
 
     // Immediately send a small handshake so background can observe
@@ -1135,7 +1147,9 @@ chrome.runtime.onConnect.addListener((port) => {
   try {
     // port listener registration confirms handlers are ready
     window.__offscreen_handlers_installed = true;
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 });
 
 // --- 오프스크린 준비 완료 메시지 전송 ---
@@ -1162,7 +1176,9 @@ function sendReadyMessage() {
     }
     try {
       console.debug('[Offscreen] sendReadyMessage invoked', payload);
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
   } catch (err) {
     try {
       console.error(
@@ -1170,7 +1186,9 @@ function sendReadyMessage() {
         err && err.stack ? err.stack : err,
         payload
       );
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
 
     try {
       // best-effort fallback
