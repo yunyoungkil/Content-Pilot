@@ -177,6 +177,7 @@ describe('Background Message Handlers', () => {
     test('should handle get_user_id with async reply', async () => {
       // mock getCurrentUserId to return a known value
       const mockedUserId = 'background-test-user';
+      jest.resetModules();
       jest.doMock('../js/services/firebaseService.js', () => ({
         getUnifiedGalleryImages: jest.fn(),
         getCurrentUserId: jest.fn().mockResolvedValue(mockedUserId),
@@ -200,6 +201,83 @@ describe('Background Message Handlers', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(sendResponse).toHaveBeenCalledWith({ success: true, userId: mockedUserId });
+    });
+  });
+
+  describe('add_image_to_scrap handler', () => {
+    test('should add image to allImages and set image if missing', async () => {
+      const mockGet = jest.fn().mockResolvedValue({ exists: () => true, val: () => ({ allImages: [], image: null }) });
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockRef = jest.fn();
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: jest.fn(),
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        uploadImageToFirebaseStorage: jest.fn(),
+        cleanDataForFirebase: jest.fn((d) => d),
+        get: mockGet,
+        update: mockUpdate,
+        ref: mockRef,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = {
+        action: 'add_image_to_scrap',
+        data: { scrapId: 'scrap-1', imageUrl: 'https://example.test/new.jpg' },
+      };
+
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      // should be async
+      expect(ret).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockGet).toHaveBeenCalled();
+      expect(mockUpdate).toHaveBeenCalledWith(mockRef(), { allImages: ['https://example.test/new.jpg'], image: 'https://example.test/new.jpg' });
+      expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true, allImages: expect.any(Array) }));
+    });
+
+    test('should return duplicate when image already exists and avoid update', async () => {
+      const mockGet = jest.fn().mockResolvedValue({ exists: () => true, val: () => ({ allImages: ['https://example.test/new.jpg'], image: 'https://example.test/new.jpg' }) });
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockRef = jest.fn();
+
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: jest.fn(),
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        uploadImageToFirebaseStorage: jest.fn(),
+        cleanDataForFirebase: jest.fn((d) => d),
+        get: mockGet,
+        update: mockUpdate,
+        ref: mockRef,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = {
+        action: 'add_image_to_scrap',
+        data: { scrapId: 'scrap-1', imageUrl: 'https://example.test/new.jpg' },
+      };
+
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockGet).toHaveBeenCalled();
+      // update should not be called because duplicate
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true, duplicate: true }));
     });
   });
 

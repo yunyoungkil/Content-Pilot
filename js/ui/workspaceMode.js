@@ -4118,71 +4118,160 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         // add the image to the workspace image gallery (and update the linked scrap card if necessary).
         if (imageUrl) {
           console.debug('[Workspace] drop event for already-linked scrap with image:', scrapData.id, imageUrl);
-          // Update linked scrap card to include image if missing
-          const existingCard = linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`);
-          if (existingCard) {
-            // If card already lacks an img, insert an image wrapper at the front
-            if (!existingCard.querySelector('.scrap-card-img-wrap img')) {
-              const imgWrap = document.createElement('div');
-              imgWrap.className = 'scrap-card-img-wrap';
-              imgWrap.innerHTML = `<img src="${imageUrl}" alt="scrap image">`;
-              // Try to insert into the canonical .scrap-card wrapper if it exists
-              const cardDiv = existingCard.querySelector('.scrap-card');
-              if (cardDiv) {
-                cardDiv.insertAdjacentElement('afterbegin', imgWrap);
-              } else {
-                // Fallback: insert directly at the beginning of the linked card container
-                existingCard.insertAdjacentElement('afterbegin', imgWrap);
+          
+          // First, add the image to the scrap in the database
+          chrome.runtime.sendMessage(
+            {
+              action: 'add_image_to_scrap',
+              data: {
+                scrapId: scrapData.id,
+                imageUrl: imageUrl,
+              },
+            },
+            (addImageRes) => {
+              if (!addImageRes || !addImageRes.success) {
+                console.warn('[Workspace] Failed to add image to scrap in DB:', addImageRes);
+                showToast('⚠️ 이미지 추가 실패');
+                return;
               }
-              // Add class to indicate thumbnail exists for styling
-              try {
-                existingCard.classList.add('has-thumbnail');
-              } catch (e) {
-                /* ignore */
-              }
-            }
-          }
-          // Add to image gallery if available
-          try {
-            const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
-            if (resourceLibrary) {
-              const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
-              if (imageGalleryGrid) {
-                // Avoid duplicates
-                const found = imageGalleryGrid.querySelector(`img[data-src="${imageUrl}"]`) || imageGalleryGrid.querySelector(`img[src="${imageUrl}"]`);
-                if (!found) {
-                  const div = document.createElement('div');
-                  div.className = 'gallery-thumb-wrap';
-                  div.draggable = true;
-                  div.dataset.imageUrl = imageUrl;
-                  div.dataset.scrapId = scrapData.id || '';
-                  div.style.cssText = 'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
-                  const imgThumb = document.createElement('img');
-                  imgThumb.className = 'gallery-thumb';
-                  imgThumb.loading = 'lazy';
-                  imgThumb.decoding = 'async';
-                  imgThumb.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
-                  imgThumb.dataset.src = imageUrl;
-                  imgThumb.src = imageUrl;
-                  div.appendChild(imgThumb);
-                  // attach dragstart handler for the new thumb
-                  div.addEventListener('dragstart', (ev) => {
-                    try {
-                      const payload = { id: scrapData.id, text: scrapData.text || '', isLinked: true, imageUrl };
-                      ev.dataTransfer.effectAllowed = 'move';
-                      ev.dataTransfer.setData('application/json', JSON.stringify(payload));
-                    } catch (err) {
-                      console.debug('[Workspace] gallery newly added dragstart setData failed', err);
+              
+              console.debug('[Workspace] Image added to scrap in DB:', scrapData.id);
+              
+              // Update ideaData.linkedScraps with the new allImages array
+              if (addImageRes.allImages && Array.isArray(addImageRes.allImages)) {
+                // Find and update the scrap in ideaData's linkedScraps
+                if (ideaData.workspace && ideaData.workspace.linkedScrapsData) {
+                  const linkedScrap = ideaData.workspace.linkedScrapsData.find(s => s.id === scrapData.id);
+                  if (linkedScrap) {
+                    linkedScrap.allImages = addImageRes.allImages;
+                    if (!linkedScrap.image) {
+                      linkedScrap.image = addImageRes.allImages[0];
                     }
-                  });
-                  imageGalleryGrid.appendChild(div);
+                  }
                 }
               }
+              
+              // Update linked scrap card to include image if missing
+              const existingCard = linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`);
+              if (existingCard) {
+                // If card already lacks an img, insert an image wrapper at the front
+                const existingImg = existingCard.querySelector('.scrap-card-img-wrap img');
+                if (!existingImg) {
+                  const imgWrap = document.createElement('div');
+                  imgWrap.className = 'scrap-card-img-wrap';
+                  imgWrap.innerHTML = `<img src="${imageUrl}" alt="scrap image">`;
+                  // Try to insert into the canonical .scrap-card wrapper if it exists
+                  const cardDiv = existingCard.querySelector('.scrap-card');
+                  if (cardDiv) {
+                    cardDiv.insertAdjacentElement('afterbegin', imgWrap);
+                  } else {
+                    // Fallback: insert directly at the beginning of the linked card container
+                    existingCard.insertAdjacentElement('afterbegin', imgWrap);
+                  }
+                  // Add class to indicate thumbnail exists for styling
+                  try {
+                    existingCard.classList.add('has-thumbnail');
+                  } catch (e) {
+                    /* ignore */
+                  }
+                } else {
+                  // Update existing image src
+                  existingImg.src = imageUrl;
+                }
+                
+                // Update image count badge
+                const imgCountBadge = existingCard.querySelector('.scrap-img-count');
+                if (imgCountBadge && addImageRes.allImages) {
+                  imgCountBadge.textContent = `📷 ${addImageRes.allImages.length}`;
+                } else if (!imgCountBadge && addImageRes.allImages && addImageRes.allImages.length > 1) {
+                  // Add badge if multiple images now exist
+                  const badge = document.createElement('span');
+                  badge.className = 'scrap-img-count';
+                  badge.textContent = `📷 ${addImageRes.allImages.length}`;
+                  badge.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;';
+                  const imgWrap = existingCard.querySelector('.scrap-card-img-wrap');
+                  if (imgWrap) {
+                    imgWrap.style.position = 'relative';
+                    imgWrap.appendChild(badge);
+                  }
+                }
+              }
+
+              // Persist workspace.linkedScrapsData to kanban card so Kanban UI can refresh counts
+              try {
+                if (ideaData && ideaData.id) {
+                  // ensure workspace exists
+                  if (!ideaData.workspace) ideaData.workspace = {};
+                  // Attempt to send a lightweight card update that persists linkedScrapsData
+                  chrome.runtime.sendMessage(
+                    {
+                      action: 'update_kanban_card',
+                      data: {
+                        cardId: ideaData.id,
+                        status: ideaData.status || 'ideas',
+                        updates: {
+                          workspace: {
+                            ...(ideaData.workspace || {}),
+                            linkedScrapsData: ideaData.workspace?.linkedScrapsData || [],
+                          },
+                        },
+                      },
+                    },
+                    (updRes) => {
+                      if (!updRes || !updRes.success) {
+                        Logger.debug('[Workspace] update_kanban_card 실패:', updRes);
+                      }
+                    }
+                  );
+                }
+              } catch (err) {
+                console.debug('[Workspace] update_kanban_card 전송 실패:', err);
+              }
+              
+              // Add to image gallery if available
+              try {
+                const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
+                if (resourceLibrary) {
+                  const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
+                  if (imageGalleryGrid) {
+                    // Avoid duplicates
+                    const found = imageGalleryGrid.querySelector(`img[data-src="${imageUrl}"]`) || imageGalleryGrid.querySelector(`img[src="${imageUrl}"]`);
+                    if (!found) {
+                      const div = document.createElement('div');
+                      div.className = 'gallery-thumb-wrap';
+                      div.draggable = true;
+                      div.dataset.imageUrl = imageUrl;
+                      div.dataset.scrapId = scrapData.id || '';
+                      div.style.cssText = 'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
+                      const imgThumb = document.createElement('img');
+                      imgThumb.className = 'gallery-thumb';
+                      imgThumb.loading = 'lazy';
+                      imgThumb.decoding = 'async';
+                      imgThumb.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+                      imgThumb.dataset.src = imageUrl;
+                      imgThumb.src = imageUrl;
+                      div.appendChild(imgThumb);
+                      // attach dragstart handler for the new thumb
+                      div.addEventListener('dragstart', (ev) => {
+                        try {
+                          const payload = { id: scrapData.id, text: scrapData.text || '', isLinked: true, imageUrl };
+                          ev.dataTransfer.effectAllowed = 'move';
+                          ev.dataTransfer.setData('application/json', JSON.stringify(payload));
+                        } catch (err) {
+                          console.debug('[Workspace] gallery newly added dragstart setData failed', err);
+                        }
+                      });
+                      imageGalleryGrid.appendChild(div);
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn('[Workspace] adding image to gallery failed:', err);
+              }
+              
+              showToast('✅ 연결된 스크랩에 이미지를 추가했습니다.');
             }
-          } catch (err) {
-            console.warn('[Workspace] adding image to gallery failed:', err);
-          }
-          showToast('✅ 스크랩의 이미지를 갤러리에 추가했습니다.');
+          );
           return;
         }
         console.debug('[Workspace] drop ignored — scrap already linked:', scrapData.id);

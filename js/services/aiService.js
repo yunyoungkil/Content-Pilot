@@ -481,12 +481,83 @@ export async function enhanceDraftWithFeatures({
       void 0;
     }
 
-    // Image source selection
-    let generatedImages = [];
-    let isProductSynthesis = false;
+    // === 이미지 소스 선택 (우선순위) ===
+    // 1순위: 에디터 내 이미지
+    // 2순위: 연결 자료(스크랩) 이미지
+    // 3순위: 제휴 링크 이미지
+    let selectedImageUrl = null;
+    let imageSourceType = null;
 
+    Logger.debug('[enhanceDraftWithFeatures] 이미지 소스 선택 디버깅:', {
+      hasFormattedDraft: !!formattedDraft,
+      formattedDraftLength: formattedDraft?.length || 0,
+      hasLinkedScrapsContent: !!ideaData.linkedScrapsContent,
+      linkedScrapsContentLength: ideaData.linkedScrapsContent?.length || 0,
+      hasAffiliateLinks: !!affiliateLinks,
+      affiliateLinksLength: affiliateLinks?.length || 0,
+    });
+
+    // 1순위: 에디터 내 이미지 추출 (단, Firebase Storage 썸네일은 제외)
+    if (formattedDraft) {
+      try {
+        const imgTagRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+        let match;
+        while ((match = imgTagRegex.exec(formattedDraft)) !== null) {
+          const url = match[1];
+          // Firebase Storage의 thumbnails 폴더 이미지는 제외 (재생성 시 순환 참조 방지)
+          if (url && !url.includes('firebasestorage.googleapis.com') && !url.includes('/thumbnails/')) {
+            selectedImageUrl = url;
+            imageSourceType = 'editor';
+            Logger.info('[enhanceDraftWithFeatures] ✅ 1순위 이미지 선택: 에디터 내 이미지', { url: selectedImageUrl.substring(0, 80) });
+            break;
+          }
+        }
+        
+        if (!selectedImageUrl) {
+          Logger.debug('[enhanceDraftWithFeatures] 에디터에 사용 가능한 이미지 없음 (썸네일 제외)');
+        }
+      } catch (e) {
+        Logger.warn('[enhanceDraftWithFeatures] 에디터 이미지 추출 실패:', e);
+      }
+    }
+
+    // 2순위: 연결 자료(스크랩) 이미지
+    if (!selectedImageUrl && ideaData.linkedScrapsContent && Array.isArray(ideaData.linkedScrapsContent)) {
+      Logger.debug('[enhanceDraftWithFeatures] 연결 자료 확인:', {
+        count: ideaData.linkedScrapsContent.length,
+        scraps: ideaData.linkedScrapsContent.map(s => ({ title: s.title, hasImage: !!s.image, imageUrl: s.image?.substring(0, 50) }))
+      });
+      
+      for (const scrap of ideaData.linkedScrapsContent) {
+        if (scrap.image) {
+          selectedImageUrl = scrap.image;
+          imageSourceType = 'scrap';
+          Logger.info('[enhanceDraftWithFeatures] ✅ 2순위 이미지 선택: 연결 자료 이미지', { 
+            scrapTitle: scrap.title,
+            url: selectedImageUrl.substring(0, 80) 
+          });
+          break;
+        }
+      }
+      
+      if (!selectedImageUrl) {
+        Logger.debug('[enhanceDraftWithFeatures] 연결 자료에 이미지 없음');
+      }
+    }
+
+    // 3순위: 제휴 링크 이미지 (기존 로직 유지)
     let productLink = null;
-    if (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+    if (!selectedImageUrl && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+      Logger.debug('[enhanceDraftWithFeatures] 제휴 링크 확인:', {
+        count: affiliateLinks.length,
+        links: affiliateLinks.map(l => ({ 
+          id: l.id, 
+          hasCardData: !!l.cardData, 
+          hasImage: !!(l.cardData && l.cardData.imageUrl),
+          imageUrl: l.cardData?.imageUrl?.substring(0, 50)
+        }))
+      });
+      
       // Prefer exact affiliate link if provided in ideaData.origin
       productLink =
         (ideaData?.origin?.affiliateLinkId
@@ -494,63 +565,58 @@ export async function enhanceDraftWithFeatures({
               (l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl
             )
           : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
-    }
-    if (productLink) {
-      const reason =
-        ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId
-          ? 'origin_match'
-          : 'best_candidate';
-      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', {
-        id: productLink.id,
-        url: productLink.url,
-        reason,
-      });
-      try {
-        console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', {
+      
+      if (productLink && productLink.cardData && productLink.cardData.imageUrl) {
+        selectedImageUrl = productLink.cardData.imageUrl;
+        imageSourceType = 'affiliate';
+        const reason =
+          ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId
+            ? 'origin_match'
+            : 'best_candidate';
+        Logger.info('[enhanceDraftWithFeatures] ✅ 3순위 이미지 선택: 제휴 링크 이미지', {
           id: productLink.id,
-          url: productLink.url,
+          url: selectedImageUrl.substring(0, 80),
           reason,
         });
-      } catch (e) {
-        void 0;
-      }
-    } else {
-      Logger.info(
-        '[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)'
-      );
-      try {
-        console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected');
-      } catch (e) {
-        void 0;
+      } else {
+        Logger.debug('[enhanceDraftWithFeatures] 제휴 링크에 이미지 없음');
       }
     }
 
-    if (productLink) {
+    // 선택된 이미지로 썸네일 생성
+    let generatedImages = [];
+    let isProductSynthesis = false;
+
+    if (selectedImageUrl) {
+      Logger.info('[enhanceDraftWithFeatures] 선택된 이미지 소스:', imageSourceType, selectedImageUrl.substring(0, 50));
+      
+      // 이미지 기반 합성 시도
       try {
         if (typeof onProgress === 'function')
           onProgress({
-            step: 'product_synthesis',
+            step: 'image_synthesis',
             progress: 55,
-            message: '상품 이미지 합성 시작...',
+            message: `${imageSourceType === 'editor' ? '에디터' : imageSourceType === 'scrap' ? '연결 자료' : '제휴 링크'} 이미지 합성 시작...`,
           });
       } catch (e) {
         void 0;
       }
-      const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
-      if (productBase64) {
-        const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
+      
+      const imageBase64 = await fetchImageAsBase64(selectedImageUrl);
+      if (imageBase64) {
+        const synthesisPrompt = `Create a professional photograph featuring the subject from the provided reference image. Place it into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
-          generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
+          generatedImages = await generateAiImage(synthesisPrompt, 1, imageBase64);
           Logger.info(
-            '[enhanceDraftWithFeatures] product synthesis images count:',
+            '[enhanceDraftWithFeatures] 이미지 합성 완료:',
             generatedImages.length
           );
           try {
             if (typeof onProgress === 'function')
               onProgress({
-                step: 'product_synthesis_complete',
+                step: 'image_synthesis_complete',
                 progress: 70,
-                message: '상품 합성 이미지 생성 완료',
+                message: '이미지 합성 완료',
               });
           } catch (e) {
             void 0;
@@ -558,11 +624,13 @@ export async function enhanceDraftWithFeatures({
           isProductSynthesis = true;
         } catch (err) {
           Logger.warn(
-            '[enhanceDraftWithFeatures] product synthesis failed, falling back to pure AI generate',
+            '[enhanceDraftWithFeatures] 이미지 합성 실패, AI 생성으로 전환',
             err
           );
         }
       }
+    } else {
+      Logger.info('[enhanceDraftWithFeatures] 참고 이미지 없음, AI 생성 모드로 진행');
     }
 
     if (!generatedImages || generatedImages.length === 0) {

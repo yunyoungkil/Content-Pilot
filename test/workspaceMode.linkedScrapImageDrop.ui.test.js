@@ -11,6 +11,8 @@ describe('Workspace drop image into already linked scrap', () => {
 
   test('dropping an image that belongs to an already-linked scrap updates linked scrap display/gallery', async () => {
     let linkedCall = null;
+    let addImageCall = null;
+    let updateCardCall = null;
     chrome.runtime.sendMessage.mockImplementation((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
@@ -29,6 +31,12 @@ describe('Workspace drop image into already linked scrap', () => {
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
         if (cb) setTimeout(() => cb({ success: true }), 0);
+        return;
+      }
+      if (message && message.action === 'add_image_to_scrap') {
+        addImageCall = message;
+        // simulate DB update returning allImages
+        if (cb) setTimeout(() => cb({ success: true, allImages: [imageUrl] }), 0);
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
@@ -88,6 +96,19 @@ describe('Workspace drop image into already linked scrap', () => {
     expect(linkedCardImg).toBeTruthy();
     expect(linkedCardImg.src).toContain('newimg.jpg');
     expect(linkedCard.classList.contains('has-thumbnail')).toBeTruthy();
+
+    // verify add_image_to_scrap was called
+    expect(addImageCall).toBeTruthy();
+    expect(addImageCall.action).toBe('add_image_to_scrap');
+    expect(addImageCall.data.scrapId).toBe('scrap-1');
+
+    // update_kanban_card should have been requested to persist linkedScrapsData
+    // There may be multiple messages; search mock calls
+    const sentMessages = chrome.runtime.sendMessage.mock.calls.map((c) => c[0]);
+    const foundUpdate = sentMessages.find((m) => m && m.action === 'update_kanban_card');
+    expect(foundUpdate).toBeTruthy();
+    expect(foundUpdate.data).toBeTruthy();
+    expect(foundUpdate.data.cardId).toBe('idea-4');
 
     // gallery should now contain the image as well (resource-library panel)
     const workspaceEl = container.querySelector('.workspace-container');

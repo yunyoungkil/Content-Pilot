@@ -2160,6 +2160,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  if (msg.action === 'add_image_to_scrap') {
+    return handleAsync(
+      (async () => {
+        const { scrapId, imageUrl } = msg.data || msg;
+        if (!scrapId || !imageUrl) {
+          return { success: false, error: '스크랩 ID 또는 이미지 URL이 유효하지 않습니다.' };
+        }
+
+        const userId = await getCurrentUserId();
+        const scrapPath = `scraps/${userId}/${scrapId}`;
+        const scrapSnap = await get(ref(getDb(), scrapPath));
+        const scrapData = scrapSnap?.val();
+
+        if (!scrapData) {
+          return { success: false, error: '스크랩을 찾을 수 없습니다.' };
+        }
+
+        // allImages 배열에 이미지 추가 (중복 방지)
+        let allImages = scrapData.allImages || [];
+        if (!Array.isArray(allImages)) {
+          allImages = [];
+        }
+        
+        // 중복 체크 - 정규화된 URL로 비교
+        const normalizedNewUrl = normalizeUrlForDeletion(imageUrl);
+        const isDuplicate = allImages.some(
+          (existingUrl) => normalizeUrlForDeletion(existingUrl) === normalizedNewUrl
+        );
+
+        if (!isDuplicate) {
+          allImages.push(imageUrl);
+
+          // image 필드가 비어있으면 첫 번째 이미지로 설정
+          const updates = {
+            allImages: allImages,
+          };
+          
+          if (!scrapData.image) {
+            updates.image = imageUrl;
+          }
+
+          await update(ref(getDb(), scrapPath), cleanDataForFirebase(updates));
+
+          Logger.biz(
+            `✅ [add_image_to_scrap] 스크랩에 이미지 추가 완료 - scrapId: ${scrapId}, imageUrl: ${imageUrl}`
+          );
+
+          return { success: true, allImages: allImages };
+        } else {
+          Logger.debug(`[add_image_to_scrap] 이미 존재하는 이미지 - scrapId: ${scrapId}`);
+          return { success: true, allImages: allImages, duplicate: true };
+        }
+      })()
+    );
+  }
+
   // === [AI Analysis] AI 분석 ===
   if (msg.action === 'generate_blog_ideas') {
     return handleAsync(
