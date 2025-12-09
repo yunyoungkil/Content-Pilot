@@ -341,7 +341,10 @@
 
 .link-edit-btn,
 .link-delete-btn,
-.link-open-btn {
+.link-open-btn,
+.link-preview-btn,
+.link-copy-html-btn,
+.link-insert-editor-btn {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid #e9ecef;
   cursor: pointer;
@@ -390,6 +393,24 @@
   background: #e8f5e8;
   border-color: #4caf50;
   transform: scale(1.1);
+}
+
+.link-preview-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  transform: scale(1.05);
+}
+
+.link-copy-html-btn:hover {
+  background: #fff; /* subtle hover */
+  border-color: #b6c0c7;
+  transform: scale(1.03);
+}
+
+.link-insert-editor-btn:hover {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  transform: scale(1.05);
 }
 
 .link-content {
@@ -1144,21 +1165,28 @@
 
 /* 폼 푸터 - 현대적인 디자인 개선 */
 .affiliate-form-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 24px;
+  display: grid; /* use CSS Grid to reliably position left and right groups */
+  grid-template-columns: 1fr auto; /* left = stretch, right = auto */
+  align-items: center; /* vertically center both groups */
+  gap: 12px; /* spacing between left and right */
+  padding: 14px 16px; /* reduce padding slightly for small widths */
   border-top: 1px solid rgba(102, 126, 234, 0.1);
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  flex-wrap: wrap;
-  gap: 10px;
+  box-sizing: border-box; /* ensure padding is included in width calculation */
+  width: 100%; /* use full available width of parent */
+  min-height: 48px; /* fix consistent footer height */
+  overflow-x: auto; /* allow horizontal scroll if content still overflows */
 }
 
 .form-footer-left,
 .form-footer-right {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  align-items: center; /* vertically center the buttons */
+}
+
+.form-footer-right {
+  justify-content: flex-end; /* keep right group right-aligned in the grid column */
 }
 
 .affiliate-preview-btn {
@@ -1178,8 +1206,44 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 80px;
+  min-width: 72px; /* reduce min width to avoid overflow on smaller viewports */
+  height: 36px; /* match footer button height */
   justify-content: center;
+}
+/* Footer button sizing and truncation */
+.affiliate-form-footer .cp-btn {
+  box-sizing: border-box; /* ensure consistent sizing in the footer */
+  min-width: 40px; /* reduced minimum for tighter layouts */
+  max-width: 140px; /* cap button width so long labels don't push layout */
+  padding: 6px 8px; /* smaller padding for compact footer */
+  font-size: 12px; /* smaller font for footer buttons */
+  white-space: nowrap; /* keep contents on a single line */
+  overflow: hidden; /* enable truncation instead of wrapping */
+  text-overflow: ellipsis; /* add ... for overflow text */
+  height: 36px; /* enforce consistent button height for tidy rows */
+  line-height: 1; /* normalize vertical text centering */
+}
+
+/* Responsive: for very narrow modals, stack footer buttons vertically */
+@media (max-width: 420px) {
+  .affiliate-form-footer {
+    padding: 10px 12px;
+    gap: 8px;
+    grid-template-columns: 1fr; /* stack footer groups */
+  }
+  .affiliate-form-footer .form-footer-left,
+  .affiliate-form-footer .form-footer-right {
+    width: 100%;
+    justify-content: center;
+  }
+  .affiliate-form-footer .form-footer-right {
+    justify-content: space-evenly;
+  }
+  .affiliate-form-footer .cp-btn {
+    width: auto;
+    flex: 1 1 auto; /* allow buttons to fill width evenly if needed */
+    min-width: 0; /* allow shrinking beyond 40px for very small screens */
+  }
 }
 
 .affiliate-preview-btn:hover {
@@ -1283,6 +1347,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 80px;
+  height: 36px; /* consistent height */
   padding: 8px 14px;
   border-radius: 8px;
   cursor: pointer;
@@ -1297,6 +1362,25 @@
   border-color: #ccc;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Footer-specific overrides to prevent overflow from large primary button styles */
+.affiliate-form-footer .affiliate-save-btn,
+.affiliate-form-footer .cp-btn-primary,
+.affiliate-form-footer .cp-btn-secondary,
+.affiliate-form-footer .affiliate-preview-btn {
+  min-width: 40px !important;
+  max-width: 140px !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Slightly wider primary save button within footer to preserve label readability */
+.affiliate-form-footer .affiliate-save-btn {
+  min-width: 72px !important;
 }
 
 /* 반응형 디자인 */

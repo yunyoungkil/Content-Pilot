@@ -530,6 +530,30 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
       // Append image element
       div.appendChild(img);
 
+      // Make gallery image draggable when it belongs to a scrap
+      if (effectiveScrapId) {
+        try {
+          div.draggable = true;
+          div.dataset.scrapId = effectiveScrapId;
+          div.addEventListener('dragstart', (e) => {
+            try {
+                  const data = {
+                    id: effectiveScrapId,
+                    text: imgData.title || '',
+                    isLinked: false,
+                    imageUrl: imgData.url || imgData.thumbnail || imgData.src || null,
+                  };
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('application/json', JSON.stringify(data));
+            } catch (err) {
+              console.debug('[Workspace] gallery dragstart setData failed', err);
+            }
+          });
+        } catch (err) {
+          // ignore
+        }
+      }
+
       // +N overlay for groups: show on the last shown image for a scrap when there are more images in the origin
       const scrapKey = imgData.scrapId || imgData.id;
       if (scrapKey) seenPerScrap[scrapKey] = (seenPerScrap[scrapKey] || 0) + 1;
@@ -1143,7 +1167,7 @@ function createScrapCard(scrap, isLinked) {
     </div>`;
 }
 
-function showScrapDetailModal(scrapData, container = null) {
+export function showScrapDetailModal(scrapData, container = null) {
   // shadow DOM 내부의 모달을 찾기 위해 container 사용
   let modal, titleEl, urlLinkEl, urlTextEl, imagesEl, textEl, tagsEl, closeBtn;
 
@@ -1230,10 +1254,8 @@ function showScrapDetailModal(scrapData, container = null) {
         .map(
           (img) => `
         <div style="position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 8px; border: 1px solid #e9ecef; cursor: pointer;">
-          <img src="${img.replace(
-            /"/g,
-            '&quot;'
-          )}" alt="스크랩 이미지" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
+          <img src="${img.replace(/"/g,'&quot;')}" alt="스크랩 이미지" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
+          <button class="scrap-image-insert-btn" title="에디터에 삽입" style="position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;">삽입</button>
         </div>
       `
         )
@@ -1266,6 +1288,62 @@ function showScrapDetailModal(scrapData, container = null) {
             }
           });
         });
+      });
+
+      // '삽입' 버튼 클릭시 에디터 iframe으로 이미지 삽입 요청 전송
+      imagesEl.querySelectorAll('.scrap-image-insert-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const imageWrapper = btn.closest('div');
+          const imgEl = imageWrapper && imageWrapper.querySelector('img');
+          const url = imgEl ? imgEl.src : null;
+          if (!url) {
+            showToast('⚠️ 이미지 URL을 찾을 수 없습니다.');
+            return;
+          }
+          // Try to find editor iframe in the current context (shadow root or document)
+          try {
+            const rootNode = container && container.getRootNode ? container.getRootNode() : document;
+            const editorIframe = (rootNode && rootNode.querySelector && rootNode.querySelector('#quill-editor-iframe')) || document.querySelector('#quill-editor-iframe');
+              if (editorIframe && editorIframe.contentWindow) {
+                console.log('[Workspace] modal insert -> editorIframe found:', !!editorIframe);
+                console.log('[Workspace] modal insert -> posting insert-image to editor:', url);
+                editorIframe.contentWindow.postMessage({ action: 'insert-image', data: { url } }, '*');
+                showToast('✅ 이미지 삽입 요청을 보냈습니다.');
+              } else {
+                console.warn('[Workspace] modal insert -> editorIframe not found');
+                showToast('❌ 에디터를 찾을 수 없습니다.');
+              }
+          } catch (err) {
+            console.warn('[Workspace] scrap detail insert image failed', err);
+          }
+        });
+      });
+      
+      // 이미지 드래그로 연결할 수 있도록 dragstart 리스너 추가
+      imagesEl.querySelectorAll('img').forEach((img) => {
+        const wrapper = img.closest('div');
+        if (!wrapper) return;
+        try {
+          wrapper.draggable = true;
+          wrapper.addEventListener('dragstart', (e) => {
+            e.stopPropagation();
+            try {
+              const data = {
+                id: scrapData.id,
+                text: scrapData.text || '',
+                isLinked: false,
+                imageUrl: img.src || null,
+              };
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('application/json', JSON.stringify(data));
+            } catch (err) {
+              console.debug('[Workspace] scrap detail dragstart setData failed', err);
+            }
+          });
+        } catch (err) {
+          // ignore
+        }
       });
     } else {
       imagesEl.innerHTML = '';
@@ -3905,80 +3983,11 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     }
 
     // 4. 상세 모달 띄우기 (나머지 영역 클릭 시)
+    // (핸들러 로직은 중복되어 아래에서 한 번 더 처리됩니다)
+    // Prevent fall-through; the actual modal code with fallback is implemented later
     e.preventDefault();
     e.stopPropagation();
-
-    // 스크랩 상세 정보 가져오기
-    chrome.runtime.sendMessage({ action: 'get_scrap_detail', scrapId: scrapId }, (response) => {
-      if (response && response.success && response.scrap) {
-        const scrap = response.scrap;
-
-        // 모달 생성
-        const modal = document.createElement('div');
-        modal.className = 'scrap-detail-modal';
-        modal.style.cssText = `
-              position: fixed;
-              top: 0;
-              left: 0;
-              width: 100%;
-              height: 100%;
-              background: rgba(0,0,0,0.7);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              z-index: 10000;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            `;
-
-        modal.innerHTML = `
-              <div style="background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-                <div style="padding: 24px; border-bottom: 1px solid #e1e5e9;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div style="flex: 1;">
-                      <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 600; color: #1a1a1a;">${scrap.title || '제목 없음'}</h2>
-                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                        <a href="${scrap.url}" target="_blank" style="color: #0066cc; text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 4px;">
-                          🔗 ${scrap.url}
-                        </a>
-                      </div>
-                      ${
-                        scrap.tags && scrap.tags.length > 0
-                          ? `
-                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                          ${scrap.tags.map((tag) => `<span style="background: #f0f4f8; color: #475569; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${tag}</span>`).join('')}
-                        </div>
-                      `
-                          : ''
-                      }
-                    </div>
-                    <button class="modal-close-btn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; hover: background: #f5f5f5;">×</button>
-                  </div>
-                </div>
-                <div style="padding: 24px;">
-                  <div style="color: #374151; line-height: 1.6; font-size: 15px;">${scrap.text || scrap.cleanText || '내용이 없습니다.'}</div>
-                </div>
-              </div>
-            `;
-
-        // 닫기 버튼 이벤트
-        modal.querySelector('.modal-close-btn').addEventListener('click', () => {
-          modal.remove();
-        });
-
-        // 배경 클릭으로 닫기
-        modal.addEventListener('click', (e) => {
-          if (e.target === modal) {
-            modal.remove();
-          }
-        });
-
-        document.body.appendChild(modal);
-        return;
-      } else {
-        showToast('❌ 스크랩 정보를 불러올 수 없습니다.');
-        return;
-      }
-    });
+    return;
     // delete draft handling moved earlier
 
     // 1. 삭제 버튼 클릭은 무시 (이미 처리됨)
@@ -4085,6 +4094,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     const data = e.dataTransfer.getData('application/json');
     if (!data) return;
     const scrapData = JSON.parse(data);
+    const imageUrl = scrapData.imageUrl || scrapData.image || scrapData.thumbnail || null;
 
     if (
       linkedScrapsList &&
@@ -4104,6 +4114,77 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         linkedScrapsIds
       );
       if (linkedScrapsIds.includes(scrapData.id)) {
+        // If an image was specifically dragged and the scrap is already linked,
+        // add the image to the workspace image gallery (and update the linked scrap card if necessary).
+        if (imageUrl) {
+          console.debug('[Workspace] drop event for already-linked scrap with image:', scrapData.id, imageUrl);
+          // Update linked scrap card to include image if missing
+          const existingCard = linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`);
+          if (existingCard) {
+            // If card already lacks an img, insert an image wrapper at the front
+            if (!existingCard.querySelector('.scrap-card-img-wrap img')) {
+              const imgWrap = document.createElement('div');
+              imgWrap.className = 'scrap-card-img-wrap';
+              imgWrap.innerHTML = `<img src="${imageUrl}" alt="scrap image">`;
+              // Try to insert into the canonical .scrap-card wrapper if it exists
+              const cardDiv = existingCard.querySelector('.scrap-card');
+              if (cardDiv) {
+                cardDiv.insertAdjacentElement('afterbegin', imgWrap);
+              } else {
+                // Fallback: insert directly at the beginning of the linked card container
+                existingCard.insertAdjacentElement('afterbegin', imgWrap);
+              }
+              // Add class to indicate thumbnail exists for styling
+              try {
+                existingCard.classList.add('has-thumbnail');
+              } catch (e) {
+                /* ignore */
+              }
+            }
+          }
+          // Add to image gallery if available
+          try {
+            const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
+            if (resourceLibrary) {
+              const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
+              if (imageGalleryGrid) {
+                // Avoid duplicates
+                const found = imageGalleryGrid.querySelector(`img[data-src="${imageUrl}"]`) || imageGalleryGrid.querySelector(`img[src="${imageUrl}"]`);
+                if (!found) {
+                  const div = document.createElement('div');
+                  div.className = 'gallery-thumb-wrap';
+                  div.draggable = true;
+                  div.dataset.imageUrl = imageUrl;
+                  div.dataset.scrapId = scrapData.id || '';
+                  div.style.cssText = 'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
+                  const imgThumb = document.createElement('img');
+                  imgThumb.className = 'gallery-thumb';
+                  imgThumb.loading = 'lazy';
+                  imgThumb.decoding = 'async';
+                  imgThumb.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+                  imgThumb.dataset.src = imageUrl;
+                  imgThumb.src = imageUrl;
+                  div.appendChild(imgThumb);
+                  // attach dragstart handler for the new thumb
+                  div.addEventListener('dragstart', (ev) => {
+                    try {
+                      const payload = { id: scrapData.id, text: scrapData.text || '', isLinked: true, imageUrl };
+                      ev.dataTransfer.effectAllowed = 'move';
+                      ev.dataTransfer.setData('application/json', JSON.stringify(payload));
+                    } catch (err) {
+                      console.debug('[Workspace] gallery newly added dragstart setData failed', err);
+                    }
+                  });
+                  imageGalleryGrid.appendChild(div);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[Workspace] adding image to gallery failed:', err);
+          }
+          showToast('✅ 스크랩의 이미지를 갤러리에 추가했습니다.');
+          return;
+        }
         console.debug('[Workspace] drop ignored — scrap already linked:', scrapData.id);
         showToast('⚠️ 이미 연결된 스크랩입니다.');
         return;
@@ -4130,7 +4211,9 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             const emptyState = linkedScrapsList.querySelector('.empty-state p');
             if (emptyState) emptyState.remove();
             linkedScrapsList.classList.remove('empty-state');
-            linkedScrapsList.insertAdjacentHTML('beforeend', createScrapCard(scrapData, true));
+            const cardToCreate = { ...scrapData };
+            if (imageUrl) cardToCreate.image = imageUrl;
+            linkedScrapsList.insertAdjacentHTML('beforeend', createScrapCard(cardToCreate, true));
             // linkedScraps를 배열로 초기화 (객체인 경우 배열로 변환)
             console.debug('[Workspace] linking scrap — id:', scrapData.id);
             if (!ideaData.linkedScraps) {
@@ -4880,7 +4963,9 @@ window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData)
 // [체크리스트 5-2] 워크스페이스: 채널 변경 시 자료만 갱신 (에디터 보호)
 export function updateWorkspaceScraps(container, ideaData) {
   // [체크리스트 5-1] 에디터 유지: 에디터와 제목은 절대 건드리지 않음
-  const workspaceEl = container.querySelector('.cp-workspace-container');
+  // Accept both container class names used across modules
+  const workspaceEl =
+    container.querySelector('.cp-workspace-container') || container.querySelector('.workspace-container');
   if (!workspaceEl) {
     console.warn('[Workspace] 워크스페이스 컨테이너를 찾을 수 없습니다.');
     return;

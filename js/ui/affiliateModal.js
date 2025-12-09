@@ -183,6 +183,8 @@ export function renderAffiliateModal(container) {
                     <option value="Coupang">🚀 쿠팡 파트너스</option>
                     <option value="AliExpress">🛍️ 알리익스프레스</option>
                     <option value="Amazon">📦 아마존 어소시에이트</option>
+                    <option value="NaverShoppingConnect">🟢 네이버 쇼핑 컨넥트</option>
+                    <option value="Ohouse">🏠 오늘의집</option>
                     <option value="General">🔗 일반 제휴 링크</option>
                   </select>
                 </div>
@@ -268,14 +270,9 @@ export function renderAffiliateModal(container) {
 
               <div class="affiliate-form-footer">
                 <div class="form-footer-left">
-                  <button id="btn-preview-link" class="cp-btn cp-btn-secondary affiliate-preview-btn">
-                    <span class="preview-icon">👁️</span>
-                    미리보기
-                  </button>
-                </div>
-                <div class="form-footer-right">
-                  <button id="btn-cancel-form" class="cp-btn cp-btn-secondary">취소</button>
-                  <button id="btn-save-link" class="cp-btn cp-btn-primary affiliate-save-btn">
+                  </div>
+                  <div class="form-footer-right">
+                    <button id="btn-save-link" class="cp-btn cp-btn-primary affiliate-save-btn">
                     <span class="save-icon">💾</span>
                     저장하기
                   </button>
@@ -299,6 +296,51 @@ export function renderAffiliateModal(container) {
 
   // 데이터 로드
   loadLinks(container);
+
+  // Ensure footer has safe sizing rules even if external CSS failed to load
+  try {
+    const footer = container.querySelector('.affiliate-form-footer');
+      if (footer) {
+      footer.style.boxSizing = 'border-box';
+      footer.style.width = '100%';
+      footer.style.overflowX = 'auto';
+      footer.style.padding = '12px 14px';
+      footer.style.minHeight = '48px';
+      // Grid layout fallback for consistent left/right alignment
+      footer.style.display = 'grid';
+      footer.style.gridTemplateColumns = '1fr auto';
+      footer.style.alignItems = 'center';
+      footer.style.gap = '12px';
+      // smaller default sizing for buttons in case external CSS is missing
+        const buttons = footer.querySelectorAll('.cp-btn');
+      buttons.forEach((btn) => {
+        btn.style.boxSizing = 'border-box';
+        if (!btn.style.minWidth) btn.style.minWidth = '40px';
+        btn.style.maxWidth = '140px';
+        btn.style.padding = '6px 8px';
+        btn.style.fontSize = '12px';
+        btn.style.whiteSpace = 'nowrap';
+        btn.style.overflow = 'hidden';
+        btn.style.textOverflow = 'ellipsis';
+        // if it's a save button, give it slightly larger min width for readability
+        if (btn.classList.contains('affiliate-save-btn')) {
+          btn.style.minWidth = '72px';
+          btn.style.height = '36px';
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[AffiliateModal] footer inline style application failed', e);
+  }
+        // ensure groups are properly aligned via inline fallback too
+        try {
+          const leftGroup = footer.querySelector('.form-footer-left');
+          const rightGroup = footer.querySelector('.form-footer-right');
+          if (leftGroup) leftGroup.style.justifyContent = 'flex-start';
+          if (rightGroup) rightGroup.style.justifyContent = 'flex-end';
+        } catch (e) {
+          // ignore
+        }
 }
 
 // 키워드 태그 관리용 배열
@@ -623,13 +665,7 @@ function bindEvents(container) {
     });
   }
 
-  // 폼 취소
-  const cancelBtn = container.querySelector('#btn-cancel-form');
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      if (formContainer) formContainer.style.display = 'none';
-    });
-  }
+  // NOTE: form cancel button has been removed from footer; users can close the form via header X
 
   // 모달 닫기 버튼 (헤더 우측 X)
   const closeModalBtn =
@@ -666,231 +702,11 @@ function bindEvents(container) {
     console.warn('[AffiliateModal] Backdrop not found');
   }
 
-  // 미리보기 버튼
-  const previewBtn = container.querySelector('#btn-preview-link');
-  if (previewBtn) {
-    previewBtn.addEventListener('click', () => {
-      showLinkPreview(container);
-    });
-  }
+  // NOTE: preview button moved to per-card actions
 
-  // 카드 HTML 복사 버튼 (form footer 좌측에 추가)
-  const copyHtmlBtnId = 'btn-copy-card-html';
-  if (!container.querySelector(`#${copyHtmlBtnId}`)) {
-    const copyBtn = document.createElement('button');
-    copyBtn.id = copyHtmlBtnId;
-    copyBtn.className = 'cp-btn cp-btn-secondary';
-    copyBtn.style.marginLeft = '8px';
-    copyBtn.textContent = '카드 HTML 복사';
+  // NOTE: 카드 HTML 복사 버튼은 각 카드에 직접 추가되었습니다.
 
-    copyBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      try {
-        const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
-        const cardImg = container.querySelector('#card-image-url')?.value?.trim();
-        const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
-        const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
-        const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
-        const cardBadges = container.querySelector('#card-badges')?.value?.trim();
-        const url = container.querySelector('#aff-url')?.value?.trim() || '';
-
-        const cardHtml = `
-          <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
-            <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
-              ${
-                cardImg
-                  ? `<img src="${cardImg}" style="width:100%;height:100%;object-fit:cover;"/>`
-                  : '<div style="color:#999;">이미지 없음</div>'
-              }
-            </div>
-            <div style="flex:1;">
-              <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${
-                cardProductName || ''
-              }</div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                <div style="font-weight:900;color:#ae0000;font-size:18px;">${
-                  cardSale ? Number(cardSale).toLocaleString() + '원' : ''
-                }</div>
-                ${
-                  cardOrig && Number(cardOrig) > Number(cardSale || 0)
-                    ? `<div style="text-decoration:line-through;color:#999;">${Number(
-                        cardOrig
-                      ).toLocaleString()}원</div>`
-                    : ''
-                }
-                ${
-                  cardDiscount
-                    ? `<div style="color:#ae0000;font-weight:700;">${cardDiscount}%</div>`
-                    : ''
-                }
-              </div>
-              ${cardBadges ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>` : ''}
-              <div style="margin-top:12px;"><a href="${url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
-            </div>
-          </div>
-        `;
-
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard
-            .writeText(cardHtml)
-            .then(() => {
-              showToast('✅ 카드 HTML이 클립보드에 복사되었습니다. 에디터에 붙여넣으세요.');
-            })
-            .catch((err) => {
-              console.error('카드 HTML 복사 실패', err);
-              showToast('⚠️ 카드 HTML 복사 실패');
-            });
-        } else {
-          // 폴백: prompt로 보여주기
-          window.prompt('아래 HTML을 복사하세요:', cardHtml);
-        }
-      } catch (err) {
-        console.error('카드 HTML 생성 오류', err);
-        showToast('⚠️ 카드 HTML 생성 실패');
-      }
-    });
-
-    const footerLeft = container.querySelector('.affiliate-form-footer .form-footer-left');
-    if (footerLeft) footerLeft.appendChild(copyBtn);
-  }
-
-  // '에디터에 삽입' 버튼: 카드 HTML을 직접 워크스페이스 에디터로 전송합니다.
-  const insertHtmlBtnId = 'btn-insert-card-html';
-  if (!container.querySelector(`#${insertHtmlBtnId}`)) {
-    const insertBtn = document.createElement('button');
-    insertBtn.id = insertHtmlBtnId;
-    insertBtn.className = 'cp-btn cp-btn-primary';
-    insertBtn.style.marginLeft = '8px';
-    insertBtn.textContent = '에디터에 삽입';
-
-    insertBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-
-      try {
-        const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
-        const cardImg = container.querySelector('#card-image-url')?.value?.trim();
-        const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
-        const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
-        const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
-        const cardBadges = container.querySelector('#card-badges')?.value?.trim();
-        const url = container.querySelector('#aff-url')?.value?.trim() || '';
-        const insertMode = container.querySelector('#card-insert-mode')?.value || 'card';
-
-        // 카드 모드와 텍스트 모드 선택에 따른 패이로드
-        let payloadHtml = '';
-        if (insertMode === 'card') {
-          // 카드 모드: 간단한 HTML 구조로 변경 (Quill 호환성 향상)
-          payloadHtml = `
-<div style="border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; background: #f9f9f9;">
-  <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${cardProductName || '상품명 없음'}</div>
-  ${cardImg ? `<img src="${cardImg}" style="max-width: 120px; height: auto; float: left; margin-right: 12px; border-radius: 4px;" onerror="this.style.display='none';" />` : ''}
-  <div style="font-size: 16px; color: #e74c3c; font-weight: bold; margin-bottom: 4px;">${cardSale ? Number(cardSale).toLocaleString() + '원' : '가격 정보 없음'}</div>
-  ${cardOrig && Number(cardOrig) > Number(cardSale || 0) ? `<div style="text-decoration: line-through; color: #999; font-size: 14px;">${Number(cardOrig).toLocaleString()}원</div>` : ''}
-  ${cardDiscount ? `<div style="color: #e74c3c; font-weight: bold;">${cardDiscount}% 할인</div>` : ''}
-  ${cardBadges ? `<div style="font-size: 12px; color: #666; margin: 4px 0;">${cardBadges}</div>` : ''}
-  <div style="clear: both;"></div>
-  <a href="${url}" target="_blank" rel="nofollow noopener" style="display: inline-block; background: #007bff; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; margin-top: 8px;">최저가 보러가기</a>
-</div>
-          `;
-        } else {
-          // 텍스트 모드: 간단한 앵커 태그 삽입
-          const txtTitle =
-            cardProductName || container.querySelector('#aff-name')?.value?.trim() || '상품 링크';
-          payloadHtml = `<a href="${url}" target="_blank" rel="nofollow noopener">${txtTitle}</a>`;
-        }
-
-        // 에디터 iframe을 찾아 postMessage로 전달합니다 (워크스페이스 / quill editor prefer)
-        const tryIframes = [];
-
-        // helper: search selector in multiple root contexts and return first iframe element
-        const findIframeInRoots = (sel) => {
-          // 1) Global document first (most reliable)
-          try {
-            const el = document.querySelector(sel);
-            if (el) return el;
-          } catch (e) {
-            Logger.warn('[AffiliateModal] global document query failed', e);
-          }
-
-          // 2) same root node as the container
-          try {
-            const rootNode = container?.getRootNode && container.getRootNode();
-            if (rootNode && rootNode.querySelector) {
-              const el = rootNode.querySelector(sel);
-              if (el) return el;
-            }
-          } catch (e) {
-            Logger.warn('[AffiliateModal] root DOM query failed', e);
-          }
-          try {
-            const host = container?.closest && container.closest('#content-pilot-host');
-            const hostShadow = host && host.shadowRoot;
-            if (hostShadow && hostShadow.querySelector) {
-              const el = hostShadow.querySelector(sel);
-              if (el) return el;
-            }
-          } catch (e) {
-            Logger.warn('[AffiliateModal] image extraction error', e);
-          }
-
-          return null;
-        };
-
-        // prefer quill in same workspace (shadow root / host) then global
-        const quillIframe = findIframeInRoots('#quill-editor-iframe');
-        if (quillIframe && quillIframe.contentWindow) tryIframes.push(quillIframe.contentWindow);
-
-        // TUI iframe can be in the same roots too
-        const tuiIframe = findIframeInRoots('#tui-editor-iframe');
-        if (tuiIframe && tuiIframe.contentWindow) tryIframes.push(tuiIframe.contentWindow);
-
-        // Lastly, include all editor-like iframes in global document (avoid duplicates)
-        document.querySelectorAll('iframe[id*="editor"]').forEach((f) => {
-          if (f.contentWindow && !tryIframes.includes(f.contentWindow))
-            tryIframes.push(f.contentWindow);
-        });
-
-        Logger.info('[AffiliateModal] Found iframes:', tryIframes.length);
-        let sent = false;
-        for (const win of tryIframes) {
-          try {
-            Logger.info('[AffiliateModal] Sending to iframe:', win);
-            win.postMessage({ action: 'insert-html', data: { html: payloadHtml } }, '*');
-            sent = true;
-            Logger.info('[AffiliateModal] HTML insert message sent to editor');
-          } catch (err) {
-            console.warn('에디터 전송 실패 대상:', err);
-          }
-        }
-
-        if (sent) {
-          showToast('✅ 에디터에 삽입 요청을 보냈습니다. (성공하면 에디터에 카드가 들어갑니다)');
-        } else {
-          // 실패시 클립보드 복사 폴백
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard
-              .writeText(payloadHtml)
-              .then(() => {
-                showToast(
-                  'ℹ️ 에디터가 감지되지 않았습니다. 카드 HTML을 클립보드에 복사했습니다 — 에디터에 붙여넣어 주세요.'
-                );
-              })
-              .catch(() => {
-                window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml);
-              });
-          } else {
-            window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml);
-          }
-        }
-      } catch (err) {
-        console.error('에디터 삽입 처리 중 오류', err);
-        showToast('⚠️ 에디터 삽입에 실패했습니다.');
-      }
-    });
-
-    const footerLeft2 = container.querySelector('.affiliate-form-footer .form-footer-left');
-    if (footerLeft2) footerLeft2.appendChild(insertBtn);
-  }
+  // NOTE: 에디터 삽입 버튼은 각 카드에 직접 추가되었습니다.
 
   // 카드 자동분석 버튼
   const parseBtn = container.querySelector('#btn-parse-card');
@@ -1345,10 +1161,17 @@ function generateKeywordSuggestions(existingKeywords) {
     .slice(0, 8);
 }
 
-function showLinkPreview(container) {
-  const name = container.querySelector('#aff-name')?.value?.trim();
-  const url = container.querySelector('#aff-url')?.value?.trim();
-  const platform = container.querySelector('#aff-platform')?.value;
+function showLinkPreview(container, link = null) {
+  let name, url, platform;
+  if (link) {
+    name = link.name || '';
+    url = link.url || '';
+    platform = link.platform || '';
+  } else {
+    name = container.querySelector('#aff-name')?.value?.trim();
+    url = container.querySelector('#aff-url')?.value?.trim();
+    platform = container.querySelector('#aff-platform')?.value;
+  }
 
   if (!name || !url) {
     showToast('⚠️ 상품명과 URL을 입력한 후 미리보기를 확인하세요.');
@@ -1364,15 +1187,26 @@ function showLinkPreview(container) {
   let icon = '🔗';
   if (platform === 'Coupang') icon = '🚀';
   else if (platform === 'AliExpress') icon = '🛍️';
+  else if (platform === 'NaverShoppingConnect') icon = '🟢';
+  else if (platform === 'Ohouse') icon = '🏠';
   else if (platform === 'Amazon') icon = '📦';
 
   // 미리보기 HTML 생성
   // 만약 카드 필드가 채워진 경우 '카드형 미리보기'를 우선적으로 보여줍니다.
-  const cardProductName = container.querySelector('#card-product-name')?.value?.trim();
-  const cardImg = container.querySelector('#card-image-url')?.value?.trim();
-  const cardSale = container.querySelector('#card-sale-price')?.value?.trim();
-  const cardOrig = container.querySelector('#card-original-price')?.value?.trim();
-  const cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
+  let cardProductName, cardImg, cardSale, cardOrig, cardDiscount;
+  if (link) {
+    cardProductName = link.cardData?.productName || '';
+    cardImg = link.cardData?.imageUrl || '';
+    cardSale = link.cardData?.salePrice || '';
+    cardOrig = link.cardData?.originalPrice || '';
+    cardDiscount = link.cardData?.discountRate || '';
+  } else {
+    cardProductName = container.querySelector('#card-product-name')?.value?.trim();
+    cardImg = container.querySelector('#card-image-url')?.value?.trim();
+    cardSale = container.querySelector('#card-sale-price')?.value?.trim();
+    cardOrig = container.querySelector('#card-original-price')?.value?.trim();
+    cardDiscount = container.querySelector('#card-discount-rate')?.value?.trim();
+  }
 
   if (cardProductName || cardImg || cardSale) {
     previewContent.innerHTML = `
@@ -1440,9 +1274,18 @@ function showLinkPreview(container) {
 
   previewContainer.style.display = 'block';
 
-  // 미리보기 스크롤
-  previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // 미리보기 스크롤 (if available in environment)
+  if (typeof previewContainer.scrollIntoView === 'function') {
+    try {
+      previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (e) {
+      // Some environments (test jsdom) may not support smooth scroll options
+      try { previewContainer.scrollIntoView(); } catch (err) { /* ignore */ }
+    }
+  }
 }
+
+export { showLinkPreview };
 
 function filterLinks(container, searchTerm) {
   const listEl = container.querySelector('#affiliate-link-list');
@@ -1591,6 +1434,14 @@ async function loadLinks(container) {
         platformIcon = '🛍️';
         platformName = '알리익스프레스';
         platformColor = '#ff6a00';
+      } else if (link.platform === 'NaverShoppingConnect') {
+        platformIcon = '🟢';
+        platformName = '네이버 쇼핑 컨넥트';
+        platformColor = '#2DB400';
+      } else if (link.platform === 'Ohouse') {
+        platformIcon = '🏠';
+        platformName = '오늘의집';
+        platformColor = '#ff7247';
       } else if (link.platform === 'Amazon') {
         platformIcon = '📦';
         platformName = '아마존';
@@ -1633,6 +1484,9 @@ async function loadLinks(container) {
           <div class="link-actions">
             <button class="link-open-btn" title="링크 열기">🔗</button>
             <button class="link-template-btn" title="템플릿 선택하여 아이디어 추가" aria-label="템플릿 선택하여 아이디어 추가">🧩</button>
+            <button class="link-preview-btn" title="미리보기">👁️</button>
+            <button class="link-copy-html-btn" title="카드 HTML 복사">📄</button>
+            <button class="link-insert-editor-btn" title="에디터에 삽입">📝</button>
             <button class="link-edit-btn" title="수정">✏️</button>
             <button class="link-delete-btn" title="삭제">🗑️</button>
           </div>
@@ -1877,6 +1731,141 @@ async function loadLinks(container) {
         });
       }
     }
+
+      // 미리보기 버튼 (카드 단위)
+      const previewBtnCard = item.querySelector('.link-preview-btn');
+      if (previewBtnCard) {
+        previewBtnCard.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showLinkPreview(container, link);
+        });
+      }
+
+      // 카드 HTML 복사 버튼 (카드 단위)
+      const copyHtmlCardBtn = item.querySelector('.link-copy-html-btn');
+      if (copyHtmlCardBtn) {
+        copyHtmlCardBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          try {
+            const cardProductName = link.cardData?.productName || link.name || '';
+            const cardImg = link.cardData?.imageUrl || '';
+            const cardSale = link.cardData?.salePrice || '';
+            const cardOrig = link.cardData?.originalPrice || '';
+            const cardDiscount = link.cardData?.discountRate || '';
+            const cardBadges = (link.cardData?.badges || []).join(', ');
+            const url = link.url || '';
+
+            const cardHtml = `
+          <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
+            <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
+              ${
+                cardImg
+                  ? `<img src="${cardImg}" style="width:100%;height:100%;object-fit:cover;"/>`
+                  : '<div style="color:#999;">이미지 없음</div>'
+              }
+            </div>
+            <div style="flex:1;">
+              <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${cardProductName || ''}</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <div style="font-weight:900;color:#ae0000;font-size:18px;">${cardSale ? Number(cardSale).toLocaleString() + '원' : ''}</div>
+                ${
+                  cardOrig && Number(cardOrig) > Number(cardSale || 0)
+                    ? `<div style="text-decoration:line-through;color:#999;">${Number(cardOrig).toLocaleString()}원</div>`
+                    : ''
+                }
+                ${cardDiscount ? `<div style="color:#ae0000;font-weight:700;">${cardDiscount}%</div>` : ''}
+              </div>
+              ${cardBadges ? `<div style="font-size:12px;color:#666;">${cardBadges}</div>` : ''}
+              <div style="margin-top:12px;"><a href="${url}" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
+            </div>
+          </div>
+        `;
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard
+                .writeText(cardHtml)
+                .then(() => {
+                  showToast('✅ 카드 HTML이 클립보드에 복사되었습니다. 에디터에 붙여넣으세요.');
+                })
+                .catch((err) => {
+                  console.error('카드 HTML 복사 실패', err);
+                  showToast('⚠️ 카드 HTML 복사 실패');
+                });
+            } else {
+              window.prompt('아래 HTML을 복사하세요:', cardHtml);
+            }
+          } catch (err) {
+            console.error('카드 HTML 생성 오류', err);
+            showToast('⚠️ 카드 HTML 생성 실패');
+          }
+        });
+      }
+
+      // 카드 에디터 삽입 버튼
+      const insertEditorBtn = item.querySelector('.link-insert-editor-btn');
+      if (insertEditorBtn) {
+        insertEditorBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            // insert handler
+            const cardProductName = link.cardData?.productName || link.name || '';
+            const cardImg = link.cardData?.imageUrl || '';
+            const cardSale = link.cardData?.salePrice || '';
+            const cardOrig = link.cardData?.originalPrice || '';
+            const cardDiscount = link.cardData?.discountRate || '';
+            const cardBadges = (link.cardData?.badges || []).join(', ');
+            const url = link.url || '';
+            const insertMode = 'card';
+
+            let payloadHtml = '';
+            if (insertMode === 'card') {
+              payloadHtml = `
+<div style="border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; background: #f9f9f9;">
+  <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${cardProductName || '상품명 없음'}</div>
+  ${cardImg ? `<img src="${cardImg}" style="max-width: 120px; height: auto; float: left; margin-right: 12px; border-radius: 4px;" onerror="this.style.display='none';" />` : ''}
+  <div style="font-size: 16px; color: #e74c3c; font-weight: bold; margin-bottom: 4px;">${cardSale ? Number(cardSale).toLocaleString() + '원' : '가격 정보 없음'}</div>
+  ${cardOrig && Number(cardOrig) > Number(cardSale || 0) ? `<div style="text-decoration: line-through; color: #999; font-size: 14px;">${Number(cardOrig).toLocaleString()}원</div>` : ''}
+  ${cardDiscount ? `<div style="color: #e74c3c; font-weight: bold;">${cardDiscount}% 할인</div>` : ''}
+  ${cardBadges ? `<div style="font-size: 12px; color: #666; margin: 4px 0;">${cardBadges}</div>` : ''}
+  <div style="clear: both;"></div>
+  <a href="${url}" target="_blank" rel="nofollow noopener" style="display: inline-block; background: #007bff; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; margin-top: 8px;">최저가 보러가기</a>
+</div>
+              `;
+            } else {
+              const txtTitle = cardProductName || link.name || '상품 링크';
+              payloadHtml = `<a href="${url}" target="_blank" rel="nofollow noopener">${txtTitle}</a>`;
+            }
+
+            const tryIframes = [];
+            const findIframeInRoots = (sel) => {
+              try { const el = document.querySelector(sel); if (el) return el; } catch (e) { Logger.warn('[AffiliateModal] global query fail', e); }
+              try { const rootNode = container?.getRootNode && container.getRootNode(); if (rootNode && rootNode.querySelector){ const el = rootNode.querySelector(sel); if (el) return el; } } catch (e) { Logger.warn('[AffiliateModal] root query fail', e); }
+              try { const host = container?.closest && container.closest('#content-pilot-host'); const hostShadow = host && host.shadowRoot; if (hostShadow && hostShadow.querySelector) { const el = hostShadow.querySelector(sel); if (el) return el; } } catch (e) { Logger.warn('[AffiliateModal] host search fail', e); }
+              return null;
+            };
+
+            const quillIframe = findIframeInRoots('#quill-editor-iframe'); if (quillIframe && quillIframe.contentWindow) tryIframes.push(quillIframe.contentWindow);
+            const tuiIframe = findIframeInRoots('#tui-editor-iframe'); if (tuiIframe && tuiIframe.contentWindow) tryIframes.push(tuiIframe.contentWindow);
+            document.querySelectorAll('iframe[id*="editor"]').forEach((f) => { if (f.contentWindow && !tryIframes.includes(f.contentWindow)) tryIframes.push(f.contentWindow); });
+
+            Logger.info('[AffiliateModal] Found iframes:', tryIframes.length);
+            let sent = false;
+            for (const win of tryIframes) {
+              try { win.postMessage({ action: 'insert-html', data: { html: payloadHtml } }, '*'); sent = true; Logger.info('[AffiliateModal] HTML insert message sent to editor'); } catch (err) { console.warn('에디터 전송 실패 대상:', err); }
+            }
+
+            if (sent) showToast('✅ 에디터에 삽입 요청을 보냈습니다. (성공하면 에디터에 카드가 들어갑니다)');
+            else {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(payloadHtml).then(() => { showToast('ℹ️ 에디터가 감지되지 않았습니다. 카드 HTML을 클립보드에 복사했습니다 — 에디터에 붙여넣어 주세요.'); }).catch(()=>{ window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml); });
+              } else {
+                window.prompt('에디터를 찾을 수 없습니다. 아래 HTML을 복사하세요:', payloadHtml);
+              }
+            }
+          } catch (err) { console.error('에디터 삽입 처리 중 오류', err); showToast('⚠️ 에디터 삽입에 실패했습니다.'); }
+        });
+        // listener bound for insertEditorBtn
+      }
   }
 }
 
