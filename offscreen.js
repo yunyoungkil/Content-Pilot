@@ -2,6 +2,7 @@
 
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { extractScrapTitle } from './js/utils/scrapTitleExtractor.js';
 
 // Debug: log immediately on script load so we can confirm the offscreen bundle
 // actually executed and attached its message listeners.
@@ -235,14 +236,30 @@ async function sanitizeAndFormatHtml(text) {
 }
 
 /**
- * 텍스트에서 불필요한 공백과 줄 바꿈을 제거하고 문단 구조를 유지합니다.
+ * 텍스트에서 불필요한 공백을 정리하되, 문단 구분은 보존합니다.
  */
 function formatCleanText(text) {
   if (!text) return '';
+  // 1. 연속된 줄바꿈(3개 이상)을 문단 구분자로 변경
   let processedText = text.replace(/\n\s*\n\s*\n/g, '__PARAGRAPH_BREAK__');
-  processedText = processedText.replace(/\n/g, ' ');
-  processedText = processedText.replace(/__PARAGRAPH_BREAK__/g, '\n');
-  processedText = processedText.replace(/\s+/g, ' ').trim();
+
+  // 2. 일반 줄바꿈은 유지 (제목 추출 등을 위해 구조 보존)
+  // 기존: processedText = processedText.replace(/\n/g, ' ');
+  // 변경: 줄바꿈을 하나로 통일하되 제거하지 않음
+  processedText = processedText.replace(/\n+/g, '\n');
+
+  // 3. 문단 구분자 복원
+  processedText = processedText.replace(/__PARAGRAPH_BREAK__/g, '\n\n');
+
+  // 4. 각 줄의 앞뒤 공백 제거
+  processedText = processedText
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n');
+
+  // 5. 연속된 공백 제거 (줄바꿈 제외)
+  processedText = processedText.replace(/[ \t]+/g, ' ').trim();
+
   return processedText;
 }
 
@@ -805,7 +822,32 @@ function sendFinalResponse(response) {
           ts: Date.now(),
           size: response && JSON.stringify(response).length,
         });
-        activeOffscreenPort.postMessage(response);
+
+        // Build a safe response object by copying direct properties using try/catch
+        // This avoids transferring objects with getters or proxies that could
+        // cause destination-side property access to throw.
+        const safeResponse = {};
+        try {
+          for (const k in response) {
+            try {
+              safeResponse[k] = response[k];
+            } catch (propErr) {
+              safeResponse[k] = null;
+            }
+          }
+        } catch (iterErr) {
+          // Fallback: shallow clone via JSON.stringify if iteration failed
+          try {
+            Object.assign(safeResponse, JSON.parse(JSON.stringify(response)));
+          } catch (_ignored) {
+            // As a last resort, copy known keys
+            safeResponse.action = response.action;
+            safeResponse.requestId = response.requestId;
+            safeResponse.success = response.success || false;
+          }
+        }
+
+        activeOffscreenPort.postMessage(safeResponse);
         return;
       } catch (e) {
         console.debug(
@@ -917,6 +959,11 @@ function handleRequest(request, sendReply) {
         const description =
           doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
 
+        const { metrics, cleanText } = parseContentAndMetrics(doc, urlObj);
+
+        // extract title using helper
+        const titleFromHtml = extractScrapTitle(html, cleanText, description);
+
         const metaTags = [];
         const keywordsMeta =
           doc.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
@@ -930,7 +977,6 @@ function handleRequest(request, sendReply) {
         }
         // ... (기타 태그 추출 로직 생략 - 기존과 동일) ...
         const uniqueTags = [...new Set(metaTags)];
-        const { metrics, cleanText } = parseContentAndMetrics(doc, urlObj);
 
         sendFinalResponse({
           action: 'parse_html_in_offscreen_response',
@@ -941,6 +987,7 @@ function handleRequest(request, sendReply) {
           metrics,
           cleanText,
           metaTags: uniqueTags.length > 0 ? uniqueTags : null,
+          title: titleFromHtml || '',
         });
       } catch (err) {
         sendFinalResponse({

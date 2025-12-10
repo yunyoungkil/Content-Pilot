@@ -206,7 +206,9 @@ describe('Background Message Handlers', () => {
 
   describe('add_image_to_scrap handler', () => {
     test('should add image to allImages and set image if missing', async () => {
-      const mockGet = jest.fn().mockResolvedValue({ exists: () => true, val: () => ({ allImages: [], image: null }) });
+      const mockGet = jest
+        .fn()
+        .mockResolvedValue({ exists: () => true, val: () => ({ allImages: [], image: null }) });
       const mockUpdate = jest.fn().mockResolvedValue(true);
       const mockRef = jest.fn();
 
@@ -239,12 +241,25 @@ describe('Background Message Handlers', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockGet).toHaveBeenCalled();
-      expect(mockUpdate).toHaveBeenCalledWith(mockRef(), { allImages: ['https://example.test/new.jpg'], image: 'https://example.test/new.jpg' });
-      expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true, allImages: expect.any(Array) }));
+      expect(mockUpdate).toHaveBeenCalledWith(mockRef(), {
+        allImages: ['https://example.test/new.jpg'],
+        image: 'https://example.test/new.jpg',
+      });
+      expect(sendResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true, allImages: expect.any(Array) })
+      );
     });
 
     test('should return duplicate when image already exists and avoid update', async () => {
-      const mockGet = jest.fn().mockResolvedValue({ exists: () => true, val: () => ({ allImages: ['https://example.test/new.jpg'], image: 'https://example.test/new.jpg' }) });
+      const mockGet = jest
+        .fn()
+        .mockResolvedValue({
+          exists: () => true,
+          val: () => ({
+            allImages: ['https://example.test/new.jpg'],
+            image: 'https://example.test/new.jpg',
+          }),
+        });
       const mockUpdate = jest.fn().mockResolvedValue(true);
       const mockRef = jest.fn();
 
@@ -277,7 +292,39 @@ describe('Background Message Handlers', () => {
       expect(mockGet).toHaveBeenCalled();
       // update should not be called because duplicate
       expect(mockUpdate).not.toHaveBeenCalled();
-      expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true, duplicate: true }));
+      expect(sendResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true, duplicate: true })
+      );
+    });
+  });
+
+  describe('scrap_element handler', () => {
+    test('should call saveScrapElement and refresh scraps when scrap saved', async () => {
+      // mock scrapService functions
+      const mockSave = jest.fn().mockResolvedValue({ success: true, scrapId: 'scrap-xyz' });
+      const mockGetFirebaseScraps = jest.fn().mockResolvedValue({ data: [], hasMore: false });
+
+      jest.resetModules();
+      jest.doMock('../js/services/scrapService.js', () => ({
+        saveScrapElement: mockSave,
+        getFirebaseScraps: mockGetFirebaseScraps,
+      }));
+
+      // reload background module
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const sendResponse = jest.fn();
+      const message = { action: 'scrap_element', data: { title: 'test' }, channelId: null };
+      const ret = runtimeHandler(message, {}, sendResponse);
+      // should be async
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockSave).toHaveBeenCalledWith({ title: 'test' }, null);
+      expect(mockGetFirebaseScraps).toHaveBeenCalledWith(null);
+      // verify tabs query broadcast - simulate tabs.query being called (mocked earlier)
+      expect(chrome.tabs.query).toHaveBeenCalled();
     });
   });
 
@@ -338,12 +385,10 @@ describe('Background Message Handlers', () => {
 
     test('should handle retry_idea_briefing by queuing DB state and scheduling generateIdeaBriefing', async () => {
       // Mock firebase get/update and current user
-      const mockGet = jest
-        .fn()
-        .mockResolvedValue({
-          val: () => ({ title: 'Retry Title', description: 'Retry Desc' }),
-          exists: () => true,
-        });
+      const mockGet = jest.fn().mockResolvedValue({
+        val: () => ({ title: 'Retry Title', description: 'Retry Desc' }),
+        exists: () => true,
+      });
       const mockUpdate = jest.fn().mockResolvedValue(true);
 
       jest.doMock('../js/services/firebaseService.js', () => ({

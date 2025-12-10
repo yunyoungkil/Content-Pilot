@@ -505,14 +505,20 @@ export async function enhanceDraftWithFeatures({
         while ((match = imgTagRegex.exec(formattedDraft)) !== null) {
           const url = match[1];
           // Firebase Storage의 thumbnails 폴더 이미지는 제외 (재생성 시 순환 참조 방지)
-          if (url && !url.includes('firebasestorage.googleapis.com') && !url.includes('/thumbnails/')) {
+          if (
+            url &&
+            !url.includes('firebasestorage.googleapis.com') &&
+            !url.includes('/thumbnails/')
+          ) {
             selectedImageUrl = url;
             imageSourceType = 'editor';
-            Logger.info('[enhanceDraftWithFeatures] ✅ 1순위 이미지 선택: 에디터 내 이미지', { url: selectedImageUrl.substring(0, 80) });
+            Logger.info('[enhanceDraftWithFeatures] ✅ 1순위 이미지 선택: 에디터 내 이미지', {
+              url: selectedImageUrl.substring(0, 80),
+            });
             break;
           }
         }
-        
+
         if (!selectedImageUrl) {
           Logger.debug('[enhanceDraftWithFeatures] 에디터에 사용 가능한 이미지 없음 (썸네일 제외)');
         }
@@ -522,24 +528,32 @@ export async function enhanceDraftWithFeatures({
     }
 
     // 2순위: 연결 자료(스크랩) 이미지
-    if (!selectedImageUrl && ideaData.linkedScrapsContent && Array.isArray(ideaData.linkedScrapsContent)) {
+    if (
+      !selectedImageUrl &&
+      ideaData.linkedScrapsContent &&
+      Array.isArray(ideaData.linkedScrapsContent)
+    ) {
       Logger.debug('[enhanceDraftWithFeatures] 연결 자료 확인:', {
         count: ideaData.linkedScrapsContent.length,
-        scraps: ideaData.linkedScrapsContent.map(s => ({ title: s.title, hasImage: !!s.image, imageUrl: s.image?.substring(0, 50) }))
+        scraps: ideaData.linkedScrapsContent.map((s) => ({
+          title: s.title,
+          hasImage: !!s.image,
+          imageUrl: s.image?.substring(0, 50),
+        })),
       });
-      
+
       for (const scrap of ideaData.linkedScrapsContent) {
         if (scrap.image) {
           selectedImageUrl = scrap.image;
           imageSourceType = 'scrap';
-          Logger.info('[enhanceDraftWithFeatures] ✅ 2순위 이미지 선택: 연결 자료 이미지', { 
+          Logger.info('[enhanceDraftWithFeatures] ✅ 2순위 이미지 선택: 연결 자료 이미지', {
             scrapTitle: scrap.title,
-            url: selectedImageUrl.substring(0, 80) 
+            url: selectedImageUrl.substring(0, 80),
           });
           break;
         }
       }
-      
+
       if (!selectedImageUrl) {
         Logger.debug('[enhanceDraftWithFeatures] 연결 자료에 이미지 없음');
       }
@@ -550,14 +564,14 @@ export async function enhanceDraftWithFeatures({
     if (!selectedImageUrl && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
       Logger.debug('[enhanceDraftWithFeatures] 제휴 링크 확인:', {
         count: affiliateLinks.length,
-        links: affiliateLinks.map(l => ({ 
-          id: l.id, 
-          hasCardData: !!l.cardData, 
+        links: affiliateLinks.map((l) => ({
+          id: l.id,
+          hasCardData: !!l.cardData,
           hasImage: !!(l.cardData && l.cardData.imageUrl),
-          imageUrl: l.cardData?.imageUrl?.substring(0, 50)
-        }))
+          imageUrl: l.cardData?.imageUrl?.substring(0, 50),
+        })),
       });
-      
+
       // Prefer exact affiliate link if provided in ideaData.origin
       productLink =
         (ideaData?.origin?.affiliateLinkId
@@ -565,7 +579,7 @@ export async function enhanceDraftWithFeatures({
               (l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl
             )
           : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
-      
+
       if (productLink && productLink.cardData && productLink.cardData.imageUrl) {
         selectedImageUrl = productLink.cardData.imageUrl;
         imageSourceType = 'affiliate';
@@ -588,8 +602,12 @@ export async function enhanceDraftWithFeatures({
     let isProductSynthesis = false;
 
     if (selectedImageUrl) {
-      Logger.info('[enhanceDraftWithFeatures] 선택된 이미지 소스:', imageSourceType, selectedImageUrl.substring(0, 50));
-      
+      Logger.info(
+        '[enhanceDraftWithFeatures] 선택된 이미지 소스:',
+        imageSourceType,
+        selectedImageUrl.substring(0, 50)
+      );
+
       // 이미지 기반 합성 시도
       try {
         if (typeof onProgress === 'function')
@@ -601,16 +619,13 @@ export async function enhanceDraftWithFeatures({
       } catch (e) {
         void 0;
       }
-      
+
       const imageBase64 = await fetchImageAsBase64(selectedImageUrl);
       if (imageBase64) {
         const synthesisPrompt = `Create a professional photograph featuring the subject from the provided reference image. Place it into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
           generatedImages = await generateAiImage(synthesisPrompt, 1, imageBase64);
-          Logger.info(
-            '[enhanceDraftWithFeatures] 이미지 합성 완료:',
-            generatedImages.length
-          );
+          Logger.info('[enhanceDraftWithFeatures] 이미지 합성 완료:', generatedImages.length);
           try {
             if (typeof onProgress === 'function')
               onProgress({
@@ -623,10 +638,7 @@ export async function enhanceDraftWithFeatures({
           }
           isProductSynthesis = true;
         } catch (err) {
-          Logger.warn(
-            '[enhanceDraftWithFeatures] 이미지 합성 실패, AI 생성으로 전환',
-            err
-          );
+          Logger.warn('[enhanceDraftWithFeatures] 이미지 합성 실패, AI 생성으로 전환', err);
         }
       }
     } else {
@@ -2539,11 +2551,13 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
         briefingStatus: 'processing',
         briefingStartedAt: serverTimestamp(),
+        briefingProgress: 0,
       });
       try {
         await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}/workspace/draft`), {
           briefingStatus: 'processing',
           briefingStartedAt: serverTimestamp(),
+          briefingProgress: 0,
         });
       } catch (nestedErr) {
         // ignore nested update failure

@@ -605,7 +605,67 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
 
   try {
     const userId = await getCurrentUserId();
-    await remove(ref(getDb(), `kanban/${userId}/${status}/${firebaseKey}`));
+    const cardPath = `kanban/${userId}/${status}/${firebaseKey}`;
+    const cardSnap = await get(ref(getDb(), cardPath));
+    const cardData = cardSnap?.val();
+
+    // Remove the card
+    await remove(ref(getDb(), cardPath));
+
+    // Remove URL index entries (if present) and invalidate duplicate_check cache
+    try {
+      const updatePromises = [];
+      if (cardData?.origin?.postUrl) {
+      const originalUrl = cardData.origin.postUrl;
+      if (originalUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalUrl));
+          const originIndexPath = `url_index/${userId}/${encodedKey}/origin/${firebaseKey}`;
+          updatePromises.push(
+            remove(ref(getDb(), originIndexPath)).catch((error) => {
+              Logger.warn(
+                `[removeIdeaFromKanban] origin URL 인덱스 삭제 실패 (${originIndexPath}):`,
+                error
+              );
+              return null;
+            })
+          );
+          // invalidate duplicate check cache for this url
+          try {
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+            await performanceOptimizer.invalidateCache(cacheKey);
+          } catch (e) {
+            Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
+          }
+        }
+      }
+
+      if (cardData?.publishedUrl) {
+      const originalPubUrl = cardData.publishedUrl;
+      if (originalPubUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalPubUrl));
+          const publishedIndexPath = `url_index/${userId}/${encodedKey}/published/${firebaseKey}`;
+          updatePromises.push(
+            remove(ref(getDb(), publishedIndexPath)).catch((error) => {
+              Logger.warn(
+                `[removeIdeaFromKanban] published URL 인덱스 삭제 실패 (${publishedIndexPath}):`,
+                error
+              );
+              return null;
+            })
+          );
+          try {
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+            await performanceOptimizer.invalidateCache(cacheKey);
+          } catch (e) {
+            Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
+          }
+        }
+      }
+
+      if (updatePromises.length > 0) await Promise.all(updatePromises);
+    } catch (indexError) {
+      Logger.warn('[removeIdeaFromKanban] URL 인덱스 삭제 중 오류:', indexError);
+    }
 
     Logger.info(
       `[removeIdeaFromKanban] 아이디어 제거 완료 - key: ${firebaseKey}, status: ${status}`
@@ -688,6 +748,26 @@ export async function deleteKanbanCard(cardId, status) {
 
         if (updatePromises.length > 0) {
           await Promise.all(updatePromises);
+        }
+
+        // Invalidate duplicate_check cache for origin/published urls
+        try {
+          if (cardData.origin?.postUrl) {
+            const originalUrl = cardData.origin.postUrl;
+            if (originalUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+              await performanceOptimizer.invalidateCache(cacheKey);
+            }
+          }
+          if (cardData.publishedUrl) {
+            const originalPubUrl = cardData.publishedUrl;
+            if (originalPubUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+              await performanceOptimizer.invalidateCache(cacheKey);
+            }
+          }
+        } catch (e) {
+          Logger.warn('[deleteKanbanCard] duplicate cache invalidate failed', e);
         }
       } catch (indexError) {
         Logger.warn('[deleteKanbanCard] URL 인덱스 삭제 중 오류:', indexError);

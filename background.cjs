@@ -1990,7 +1990,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
-        return await deleteScrap(scrapId);
+        const res = await deleteScrap(scrapId);
+        // Broadcast new list to tabs
+        try {
+          await getFirebaseScraps(null);
+        } catch (e) {
+          Logger.warn('[delete_scrap] getFirebaseScraps broadcast 실패:', e?.message || e);
+        }
+        return res;
       })()
     );
   }
@@ -2182,7 +2189,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!Array.isArray(allImages)) {
           allImages = [];
         }
-        
+
         // 중복 체크 - 정규화된 URL로 비교
         const normalizedNewUrl = normalizeUrlForDeletion(imageUrl);
         const isDuplicate = allImages.some(
@@ -2196,7 +2203,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const updates = {
             allImages: allImages,
           };
-          
+
           if (!scrapData.image) {
             updates.image = imageUrl;
           }

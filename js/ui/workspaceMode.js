@@ -537,12 +537,12 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           div.dataset.scrapId = effectiveScrapId;
           div.addEventListener('dragstart', (e) => {
             try {
-                  const data = {
-                    id: effectiveScrapId,
-                    text: imgData.title || '',
-                    isLinked: false,
-                    imageUrl: imgData.url || imgData.thumbnail || imgData.src || null,
-                  };
+              const data = {
+                id: effectiveScrapId,
+                text: imgData.title || '',
+                isLinked: false,
+                imageUrl: imgData.url || imgData.thumbnail || imgData.src || null,
+              };
               e.dataTransfer.effectAllowed = 'move';
               e.dataTransfer.setData('application/json', JSON.stringify(data));
             } catch (err) {
@@ -1080,7 +1080,7 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
 function createScrapCard(scrap, isLinked) {
   const textContent = scrap.text || '(내용 없음)';
-  const cleanedTitle = textContent.replace(/\s+/g, ' ').trim();
+  const cleanedTitle = (scrap.title || textContent).replace(/\s+/g, ' ').trim();
   const displayTitle = cleanedTitle.substring(0, 10);
 
   // [수정] 연결된 스크랩 UI 개선 (이미지 썸네일 표시)
@@ -1228,8 +1228,11 @@ export function showScrapDetailModal(scrapData, container = null) {
     titleEl: !!titleEl,
   });
 
-  // 제목
-  const title = scrapData.text ? scrapData.text.substring(0, 100).replace(/\n/g, ' ') : '제목 없음';
+  // 제목 - 우선 scrapData.title 사용
+  const title = (scrapData.title || scrapData.text || '제목 없음')
+    .toString()
+    .substring(0, 100)
+    .replace(/\n/g, ' ');
   if (titleEl) titleEl.textContent = title;
 
   // URL
@@ -1254,7 +1257,7 @@ export function showScrapDetailModal(scrapData, container = null) {
         .map(
           (img) => `
         <div style="position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 8px; border: 1px solid #e9ecef; cursor: pointer;">
-          <img src="${img.replace(/"/g,'&quot;')}" alt="스크랩 이미지" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
+          <img src="${img.replace(/"/g, '&quot;')}" alt="스크랩 이미지" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
           <button class="scrap-image-insert-btn" title="에디터에 삽입" style="position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;">삽입</button>
         </div>
       `
@@ -1303,23 +1306,31 @@ export function showScrapDetailModal(scrapData, container = null) {
           }
           // Try to find editor iframe in the current context (shadow root or document)
           try {
-            const rootNode = container && container.getRootNode ? container.getRootNode() : document;
-            const editorIframe = (rootNode && rootNode.querySelector && rootNode.querySelector('#quill-editor-iframe')) || document.querySelector('#quill-editor-iframe');
-              if (editorIframe && editorIframe.contentWindow) {
-                console.log('[Workspace] modal insert -> editorIframe found:', !!editorIframe);
-                console.log('[Workspace] modal insert -> posting insert-image to editor:', url);
-                editorIframe.contentWindow.postMessage({ action: 'insert-image', data: { url } }, '*');
-                showToast('✅ 이미지 삽입 요청을 보냈습니다.');
-              } else {
-                console.warn('[Workspace] modal insert -> editorIframe not found');
-                showToast('❌ 에디터를 찾을 수 없습니다.');
-              }
+            const rootNode =
+              container && container.getRootNode ? container.getRootNode() : document;
+            const editorIframe =
+              (rootNode &&
+                rootNode.querySelector &&
+                rootNode.querySelector('#quill-editor-iframe')) ||
+              document.querySelector('#quill-editor-iframe');
+            if (editorIframe && editorIframe.contentWindow) {
+              console.log('[Workspace] modal insert -> editorIframe found:', !!editorIframe);
+              console.log('[Workspace] modal insert -> posting insert-image to editor:', url);
+              editorIframe.contentWindow.postMessage(
+                { action: 'insert-image', data: { url } },
+                '*'
+              );
+              showToast('✅ 이미지 삽입 요청을 보냈습니다.');
+            } else {
+              console.warn('[Workspace] modal insert -> editorIframe not found');
+              showToast('❌ 에디터를 찾을 수 없습니다.');
+            }
           } catch (err) {
             console.warn('[Workspace] scrap detail insert image failed', err);
           }
         });
       });
-      
+
       // 이미지 드래그로 연결할 수 있도록 dragstart 리스너 추가
       imagesEl.querySelectorAll('img').forEach((img) => {
         const wrapper = img.closest('div');
@@ -2293,6 +2304,10 @@ export function renderWorkspace(container, ideaData) {
     typeof ideaData.briefingProgress === 'number' ? ideaData.briefingProgress : null;
   const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
   const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+  const progressNumeric =
+    typeof progressValue === 'number' && !Number.isNaN(progressValue)
+      ? Math.max(0, Math.min(100, Math.round(progressValue)))
+      : null;
 
   if (bs) {
     let bsHtml = '';
@@ -2301,12 +2316,12 @@ export function renderWorkspace(container, ideaData) {
         bsHtml = `<span class="briefing-status-badge queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
         break;
       case 'processing':
-        if (progressValue !== null && typeof progressValue === 'number') {
+        if (progressNumeric !== null && typeof progressNumeric === 'number') {
           bsHtml = `
             <span class="briefing-status-badge processing" title="AI 브리핑 생성 중 - ${progressValue}%">
               <span class="briefing-spinner">🔄</span>
-              <span class="briefing-progress-label">브리핑 생성 중 (${progressValue}%)</span>
-              <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressValue}%"></div></div>
+              <span class="briefing-progress-label">브리핑 생성 중 (${progressNumeric}%)</span>
+              <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressNumeric}%"></div></div>
             </span>`;
         } else {
           bsHtml = `<span class="briefing-status-badge processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
@@ -2874,6 +2889,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                       allScrapsList.innerHTML = availableScraps
                         .map((s) => createScrapCard(s, false))
                         .join('');
+                      attachScrapItemListeners(allScrapsList, linkedScrapsList, ideaData);
                     } else {
                       allScrapsList.innerHTML =
                         "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
@@ -4117,8 +4133,12 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         // If an image was specifically dragged and the scrap is already linked,
         // add the image to the workspace image gallery (and update the linked scrap card if necessary).
         if (imageUrl) {
-          console.debug('[Workspace] drop event for already-linked scrap with image:', scrapData.id, imageUrl);
-          
+          console.debug(
+            '[Workspace] drop event for already-linked scrap with image:',
+            scrapData.id,
+            imageUrl
+          );
+
           // First, add the image to the scrap in the database
           chrome.runtime.sendMessage(
             {
@@ -4134,14 +4154,16 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                 showToast('⚠️ 이미지 추가 실패');
                 return;
               }
-              
+
               console.debug('[Workspace] Image added to scrap in DB:', scrapData.id);
-              
+
               // Update ideaData.linkedScraps with the new allImages array
               if (addImageRes.allImages && Array.isArray(addImageRes.allImages)) {
                 // Find and update the scrap in ideaData's linkedScraps
                 if (ideaData.workspace && ideaData.workspace.linkedScrapsData) {
-                  const linkedScrap = ideaData.workspace.linkedScrapsData.find(s => s.id === scrapData.id);
+                  const linkedScrap = ideaData.workspace.linkedScrapsData.find(
+                    (s) => s.id === scrapData.id
+                  );
                   if (linkedScrap) {
                     linkedScrap.allImages = addImageRes.allImages;
                     if (!linkedScrap.image) {
@@ -4150,9 +4172,11 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                   }
                 }
               }
-              
+
               // Update linked scrap card to include image if missing
-              const existingCard = linkedScrapsList.querySelector(`[data-scrap-id="${scrapData.id}"]`);
+              const existingCard = linkedScrapsList.querySelector(
+                `[data-scrap-id="${scrapData.id}"]`
+              );
               if (existingCard) {
                 // If card already lacks an img, insert an image wrapper at the front
                 const existingImg = existingCard.querySelector('.scrap-card-img-wrap img');
@@ -4178,17 +4202,22 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                   // Update existing image src
                   existingImg.src = imageUrl;
                 }
-                
+
                 // Update image count badge
                 const imgCountBadge = existingCard.querySelector('.scrap-img-count');
                 if (imgCountBadge && addImageRes.allImages) {
                   imgCountBadge.textContent = `📷 ${addImageRes.allImages.length}`;
-                } else if (!imgCountBadge && addImageRes.allImages && addImageRes.allImages.length > 1) {
+                } else if (
+                  !imgCountBadge &&
+                  addImageRes.allImages &&
+                  addImageRes.allImages.length > 1
+                ) {
                   // Add badge if multiple images now exist
                   const badge = document.createElement('span');
                   badge.className = 'scrap-img-count';
                   badge.textContent = `📷 ${addImageRes.allImages.length}`;
-                  badge.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;';
+                  badge.style.cssText =
+                    'position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;';
                   const imgWrap = existingCard.querySelector('.scrap-card-img-wrap');
                   if (imgWrap) {
                     imgWrap.style.position = 'relative';
@@ -4227,7 +4256,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               } catch (err) {
                 console.debug('[Workspace] update_kanban_card 전송 실패:', err);
               }
-              
+
               // Add to image gallery if available
               try {
                 const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
@@ -4235,30 +4264,42 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                   const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
                   if (imageGalleryGrid) {
                     // Avoid duplicates
-                    const found = imageGalleryGrid.querySelector(`img[data-src="${imageUrl}"]`) || imageGalleryGrid.querySelector(`img[src="${imageUrl}"]`);
+                    const found =
+                      imageGalleryGrid.querySelector(`img[data-src="${imageUrl}"]`) ||
+                      imageGalleryGrid.querySelector(`img[src="${imageUrl}"]`);
                     if (!found) {
                       const div = document.createElement('div');
                       div.className = 'gallery-thumb-wrap';
                       div.draggable = true;
                       div.dataset.imageUrl = imageUrl;
                       div.dataset.scrapId = scrapData.id || '';
-                      div.style.cssText = 'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
+                      div.style.cssText =
+                        'position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; background: #f5f5f5; min-width: 0; min-height: 88px; box-sizing: border-box;';
                       const imgThumb = document.createElement('img');
                       imgThumb.className = 'gallery-thumb';
                       imgThumb.loading = 'lazy';
                       imgThumb.decoding = 'async';
-                      imgThumb.style.cssText = 'width:100%;height:88px;object-fit:cover;display:block;';
+                      imgThumb.style.cssText =
+                        'width:100%;height:88px;object-fit:cover;display:block;';
                       imgThumb.dataset.src = imageUrl;
                       imgThumb.src = imageUrl;
                       div.appendChild(imgThumb);
                       // attach dragstart handler for the new thumb
                       div.addEventListener('dragstart', (ev) => {
                         try {
-                          const payload = { id: scrapData.id, text: scrapData.text || '', isLinked: true, imageUrl };
+                          const payload = {
+                            id: scrapData.id,
+                            text: scrapData.text || '',
+                            isLinked: true,
+                            imageUrl,
+                          };
                           ev.dataTransfer.effectAllowed = 'move';
                           ev.dataTransfer.setData('application/json', JSON.stringify(payload));
                         } catch (err) {
-                          console.debug('[Workspace] gallery newly added dragstart setData failed', err);
+                          console.debug(
+                            '[Workspace] gallery newly added dragstart setData failed',
+                            err
+                          );
                         }
                       });
                       imageGalleryGrid.appendChild(div);
@@ -4268,7 +4309,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               } catch (err) {
                 console.warn('[Workspace] adding image to gallery failed:', err);
               }
-              
+
               showToast('✅ 연결된 스크랩에 이미지를 추가했습니다.');
             }
           );
@@ -4950,89 +4991,96 @@ window.__cp_filterScraps = function (scraps, keyword, searchText) {
     );
   });
 };
-window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData) {
-  if (filtered.length > 0) {
-    allCont.innerHTML = filtered.map((s) => createScrapCard(s, false)).join('');
-
-    // 삭제 버튼 이벤트 리스너 재등록 (동적 요소 대응)
-    allCont.querySelectorAll('.scrap-card-delete-btn').forEach((deleteBtn) => {
-      // 이미 이벤트 리스너가 등록되어 있으면 중복 등록 방지
-      if (deleteBtn.dataset.listenerAttached) return;
-      deleteBtn.dataset.listenerAttached = 'true';
-
-      deleteBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const card = deleteBtn.closest('.scrap-card-item');
-        if (!card) return;
-
-        const scrapId = card.dataset.scrapId;
-        if (!scrapId) {
-          console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
-          return;
-        }
-
-        showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
-          chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
-              showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
-              return;
-            }
-            if (response && response.success) {
-              showToast('✅ 스크랩이 삭제되었습니다.');
-              // 스크랩 리스트 새로고침
-              chrome.storage.local.get('activeChannelId', (res) => {
-                chrome.runtime.sendMessage(
-                  {
-                    action: 'get_all_scraps',
-                    channelId: res.activeChannelId,
-                  },
-                  (r) => {
-                    if (r && r.success) {
-                      const linkedScrapIds =
-                        ideaData && ideaData.linkedScraps
-                          ? Array.isArray(ideaData.linkedScraps)
-                            ? ideaData.linkedScraps
-                            : Object.keys(ideaData.linkedScraps)
-                          : [];
-                      const availableScraps = r.scraps.filter(
-                        (s) => !linkedScrapIds.includes(s.id)
-                      );
-                      window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
-                    }
+function attachScrapItemListeners(allCont, linkedCont, ideaData) {
+  if (!allCont) return;
+  // 삭제 버튼 이벤트 리스너 및 드래그 시작 리스너 (재사용 가능하도록 함수화)
+  allCont.querySelectorAll('.scrap-card-delete-btn').forEach((deleteBtn) => {
+    if (deleteBtn.dataset.listenerAttached) return;
+    deleteBtn.dataset.listenerAttached = 'true';
+    deleteBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = deleteBtn.closest('.scrap-card-item');
+      if (!card) return;
+      const scrapId = card.dataset.scrapId;
+      if (!scrapId) {
+        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+        return;
+      }
+      showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
+        chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
+            showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+            return;
+          }
+          if (response && response.success) {
+            showToast('✅ 스크랩이 삭제되었습니다.');
+            // 스크랩 리스트 새로고침
+            chrome.storage.local.get('activeChannelId', (res) => {
+              chrome.runtime.sendMessage(
+                {
+                  action: 'get_all_scraps',
+                  channelId: res.activeChannelId,
+                },
+                (r) => {
+                  if (r && r.success) {
+                    const linkedScrapIds =
+                      ideaData && ideaData.linkedScraps
+                        ? Array.isArray(ideaData.linkedScraps)
+                          ? ideaData.linkedScraps
+                          : Object.keys(ideaData.linkedScraps)
+                        : [];
+                    const availableScraps = r.scraps.filter(
+                      (s) => !linkedScrapIds.includes(s.id)
+                    );
+                    window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
                   }
-                );
-              });
-            } else {
-              const errorMsg = response?.error || '알 수 없는 오류';
-              console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
-              showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
-            }
-          });
-        });
-      });
-      // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
-      allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
-        // avoid duplicate listeners
-        if (scrapItem.dataset.dragListenerAttached) return;
-        scrapItem.dataset.dragListenerAttached = 'true';
-        scrapItem.addEventListener('dragstart', (e) => {
-          try {
-            const data = {
-              id: scrapItem.dataset.scrapId,
-              text: scrapItem.dataset.text,
-              isLinked: false,
-            };
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('application/json', JSON.stringify(data));
-          } catch (err) {
-            console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
+                }
+              );
+            });
+          } else {
+            const errorMsg = response?.error || '알 수 없는 오류';
+            console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
+            showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
           }
         });
       });
     });
+  });
+
+  // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
+  allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
+    // avoid duplicate listeners
+    if (scrapItem.dataset.dragListenerAttached) return;
+    scrapItem.dataset.dragListenerAttached = 'true';
+    try {
+      scrapItem.draggable = true;
+    } catch (err) {
+      /* ignore */
+    }
+    scrapItem.addEventListener('dragstart', (e) => {
+      try {
+        const data = {
+          id: scrapItem.dataset.scrapId,
+          text: scrapItem.dataset.text,
+          isLinked: false,
+        };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/json', JSON.stringify(data));
+      } catch (err) {
+        console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
+      }
+    });
+  });
+}
+
+window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData) {
+  if (filtered.length > 0) {
+    allCont.innerHTML = filtered.map((s) => createScrapCard(s, false)).join('');
+
+    // Attach delete / drag listeners for each scrap item
+    attachScrapItemListeners(allCont, linkedCont, ideaData);
   } else {
     const searchInput = document.querySelector('#scrap-search-input');
     const filterBtn = document.querySelector('#filter-scrap-by-draft-btn');
@@ -5054,7 +5102,8 @@ export function updateWorkspaceScraps(container, ideaData) {
   // [체크리스트 5-1] 에디터 유지: 에디터와 제목은 절대 건드리지 않음
   // Accept both container class names used across modules
   const workspaceEl =
-    container.querySelector('.cp-workspace-container') || container.querySelector('.workspace-container');
+    container.querySelector('.cp-workspace-container') ||
+    container.querySelector('.workspace-container');
   if (!workspaceEl) {
     console.warn('[Workspace] 워크스페이스 컨테이너를 찾을 수 없습니다.');
     return;
@@ -5062,6 +5111,7 @@ export function updateWorkspaceScraps(container, ideaData) {
 
   // [체크리스트 5-2] 참고 자료 갱신: 우측 패널의 '모든 스크랩', '이미지 갤러리'만 갱신
   const allScrapsList = workspaceEl.querySelector('.all-scraps-list');
+  const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
   const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
 
   if (allScrapsList) {
@@ -5079,6 +5129,8 @@ export function updateWorkspaceScraps(container, ideaData) {
               allScrapsList.innerHTML = availableScraps
                 .map((s) => createScrapCard(s, false))
                 .join('');
+              // attach listeners to newly rendered scrap cards
+              attachScrapItemListeners(allScrapsList, linkedScrapsList, ideaData);
             } else {
               allScrapsList.innerHTML =
                 "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";

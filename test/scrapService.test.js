@@ -64,7 +64,10 @@ describe('Scrap Service', () => {
       const mockSnapshot = { exists: jest.fn(() => false), val: jest.fn(() => null) };
       mockFirebaseService.get.mockResolvedValue(mockSnapshot);
 
-      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'channel-x');
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(
+        scrapId,
+        'channel-x'
+      );
       expect(result.success).toBe(false);
       expect(result.error).toBe('스크랩을 찾을 수 없습니다.');
     });
@@ -76,10 +79,15 @@ describe('Scrap Service', () => {
       mockFirebaseService.get.mockResolvedValue(mockSnapshot);
       mockFirebaseService.update.mockResolvedValue();
 
-      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'active-chan');
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(
+        scrapId,
+        'active-chan'
+      );
       expect(result.success).toBe(true);
       expect(result.newChannelId).toBe('active-chan');
-      expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', { channelId: 'active-chan' });
+      expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', {
+        channelId: 'active-chan',
+      });
     });
 
     it('should toggle to public when currently dedicated', async () => {
@@ -89,7 +97,10 @@ describe('Scrap Service', () => {
       mockFirebaseService.get.mockResolvedValue(mockSnapshot);
       mockFirebaseService.update.mockResolvedValue();
 
-      const result = await require('../js/services/scrapService.js').toggleScrapSharing(scrapId, 'ignored');
+      const result = await require('../js/services/scrapService.js').toggleScrapSharing(
+        scrapId,
+        'ignored'
+      );
       expect(result.success).toBe(true);
       expect(result.newChannelId).toBe(null);
       expect(mockFirebaseService.update).toHaveBeenCalledWith('mock-ref', { channelId: null });
@@ -396,6 +407,32 @@ describe('Scrap Service', () => {
       // Then
       expect(result.success).toBe(true);
       expect(mockFirebaseService.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteScrap cache behavior', () => {
+    it('should clear cache after delete so subsequent fetch uses fresh data', async () => {
+      const mockScrapList = { id1: { text: 'one', timestamp: 1 } };
+      const mockEmptyList = {};
+
+      const mockSnapshot = { val: jest.fn(() => mockScrapList) };
+      const mockEmptySnapshot = { val: jest.fn(() => mockEmptyList) };
+
+      mockFirebaseService.get.mockResolvedValueOnce(mockSnapshot);
+      // first call: getFirebaseScraps should call get() once and cache
+      const { getFirebaseScraps } = require('../js/services/scrapService.js');
+      let res = await getFirebaseScraps();
+      expect(res.data).toBeDefined();
+
+      // now mock remove to succeed and mock delete to clear cache
+      mockFirebaseService.remove.mockResolvedValue();
+      const { deleteScrap } = require('../js/services/scrapService.js');
+      await deleteScrap('id1');
+
+      // set next get() to return empty list
+      mockFirebaseService.get.mockResolvedValueOnce(mockEmptySnapshot);
+      res = await getFirebaseScraps();
+      expect(res.data.length).toBe(0);
     });
   });
 });

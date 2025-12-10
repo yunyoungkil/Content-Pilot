@@ -363,4 +363,77 @@ describe('kanbanService workspace fields', () => {
     expect(updatePayload.briefingStatus).toBe('queued');
     expect(updatePayload.briefingQueuedAt).toBeDefined();
   });
+
+  test('deleteKanbanCard should invalidate duplicate cache for origin/published urls', async () => {
+    jest.resetModules();
+
+    const mockRemove = jest.fn().mockResolvedValue(true);
+    const mockGet = jest
+      .fn()
+      .mockResolvedValue({
+        exists: () => true,
+        val: () => ({
+          origin: { postUrl: 'https://example.com/scrap/123' },
+          publishedUrl: 'https://example.com/published/123',
+        }),
+      });
+    const mockRef = jest.fn();
+
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+      getDb: jest.fn(),
+      ref: mockRef,
+      remove: mockRemove,
+      get: mockGet,
+    }));
+
+    const invalidateSpy = jest.fn().mockResolvedValue();
+    jest.doMock('../js/services/performanceOptimizer.js', () => ({
+      performanceOptimizer: { invalidateCache: invalidateSpy },
+    }));
+
+    const { deleteKanbanCard } = await import('../js/services/kanbanService.js');
+
+    const res = await deleteKanbanCard('card-123', 'ideas');
+    expect(res.success).toBe(true);
+    // invalidateCache should be called for origin and published urls
+    expect(invalidateSpy).toHaveBeenCalled();
+    // ensure remove was called at least for the card path
+    expect(mockRemove).toHaveBeenCalled();
+  });
+
+  test('removeIdeaFromKanban should remove url index and invalidate duplicate cache', async () => {
+    jest.resetModules();
+
+    const mockRemove = jest.fn().mockResolvedValue(true);
+    const mockGet = jest
+      .fn()
+      .mockResolvedValue({
+        exists: () => true,
+        val: () => ({
+          origin: { postUrl: 'https://example.com/scrap/456' },
+          publishedUrl: 'https://example.com/published/456',
+        }),
+      });
+    const mockRef = jest.fn();
+
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+      getDb: jest.fn(),
+      ref: mockRef,
+      remove: mockRemove,
+      get: mockGet,
+    }));
+
+    const invalidateSpy = jest.fn().mockResolvedValue();
+    jest.doMock('../js/services/performanceOptimizer.js', () => ({
+      performanceOptimizer: { invalidateCache: invalidateSpy },
+    }));
+
+    const { removeIdeaFromKanban } = await import('../js/services/kanbanService.js');
+    const res = await removeIdeaFromKanban('card-456', 'ideas');
+    expect(res.success).toBe(true);
+    expect(invalidateSpy).toHaveBeenCalled();
+    expect(mockRemove).toHaveBeenCalled();
+  });
 });

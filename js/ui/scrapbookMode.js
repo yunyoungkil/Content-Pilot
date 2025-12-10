@@ -173,7 +173,12 @@ function createScrapCardHTML(scrap) {
     scrap.tags && Array.isArray(scrap.tags) && scrap.tags.length > 0
       ? `<div class="card-tags">${scrap.tags.map((tag) => `<span class="tag">#${tag}</span>`).join('')}</div>`
       : '';
-  const cleanedTitle = scrap.text ? scrap.text.replace(/\s+/g, ' ').trim() : '제목 없음';
+  const cleanedTitle =
+    scrap.title && String(scrap.title).trim()
+      ? scrap.title.replace(/\s+/g, ' ').trim()
+      : scrap.text
+        ? scrap.text.replace(/\s+/g, ' ').trim()
+        : '제목 없음';
 
   // [체크리스트 2] 전용/공용 토글 버튼 생성 (배지 제거, 토글 버튼만 유지)
   // [CSP 준수] 인라인 이벤트 핸들러 제거, CSS :hover 사용
@@ -610,7 +615,10 @@ function renderDetailView(scrapId, container) {
     console.log('[ScrapbookMode] 하이라이트 데이터 없음. scrap 객체:', Object.keys(scrap));
   }
 
-  const detailTitle = (scrap.text || '제목 없음').replace(/\s+/g, ' ').trim().substring(0, 50);
+  const detailTitle = (scrap.title || scrap.text || '제목 없음')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 50);
 
   // 이미지 수집 (image, allImages, images 모두 확인 - 하위 호환성)
   // 유효한 이미지 URL만 필터링 및 정규화
@@ -737,13 +745,20 @@ function renderDetailView(scrapId, container) {
   // 2열 레이아웃: 왼쪽 텍스트 카드, 오른쪽 이미지 카드
   detailContainer.innerHTML = `
         <div style="display: flex; gap: 16px; width: 100%; align-items: flex-start;">
-            <div class="scrapbook-detail-card" style="flex: 1; min-width: 300px; max-width: 420px;">
-                <div class="scrapbook-detail-title">${detailTitle}</div>
+            <div class="scrapbook-detail-card" style="flex: 1; min-width: 300px; max-width: 420px; position: relative;">
+              <div style="display:flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <div style="flex: 1; min-width: 0;">
+                  <div class="scrapbook-detail-title">${detailTitle}</div>
+                </div>
+                <div style="flex: 0 0 auto;">
+                  <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin: 0 0 0 12px; padding: 8px 12px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
+                    💡 아이디어로 전환
+                  </button>
+                </div>
+              </div>
                 <div class="scrapbook-detail-meta"><span>URL: <a href="${scrap.url}" target="_blank">${shortenLink(scrap.url)}</a></span></div>
                 <p class="scrapbook-detail-desc" style="white-space: pre-wrap; word-wrap: break-word; line-height: 1.6;">${highlightedText}</p>
-                <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin-top: 16px; padding: 10px 16px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
-                    💡 아이디어로 전환
-                </button>
+                <!-- moved to top: scrap-to-idea-btn -->
             </div>
             <div class="scrapbook-detail-images-card" style="flex: 1; min-width: 300px; max-width: 420px; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(66, 133, 244, 0.08); padding: 20px;">
                 <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px;">이미지 (${allImageUrls.length}개)</div>
@@ -992,9 +1007,10 @@ function renderDetailView(scrapId, container) {
       }
 
       // 스크랩 데이터를 아이디어 형식으로 변환
-      const ideaTitle = scrap.text
-        ? scrap.text.replace(/\s+/g, ' ').trim().substring(0, 100)
-        : '제목 없음';
+      const ideaTitle =
+        scrap.title || scrap.text
+          ? (scrap.title || scrap.text).replace(/\s+/g, ' ').trim().substring(0, 100)
+          : '제목 없음';
       const ideaDescription = scrap.text || '';
       const ideaTags =
         scrap.tags && Array.isArray(scrap.tags)

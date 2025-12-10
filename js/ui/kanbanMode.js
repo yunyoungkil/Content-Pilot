@@ -732,6 +732,10 @@ function createKanbanCard(id, data, status) {
     typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
   const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
   const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+  const progressNumeric =
+    typeof progressValue === 'number' && !Number.isNaN(progressValue)
+      ? Math.max(0, Math.min(100, Math.round(progressValue)))
+      : null;
 
   // If draft textual content exists, show the '초안 완료' meta. Object-only drafts will not count.
   if (hasDraftContent || hasWorkspaceDraft) {
@@ -747,12 +751,12 @@ function createKanbanCard(id, data, status) {
         bsHtml = `<span class="kanban-card-meta briefing-status-tag queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
         break;
       case 'processing':
-        if (progressValue !== null) {
+        if (progressNumeric !== null) {
           bsHtml = `
-              <span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중 - ${progressValue}%">
+              <span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중 - ${progressNumeric}%">
                 <span class="briefing-spinner">🔄</span>
-                <span class="briefing-progress-label">브리핑 생성 중 (${progressValue}%)</span>
-                <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressValue}%"></div></div>
+                <span class="briefing-progress-label">브리핑 생성 중 (${progressNumeric}%)</span>
+                <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressNumeric}%"></div></div>
               </span>`;
         } else {
           bsHtml = `<span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;

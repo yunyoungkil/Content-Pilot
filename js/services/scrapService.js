@@ -4,6 +4,7 @@
 import { cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
 import { get, remove, push, update, getDb, ref } from './firebaseService.js';
 import { Logger } from '../utils.js';
+import { parseHtmlInOffscreen } from './offscreenService.js';
 
 // [추가] URL 정규화 헬퍼 함수
 function normalizeUrlForDeletion(url) {
@@ -38,6 +39,7 @@ export async function saveScrapElement(data, channelId = null) {
       tag: data.tag || 'UNKNOWN',
       url: data.url || '',
       image: data.image || null,
+      title: data.title || '',
       images: data.images || [],
       allImages:
         data.allImages ||
@@ -61,6 +63,41 @@ export async function saveScrapElement(data, channelId = null) {
       delete scrapPayload.images;
     }
 
+    // Try to set title if missing using offscreen parser
+    try {
+      if (!scrapPayload.title && scrapPayload.html) {
+        const parsed = await parseHtmlInOffscreen(scrapPayload.html, scrapPayload.url);
+        if (parsed && parsed.title) scrapPayload.title = parsed.title;
+      }
+    } catch (e) {
+      Logger.warn(
+        '[saveScrapElementsBatch] offscreen parse 실패, 계속 진행합니다:',
+        e?.message || e
+      );
+    }
+
+    if (!scrapPayload.title) {
+      scrapPayload.title =
+        (scrapPayload.text || '').replace(/\s+/g, ' ').trim().substring(0, 100) || '';
+    }
+    // If no explicit title provided, try to extract using offscreen parser
+    try {
+      if (!scrapPayload.title && scrapPayload.html) {
+        const parsed = await parseHtmlInOffscreen(scrapPayload.html, scrapPayload.url);
+        if (parsed && parsed.title) {
+          scrapPayload.title = parsed.title;
+        }
+      }
+    } catch (e) {
+      Logger.warn('[saveScrapElement] offscreen parse 실패, 계속 진행합니다:', e?.message || e);
+    }
+
+    // Ensure fallback title exists
+    if (!scrapPayload.title) {
+      scrapPayload.title =
+        (scrapPayload.text || '').replace(/\s+/g, ' ').trim().substring(0, 100) || '';
+    }
+
     // Firebase에 저장
     const userId = await getCurrentUserId();
     const scrapPath = `scraps/${userId}`;
@@ -68,6 +105,11 @@ export async function saveScrapElement(data, channelId = null) {
     const scrapId = scrapRef.key;
 
     Logger.info(`[saveScrapElement] 스크랩 저장 완료 - scrapId: ${scrapId}`);
+    // 캐시 초기화: 새로 추가된 스크랩 반영
+    if (typeof scrapCache !== 'undefined') {
+      scrapCache.clear();
+      Logger.info('[saveScrapElement] scrapCache 초기화 완료');
+    }
     return {
       success: true,
       scrapId: scrapId,
@@ -134,6 +176,11 @@ export async function saveScrapElementsBatch(scrapDataArray, channelId = null) {
     }
 
     Logger.info(`[saveScrapElementsBatch] 개별 저장 완료 - ${scrapDataArray.length}개 스크랩`);
+    // 캐시 초기화: 배치 저장 반영
+    if (typeof scrapCache !== 'undefined') {
+      scrapCache.clear();
+      Logger.info('[saveScrapElementsBatch] scrapCache 초기화 완료');
+    }
     return {
       success: true,
       results: results,
@@ -347,6 +394,11 @@ export async function deleteScrap(scrapId) {
     const scrapPath = `scraps/${userId}/${scrapId}`;
     await remove(scrapPath);
 
+    // 캐시 초기화: 삭제 후 즉시 최신 데이터가 불러와지도록 함
+    if (typeof scrapCache !== 'undefined') {
+      scrapCache.clear();
+      Logger.info('[deleteScrap] scrapCache 초기화 완료');
+    }
     Logger.info(`[deleteScrap] 스크랩 삭제 완료 - scrapId: ${scrapId}`);
     return { success: true };
   } catch (_error) {

@@ -734,36 +734,197 @@ async function sendToOffscreen(action, data, timeout = 30000) {
     // 1. 고유 ID 생성
     const requestId = `${action}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // 클로저 변수를 먼저 캡처
+    const expectedAction = `${action}_response`;
+    const expectedRequestId = requestId;
+
     const responseListener = (msg) => {
       // 2. 액션명과 ID가 모두 일치해야 내 응답임
-      if (msg.action === `${action}_response` && msg.requestId === requestId) {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        if (msg.success) resolve(msg);
-        else reject(new Error(msg.error || `${action} 실패`));
-        return true;
+      try {
+        // msg 객체를 안전하게 검사
+        if (!msg || typeof msg !== 'object') {
+          return false;
+        }
+
+        let act, rid;
+        try {
+          act = msg.action;
+          rid = msg.requestId;
+        } catch (propErr) {
+          // 프로퍼티 getter 실행 오류 무시
+          Logger.debug(
+            '[OffscreenService] responseListener msg property getter failed:',
+            propErr && propErr.message
+          );
+          return false;
+        }
+
+        if (act === expectedAction && rid === expectedRequestId) {
+          chrome.runtime.onMessage.removeListener(responseListener);
+
+          let success;
+          try {
+            success = msg.success;
+          } catch (e) {
+            success = false;
+          }
+
+          if (success) {
+            resolve(msg);
+          } else {
+            let errorMsg;
+            try {
+              errorMsg = msg.error || `${action} 실패`;
+            } catch (e) {
+              errorMsg = `${action} 실패`;
+            }
+            reject(new Error(errorMsg));
+          }
+          return true;
+        }
+        return false;
+      } catch (e) {
+        Logger.error('[OffscreenService] responseListener handler error:', e && e.message);
+        return false;
       }
-      return false;
     };
 
     const usingPort = Boolean(offscreenPort);
     if (usingPort) {
       try {
-        const portResponse = (msg) => {
-          // 3. 포트 메시지도 ID 확인
-          if (msg && msg.action === `${action}_response` && msg.requestId === requestId) {
+        // 클로저 변수를 먼저 캡처 - const 대신 let 사용하여 호이스팅 문제 방지
+        const portExpectedAction = action + '_response';
+        const portExpectedRequestId = requestId;
+        const portOffscreen = offscreenPort;
+        const portResolve = resolve;
+        const portReject = reject;
+        const portAction = action;
+
+        // 일반 함수 선언문 사용 (호이스팅 안전)
+        function portResponse(msg) {
+          // 안전하게 msg를 직렬화하여 로깅(가능하면) — getter에서 예외 발생할 수 있으므로 try/catch로 보호
+          try {
+            let safeStr;
             try {
-              offscreenPort.onMessage.removeListener(portResponse);
-            } catch (e) {
+              safeStr = JSON.stringify(msg);
+            } catch (_e) {
+              try {
+                safeStr = String(msg);
+              } catch (__e) {
+                safeStr = '[unserializable message]';
+              }
+            }
+            Logger.debug('[OffscreenService] portResponse received msg:', safeStr);
+          } catch (logErr) {
+            // 로깅 실패는 흘려보낸다
+            void 0;
+          }
+          // 3. 포트 메시지도 ID 확인 (안전하게 프로퍼티 접근)
+          try {
+            // msg 객체를 안전하게 검사
+            if (!msg || typeof msg !== 'object') {
+              return false;
+            }
+
+            let act, rid;
+            try {
+              act = msg.action;
+              rid = msg.requestId;
+            } catch (propErr) {
+              // 프로퍼티 getter 실행 오류 무시
+              Logger.debug(
+                '[OffscreenService] portResponse msg property getter failed:',
+                propErr && propErr.message
+              );
+              return false;
+            }
+
+            if (act === portExpectedAction && rid === portExpectedRequestId) {
+              try {
+                portOffscreen.onMessage.removeListener(portResponse);
+              } catch (e) {
+                void 0;
+              }
+
+              let success;
+              try {
+                success = msg.success;
+              } catch (e) {
+                success = false;
+              }
+
+              if (success) {
+                portResolve(msg);
+              } else {
+                let errorMsg;
+                try {
+                  errorMsg = msg.error || portAction + ' 실패';
+                } catch (e) {
+                  errorMsg = portAction + ' 실패';
+                }
+                portReject(new Error(errorMsg));
+              }
+              return true;
+            }
+            return false;
+          } catch (e) {
+            Logger.error('[OffscreenService] portResponse handler error:', e && e.message);
+            return false;
+          }
+        }
+
+        // Wrap portResponse in a protective wrapper to ensure any runtime error within
+        // the handler itself does not crash the background and will be logged and removed.
+        function safePortResponseWrapper(msg) {
+          try {
+            return portResponse(msg);
+          } catch (e) {
+            try {
+              // Try to capture a safe representation of msg
+              let safe;
+              try {
+                safe = JSON.stringify(msg);
+              } catch (_jj) {
+                try {
+                  safe = String(msg);
+                } catch (__jj) {
+                  safe = '[unable to serialize message]';
+                }
+              }
+              Logger.error(
+                '[OffscreenService] portResponse crashed with error:',
+                e && e.message,
+                'msg:',
+                safe
+              );
+            } catch (logErr) {
+              Logger.error(
+                '[OffscreenService] portResponse crashed; additional log failed',
+                logErr && logErr.message
+              );
+            }
+            try {
+              portOffscreen.onMessage.removeListener(safePortResponseWrapper);
+            } catch (ignore) {
               void 0;
             }
-            if (msg.success) resolve(msg);
-            else reject(new Error(msg.error || `${action} 실패`));
-            return true;
+            return false;
           }
-          return false;
-        };
-        offscreenPort.onMessage.addListener(portResponse);
+        }
+        Logger.debug(
+          '[OffscreenService] addListener(for action):',
+          action,
+          'requestId:',
+          requestId
+        );
+        offscreenPort.onMessage.addListener(safePortResponseWrapper);
         // 4. 요청 보낼 때 requestId 포함
+        Logger.debug(
+          '[OffscreenService] postMessage to offscreen:',
+          action,
+          'requestId:',
+          requestId
+        );
         offscreenPort.postMessage({ action, requestId, ...data });
       } catch (err) {
         // 실패 시 런타임으로 폴백
@@ -912,6 +1073,7 @@ export async function parseHtmlInOffscreen(html, baseUrl) {
       metrics: response.metrics || {},
       cleanText: response.cleanText || '',
       metaTags: response.metaTags || null,
+      title: response.title || '',
     };
   } catch (error) {
     Logger.error('[OffscreenService] HTML 파싱 오류:', error);

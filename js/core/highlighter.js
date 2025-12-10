@@ -123,9 +123,11 @@ export function setupHighlighter() {
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
     `;
 
-    const scrapPreview = scrapData.text
-      ? scrapData.text.substring(0, 100) + (scrapData.text.length > 100 ? '...' : '')
-      : '스크랩 내용';
+    const scrapPreview =
+      scrapData.title || scrapData.text
+        ? (scrapData.title || scrapData.text).toString().substring(0, 100) +
+          ((scrapData.title || scrapData.text).toString().length > 100 ? '...' : '')
+        : '스크랩 내용';
 
     modalContent.innerHTML = `
       <div style="margin-bottom: 20px;">

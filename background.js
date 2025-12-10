@@ -1920,7 +1920,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         const { data } = msg;
         const channelId = msg.channelId !== undefined ? msg.channelId : null;
-        return await saveScrapElement(data, channelId);
+        const result = await saveScrapElement(data, channelId);
+
+        // After successful save, force a refresh of scrap list & broadcast update
+        if (result && result.success) {
+          try {
+            // Trigger getFirebaseScraps which will send 'scraps_data_updated' to content scripts
+            await getFirebaseScraps(channelId);
+          } catch (e) {
+            Logger.warn('[Background] getFirebaseScraps 호출 실패:', e?.message || e);
+          }
+
+          try {
+            // also send a lightweight notification so UIs can proactively request fresh data
+            chrome.tabs.query({}, (tabs) => {
+              tabs.forEach((tab) => {
+                if (tab.id) {
+                  try {
+                    chrome.tabs.sendMessage(tab.id, { action: 'cp_scraps_updated' });
+                  } catch (_sendErr) {
+                    // ignore
+                  }
+                }
+              });
+            });
+          } catch (e) {
+            Logger.warn('[Background] cp_scraps_updated 브로드캐스트 실패:', e?.message || e);
+          }
+        }
+
+        return result;
       })()
     );
   }
@@ -1972,7 +2001,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
-        return await deleteScrap(scrapId);
+        const res = await deleteScrap(scrapId);
+        // Broadcast new scraps list to all tabs so UI updates even if content scripts don't re-request
+        try {
+          await getFirebaseScraps(null);
+        } catch (e) {
+          Logger.warn('[delete_scrap] getFirebaseScraps broadcast 실패:', e?.message || e);
+        }
+        return res;
       })()
     );
   }
@@ -2177,7 +2213,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!Array.isArray(allImages)) {
           allImages = [];
         }
-        
+
         // 중복 체크 - 정규화된 URL로 비교
         const normalizedNewUrl = normalizeUrlForDeletion(imageUrl);
         const isDuplicate = allImages.some(
@@ -2191,7 +2227,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const updates = {
             allImages: allImages,
           };
-          
+
           if (!scrapData.image) {
             updates.image = imageUrl;
           }
