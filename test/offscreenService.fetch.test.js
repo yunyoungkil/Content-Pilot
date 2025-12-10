@@ -14,8 +14,10 @@ describe('OffscreenService fetch URL wrapper', () => {
     chrome.offscreen.closeDocument = jest.fn().mockResolvedValue(true);
     chrome.offscreen.hasDocument = jest.fn().mockResolvedValue(true);
     // Ensure onConnect exists for runtime
-    if (!chrome.runtime.onConnect) chrome.runtime.onConnect = { addListener: jest.fn(), removeListener: jest.fn() };
-    if (!chrome.runtime.onMessage.removeListener) chrome.runtime.onMessage.removeListener = jest.fn();
+    if (!chrome.runtime.onConnect)
+      chrome.runtime.onConnect = { addListener: jest.fn(), removeListener: jest.fn() };
+    if (!chrome.runtime.onMessage.removeListener)
+      chrome.runtime.onMessage.removeListener = jest.fn();
     wirePingResponse(runtime);
   });
   // helper to wire ping responses during tests so ensureOffscreenDocument's ping verifies
@@ -54,7 +56,12 @@ describe('OffscreenService fetch URL wrapper', () => {
         // echo a success response for fetch_url_in_offscreen; also provide onConnect callback so ensureOffscreenDocument can pick up the port
         setTimeout(() => {
           listeners.forEach((l) =>
-            l({ action: 'fetch_url_in_offscreen_response', success: true, html: '<html>OK</html>', requestId: msg.requestId })
+            l({
+              action: 'fetch_url_in_offscreen_response',
+              success: true,
+              html: '<html>OK</html>',
+              requestId: msg.requestId,
+            })
           );
         }, 10);
       }),
@@ -65,7 +72,12 @@ describe('OffscreenService fetch URL wrapper', () => {
     expect(registerOffscreenPort(port)).toBe(true);
     // ensure sendMessage interceptor responds to fetch_url requests
     wirePingResponse(runtime, {
-      fetch_url_in_offscreen: (msg) => ({ action: 'fetch_url_in_offscreen_response', success: true, html: '<html>OK</html>', requestId: msg.requestId }),
+      fetch_url_in_offscreen: (msg) => ({
+        action: 'fetch_url_in_offscreen_response',
+        success: true,
+        html: '<html>OK</html>',
+        requestId: msg.requestId,
+      }),
     });
     const result = await fetchUrlInOffscreen('https://example.test/path');
     expect(result).toBe('<html>OK</html>');
@@ -82,7 +94,14 @@ describe('OffscreenService fetch URL wrapper', () => {
         // reply with structured error fields; also ensure port is used by ensureOffscreenDocument
         setTimeout(() => {
           listeners.forEach((l) =>
-            l({ action: 'fetch_url_in_offscreen_response', success: false, error: 'Failed to fetch', errorName: 'TypeError', errorStack: 'stacktrace', requestId: msg.requestId })
+            l({
+              action: 'fetch_url_in_offscreen_response',
+              success: false,
+              error: 'Failed to fetch',
+              errorName: 'TypeError',
+              errorStack: 'stacktrace',
+              requestId: msg.requestId,
+            })
           );
         }, 10);
       }),
@@ -91,8 +110,18 @@ describe('OffscreenService fetch URL wrapper', () => {
 
     expect(registerOffscreenPort(port)).toBe(true);
     wirePingResponse(runtime, {
-      fetch_url_in_offscreen: (msg) => ({ action: 'fetch_url_in_offscreen_response', success: false, error: 'Failed to fetch', errorName: 'TypeError', errorStack: 'stacktrace', requestId: msg.requestId }),
+      fetch_url_in_offscreen: (msg) => ({
+        action: 'fetch_url_in_offscreen_response',
+        success: false,
+        error: 'Failed to fetch',
+        errorName: 'TypeError',
+        errorStack: 'stacktrace',
+        requestId: msg.requestId,
+      }),
     });
-    await expect(fetchUrlInOffscreen('https://example.test/bad')).rejects.toMatchObject({ message: 'Failed to fetch', name: 'TypeError' });
+    await expect(fetchUrlInOffscreen('https://example.test/bad')).rejects.toMatchObject({
+      message: 'Failed to fetch',
+      name: 'TypeError',
+    });
   });
 });
