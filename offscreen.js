@@ -1101,7 +1101,37 @@ function handleRequest(request, sendReply) {
     return false;
   }
 
-  // 8. debug echo
+  // 8. fetch URL (URL에서 HTML 가져오기)
+  if (request.action === 'fetch_url_in_offscreen') {
+    const { url } = request;
+    safeSendReply(sendReply, { action: 'fetch_url_in_offscreen_ack', requestId });
+
+    (async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const html = await response.text();
+        sendFinalResponse({
+          action: 'fetch_url_in_offscreen_response',
+          success: true,
+          html,
+          requestId, // ✅ ID 포함
+        });
+      } catch (error) {
+        sendFinalResponse({
+          action: 'fetch_url_in_offscreen_response',
+          success: false,
+          error: error.message,
+          requestId, // ✅ ID 포함
+        });
+      }
+    })();
+    return false;
+  }
+
+  // 9. debug echo
   if (request.action === 'debug_echo') {
     safeSendReply(sendReply, { action: 'debug_echo_ack', requestId });
     sendFinalResponse({

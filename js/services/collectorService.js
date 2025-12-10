@@ -8,7 +8,7 @@ import { Logger } from '../utils.js';
 import { performanceOptimizer } from './performanceOptimizer.js';
 
 // ▼▼▼ [추가] 오프스크린 서비스에서 검증된 파싱 함수 가져오기 ▼▼▼
-import { parseHtmlInOffscreen } from './offscreenService.js';
+import { parseHtmlInOffscreen, fetchUrlInOffscreen } from './offscreenService.js';
 
 let creating;
 
@@ -642,9 +642,7 @@ export async function parseBlogPage(url, html) {
 
     // HTML 내용이 없으면 직접 가져오기
     if (!content) {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Fetch Fail: ${res.status}`);
-      content = await res.text();
+      content = await fetchUrlInOffscreen(url);
     }
 
     // [핵심 변경] 직접 메시지를 보내지 말고, offscreenService의 함수를 사용합니다.

@@ -1161,3 +1161,18 @@ export async function composeThumbnailInOffscreen(imageUrl, text, textPosition =
     throw error;
   }
 }
+
+/**
+ * URL에서 HTML 콘텐츠를 fetch (CORS 우회용)
+ * @param {string} url - 가져올 URL
+ * @returns {Promise<string>} HTML 콘텐츠
+ */
+export async function fetchUrlInOffscreen(url) {
+  try {
+    const response = await sendToOffscreen('fetch_url_in_offscreen', { url }, 30000);
+    return response.html;
+  } catch (error) {
+    Logger.error('[OffscreenService] URL fetch 오류:', error);
+    throw error;
+  }
+}
