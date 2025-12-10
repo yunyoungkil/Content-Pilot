@@ -1107,24 +1107,84 @@ function handleRequest(request, sendReply) {
     safeSendReply(sendReply, { action: 'fetch_url_in_offscreen_ack', requestId });
 
     (async () => {
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // Helper: try fetch with several options and return result
+      async function tryFetchWithOptions(fetchUrl, options = {}) {
+        try {
+          const resp = await fetch(fetchUrl, options);
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+          }
+          return await resp.text();
+        } catch (err) {
+          // rethrow so caller can decide fallback
+          throw err;
         }
-        const html = await response.text();
-        sendFinalResponse({
-          action: 'fetch_url_in_offscreen_response',
-          success: true,
-          html,
-          requestId, // ✅ ID 포함
-        });
+      }
+
+      try {
+        // Attempt 1: default fetch
+        try {
+          const html = await tryFetchWithOptions(url, { redirect: 'follow' });
+          sendFinalResponse({
+            action: 'fetch_url_in_offscreen_response',
+            success: true,
+            html,
+            requestId, // ✅ ID 포함
+          });
+          return;
+        } catch (firstErr) {
+          // Keep original error for later reporting
+          const originalError = firstErr;
+
+          // Attempt 2: try with credentials included (some sites require cookies)
+          try {
+            const html2 = await tryFetchWithOptions(url, { redirect: 'follow', credentials: 'include' });
+            sendFinalResponse({
+              action: 'fetch_url_in_offscreen_response',
+              success: true,
+              html: html2,
+              requestId,
+            });
+            return;
+          } catch (secondErr) {
+            // Attempt 3: Domain specific proxy fallback for known sites (e.g., blog.naver.com)
+            try {
+              const host = new URL(url).hostname || '';
+              // Use a public rendering/proxy service as a last resort to bypass strict CORS
+              const jinaProxy = 'https://r.jina.ai/http://';
+              const proxyUrl = `${jinaProxy}${url}`;
+              const html3 = await tryFetchWithOptions(proxyUrl, { redirect: 'follow' });
+              sendFinalResponse({
+                action: 'fetch_url_in_offscreen_response',
+                success: true,
+                html: html3,
+                requestId,
+              });
+              return;
+            } catch (proxyErr) {
+              // Last attempt failed — report the most informative error available
+              const errToReport = proxyErr || secondErr || originalError;
+              sendFinalResponse({
+                action: 'fetch_url_in_offscreen_response',
+                success: false,
+                error: errToReport?.message || 'fetch failed',
+                errorName: errToReport?.name || '',
+                errorStack: errToReport?.stack || '',
+                requestId, // ✅ ID 포함
+              });
+              return;
+            }
+          }
+        }
       } catch (error) {
+        // Fallback: send a structured error with details for debugging
         sendFinalResponse({
           action: 'fetch_url_in_offscreen_response',
           success: false,
-          error: error.message,
-          requestId, // ✅ ID 포함
+          error: error?.message || 'fetch failed',
+          errorName: error?.name || '',
+          errorStack: error?.stack || '',
+          requestId,
         });
       }
     })();

@@ -772,13 +772,32 @@ async function sendToOffscreen(action, data, timeout = 30000) {
           if (success) {
             resolve(msg);
           } else {
-            let errorMsg;
+            let errorMsg = `${action} 실패`;
+            let errName = 'OffscreenError';
+            let errStack = '';
             try {
-              errorMsg = msg.error || `${action} 실패`;
+              errorMsg = msg.error || errorMsg;
             } catch (e) {
-              errorMsg = `${action} 실패`;
+              /* ignore */
             }
-            reject(new Error(errorMsg));
+            try {
+              errName = msg.errorName || errName;
+            } catch (e) {
+              /* ignore */
+            }
+            try {
+              errStack = msg.errorStack || '';
+            } catch (e) {
+              /* ignore */
+            }
+            const newErr = new Error(errorMsg);
+            try {
+              newErr.name = errName;
+              if (errStack) newErr.stack = errStack;
+            } catch (e) {
+              /* ignore */
+            }
+            reject(newErr);
           }
           return true;
         }
@@ -856,13 +875,32 @@ async function sendToOffscreen(action, data, timeout = 30000) {
               if (success) {
                 portResolve(msg);
               } else {
-                let errorMsg;
+                let errorMsg = portAction + ' 실패';
+                let errName = 'OffscreenError';
+                let errStack = '';
                 try {
-                  errorMsg = msg.error || portAction + ' 실패';
+                  errorMsg = msg.error || errorMsg;
                 } catch (e) {
-                  errorMsg = portAction + ' 실패';
+                  /* ignore */
                 }
-                portReject(new Error(errorMsg));
+                try {
+                  errName = msg.errorName || errName;
+                } catch (e) {
+                  /* ignore */
+                }
+                try {
+                  errStack = msg.errorStack || '';
+                } catch (e) {
+                  /* ignore */
+                }
+                const newErr = new Error(errorMsg);
+                try {
+                  newErr.name = errName;
+                  if (errStack) newErr.stack = errStack;
+                } catch (e) {
+                  /* ignore */
+                }
+                portReject(newErr);
               }
               return true;
             }

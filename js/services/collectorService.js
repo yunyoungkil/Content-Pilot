@@ -161,7 +161,7 @@ async function processRssItem(itemText, sourceId, channelType) {
   let link =
     itemText.match(/<link[^>]*href=["']([^"']*)["']/) || itemText.match(/<link>(.*?)<\/link>/);
   if (!link) return;
-  const fullLink = link[1].replace(/CDATA\[(.*?)\]\]/g, '$1').trim();
+  const fullLink = link[1].replace(/(?:<!\[)?CDATA\[(.*?)\]\](?:>)?/g, '$1').trim();
 
   const titleMatch = itemText.match(/<title.*?>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
   const title = titleMatch ? titleMatch[1] : '제목 없음';
@@ -180,6 +180,20 @@ async function processRssItem(itemText, sourceId, channelType) {
       if (tag && !tags.includes(tag)) tags.push(tag);
     }
   }
+
+  // RSS description에서 썸네일 추출 시도
+  let rssThumbnail = null;
+  const descriptionMatch = itemText.match(/<description>(.*?)<\/description>/s);
+  if (descriptionMatch) {
+    const rawDescription = descriptionMatch[1];
+    // CDATA 제거
+    const cleanDescription = rawDescription.replace(/(?:<!\[)?CDATA\[(.*?)\]\](?:>)?/gs, '$1');
+    const imgMatch = cleanDescription.match(/<img[^>]+src=["']([^"']+)["']/);
+    if (imgMatch) {
+      rssThumbnail = imgMatch[1];
+    }
+  }
+
   // <dc:subject> 태그 추출 (Dublin Core)
   const subjectMatches = itemText.matchAll(
     /<dc:subject[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/dc:subject>/gi
@@ -231,18 +245,28 @@ async function processRssItem(itemText, sourceId, channelType) {
     finalTags = extractedTags && extractedTags.length > 0 ? extractedTags : null;
   }
 
+  // allImages 처리: 파싱된 이미지 목록에 RSS 썸네일이 없으면 추가
+  let allImages = parsed.metrics?.allImages || [];
+  if (rssThumbnail && !allImages.some((img) => img.src === rssThumbnail)) {
+    // allImages가 배열이 아닌 경우(null/undefined) 대비
+    if (!Array.isArray(allImages)) allImages = [];
+    allImages.unshift({ src: rssThumbnail, alt: 'RSS Thumbnail' });
+  }
+
   const data = {
     title,
     fullLink,
     pubDate: timestamp,
     description: parsed.description,
-    thumbnail: parsed.thumbnail,
+    thumbnail: parsed.thumbnail || rssThumbnail,
     cleanText: parsed.cleanText,
     sourceId,
     channelType,
     fetchedAt: Date.now(),
     tags: finalTags,
     ...parsed.metrics,
+    // Firebase에서 null은 키 삭제로 처리되므로, 컬럼을 항상 만들려면 빈 배열을 저장합니다.
+    allImages: Array.isArray(allImages) ? allImages : [],
   };
 
   await set(ref(db, path), cleanDataForFirebase(data));
@@ -642,7 +666,26 @@ export async function parseBlogPage(url, html) {
 
     // HTML 내용이 없으면 직접 가져오기
     if (!content) {
-      content = await fetchUrlInOffscreen(url);
+      try {
+        content = await fetchUrlInOffscreen(url);
+      } catch (err) {
+        // If CORS/network 'Failed to fetch' occurs for certain known domains (e.g. blog.naver.com),
+        // try a public proxy fallback to retrieve HTML (best-effort).
+        const hostname = new URL(url).hostname;
+        if (hostname && hostname.includes('naver.com') && err && err.message && err.message.includes('Failed to fetch')) {
+          try {
+            const proxyTarget = url.replace(/^https?:\/\//, '');
+            const proxyUrl = `https://r.jina.ai/http://${proxyTarget}`;
+            Logger.warn('[parseBlogPage] 직접 fetch 실패, 프록시로 재시도:', url, '->', proxyUrl);
+            content = await fetchUrlInOffscreen(proxyUrl);
+          } catch (innerErr) {
+            // 마지막 시도 실패 시 rethrow original error
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
     }
 
     // [핵심 변경] 직접 메시지를 보내지 말고, offscreenService의 함수를 사용합니다.
@@ -665,7 +708,11 @@ export async function parseBlogPage(url, html) {
 export async function fetchImageAsBase64(url) {
   try {
     // 네이버 이미지인 경우 특별 처리
-    if (url.includes('postfiles.pstatic.net') || url.includes('blogfiles.naver.net')) {
+    if (
+      url.includes('postfiles.pstatic.net') ||
+      url.includes('blogfiles.naver.net') ||
+      url.includes('blogthumb.pstatic.net')
+    ) {
       // background script를 통해 fetch (Service Worker에서는 더 나은 권한)
       const response = await chrome.runtime.sendMessage({
         action: 'fetch_image_as_base64',
