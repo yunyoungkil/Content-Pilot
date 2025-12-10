@@ -29,3 +29,20 @@ describe("parseCoupangText (HTML input)", () => {
     expect(parsed.imageUrl).toContain("thumbnail.coupangcdn.com");
   });
 });
+
+describe("parseCoupangText (ProductItem HTML structure)", () => {
+  const sampleProductItemHtml = `
+<div class="ProductItem_info_wrap__7YDVd"><span class="ProductItem_detail__JtaJU"><span class="ProductItem_commission_wrap___a51h"><span class="ProductItem_commission__Bbulj">수수료 5%</span></span><span class="ProductItem_price_wrap__KALw2"><del class="ProductItem_price_original__i7pOI"><span class="ProductItem_blind__9DGMH">판매가</span>581,000원</del><ins class="ProductItem_price__yTp_T"><strong class="ProductItem_discount_rate__sDmkV"><span class="ProductItem_blind__9DGMH">할인율</span>4%</strong><span class="ProductItem_blind__9DGMH">할인가</span><strong>552,000</strong>원</ins></span></span><span class="ProductItem_title__I3r9G"><span class="ProductItem_ell__9YeTU">삼성전자 삼성 포터블 외장 SSD T7 (정품) 4TB, 그레이</span></span><span class="ProductItem_name_wrap__ydO6F"><span class="ProductItem_brand_name__4elwS"><span class="ProductItem_ell__9YeTU">삼성공식파트너  씨앤에이치</span></span></span></div>
+`;
+
+  test("parses ProductItem-style HTML correctly", () => {
+    const parsed = parseCoupangText(sampleProductItemHtml);
+
+    expect(parsed.productName).toBe("삼성전자 삼성 포터블 외장 SSD T7 (정품) 4TB, 그레이");
+    expect(parsed.originalPrice).toBe(581000);
+    expect(parsed.salePrice).toBe(552000);
+    expect(parsed.discountRate).toBe(4);
+    expect(parsed.commission).toBe(5);
+    expect(parsed.brand).toContain("삼성공식파트너");
+  });
+});

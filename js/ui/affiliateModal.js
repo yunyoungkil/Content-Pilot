@@ -248,6 +248,8 @@ export function renderAffiliateModal(container) {
                       <input type="number" id="card-rating" step="0.1" placeholder="별점 (예: 4.5)" class="affiliate-form-input">
                       <input type="number" id="card-review-count" placeholder="리뷰수" class="affiliate-form-input">
                       <input type="text" id="card-badges" placeholder="뱃지(쉼표로 구분)" class="affiliate-form-input">
+                      <input type="text" id="card-brand" placeholder="브랜드 (선택)" class="affiliate-form-input">
+                      <input type="text" id="card-commission" placeholder="수수료 (예: 5%)" class="affiliate-form-input">
                       <label style="grid-column: 1 / -1; display:flex; gap:8px; align-items:center;">
                         <input type="checkbox" id="card-is-rocket"> <span style="font-size:13px;color:#555;">내일 도착 보장 / 로켓배송 여부</span>
                       </label>
@@ -376,6 +378,8 @@ export function parseCoupangText(rawText) {
     originalPrice: 0,
     salePrice: 0,
     discountRate: 0,
+    commission: 0,
+    brand: '',
     rating: 0,
     reviewCount: 0,
     isRocket: false,
@@ -404,7 +408,7 @@ export function parseCoupangText(rawText) {
     if (doc) {
       // common class patterns seen on Coupang / other marketplaces
       const nameEl = doc.querySelector(
-        '.ProductUnit_productNameV2__cV9cw, .ProductUnit_productName, .product-name, .ProductName, .title, .product-title'
+        '.ProductUnit_productNameV2__cV9cw, .ProductUnit_productName, .product-name, .ProductName, .title, .product-title, [class*="ProductItem_title"], [class*="ProductItem_ell"]'
       );
       if (nameEl && nameEl.textContent.trim()) result.productName = nameEl.textContent.trim();
     }
@@ -424,7 +428,9 @@ export function parseCoupangText(rawText) {
       const priceContainer =
         doc.querySelector('.PriceArea_priceArea__NntJz') ||
         doc.querySelector('.PriceArea') ||
-        doc.querySelector('.PriceArea_priceArea');
+        doc.querySelector('.PriceArea_priceArea') ||
+        doc.querySelector('[class*="ProductItem_price_wrap"]') ||
+        doc.querySelector('[class*="ProductItem_price"]');
       const priceSourceText = priceContainer
         ? priceContainer.textContent || ''
         : doc.body.textContent || '';
@@ -455,8 +461,14 @@ export function parseCoupangText(rawText) {
     try {
       // const percEl = doc.querySelector("*[class*='percent'], *[class*='discount'], div, span"); // not used
       // fallback: search for any % in body text
-      const pct =
-        doc.body && doc.body.textContent ? doc.body.textContent.match(/(\d{1,3})%/) || null : null;
+      // support ProductItem discount rate
+      let pct = null;
+      // try productItem specific discount node
+      const discountEl = doc.querySelector('[class*="ProductItem_discount_rate"], [class*="ProductItem_discount"]');
+      if (discountEl && discountEl.textContent) {
+        pct = discountEl.textContent.match(/(\d{1,3})%/);
+      }
+      if (!pct) pct = doc.body && doc.body.textContent ? doc.body.textContent.match(/(\d{1,3})%/) || null : null;
       discountMatch = pct;
     } catch (e) {
       discountMatch = text.match(/(\d{1,3})%/);
@@ -548,6 +560,24 @@ export function parseCoupangText(rawText) {
         if ((doc.body.textContent || '').includes(k)) badgeTexts.add(k);
       });
       result.badges = Array.from(badgeTexts).filter(Boolean);
+      // extract commission and brand from ProductItem patterns
+      try {
+        const commissionEl = doc.querySelector('[class*="ProductItem_commission__"], [class*="ProductItem_commission_wrap"], [class*="commission"]');
+        if (commissionEl && commissionEl.textContent) {
+          const cMatch = commissionEl.textContent.match(/(\d{1,2})%/);
+          if (cMatch) {
+            result.commission = parseInt(cMatch[1], 10);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      try {
+        const brandEl = doc.querySelector('[class*="ProductItem_brand_name"], [class*="brand-name"], [class*="ProductItem_name_wrap"]');
+        if (brandEl && brandEl.textContent) result.brand = brandEl.textContent.trim();
+      } catch (e) {
+        // ignore
+      }
     } else {
       ['무료배송', '적립', '쿠폰', '최저가', '세일'].forEach((k) => {
         if (text.includes(k)) result.badges.push(k);
@@ -739,6 +769,8 @@ function bindEvents(container) {
       setValue('card-review-count', parsed.reviewCount || '');
       setValue('card-badges', (parsed.badges || []).join(', '));
       setValue('card-image-url', parsed.imageUrl || '');
+      setValue('card-brand', parsed.brand || '');
+      setValue('card-commission', parsed.commission ? parsed.commission + '%' : '');
       const rocket = container.querySelector('#card-is-rocket');
       if (rocket) rocket.checked = !!parsed.isRocket;
 
