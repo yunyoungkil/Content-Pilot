@@ -58,19 +58,24 @@ describe('ChannelMode - ID preservation', () => {
     // Wait for modal
     await testHelpers.waitForNextTick();
 
-    // Click apply without changes
+    // Click apply (로컬 반영만)
     const applyBtn = container.querySelector('#modal-apply-btn');
     expect(applyBtn).toBeTruthy();
     applyBtn.click();
-
-    // wait for async saveChannelsToFirebase -> chrome.runtime.sendMessage
     await testHelpers.waitForMs(20);
 
-    // Find save_channels_and_key call and inspect payload
-    const sent = chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(sent).toBeTruthy();
-    const payload = sent[0].data;
-    expect(payload).toBeTruthy();
+    // 아직 저장 호출 없음
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    // Save All을 눌러 실제 저장
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
+    const payload = saveCalls[0][0].data;
     const savedBlogs = payload.myChannels.blogs;
     expect(Array.isArray(savedBlogs)).toBe(true);
     expect(savedBlogs[0].id).toBe('existing-123');

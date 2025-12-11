@@ -48,6 +48,9 @@ describe('ChannelMode - platform overwrite regression', () => {
     blogUrlEl.value = 'https://example.tistory.com/mine';
     container.querySelector('#modal-apply-btn').click();
     await testHelpers.waitForMs(200);
+    // 모달 적용 시 즉시 백엔드 저장 호출은 발생하지 않아야 함
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
 
     // Add second channel (Naver)
     container.querySelector('#add-my-channel-btn').click();
@@ -58,6 +61,9 @@ describe('ChannelMode - platform overwrite regression', () => {
     blogUrlEl2.value = 'https://blog.naver.com/other';
     container.querySelector('#modal-apply-btn').click();
     await testHelpers.waitForMs(200);
+    // 여전히 Save All이 눌리기 전에는 저장 호출 없어야 함
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
 
     // Click save all channels
     const saveAllBtn = container.querySelector('#save-all-channels-btn');
@@ -66,8 +72,10 @@ describe('ChannelMode - platform overwrite regression', () => {
 
     // Find the save_channels_and_key call payload
     const calls = chrome.runtime.sendMessage.mock.calls;
-    const saveCalls = calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
-    const saveCall = saveCalls.pop();
+    saveCalls = calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    // Save All 클릭으로 인해 정확히 한 번만 저장 요청이 발생해야 함
+    expect(saveCalls.length).toBe(1);
+    const saveCall = saveCalls[0];
     expect(saveCall).toBeTruthy();
     const payload = saveCall[0].data;
     expect(payload).toBeTruthy();

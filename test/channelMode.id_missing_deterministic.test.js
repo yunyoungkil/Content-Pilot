@@ -60,12 +60,19 @@ describe('ChannelMode - id inference for missing id', () => {
     const applyBtn = container.querySelector('#modal-apply-btn');
     expect(applyBtn).toBeTruthy();
     applyBtn.click();
-
     await testHelpers.waitForMs(20);
 
-    const sent = chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(sent).toBeTruthy();
-    const payload = sent[0].data;
+    // 아직 저장 호출 없음
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
+    const payload = saveCalls[0][0].data;
     const savedBlogs = payload.myChannels.blogs;
     expect(savedBlogs[0].id).toBe(expectedId);
   });

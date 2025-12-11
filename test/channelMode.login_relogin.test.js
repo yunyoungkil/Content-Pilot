@@ -72,10 +72,19 @@ describe('ChannelMode - login/logout/relogin duplicate prevention', () => {
 
     // There should only be one channel in UI, with the deterministic ID
     expect(container.querySelectorAll('.my-channel-card').length).toBe(1);
-    const calls = chrome.runtime.sendMessage.mock.calls;
-    const saveCall = calls.find((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(saveCall).toBeTruthy();
-    const payload = saveCall[0].data;
+
+    // Apply only modified local state; 실제 저장은 Save All에서 수행됨을 확인
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    // 실제 저장 수행
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
+    const payload = saveCalls[0][0].data;
     const blogs = payload.myChannels.blogs || [];
     expect(blogs.length).toBe(1);
     expect(blogs[0].id).toBe(derivedId);

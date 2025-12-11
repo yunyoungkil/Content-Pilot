@@ -233,6 +233,7 @@ export function renderChannelMode(container) {
   container.appendChild(style);
 
   let myChannelsData = []; // 로컬 상태 관리
+  let channelsDirty = false; // 변경사항이 있는지 표시 (모달 적용 시 true, 저장 시 false)
   let loadRetryCount = 0;
   const MAX_RETRY_COUNT = 10; // 최대 10회 재시도 (약 10초)
 
@@ -336,6 +337,7 @@ export function renderChannelMode(container) {
       Logger.debug('[ChannelMode] processChannelDataResponse - 블로그 데이터 개수:', blogs.length);
 
       let needSave = false;
+      const prevChannels = myChannelsData || [];
 
       myChannelsData = blogs.map((blog) => {
         Logger.debug('[ChannelMode] processChannelDataResponse - 블로그 변환:', blog);
@@ -354,7 +356,7 @@ export function renderChannelMode(container) {
           inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
           url: blog.url || blog.inputUrl, // 하위 호환성 유지
           apiUrl: blog.apiUrl || null, // RSS URL
-          platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
+          platformType: blog.platformType ?? (prevChannels.find((c) => c.id === channelId)?.platformType) ?? 'naver', // 플랫폼 타입 보존 (없으면 'naver' 기본값)
           gaPropertyId: blog.gaPropertyId || '',
           adSenseAccountId: blog.adSenseAccountId || '',
           competitors: (blog.competitors || []).map((c) => {
@@ -458,6 +460,7 @@ export function renderChannelMode(container) {
               blogs.length
             );
 
+            const prevChannels = myChannelsData || [];
             myChannelsData = blogs.map((blog) => {
               Logger.debug('[ChannelMode] loadChannelData - 블로그 변환:', blog);
               return {
@@ -465,6 +468,7 @@ export function renderChannelMode(container) {
                 inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
                 url: blog.url || blog.inputUrl, // 하위 호환성 유지
                 apiUrl: blog.apiUrl || null, // RSS URL
+                platformType: blog.platformType || 'naver',
                 gaPropertyId: blog.gaPropertyId || '',
                 adSenseAccountId: blog.adSenseAccountId || '',
                 competitors: (blog.competitors || []).map((c) => {
@@ -605,6 +609,8 @@ export function renderChannelMode(container) {
     // [수정] 데이터가 없는 경우 처리 강화
     if (!myChannelsData || myChannelsData.length === 0) {
       listEl.innerHTML = `<div style="text-align:center; padding: 30px; color: #888; border: 1px dashed #ddd; border-radius: 8px;">등록된 채널이 없습니다.<br>'+ 채널 추가' 버튼을 눌러 시작하세요.</div>`;
+      // 적용 여부에 따라 저장 버튼 상태 갱신
+      updateSaveAllButtonState();
       return;
     }
 
@@ -748,6 +754,22 @@ export function renderChannelMode(container) {
 
       listEl.appendChild(card);
     });
+
+    // 렌더 이후 저장 버튼 상태 갱신
+    updateSaveAllButtonState();
+  }
+
+  // 저장 버튼 상태 변경 핸들러
+  function updateSaveAllButtonState() {
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    if (!saveAllBtn) return;
+    // 변경사항이 있으면 활성화, 없으면 비활성화
+    saveAllBtn.disabled = !channelsDirty;
+    if (channelsDirty) {
+      saveAllBtn.textContent = '설정 저장하기 (변경사항 있음)';
+    } else {
+      saveAllBtn.textContent = '설정 저장하기';
+    }
   }
 
   // 모달 관련 변수
@@ -829,21 +851,25 @@ export function renderChannelMode(container) {
         chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
           if (response && response.success) {
             // 최신 데이터로 myChannelsData 업데이트
-            const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
-              id: blog.id || (blog.inputUrl || blog.url ? btoa((blog.inputUrl || blog.url).replace(/\/$/, '')).replace(/=/g, '') : (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : undefined)),
-              inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
-              url: blog.url || blog.inputUrl, // 하위 호환성
-              apiUrl: blog.apiUrl || null, // RSS URL
-              platformType: blog.platformType || 'naver', // 플랫폼 타입 추가
-              gaPropertyId: blog.gaPropertyId || '',
-              adSenseAccountId: blog.adSenseAccountId || '',
-              competitors: (blog.competitors || []).map((c) => {
-                // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
-                return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
-              }),
-              contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
-              competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
-            })); // myChannelsData 업데이트
+            const prevChannelsForModal = myChannelsData || [];
+            const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => {
+              const id = blog.id || (blog.inputUrl || blog.url ? btoa((blog.inputUrl || blog.url).replace(/\/$/, '')).replace(/=/g, '') : (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : undefined));
+              return {
+                id: id,
+                inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
+                url: blog.url || blog.inputUrl, // 하위 호환성
+                apiUrl: blog.apiUrl || null, // RSS URL
+                platformType: blog.platformType ?? (prevChannelsForModal.find((c) => c.id === id)?.platformType) ?? 'naver', // 플랫폼 타입 보존
+                gaPropertyId: blog.gaPropertyId || '',
+                adSenseAccountId: blog.adSenseAccountId || '',
+                competitors: (blog.competitors || []).map((c) => {
+                  // competitors가 객체인 경우 inputUrl 추출, 문자열인 경우 그대로 사용
+                  return typeof c === 'object' && c.inputUrl ? c.inputUrl : c || '';
+                }),
+                contentLimit: blog.contentLimit || 10, // 내 채널 콘텐츠 수집 개수
+                competitorContentLimit: blog.competitorContentLimit || 10, // 경쟁 채널 콘텐츠 수집 개수
+              };
+            }); // myChannelsData 업데이트
             myChannelsData = latestChannels;
 
             // 인덱스가 유효한지 확인
@@ -1251,13 +1277,16 @@ export function renderChannelMode(container) {
         });
 
         // 최신 데이터로 myChannelsData 업데이트
+        const prevChannelsForReload = myChannelsData || [];
         const latestChannels = (channelResponse.data.myChannels?.blogs || []).map((blog) => {
           console.log('[ChannelMode] 블로그 데이터 변환:', blog);
+          const id = blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null);
           return {
-          id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null),
+          id: id,
             inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
             url: blog.url || blog.inputUrl, // 하위 호환성
             apiUrl: blog.apiUrl || null, // RSS URL
+            platformType: blog.platformType ?? (prevChannelsForReload.find((c) => c.id === id)?.platformType) ?? 'naver',
             gaPropertyId: blog.gaPropertyId || '',
             adSenseAccountId: blog.adSenseAccountId || '',
             competitors: (blog.competitors || []).map((c) => {
@@ -1675,79 +1704,29 @@ export function renderChannelMode(container) {
       renderMyChannels();
       if (modal) modal.style.display = 'none';
 
-      // 즉시 저장: 상세 모달에서 적용을 누르면 백그라운드에 저장하고
-      // 후속 로직(헤더 갱신, 활성 채널 자동 선택 및 대시보드 이동)을 실행합니다.
-      saveChannelsToFirebase((response) => {
-        if (response && response.success) {
-          showToast('✅ 채널이 저장되었습니다.');
+      // 모달에서 적용은 로컬(임시) 업데이트만 수행합니다. 실제 DB 저장은 '설정 저장하기' 버튼에서 한 번에 처리합니다.
+      channelsDirty = true; // 변경사항 표시
+      updateSaveAllButtonState();
 
-          const shadowRoot =
-            container.closest('#content-pilot-host')?.shadowRoot ||
-            document.querySelector('#content-pilot-host')?.shadowRoot;
-              if (shadowRoot) {
-                import('./header.js').then((module) => {
-                  module.addHeaderEventListeners(shadowRoot);
-                  // 저장 직후 헤더의 글로벌 채널 셀렉터를 즉시 갱신하여 옵션과 매핑을 동기화합니다.
-                  if (module.refreshGlobalChannelSelector) {
-                    module.refreshGlobalChannelSelector(shadowRoot);
-                  }
-                });
-              }
-              // 헤더가 비동기적으로 갱신되지 않는 환경을 대비해 채널 데이터 업데이트 브로드캐스트
-              try {
-                chrome.runtime.sendMessage({ action: 'channels_data_updated', data: { myChannels: { blogs: myChannelsData } } });
-              } catch (e) {
-                Logger.debug('[ChannelMode] channels_data_updated 브로드캐스트 실패:', e && e.message);
-              }
+      // UI 동기화: 헤더 셀렉터는 즉시 갱신(로컬 변경 반영)하되, DB 저장은 하지 않습니다.
+      const shadowRoot =
+        container.closest('#content-pilot-host')?.shadowRoot ||
+        document.querySelector('#content-pilot-host')?.shadowRoot;
+      if (shadowRoot) {
+        import('./header.js').then((module) => {
+          if (module.refreshGlobalChannelSelector) {
+            module.refreshGlobalChannelSelector(shadowRoot);
+          }
+        });
+      }
+      try {
+        chrome.runtime.sendMessage({ action: 'channels_data_updated', data: { myChannels: { blogs: myChannelsData } } });
+      } catch (e) {
+        Logger.debug('[ChannelMode] channels_data_updated 브로드캐스트 실패:', e && e.message);
+      }
 
-          // 활성 채널이 없으면 첫 번째 채널을 활성화하고 대시보드로 이동
-          chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (channelResponse) => {
-            const myBlogs = channelResponse?.data?.myChannels?.blogs || [];
-            chrome.storage.local.get('activeChannelId', (res) => {
-              const activeChannelId = res.activeChannelId;
-              if (!activeChannelId && myBlogs.length > 0) {
-                const firstChannel = myBlogs[0];
-                const firstChannelId =
-                  firstChannel.id ||
-                  (firstChannel.id || (firstChannel.inputUrl || firstChannel.url ? btoa((firstChannel.inputUrl || firstChannel.url).replace(/\/$/, '')).replace(/=/g, '') : (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '')));
-
-                if (firstChannelId) {
-                  chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
-                    const shadowRoot =
-                      container.closest('#content-pilot-host')?.shadowRoot ||
-                      document.querySelector('#content-pilot-host')?.shadowRoot;
-                    if (shadowRoot) {
-                      const mainArea = shadowRoot.querySelector('#cp-main-area');
-                      const dashboardTab = shadowRoot.querySelector('[data-key="dashboard"]');
-
-                      if (mainArea && dashboardTab) {
-                        shadowRoot
-                          .querySelectorAll('.cp-mode-tab')
-                          .forEach((tab) => tab.classList.remove('active'));
-                        dashboardTab.classList.add('active');
-
-                        import('./dashboardMode.js').then((module) => {
-                          module.renderDashboard(mainArea);
-                          module.addDashboardEventListeners(mainArea);
-                        });
-
-                        import('./header.js').then((module) => {
-                          module.addHeaderEventListeners(shadowRoot);
-                        });
-
-                        showToast('✅ 첫 번째 채널이 선택되었습니다. 대시보드로 이동합니다.');
-                      }
-                    }
-                  });
-                }
-              }
-            });
-          });
-        } else {
-          // 저장 실패시 간단하게 사용자에게 알림
-          showToast('❌ 채널 저장에 실패했습니다. 다시 시도해주세요.');
-        }
-      });
+      // 참고: 활성 채널 자동선택 / 대시보드 이동 등은 실제 저장 후 적용되므로
+      // 이 로직은 '설정 저장하기'에서 수행됩니다.
     });
   }
 
@@ -1757,10 +1736,20 @@ export function renderChannelMode(container) {
     const geminiApiKeyEl = container.querySelector('#gemini-api-key');
     const youtubeApiKey = youtubeApiKeyEl ? youtubeApiKeyEl.value.trim() : '';
     const geminiApiKey = geminiApiKeyEl ? geminiApiKeyEl.value.trim() : '';
+    // Use a deep clone when sending to avoid accidental mutations
+    // (protects against shared references between UI and outgoing payload)
+    // 디버그: 저장 직전 로컬 상태 스냅샷
+    Logger.debug('[ChannelMode] saveChannelsToFirebase - myChannelsData snapshot:', myChannelsData);
+    // Ensure each blog has platformType (defensive: avoid accidental deletion)
+    const normalizedBlogs = (myChannelsData || []).map((b) => ({
+      ...b,
+      platformType: b.platformType || 'naver',
+    }));
+
     const payload = {
       youtubeApiKey,
       geminiApiKey,
-      myChannels: { blogs: myChannelsData }, // 변경된 데이터 구조에 맞게 전송
+      myChannels: { blogs: JSON.parse(JSON.stringify(normalizedBlogs)) }, // 변경된 데이터 구조에 맞게 전송
     };
 
     chrome.runtime.sendMessage(
@@ -1791,6 +1780,10 @@ export function renderChannelMode(container) {
           // [체크리스트 4-3] 저장 성공 피드백
           showToast('✅ 채널 설정이 저장되었습니다.');
 
+          // 저장 완료: 변경사항 플래그 초기화
+          channelsDirty = false;
+          updateSaveAllButtonState();
+
           // [체크리스트 4-2] 실시간 동기화: 헤더의 채널 선택기 갱신
           const shadowRoot =
             container.closest('#content-pilot-host')?.shadowRoot ||
@@ -1802,6 +1795,12 @@ export function renderChannelMode(container) {
                 module.refreshGlobalChannelSelector(shadowRoot);
               }
             });
+          }
+          // 저장 완료라는 신호를 브로드캐스트하여 다른 UI가 동기화되도록 합니다.
+          try {
+            chrome.runtime.sendMessage({ action: 'channels_data_updated', data: { myChannels: { blogs: myChannelsData } } });
+          } catch (e) {
+            Logger.debug('[ChannelMode] channels_data_updated 브로드캐스트 실패:', e && e.message);
           }
 
           // [체크리스트 3-🆎] 첫 채널 생성 후 자동 선택 및 대시보드 이동

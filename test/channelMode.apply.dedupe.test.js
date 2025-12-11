@@ -65,20 +65,26 @@ describe('ChannelMode - add duplicate should update existing channel', () => {
     // Input same URL but with trailing slash to test normalization
     blogUrlEl.value = 'https://blog.example.com/user/';
 
-    // Click apply
+    // Click apply (로컬만 업데이트됨)
     const applyBtn = container.querySelector('#modal-apply-btn');
     expect(applyBtn).toBeTruthy();
     applyBtn.click();
-
-    // wait for async saveChannelsToFirebase -> chrome.runtime.sendMessage
     await testHelpers.waitForMs(20);
 
-    // Assert that save_channels_and_key message was sent with only one blog and preserved id
-    const calls = chrome.runtime.sendMessage.mock.calls;
-    const saveCall = calls.find((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(saveCall).toBeTruthy();
-    const payload = saveCall[0].data;
-    expect(payload).toBeTruthy();
+    // 모달 적용 시에는 저장 호출이 발생하지 않음
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    // 이제 '설정 저장하기' 를 눌러 서버에 저장
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    expect(saveAllBtn).toBeTruthy();
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+
+    // 저장 호출 발생 및 payload 확인
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
+    const payload = saveCalls[0][0].data;
     const blogs = payload.myChannels.blogs || [];
     expect(blogs.length).toBe(1);
     expect(blogs[0].id).toBe(existingBlog.id);
@@ -130,10 +136,16 @@ describe('ChannelMode - add duplicate should update existing channel', () => {
     applyBtn.click();
     await testHelpers.waitForMs(20);
 
-    const calls = chrome.runtime.sendMessage.mock.calls;
-    const saveCall = calls.find((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(saveCall).toBeTruthy();
-    const payload = saveCall[0].data;
+    // 저장 호출은 아직 발생하지 않음
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
+    const payload = saveCalls[0][0].data;
     const blogs = payload.myChannels.blogs || [];
     expect(blogs.length).toBe(1);
     expect(blogs[0].id).toBe(derivedId);
