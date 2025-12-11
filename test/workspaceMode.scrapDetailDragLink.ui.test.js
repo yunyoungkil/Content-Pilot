@@ -14,6 +14,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
+    chrome.runtime.sendMessage = jest.fn();
   });
 
   test('dragging a scrap detail image and dropping into linked list links the scrap', async () => {

@@ -15,6 +15,8 @@ describe('Workspace gallery image drag/drop linking', () => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
+    // ensure runtime sendMessage is a fresh mock
+    chrome.runtime.sendMessage = jest.fn();
   });
 
   test('dragging a gallery image for a scrap and dropping into linked list links the scrap', async () => {

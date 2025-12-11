@@ -14,6 +14,7 @@ describe('Workspace scrap detail insert image', () => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
+    chrome.runtime.sendMessage = jest.fn();
   });
 
   test('clicking insert on scrap detail image posts insert-image to editor iframe', async () => {

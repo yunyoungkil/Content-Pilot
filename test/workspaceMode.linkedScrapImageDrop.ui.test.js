@@ -14,6 +14,7 @@ describe('Workspace drop image into already linked scrap', () => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
+    chrome.runtime.sendMessage = jest.fn();
   });
 
   test('dropping an image that belongs to an already-linked scrap updates linked scrap display/gallery', async () => {
