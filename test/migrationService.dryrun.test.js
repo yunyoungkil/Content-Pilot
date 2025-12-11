@@ -12,6 +12,8 @@ describe('Migration Service - dry-run', () => {
         'card-2': { id: 'card-2', channelId: 'ch-other' },
       },
     };
+    // also include a card with empty string channelId to test emptiness
+    kanbanData.ideas['card-3'] = { id: 'card-3', channelId: '' };
     const scrapsData = {
       'scrap-1': { id: 'scrap-1', channelId: null },
       'scrap-2': { id: 'scrap-2', channelId: 'ch-other' },
@@ -45,7 +47,10 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     expect(result.dryRunResult).toBeTruthy();
-    expect(result.dryRunResult.totalItems).toBe(2); // card-1 and scrap-1
+    expect(result.dryRunResult.totalItems).toBe(3); // card-1, card-3 and scrap-1
+    // groups should include both kanban and scraps
+    expect(result.dryRunResult.groups.kanban.count).toBe(2); // card-1 and card-3
+    expect(result.dryRunResult.groups.scraps.count).toBe(1);
     expect(updateMock).not.toHaveBeenCalled();
     expect(setMock).not.toHaveBeenCalled();
   });

@@ -29,7 +29,16 @@ describe('ChannelMode - migration modal dry-run action', () => {
       if (msg && msg.action === 'get_channels_and_key') {
         cb(responsePayload);
       } else if (msg && msg.action === 'migrate_channel') {
-        cb({ success: true, dryRunResult: { totalItems: 2, sample: [{ type: 'kanban', id: 'card-1' }, { type: 'scraps', id: 'scrap-1' }] } });
+        cb({
+          success: true,
+          dryRunResult: {
+            totalItems: 2,
+            groups: {
+              kanban: { count: 1, sample: ['ideas/card-1'] },
+              scraps: { count: 1, sample: ['scrap-1'] },
+            },
+          },
+        });
       } else cb({ success: true });
     });
 
@@ -64,7 +73,8 @@ describe('ChannelMode - migration modal dry-run action', () => {
 
     const resultEl = modal.querySelector('#migration-result');
     expect(resultEl).toBeTruthy();
-    expect(resultEl.textContent).toContain('총 2개');
-    expect(resultEl.textContent).toContain('kanban:card-1');
+    expect(resultEl.textContent).toContain('총 2개 항목');
+    expect(resultEl.textContent).toContain('- 칸반: 1개');
+    expect(resultEl.textContent).toContain('- 스크랩: 1개');
   });
 });

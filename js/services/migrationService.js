@@ -89,11 +89,22 @@ export async function runDataMigration(userId, targetChannelId = null, options =
     let totalItems = 0;
     const itemsToMigrate = [];
 
+    // 헬퍼: 카드에서 채널 ID를 추출 (다양한 스키마 대응)
+    function extractChannelIdFromCard(card) {
+      if (!card) return null;
+      // 우선순위: channelId, channel?.id, publishInfo?.channelId, channel
+      const cid = card.channelId ?? (card.channel && card.channel.id) ?? (card.publishInfo && card.publishInfo.channelId) ?? card.channel ?? null;
+      // treat empty string as missing
+      if (cid === '' || cid === null || cid === undefined) return null;
+      return cid;
+    }
+
     // 칸반 데이터 카운트 및 수집
     for (const status in kanban) {
       for (const id in kanban[status]) {
         const card = kanban[status][id];
-        if (card.channelId === undefined || card.channelId === null) {
+        const chId = extractChannelIdFromCard(card);
+        if (!chId) {
           itemsToMigrate.push({ type: 'kanban', status, id, card });
           totalItems++;
         }
@@ -103,7 +114,8 @@ export async function runDataMigration(userId, targetChannelId = null, options =
     // 스크랩 데이터 카운트 및 수집
     for (const id in scraps) {
       const scrap = scraps[id];
-      if (scrap.channelId === undefined || scrap.channelId === null) {
+      const scrapChannelId = scrap?.channelId ?? null;
+      if (!scrapChannelId) {
         itemsToMigrate.push({ type: 'scraps', id, scrap });
         totalItems++;
       }
@@ -170,15 +182,27 @@ export async function runDataMigration(userId, targetChannelId = null, options =
 
     // dryRun인 경우 결과를 각 항목 표본과 함께 반환
     if (dryRun) {
-      // return a list of sample items and total
-      const sample = itemsToMigrate.slice(0, 5).map((it) => ({ type: it.type, id: it.id }));
+      // group counts and sample ids by type
+      const groups = { kanban: { count: 0, sample: [] }, scraps: { count: 0, sample: [] } };
+      itemsToMigrate.forEach((it) => {
+        if (!groups[it.type]) groups[it.type] = { count: 0, sample: [] };
+        groups[it.type].count += 1;
+        if (groups[it.type].sample.length < 5) {
+          if (it.type === 'kanban') {
+            groups[it.type].sample.push(`${it.status}/${it.id}`);
+          } else {
+            groups[it.type].sample.push(it.id);
+          }
+        }
+      });
+
       return {
         success: true,
         message: `Dry-run: 총 ${totalItems}개 항목이 마이그레이션 후보입니다.`,
         updatedCount: totalItems,
         dryRunResult: {
           totalItems,
-          sample,
+          groups,
         },
       };
     }

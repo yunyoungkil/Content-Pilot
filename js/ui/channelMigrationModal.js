@@ -99,11 +99,24 @@ export function showChannelMigrationModal(root, channel) {
       if (res.success && res.dryRunResult) {
         resultEl.style.display = 'block';
         const r = res.dryRunResult;
-        let html = `Dry-run 결과: 총 ${r.totalItems}개 항목이 마이그레이션 후보입니다.`;
-        if (r.sample && Array.isArray(r.sample) && r.sample.length > 0) {
-          html += '\n샘플: ' + r.sample.map((s) => `${s.type}:${s.id}`).join(', ');
-        }
-        resultEl.textContent = html;
+        const g = r.groups || {};
+        // Build a friendly multiline summary
+        let lines = [];
+        lines.push(`Dry-run 결과: 총 ${r.totalItems}개 항목이 마이그레이션 후보입니다.`);
+        Object.keys(g).forEach((type) => {
+          const group = g[type];
+          if (group.count && group.count > 0) {
+            const readableName = type === 'kanban' ? '칸반' : type === 'scraps' ? '스크랩' : type;
+            lines.push(`- ${readableName}: ${group.count}개`);
+            if (group.sample && Array.isArray(group.sample) && group.sample.length > 0) {
+              lines.push(`  샘플:`);
+              group.sample.slice(0, 5).forEach((s) => {
+                lines.push(`    - ${s}`);
+              });
+            }
+          }
+        });
+        resultEl.textContent = lines.join('\n');
         showToast('🔎 Dry-run 결과가 표시되었습니다.');
       } else if (res.success && res.jobId) {
         resultEl.style.display = 'block';
