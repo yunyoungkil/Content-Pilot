@@ -53,8 +53,12 @@ describe('OffscreenService fetch URL wrapper', () => {
       onMessage: { addListener: jest.fn((fn) => listeners.push(fn)), removeListener: jest.fn() },
       onDisconnect: { addListener: jest.fn() },
       postMessage: jest.fn((msg) => {
-        // echo a success response for fetch_url_in_offscreen; also provide onConnect callback so ensureOffscreenDocument can pick up the port
+        // Reply to ping messages quickly and echo a success response for fetch_url_in_offscreen
         setTimeout(() => {
+          if (msg && msg.action === 'offscreen_ping') {
+            listeners.forEach((l) => l({ action: 'offscreen_ping_response' }));
+            return;
+          }
           listeners.forEach((l) =>
             l({
               action: 'fetch_url_in_offscreen_response',
@@ -91,8 +95,12 @@ describe('OffscreenService fetch URL wrapper', () => {
       onMessage: { addListener: jest.fn((fn) => listeners.push(fn)), removeListener: jest.fn() },
       onDisconnect: { addListener: jest.fn() },
       postMessage: jest.fn((msg) => {
-        // reply with structured error fields; also ensure port is used by ensureOffscreenDocument
+        // reply to ping and to fetch requests with structured error fields; ensure port ping responses too
         setTimeout(() => {
+          if (msg && msg.action === 'offscreen_ping') {
+            listeners.forEach((l) => l({ action: 'offscreen_ping_response' }));
+            return;
+          }
           listeners.forEach((l) =>
             l({
               action: 'fetch_url_in_offscreen_response',

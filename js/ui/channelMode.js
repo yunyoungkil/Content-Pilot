@@ -458,6 +458,10 @@ export function renderChannelMode(container) {
             myChannelsData = blogs.map((blog) => {
               Logger.debug('[ChannelMode] loadChannelData - 블로그 변환:', blog);
               return {
+                // Preserve explicit id when present; otherwise derive a stable id
+                // from the RSS/API URL so repeated saves with the same domain do not
+                // cause the ID to flip between empty and a generated value.
+                id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : ''),
                 inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
                 url: blog.url || blog.inputUrl, // 하위 호환성 유지
                 apiUrl: blog.apiUrl || null, // RSS URL
@@ -802,6 +806,10 @@ export function renderChannelMode(container) {
           if (response && response.success) {
             // 최신 데이터로 myChannelsData 업데이트
             const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
+              // Preserve existing channel id to avoid unintended ID loss on edit.
+              // If id is missing, compute a stable fallback from apiUrl so that
+              // saving without changing domain does not flip the id later.
+              id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : ''),
               inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
               url: blog.url || blog.inputUrl, // 하위 호환성
               apiUrl: blog.apiUrl || null, // RSS URL
@@ -1559,7 +1567,8 @@ export function renderChannelMode(container) {
       if (currentEditingIndex === -1) {
         newId = crypto.randomUUID(); // 신규 생성
       } else {
-        newId = myChannelsData[currentEditingIndex].id; // 기본은 유지
+        // 기본은 기존 id 유지. 만약 기존 id가 비어있다면 apiUrl 기반의 deterministic id를 사용
+        newId = myChannelsData[currentEditingIndex].id || (myChannelsData[currentEditingIndex].apiUrl ? btoa(myChannelsData[currentEditingIndex].apiUrl).replace(/=/g, '') : '');
 
         // [핵심] 만약 어떤 이유로 ID가 변경되었다면? (예: url 변경 시 ID도 재발급 정책 등)
         // 여기서는 예시로 'url이 바뀌면 ID도 바뀐다'는 가정을 해보겠습니다. (실제로는 추천하지 않음)
