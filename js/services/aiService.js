@@ -22,6 +22,14 @@ import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js'
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
+// [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수
+function removeDuplicateYears(title) {
+  if (!title) return title;
+  // 정규식으로 연속된 같은 년도 패턴을 찾아 하나로 줄임
+  // 예: "2024년 2024년 최고의" -> "2024년 최고의"
+  return title.replace(/(\d{4}년)(\s+\1)+/g, '$1');
+}
+
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
   try {
@@ -904,28 +912,10 @@ export async function enhanceDraftWithFeatures({
         let rawTextForDesc = (ideaData.description || '').toString().trim();
 
         if (!rawTextForDesc && formattedDraft) {
-          // Prefer the first meaningful paragraph after the H1 if available
-          // or fallback to the first paragraph otherwise. Try to avoid common
-          // UI/auxiliary paragraphs that list filters, counts, or UI labels
-          // (e.g. '리뷰 10,519건', '랭킹순', '포토/동영상', 'AI 리뷰요약').
-          try {
-            const afterH1Match = formattedDraft.match(/<h1[\s\S]*?<\/h1>([\s\S]*)/i);
-            const scopeHtml = (afterH1Match && afterH1Match[1]) || formattedDraft;
-            const stripped = scopeHtml.replace(/<[^>]+>/g, '\n');
-            const paragraphs = (stripped || '')
-              .split(/\n\s*\n/)
-              .map((p) => p.trim())
-              .filter(Boolean);
-            const UI_TOKENS = /리뷰|랭킹|최신순|평점|포토\/?동영상|AI 리뷰요약|스토어PI|전체보기/i;
-            const candidate = paragraphs.find((p) => p.length >= 40 && !UI_TOKENS.test(p));
-            const firstNonUiPara = candidate || paragraphs.find((p) => !UI_TOKENS.test(p));
-            rawTextForDesc = (firstNonUiPara || paragraphs[0] || '').trim();
-          } catch (err) {
-            // fallback to the old behavior if anything goes wrong
-            const stripped = formattedDraft.replace(/<[^>]+>/g, '\n');
-            const firstPara = (stripped || '').split(/\n\s*\n/)[0] || stripped;
-            rawTextForDesc = (firstPara || '').trim();
-          }
+          // Strip HTML tags and take first paragraph
+          const stripped = formattedDraft.replace(/<[^>]+>/g, '\n');
+          const firstPara = (stripped || '').split(/\n\s*\n/)[0] || stripped;
+          rawTextForDesc = (firstPara || '').trim();
         }
 
         let desc = (rawTextForDesc || '').substring(0, 200).trim();
@@ -2108,6 +2098,10 @@ ${defaultDescription}
       if (!seoTitle) {
         seoTitle = title;
       }
+
+      // [버그 수정] 제목에 중복 년도 제거
+      seoTitle = removeDuplicateYears(seoTitle);
+
       console.debug('[DIAG generateDraftFromIdea] seoTitle extracted from draft:', seoTitle);
     } // 초안 생성 블록 종료
 

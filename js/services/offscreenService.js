@@ -772,32 +772,19 @@ async function sendToOffscreen(action, data, timeout = 30000) {
           if (success) {
             resolve(msg);
           } else {
-            let errorMsg = `${action} 실패`;
-            let errName = 'OffscreenError';
-            let errStack = '';
+            let errorMsg;
             try {
-              errorMsg = msg.error || errorMsg;
+              errorMsg = msg.error || `${action} 실패`;
             } catch (e) {
-              /* ignore */
+              errorMsg = `${action} 실패`;
             }
+            const err = new Error(errorMsg);
             try {
-              errName = msg.errorName || errName;
+              if (msg && msg.errorName) err.name = msg.errorName;
             } catch (e) {
-              /* ignore */
+              // ignore
             }
-            try {
-              errStack = msg.errorStack || '';
-            } catch (e) {
-              /* ignore */
-            }
-            const newErr = new Error(errorMsg);
-            try {
-              newErr.name = errName;
-              if (errStack) newErr.stack = errStack;
-            } catch (e) {
-              /* ignore */
-            }
-            reject(newErr);
+            reject(err);
           }
           return true;
         }
@@ -875,32 +862,19 @@ async function sendToOffscreen(action, data, timeout = 30000) {
               if (success) {
                 portResolve(msg);
               } else {
-                let errorMsg = portAction + ' 실패';
-                let errName = 'OffscreenError';
-                let errStack = '';
+                let errorMsg;
                 try {
-                  errorMsg = msg.error || errorMsg;
+                  errorMsg = msg.error || portAction + ' 실패';
                 } catch (e) {
-                  /* ignore */
+                  errorMsg = portAction + ' 실패';
                 }
+                const perr = new Error(errorMsg);
                 try {
-                  errName = msg.errorName || errName;
+                  if (msg && msg.errorName) perr.name = msg.errorName;
                 } catch (e) {
-                  /* ignore */
+                  // ignore
                 }
-                try {
-                  errStack = msg.errorStack || '';
-                } catch (e) {
-                  /* ignore */
-                }
-                const newErr = new Error(errorMsg);
-                try {
-                  newErr.name = errName;
-                  if (errStack) newErr.stack = errStack;
-                } catch (e) {
-                  /* ignore */
-                }
-                portReject(newErr);
+                portReject(perr);
               }
               return true;
             }
@@ -1029,6 +1003,21 @@ export async function sanitizeHtmlInOffscreen(rawText) {
     }
     throw error;
   }
+}
+
+/**
+ * Fetch a URL using the offscreen document. Returns the raw HTML string.
+ * This is a simple wrapper around sendToOffscreen for tests and callers.
+ */
+export async function fetchUrlInOffscreen(url) {
+  if (!url || typeof url !== 'string') throw new Error('Invalid url');
+  const response = await sendToOffscreen('fetch_url_in_offscreen', { url }, 30000);
+  // normalize response shape
+  if (response && response.success) return response.html;
+  // If offscreen returned error details, try to include them
+  const err = new Error(response && response.error ? response.error : 'fetch failed');
+  if (response && response.errorName) err.name = response.errorName;
+  throw err;
 }
 
 /**
@@ -1196,21 +1185,6 @@ export async function composeThumbnailInOffscreen(imageUrl, text, textPosition =
     return response.dataUrl;
   } catch (error) {
     Logger.error('[OffscreenService] 썸네일 합성 오류:', error);
-    throw error;
-  }
-}
-
-/**
- * URL에서 HTML 콘텐츠를 fetch (CORS 우회용)
- * @param {string} url - 가져올 URL
- * @returns {Promise<string>} HTML 콘텐츠
- */
-export async function fetchUrlInOffscreen(url) {
-  try {
-    const response = await sendToOffscreen('fetch_url_in_offscreen', { url }, 30000);
-    return response.html;
-  } catch (error) {
-    Logger.error('[OffscreenService] URL fetch 오류:', error);
     throw error;
   }
 }
