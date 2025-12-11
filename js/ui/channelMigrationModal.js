@@ -12,7 +12,7 @@ export function showChannelMigrationModal(root, channel) {
   const modalWrap = document.createElement('div');
   modalWrap.id = 'channel-migration-modal';
   modalWrap.className = 'cp-modal-wrap';
-  modalWrap.style.cssText = `position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.45); z-index:10000;`;
+  modalWrap.style.cssText = `position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.45); z-index:2147483647;`;
 
   const modal = document.createElement('div');
   modal.className = 'cp-modal';
@@ -43,13 +43,32 @@ export function showChannelMigrationModal(root, channel) {
   `;
 
   modalWrap.appendChild(modal);
-  root.appendChild(modalWrap);
+  // root가 ShadowRoot면 그곳에 붙이고, Document면 body에 붙입니다.
+  // 항상 최상단 body에 붙여서 z-index/스태킹 컨텍스트 문제를 피합니다.
+  try {
+    document.body.appendChild(modalWrap);
+  } catch (err) {
+    console.error('[ChannelMigrationModal] 모달 삽입 실패, 대체로 document.body에 추가합니다:', err);
+    // fallback: 최종적으로 root에 붙입니다.
+    try {
+      root.appendChild(modalWrap);
+    } catch (e) {
+      console.error('[ChannelMigrationModal] fallback으로 root에 추가도 실패했습니다:', e);
+    }
+  }
 
   const cancelBtn = modal.querySelector('#migration-cancel');
   const runBtn = modal.querySelector('#migration-run');
   const dryRunEl = modal.querySelector('#migration-dryrun');
   const targetSelect = modal.querySelector('#migration-target-select');
   const resultEl = modal.querySelector('#migration-result');
+
+  // 기본값: 채널의 platformType을 우선 사용
+  try {
+    if (channel && channel.platformType && targetSelect) targetSelect.value = channel.platformType;
+  } catch (e) {
+    // ignore
+  }
 
   cancelBtn.addEventListener('click', () => modalWrap.remove());
   modalWrap.addEventListener('click', (e) => {
@@ -79,7 +98,12 @@ export function showChannelMigrationModal(root, channel) {
 
       if (res.success && res.dryRunResult) {
         resultEl.style.display = 'block';
-        resultEl.textContent = 'Dry-run 결과:\n' + JSON.stringify(res.dryRunResult, null, 2);
+        const r = res.dryRunResult;
+        let html = `Dry-run 결과: 총 ${r.totalItems}개 항목이 마이그레이션 후보입니다.`;
+        if (r.sample && Array.isArray(r.sample) && r.sample.length > 0) {
+          html += '\n샘플: ' + r.sample.map((s) => `${s.type}:${s.id}`).join(', ');
+        }
+        resultEl.textContent = html;
         showToast('🔎 Dry-run 결과가 표시되었습니다.');
       } else if (res.success && res.jobId) {
         resultEl.style.display = 'block';

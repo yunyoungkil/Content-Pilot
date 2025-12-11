@@ -144,6 +144,8 @@ import {
   removeScrapImage,
 } from './js/services/scrapService.js';
 
+import { runDataMigration, checkMigrationNeeded } from './js/services/migrationService.js';
+
 import {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
@@ -443,6 +445,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           count: result.deletedCount,
           details: result.details,
         };
+      })()
+    );
+  }
+  // 채널 데이터 마이그레이션 요청
+  if (msg.action === 'migrate_channel') {
+    return handleAsync(
+      (async () => {
+        const { channelId, targetPlatform, dryRun } = msg;
+        const userId = await getCurrentUserId();
+        if (userId === CONSTANTS.USER_ID) {
+          return { success: false, error: '로그인이 필요합니다.' };
+        }
+
+        const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null });
+        if (!result.success) return { success: false, error: result.message };
+        return { success: true, message: result.message, dryRunResult: result.dryRunResult, updatedCount: result.updatedCount };
       })()
     );
   }

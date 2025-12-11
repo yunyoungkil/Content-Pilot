@@ -15,6 +15,16 @@ describe('Background - migrate_channel handler', () => {
     jest.doMock('../js/services/firebaseService.js', () => ({
       getCurrentUserId,
       initializeFirebase: jest.fn(),
+      CONSTANTS: { USER_ID: 'default_user' },
+    }));
+    jest.doMock('../js/services/authService.js', () => ({
+      restoreAuthSession: jest.fn().mockResolvedValue(null),
+      startGoogleAuth: jest.fn(),
+      revokeGoogleAuth: jest.fn(),
+      getValidToken: jest.fn().mockResolvedValue(null),
+    }));
+    jest.doMock('../js/constants.js', () => ({
+      USER_ID: 'default_user',
     }));
 
     // minimal chrome stubs
@@ -33,6 +43,6 @@ describe('Background - migrate_channel handler', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     // sendResponse should have been called with the dry-run result
-    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1');
+    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1', { dryRun: true, targetPlatform: null });
   });
 });

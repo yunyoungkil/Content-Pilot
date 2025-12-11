@@ -13,12 +13,9 @@ import { Logger } from '../utils.js';
  * @param {string|null} targetChannelId - 타겟 채널 ID (null이면 자동 결정)
  * @returns {Promise<{success: boolean, message: string, updatedCount?: number}>}
  */
-export async function runDataMigration(userId, targetChannelId = null) {
-  // 마이그레이션 로직은 현재 비활성화되어 있습니다.
-  Logger.info(
-    '🚫 [Migration] runDataMigration 호출됨 — 현재 마이그레이션 기능은 비활성화되어 있습니다.'
-  );
-  return { success: false, message: '마이그레이션 기능이 비활성화되어 있습니다.' };
+export async function runDataMigration(userId, targetChannelId = null, options = {}) {
+  const { dryRun = false, targetPlatform = null } = options;
+  Logger.info(`🔁 [Migration] runDataMigration 호출 (dryRun=${dryRun}) - userId: ${userId}, targetChannelId: ${targetChannelId}`);
 
   // 백업 경로 생성 (타임스탬프 기반)
   const timestamp = Date.now();
@@ -74,11 +71,15 @@ export async function runDataMigration(userId, targetChannelId = null) {
       backupData.scraps = scraps;
     }
 
-    // 백업 데이터를 Firebase에 저장
+    // 백업 데이터를 Firebase에 저장 (dryRun이면 저장하지 않음)
     if (Object.keys(backupData).length > 0) {
-      await set(ref(getDb(), backupPath), backupData);
-      Logger.info(`📦 [Backup] 데이터 백업 완료 (경로: ${backupPath})`);
-      rollbackNeeded = true;
+      if (!dryRun) {
+        await set(ref(getDb(), backupPath), backupData);
+        Logger.info(`📦 [Backup] 데이터 백업 완료 (경로: ${backupPath})`);
+        rollbackNeeded = true;
+      } else {
+        Logger.info('[Backup] Dry-run 모드: 백업을 생성하지 않습니다.');
+      }
     } else {
       Logger.info('[Backup] 백업할 데이터가 없습니다.');
     }
@@ -125,6 +126,12 @@ export async function runDataMigration(userId, targetChannelId = null) {
     let processedCount = 0;
 
     for (const item of itemsToMigrate) {
+      // dryRun인 경우는 변환 대상만 수집하고 DB 변경은 하지 않음
+      if (dryRun) {
+        processedCount++;
+        updatedCount++;
+        continue;
+      }
       try {
         if (item.type === 'kanban') {
           await update(ref(getDb(), `kanban/${userId}/${item.status}/${item.id}`), {
@@ -154,10 +161,27 @@ export async function runDataMigration(userId, targetChannelId = null) {
     Logger.info(`✅ [Migration] 완료: 총 ${updatedCount}개 데이터 처리됨`);
 
     // 마이그레이션 완료 상태 저장 (일회성 실행 보장)
-    await chrome.storage.local.set({ migration_completed: true });
+    if (!dryRun) {
+      await chrome.storage.local.set({ migration_completed: true });
+    }
 
     // 성공 시 백업 데이터는 유지 (수동 복구 가능하도록)
     Logger.info(`[Backup] 마이그레이션 성공. 백업 데이터는 ${backupPath}에 보관됩니다.`);
+
+    // dryRun인 경우 결과를 각 항목 표본과 함께 반환
+    if (dryRun) {
+      // return a list of sample items and total
+      const sample = itemsToMigrate.slice(0, 5).map((it) => ({ type: it.type, id: it.id }));
+      return {
+        success: true,
+        message: `Dry-run: 총 ${totalItems}개 항목이 마이그레이션 후보입니다.`,
+        updatedCount: totalItems,
+        dryRunResult: {
+          totalItems,
+          sample,
+        },
+      };
+    }
 
     return {
       success: true,

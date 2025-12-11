@@ -15,7 +15,7 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
   const { orphanCount, channelCount, channelOptions, autoAssign } = migrationInfo;
 
   // 모달이 이미 있으면 제거
-  const existingModal = shadowRoot.querySelector('#migration-modal');
+  const existingModal = (shadowRoot && shadowRoot.querySelector && shadowRoot.querySelector('#migration-modal')) || document.querySelector('#migration-modal');
   if (existingModal) {
     existingModal.remove();
   }
@@ -27,7 +27,7 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
   modal.style.cssText = `
     position: fixed;
     inset: 0;
-    z-index: 10000;
+    z-index: 2147483647;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -99,7 +99,16 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
 
   modalContent.innerHTML = modalHTML;
   modal.appendChild(modalContent);
-  shadowRoot.appendChild(modal);
+  try {
+    document.body.appendChild(modal);
+  } catch (err) {
+    console.error('[MigrationModal] document.body.appendChild 실패, shadowRoot에 붙입니다:', err);
+    try {
+      shadowRoot.appendChild(modal);
+    } catch (e) {
+      console.error('[MigrationModal] fallback: shadowRoot.appendChild도 실패했습니다:', e);
+    }
+  }
 
   // 이벤트 리스너
   const confirmBtn = modalContent.querySelector('#migration-confirm-btn');

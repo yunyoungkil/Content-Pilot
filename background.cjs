@@ -449,10 +449,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         // 현재 마이그레이션은 migrationService에서 처리
-        const result = await runDataMigration(userId, channelId);
+        const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null });
         // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
         if (!result.success) return { success: false, error: result.message };
-        return { success: true, message: result.message, dryRunResult: result.dryRunResult };
+        return { success: true, message: result.message, dryRunResult: result.dryRunResult, updatedCount: result.updatedCount };
       })()
     );
   }
