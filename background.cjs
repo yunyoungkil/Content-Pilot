@@ -136,6 +136,9 @@ const {
   toggleScrapSharing,
 } = require('./js/services/scrapService.js');
 
+// Migration service
+const { runDataMigration, checkMigrationNeeded } = require('./js/services/migrationService.js');
+
 const {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
@@ -431,6 +434,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           count: result.deletedCount,
           details: result.details,
         };
+      })()
+    );
+  }
+
+  // 채널 데이터 마이그레이션 요청
+  if (msg.action === 'migrate_channel') {
+    return handleAsync(
+      (async () => {
+        const { channelId, targetPlatform, dryRun } = msg;
+        const userId = await getCurrentUserId();
+        if (userId === CONSTANTS.USER_ID) {
+          return { success: false, error: '로그인이 필요합니다.' };
+        }
+
+        // 현재 마이그레이션은 migrationService에서 처리
+        const result = await runDataMigration(userId, channelId);
+        // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
+        if (!result.success) return { success: false, error: result.message };
+        return { success: true, message: result.message, dryRunResult: result.dryRunResult };
       })()
     );
   }

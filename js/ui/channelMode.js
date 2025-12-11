@@ -4,6 +4,7 @@ import { showToast, Logger } from '../utils.js';
 import { deleteCompetitorData } from '../services/cascadeDeleteService.js';
 import { getCurrentUserId } from '../services/firebaseService.js';
 import { migrateChannelIdCascade } from '../services/migrationService.js';
+import { showChannelMigrationModal } from './channelMigrationModal.js';
 import { normalizeUrlForComparison } from '../services/collectorService.js';
 
 export function renderChannelMode(container) {
@@ -626,6 +627,10 @@ export function renderChannelMode(container) {
             경쟁사: ${channel.competitors.length}개 | GA4: ${
               channel.gaPropertyId ? '✅' : '❌'
             } | AdSense: ${channel.adSenseAccountId ? '✅' : '❌'}
+            <div style="margin-top:6px; font-size:12px; color:#555;">
+              ID: <span class="channel-id" data-channel-id="${channel.id}" style="cursor:pointer; color:#2d8cf0; text-decoration:underline;">${channel.id}</span>
+              <button class="action-btn copy-id-btn" title="ID 복사" style="margin-left:8px;">복사</button>
+            </div>
           </div>
         </div>
         <div class="channel-actions">
@@ -636,6 +641,49 @@ export function renderChannelMode(container) {
 
       // 수정 버튼
       card.querySelector('.edit-btn').addEventListener('click', () => openDetailModal(index));
+
+      // 채널 ID 클릭 -> 마이그레이션 모달 오픈
+      const idEl = card.querySelector('.channel-id');
+      if (idEl) {
+        idEl.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // show migration modal; pass the channel object
+          try {
+            const shadowRoot = container.closest('#content-pilot-host')?.shadowRoot || document.querySelector('#content-pilot-host')?.shadowRoot || document;
+            showChannelMigrationModal(shadowRoot, channel);
+          } catch (err) {
+            console.error('[ChannelMode] 채널 마이그레이션 모달 열기 실패:', err);
+            showToast('❌ 마이그레이션 모달을 열 수 없습니다. 콘솔을 확인하세요.');
+          }
+        });
+      }
+
+      // ID 복사 버튼
+      const copyBtn = card.querySelector('.copy-id-btn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = copyBtn.parentNode.querySelector('.channel-id')?.dataset.channelId;
+          if (id) {
+            navigator.clipboard?.writeText(id).then(() => {
+              showToast('ID가 복사되었습니다.');
+            }).catch(() => {
+              // 구형 환경 폴백
+              const ta = document.createElement('textarea');
+              ta.value = id;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+              showToast('ID가 복사되었습니다.');
+            });
+          } else {
+            showToast('복사할 ID가 없습니다.');
+          }
+        });
+      }
 
       // 삭제 버튼
       card.querySelector('.delete-btn').addEventListener('click', async () => {
