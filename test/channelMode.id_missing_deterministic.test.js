@@ -17,10 +17,10 @@ describe('ChannelMode - id inference for missing id', () => {
     document.body.appendChild(container);
 
     // channel without id but with apiUrl
-    const apiUrl = 'https://blog.example.com/rss';
+    const inputUrl = 'https://blog.example.com/user';
     const expectedId = (typeof btoa !== 'undefined'
-      ? btoa(apiUrl).replace(/=/g, '')
-      : Buffer.from(apiUrl).toString('base64').replace(/=/g, ''));
+      ? btoa(inputUrl.replace(/\/$/, '')).replace(/=/g, '')
+      : Buffer.from(inputUrl).toString('base64').replace(/=/g, ''));
 
     const mockChannels = {
       success: true,
@@ -31,7 +31,7 @@ describe('ChannelMode - id inference for missing id', () => {
               // id missing
               inputUrl: 'https://blog.example.com/user',
               url: 'https://blog.example.com/user',
-              apiUrl: apiUrl,
+              apiUrl: 'https://blog.example.com/rss',
               platformType: 'naver',
               gaPropertyId: '',
               adSenseAccountId: '',

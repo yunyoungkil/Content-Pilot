@@ -2889,7 +2889,6 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                       allScrapsList.innerHTML = availableScraps
                         .map((s) => createScrapCard(s, false))
                         .join('');
-                      attachScrapItemListeners(allScrapsList, linkedScrapsList, ideaData);
                     } else {
                       allScrapsList.innerHTML =
                         "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";
@@ -4991,96 +4990,89 @@ window.__cp_filterScraps = function (scraps, keyword, searchText) {
     );
   });
 };
-function attachScrapItemListeners(allCont, linkedCont, ideaData) {
-  if (!allCont) return;
-  // 삭제 버튼 이벤트 리스너 및 드래그 시작 리스너 (재사용 가능하도록 함수화)
-  allCont.querySelectorAll('.scrap-card-delete-btn').forEach((deleteBtn) => {
-    if (deleteBtn.dataset.listenerAttached) return;
-    deleteBtn.dataset.listenerAttached = 'true';
-    deleteBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const card = deleteBtn.closest('.scrap-card-item');
-      if (!card) return;
-      const scrapId = card.dataset.scrapId;
-      if (!scrapId) {
-        console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
-        return;
-      }
-      showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
-        chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
-            showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
-            return;
-          }
-          if (response && response.success) {
-            showToast('✅ 스크랩이 삭제되었습니다.');
-            // 스크랩 리스트 새로고침
-            chrome.storage.local.get('activeChannelId', (res) => {
-              chrome.runtime.sendMessage(
-                {
-                  action: 'get_all_scraps',
-                  channelId: res.activeChannelId,
-                },
-                (r) => {
-                  if (r && r.success) {
-                    const linkedScrapIds =
-                      ideaData && ideaData.linkedScraps
-                        ? Array.isArray(ideaData.linkedScraps)
-                          ? ideaData.linkedScraps
-                          : Object.keys(ideaData.linkedScraps)
-                        : [];
-                    const availableScraps = r.scraps.filter(
-                      (s) => !linkedScrapIds.includes(s.id)
-                    );
-                    window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
-                  }
-                }
-              );
-            });
-          } else {
-            const errorMsg = response?.error || '알 수 없는 오류';
-            console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
-            showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
-          }
-        });
-      });
-    });
-  });
-
-  // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
-  allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
-    // avoid duplicate listeners
-    if (scrapItem.dataset.dragListenerAttached) return;
-    scrapItem.dataset.dragListenerAttached = 'true';
-    try {
-      scrapItem.draggable = true;
-    } catch (err) {
-      /* ignore */
-    }
-    scrapItem.addEventListener('dragstart', (e) => {
-      try {
-        const data = {
-          id: scrapItem.dataset.scrapId,
-          text: scrapItem.dataset.text,
-          isLinked: false,
-        };
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('application/json', JSON.stringify(data));
-      } catch (err) {
-        console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
-      }
-    });
-  });
-}
-
 window.__cp_updateScrapList = function (filtered, allCont, linkedCont, ideaData) {
   if (filtered.length > 0) {
     allCont.innerHTML = filtered.map((s) => createScrapCard(s, false)).join('');
 
-    // Attach delete / drag listeners for each scrap item
-    attachScrapItemListeners(allCont, linkedCont, ideaData);
+    // 삭제 버튼 이벤트 리스너 재등록 (동적 요소 대응)
+    allCont.querySelectorAll('.scrap-card-delete-btn').forEach((deleteBtn) => {
+      // 이미 이벤트 리스너가 등록되어 있으면 중복 등록 방지
+      if (deleteBtn.dataset.listenerAttached) return;
+      deleteBtn.dataset.listenerAttached = 'true';
+
+      deleteBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const card = deleteBtn.closest('.scrap-card-item');
+        if (!card) return;
+
+        const scrapId = card.dataset.scrapId;
+        if (!scrapId) {
+          console.error('[Workspace] 스크랩 ID를 찾을 수 없습니다.');
+          return;
+        }
+
+        showConfirmationToast('정말로 스크랩을 삭제하시겠습니까?', () => {
+          chrome.runtime.sendMessage({ action: 'delete_scrap', id: scrapId }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error('[Workspace] 스크랩 삭제 오류:', chrome.runtime.lastError);
+              showToast(`❌ 삭제 실패: ${chrome.runtime.lastError.message}`, 'error');
+              return;
+            }
+            if (response && response.success) {
+              showToast('✅ 스크랩이 삭제되었습니다.');
+              // 스크랩 리스트 새로고침
+              chrome.storage.local.get('activeChannelId', (res) => {
+                chrome.runtime.sendMessage(
+                  {
+                    action: 'get_all_scraps',
+                    channelId: res.activeChannelId,
+                  },
+                  (r) => {
+                    if (r && r.success) {
+                      const linkedScrapIds =
+                        ideaData && ideaData.linkedScraps
+                          ? Array.isArray(ideaData.linkedScraps)
+                            ? ideaData.linkedScraps
+                            : Object.keys(ideaData.linkedScraps)
+                          : [];
+                      const availableScraps = r.scraps.filter(
+                        (s) => !linkedScrapIds.includes(s.id)
+                      );
+                      window.__cp_updateScrapList(availableScraps, allCont, linkedCont, ideaData);
+                    }
+                  }
+                );
+              });
+            } else {
+              const errorMsg = response?.error || '알 수 없는 오류';
+              console.error('[Workspace] 스크랩 삭제 실패:', errorMsg);
+              showToast(`❌ 삭제 실패: ${errorMsg}`, 'error');
+            }
+          });
+        });
+      });
+      // attach dragstart listeners to non-linked scrap items so they can be dropped into linked list
+      allCont.querySelectorAll('.scrap-card-item').forEach((scrapItem) => {
+        // avoid duplicate listeners
+        if (scrapItem.dataset.dragListenerAttached) return;
+        scrapItem.dataset.dragListenerAttached = 'true';
+        scrapItem.addEventListener('dragstart', (e) => {
+          try {
+            const data = {
+              id: scrapItem.dataset.scrapId,
+              text: scrapItem.dataset.text,
+              isLinked: false,
+            };
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('application/json', JSON.stringify(data));
+          } catch (err) {
+            console.debug('[Workspace] attach dragstart failed for scrapItem', scrapItem, err);
+          }
+        });
+      });
+    });
   } else {
     const searchInput = document.querySelector('#scrap-search-input');
     const filterBtn = document.querySelector('#filter-scrap-by-draft-btn');
@@ -5111,7 +5103,6 @@ export function updateWorkspaceScraps(container, ideaData) {
 
   // [체크리스트 5-2] 참고 자료 갱신: 우측 패널의 '모든 스크랩', '이미지 갤러리'만 갱신
   const allScrapsList = workspaceEl.querySelector('.all-scraps-list');
-  const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
   const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
 
   if (allScrapsList) {
@@ -5129,8 +5120,6 @@ export function updateWorkspaceScraps(container, ideaData) {
               allScrapsList.innerHTML = availableScraps
                 .map((s) => createScrapCard(s, false))
                 .join('');
-              // attach listeners to newly rendered scrap cards
-              attachScrapItemListeners(allScrapsList, linkedScrapsList, ideaData);
             } else {
               allScrapsList.innerHTML =
                 "<p style='text-align: center; padding: 20px; color: #666;'>자료 보관함이 비어있습니다.</p>";

@@ -616,9 +616,9 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
     try {
       const updatePromises = [];
       if (cardData?.origin?.postUrl) {
-      const originalUrl = cardData.origin.postUrl;
-      if (originalUrl) {
-          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalUrl));
+        const normalizedUrl = normalizeUrlForComparison(cardData.origin.postUrl);
+        if (normalizedUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
           const originIndexPath = `url_index/${userId}/${encodedKey}/origin/${firebaseKey}`;
           updatePromises.push(
             remove(ref(getDb(), originIndexPath)).catch((error) => {
@@ -631,7 +631,7 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
           );
           // invalidate duplicate check cache for this url
           try {
-            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(normalizedUrl) : Buffer.from(normalizedUrl).toString('base64')).replace(/=/g, '')}`;
             await performanceOptimizer.invalidateCache(cacheKey);
           } catch (e) {
             Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
@@ -640,9 +640,9 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
       }
 
       if (cardData?.publishedUrl) {
-      const originalPubUrl = cardData.publishedUrl;
-      if (originalPubUrl) {
-          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalPubUrl));
+        const normalizedUrl = normalizeUrlForComparison(cardData.publishedUrl);
+        if (normalizedUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizedUrl);
           const publishedIndexPath = `url_index/${userId}/${encodedKey}/published/${firebaseKey}`;
           updatePromises.push(
             remove(ref(getDb(), publishedIndexPath)).catch((error) => {
@@ -654,7 +654,7 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
             })
           );
           try {
-            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(normalizedUrl) : Buffer.from(normalizedUrl).toString('base64')).replace(/=/g, '')}`;
             await performanceOptimizer.invalidateCache(cacheKey);
           } catch (e) {
             Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
@@ -753,16 +753,16 @@ export async function deleteKanbanCard(cardId, status) {
         // Invalidate duplicate_check cache for origin/published urls
         try {
           if (cardData.origin?.postUrl) {
-            const originalUrl = cardData.origin.postUrl;
-            if (originalUrl) {
-              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+            const normalizedUrl = normalizeUrlForComparison(cardData.origin.postUrl);
+            if (normalizedUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(normalizedUrl) : Buffer.from(normalizedUrl).toString('base64')).replace(/=/g, '')}`;
               await performanceOptimizer.invalidateCache(cacheKey);
             }
           }
           if (cardData.publishedUrl) {
-            const originalPubUrl = cardData.publishedUrl;
-            if (originalPubUrl) {
-              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+            const normalizedUrl = normalizeUrlForComparison(cardData.publishedUrl);
+            if (normalizedUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(normalizedUrl) : Buffer.from(normalizedUrl).toString('base64')).replace(/=/g, '')}`;
               await performanceOptimizer.invalidateCache(cacheKey);
             }
           }

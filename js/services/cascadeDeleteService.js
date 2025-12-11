@@ -4,7 +4,6 @@
 import { getDb } from './firebaseService.js';
 import { ref, get, remove } from './firebaseService.js';
 import { Logger } from '../utils.js';
-import { performanceOptimizer } from './performanceOptimizer.js';
 
 /**
  * [수정 1] URL 인덱스 키 생성기 (덤프 데이터 형식 반영)
@@ -309,12 +308,6 @@ export async function deleteChannelDataCascade(channelId, userId, channelUrl = n
     Logger.biz(
       `✅ [Cascade Delete] 최종 완료: 카드(${stats.kanban}), 스크랩(${stats.scraps}), 메타(${stats.meta}), 캐시(${stats.contentCache}), 인덱스(${stats.urlIndex})`
     );
-    // Invalidate duplicate cache entries related to urls removed by cascade delete
-    try {
-      await performanceOptimizer.invalidateCache('duplicate_check_');
-    } catch (e) {
-      Logger.warn('[Cascade Delete] duplicate cache invalidate failed', e);
-    }
     return { success: true, deletedCount: stats.kanban + stats.scraps };
   } catch (error) {
     Logger.error(`[Cascade Delete] 오류:`, error);

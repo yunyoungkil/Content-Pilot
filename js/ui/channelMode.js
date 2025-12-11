@@ -4,6 +4,7 @@ import { showToast, Logger } from '../utils.js';
 import { deleteCompetitorData } from '../services/cascadeDeleteService.js';
 import { getCurrentUserId } from '../services/firebaseService.js';
 import { migrateChannelIdCascade } from '../services/migrationService.js';
+import { normalizeUrlForComparison } from '../services/collectorService.js';
 
 export function renderChannelMode(container) {
   container.innerHTML = `
@@ -339,8 +340,10 @@ export function renderChannelMode(container) {
       myChannelsData = blogs.map((blog) => {
         Logger.debug('[ChannelMode] processChannelDataResponse - 블로그 변환:', blog);
 
-        // UUID가 없으면 생성 (마이그레이션)
-        let channelId = blog.id;
+        // ID 결정: 서버에 ID가 있으면 사용, 없으면 inputUrl 기반 deterministic ID(=Base64(normalized inputUrl))를 우선 사용,
+        // 없으면 apiUrl 기반으로 시도하고, 그것도 없으면 랜덤 UUID 생성 (최후의 수단)
+        const derivedFromInput = blog.inputUrl || blog.url || '';
+        let channelId = blog.id || (derivedFromInput ? btoa(derivedFromInput.replace(/\/$/, '')).replace(/=/g, '') : null) || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null);
         if (!channelId) {
           channelId = crypto.randomUUID(); // 브라우저 내장 UUID 생성 함수
           needSave = true; // 저장 필요함 표시
@@ -458,10 +461,7 @@ export function renderChannelMode(container) {
             myChannelsData = blogs.map((blog) => {
               Logger.debug('[ChannelMode] loadChannelData - 블로그 변환:', blog);
               return {
-                // Preserve explicit id when present; otherwise derive a stable id
-                // from the RSS/API URL so repeated saves with the same domain do not
-                // cause the ID to flip between empty and a generated value.
-                id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : ''),
+                id: blog.id || (blog.inputUrl || blog.url ? btoa((blog.inputUrl || blog.url).replace(/\/$/, '')).replace(/=/g, '') : (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null)),
                 inputUrl: blog.inputUrl || blog.url, // inputUrl 우선, 없으면 url (하위 호환성)
                 url: blog.url || blog.inputUrl, // 하위 호환성 유지
                 apiUrl: blog.apiUrl || null, // RSS URL
@@ -511,7 +511,14 @@ export function renderChannelMode(container) {
 
   // 채널 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
   chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
-    if (msg.action === 'channel_data_updated' || msg.action === 'channels_data_updated') {
+    // Support incoming full data payloads via either explicit update messages
+    // (channel_data_updated / channels_data_updated) or (for tests) a
+    // direct 'get_channels_and_key' broadcast that contains the same data.
+    if (
+      msg.action === 'channel_data_updated' ||
+      msg.action === 'channels_data_updated' ||
+      msg.action === 'get_channels_and_key'
+    ) {
       console.log('[ChannelMode] 채널 데이터 업데이트 메시지 수신:', msg.data);
 
       // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
@@ -522,12 +529,11 @@ export function renderChannelMode(container) {
       }
 
       // 응답 데이터 구조 처리
-      const responseData = {
-        success: true,
-        data: msg.data,
-      };
-
-      processChannelDataResponse(responseData);
+      if (msg.data) {
+        // message already contains data (broadcast)
+        const responseData = { success: true, data: msg.data };
+        processChannelDataResponse(responseData);
+      }
     }
 
     // 다른 메시지는 처리하지 않음
@@ -631,7 +637,10 @@ export function renderChannelMode(container) {
           confirm('이 채널을 삭제하시겠습니까? \n(작성한 모든 카드와 데이터가 영구 삭제됩니다)')
         ) {
           const channelToDelete = myChannelsData[index];
-          const targetId = channelToDelete.id;
+          // ID가 없으면 API URL의 Base64 변환으로 폴백
+          const targetId =
+            channelToDelete.id ||
+            ((channelToDelete.inputUrl || channelToDelete.url) ? btoa(((channelToDelete.inputUrl || channelToDelete.url).replace(/\/$/, ''))).replace(/=/g, '') : (channelToDelete.apiUrl ? btoa(channelToDelete.apiUrl).replace(/=/g, '') : null));
           const targetUrl = channelToDelete.inputUrl || channelToDelete.url;
 
           try {
@@ -692,6 +701,21 @@ export function renderChannelMode(container) {
                     saveChannelsToFirebase((saveResponse) => {
                       if (saveResponse && saveResponse.success) {
                         console.log('[ChannelMode] 삭제 후 채널 목록 저장 완료');
+                        const shadowRoot =
+                          container.closest('#content-pilot-host')?.shadowRoot ||
+                          document.querySelector('#content-pilot-host')?.shadowRoot;
+                        if (shadowRoot) {
+                            import('./header.js').then(async (module) => {
+                            if (module.refreshGlobalChannelSelector) {
+                              module.refreshGlobalChannelSelector(shadowRoot);
+                            }
+                            try {
+                              chrome.runtime.sendMessage({ action: 'channels_data_updated', data: { myChannels: { blogs: myChannelsData } } });
+                            } catch (e) {
+                              Logger.debug('[ChannelMode] channels_data_updated 브로드캐스트 실패:', e && e.message);
+                            }
+                          });
+                        }
                       } else {
                         console.warn('[ChannelMode] 삭제 후 채널 목록 저장 실패:', saveResponse);
                       }
@@ -806,10 +830,7 @@ export function renderChannelMode(container) {
           if (response && response.success) {
             // 최신 데이터로 myChannelsData 업데이트
             const latestChannels = (response.data.myChannels?.blogs || []).map((blog) => ({
-              // Preserve existing channel id to avoid unintended ID loss on edit.
-              // If id is missing, compute a stable fallback from apiUrl so that
-              // saving without changing domain does not flip the id later.
-              id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : ''),
+              id: blog.id || (blog.inputUrl || blog.url ? btoa((blog.inputUrl || blog.url).replace(/\/$/, '')).replace(/=/g, '') : (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : undefined)),
               inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
               url: blog.url || blog.inputUrl, // 하위 호환성
               apiUrl: blog.apiUrl || null, // RSS URL
@@ -1233,6 +1254,7 @@ export function renderChannelMode(container) {
         const latestChannels = (channelResponse.data.myChannels?.blogs || []).map((blog) => {
           console.log('[ChannelMode] 블로그 데이터 변환:', blog);
           return {
+          id: blog.id || (blog.apiUrl ? btoa(blog.apiUrl).replace(/=/g, '') : null),
             inputUrl: blog.inputUrl || blog.url, // inputUrl 우선
             url: blog.url || blog.inputUrl, // 하위 호환성
             apiUrl: blog.apiUrl || null, // RSS URL
@@ -1257,6 +1279,47 @@ export function renderChannelMode(container) {
         // 메인 채널 목록 업데이트
         renderMyChannels();
 
+        // 로그인 후 activeChannelId 및 모달 표시 로직
+        chrome.storage.local.get(['activeChannelId'], (result) => {
+          // activeChannelId가 없거나 "none"이면 첫 채널 자동 선택 (항상 ID 사용)
+          if ((!result.activeChannelId || result.activeChannelId === 'none') && myChannelsData.length > 0) {
+            const firstChannelId = myChannelsData[0].id || (myChannelsData[0].inputUrl || myChannelsData[0].url ? btoa((myChannelsData[0].inputUrl || myChannelsData[0].url).replace(/\/$/, '')).replace(/=/g, '') : (myChannelsData[0].apiUrl ? btoa(myChannelsData[0].apiUrl).replace(/=/g, '') : null));
+            if (firstChannelId) {
+              chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
+                console.log('[ChannelMode] 로그인 후 첫 채널 자동 선택:', firstChannelId);
+              });
+            }
+          }
+
+          // 모달 열림 상태에 따른 처리
+          if (isModalOpen) {
+            if (currentEditingIndex >= 0 && currentEditingIndex < myChannelsData.length) {
+              // 편집 중인 채널이 있고 데이터가 있으면 해당 채널의 최신 데이터로 모달 업데이트
+              populateModalWithData(myChannelsData[currentEditingIndex], false);
+            } else if (myChannelsData.length > 0 && result.activeChannelId !== 'none') {
+              // 편집 중인 채널이 없고 activeChannelId가 "none"이 아니면 첫 번째 채널 표시
+              currentEditingIndex = 0;
+              populateModalWithData(myChannelsData[0], false);
+            } else {
+              // activeChannelId가 "none"이거나 채널 데이터가 없으면 새 채널 추가 모드로 표시
+              currentEditingIndex = -1;
+              populateModalWithData(
+                {
+                  inputUrl: '',
+                  url: '',
+                  apiUrl: null,
+                  gaPropertyId: '',
+                  adSenseAccountId: '',
+                  competitors: [],
+                },
+                true
+              );
+            }
+          } else {
+            console.log('[ChannelMode] 모달이 닫혀있음 - 메인 목록만 업데이트');
+          }
+        });
+
         // 모달이 열려있으면 채널 데이터를 모달에 표시
         const modal = container.querySelector('#channel-detail-modal');
         const isModalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
@@ -1269,38 +1332,7 @@ export function renderChannelMode(container) {
           channelsCount: myChannelsData.length,
         });
 
-        if (isModalOpen) {
-          if (currentEditingIndex >= 0 && currentEditingIndex < myChannelsData.length) {
-            // 편집 중인 채널이 있고 데이터가 있으면 해당 채널의 최신 데이터로 모달 업데이트
-            console.log(
-              '[ChannelMode] 모달이 열려있음 - 편집 중인 채널 정보 업데이트:',
-              currentEditingIndex
-            );
-            populateModalWithData(myChannelsData[currentEditingIndex], false);
-          } else if (myChannelsData.length > 0) {
-            // 편집 중인 채널이 없지만 데이터가 있으면 첫 번째 채널을 모달에 표시
-            console.log('[ChannelMode] 모달이 열려있음 - 첫 번째 채널 정보 표시');
-            currentEditingIndex = 0;
-            populateModalWithData(myChannelsData[0], false);
-          } else {
-            // 채널 데이터가 없으면 새 채널 추가 모드로 표시
-            console.log('[ChannelMode] 모달이 열려있지만 채널 데이터 없음 - 새 채널 모드');
-            currentEditingIndex = -1;
-            populateModalWithData(
-              {
-                inputUrl: '',
-                url: '',
-                apiUrl: null,
-                gaPropertyId: '',
-                adSenseAccountId: '',
-                competitors: [],
-              },
-              true
-            );
-          }
-        } else {
-          console.log('[ChannelMode] 모달이 닫혀있음 - 메인 목록만 업데이트');
-        }
+        // 모달 관련 처리는 위의 storage.get 콜백에서 처리됨 (skipAutoSelect 고려 포함)
       } else {
         console.error('[ChannelMode] 채널 데이터 재로드 실패:', channelResponse);
         // 실패 시 재시도 (사용자 ID가 아직 업데이트되지 않았을 수 있음)
@@ -1376,6 +1408,13 @@ export function renderChannelMode(container) {
             // if (geminiApiKeyEl) geminiApiKeyEl.value = "";
 
             console.log('[ChannelMode] 모든 채널 정보 초기화 완료');
+
+            // 5. activeChannelId 초기화 (로그아웃 시 채널 선택 상태 제거)
+            // activeChannelId를 "none"으로 설정하여 자동 선택 방지
+            chrome.storage.local.set({ activeChannelId: 'none' }, () => {
+              console.log('[ChannelMode] activeChannelId를 "none"으로 설정하여 자동 선택 방지');
+            });
+
             alert('✅ Google 계정 연동이 해제되었습니다. 채널 정보가 초기화되었습니다.');
           }
         });
@@ -1555,20 +1594,44 @@ export function renderChannelMode(container) {
         return;
       }
 
-      // [변경 감지 로직 시작]
-      const oldId = currentEditingIndex === -1 ? null : myChannelsData[currentEditingIndex].id;
+      // [중복 채널 체크] 같은 URL의 채널이 이미 존재하는지 확인 (정규화된 비교 사용)
+      const normalizedInput = normalizeUrlForComparison(url);
+      const existingChannelIndex = myChannelsData.findIndex((channel) => {
+        const candidate = channel.inputUrl || channel.url || '';
+        return normalizeUrlForComparison(candidate) === normalizedInput;
+      });
+
+      if (existingChannelIndex !== -1 && currentEditingIndex === -1) {
+        // 같은 URL의 채널이 이미 있고, 현재 새 채널 추가 모드라면 업데이트 모드로 전환
+        const confirmUpdate = confirm(
+          '같은 URL의 채널이 이미 존재합니다. 기존 채널을 업데이트하시겠습니까?'
+        );
+        if (confirmUpdate) {
+          currentEditingIndex = existingChannelIndex;
+          showToast('📝 기존 채널 업데이트 모드로 전환되었습니다.');
+        } else {
+          showToast('❌ 채널 추가가 취소되었습니다.');
+          return;
+        }
+      }
 
       // 1. ID 결정 로직
+      // oldId는 편집 모드(currentEditingIndex)에서 기존 채널의 ID를 저장합니다.
+      const oldId = currentEditingIndex === -1 ? null : myChannelsData[currentEditingIndex].id;
+
       // 만약 ID를 변경하는 UI가 있다면 여기서 newId를 가져오겠지만,
       // 지금은 예시로 '기존 ID 유지' 또는 '새로 생성' 로직을 따릅니다.
       // 사용자가 강제로 ID를 바꾸는 상황을 가정합니다.
 
       let newId;
       if (currentEditingIndex === -1) {
-        newId = crypto.randomUUID(); // 신규 생성
+        // 신규 생성: inputUrl 기반 deterministic ID 사용 (동일 URL이면 중복 방지)
+        newId = url ? btoa(url.replace(/\/$/, '')).replace(/=/g, '') : crypto.randomUUID();
       } else {
-        // 기본은 기존 id 유지. 만약 기존 id가 비어있다면 apiUrl 기반의 deterministic id를 사용
-        newId = myChannelsData[currentEditingIndex].id || (myChannelsData[currentEditingIndex].apiUrl ? btoa(myChannelsData[currentEditingIndex].apiUrl).replace(/=/g, '') : '');
+        // 기존 채널에서 ID가 없으면 deterministic ID(=Base64(apiUrl))로 폴백
+        const existingChannel = myChannelsData[currentEditingIndex];
+        newId =
+          existingChannel.id || (existingChannel.inputUrl || existingChannel.url ? btoa((existingChannel.inputUrl || existingChannel.url).replace(/\/$/, '')).replace(/=/g, '') : (existingChannel.apiUrl ? btoa(existingChannel.apiUrl).replace(/=/g, '') : null));
 
         // [핵심] 만약 어떤 이유로 ID가 변경되었다면? (예: url 변경 시 ID도 재발급 정책 등)
         // 여기서는 예시로 'url이 바뀌면 ID도 바뀐다'는 가정을 해보겠습니다. (실제로는 추천하지 않음)
@@ -1621,11 +1684,21 @@ export function renderChannelMode(container) {
           const shadowRoot =
             container.closest('#content-pilot-host')?.shadowRoot ||
             document.querySelector('#content-pilot-host')?.shadowRoot;
-          if (shadowRoot) {
-            import('./header.js').then((module) => {
-              module.addHeaderEventListeners(shadowRoot);
-            });
-          }
+              if (shadowRoot) {
+                import('./header.js').then((module) => {
+                  module.addHeaderEventListeners(shadowRoot);
+                  // 저장 직후 헤더의 글로벌 채널 셀렉터를 즉시 갱신하여 옵션과 매핑을 동기화합니다.
+                  if (module.refreshGlobalChannelSelector) {
+                    module.refreshGlobalChannelSelector(shadowRoot);
+                  }
+                });
+              }
+              // 헤더가 비동기적으로 갱신되지 않는 환경을 대비해 채널 데이터 업데이트 브로드캐스트
+              try {
+                chrome.runtime.sendMessage({ action: 'channels_data_updated', data: { myChannels: { blogs: myChannelsData } } });
+              } catch (e) {
+                Logger.debug('[ChannelMode] channels_data_updated 브로드캐스트 실패:', e && e.message);
+              }
 
           // 활성 채널이 없으면 첫 번째 채널을 활성화하고 대시보드로 이동
           chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (channelResponse) => {
@@ -1636,7 +1709,7 @@ export function renderChannelMode(container) {
                 const firstChannel = myBlogs[0];
                 const firstChannelId =
                   firstChannel.id ||
-                  (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '');
+                  (firstChannel.id || (firstChannel.inputUrl || firstChannel.url ? btoa((firstChannel.inputUrl || firstChannel.url).replace(/\/$/, '')).replace(/=/g, '') : (firstChannel.apiUrl ? btoa(firstChannel.apiUrl).replace(/=/g, '') : '')));
 
                 if (firstChannelId) {
                   chrome.storage.local.set({ activeChannelId: firstChannelId }, () => {
@@ -1725,6 +1798,9 @@ export function renderChannelMode(container) {
           if (shadowRoot) {
             import('./header.js').then((module) => {
               module.addHeaderEventListeners(shadowRoot);
+              if (module.refreshGlobalChannelSelector) {
+                module.refreshGlobalChannelSelector(shadowRoot);
+              }
             });
           }
 

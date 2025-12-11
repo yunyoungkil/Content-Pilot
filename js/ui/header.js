@@ -398,6 +398,15 @@ async function initGlobalChannelSelector(shadowRoot) {
   });
 }
 
+// 외부에서 글로벌 채널 셀렉터를 강제로 갱신할 수 있는 함수
+export async function refreshGlobalChannelSelector(shadowRoot) {
+  try {
+    await initGlobalChannelSelector(shadowRoot);
+  } catch (e) {
+    console.warn('[Header] refreshGlobalChannelSelector 실패:', e && e.message);
+  }
+}
+
 // 채널 관리 화면으로 전환하는 헬퍼
 function openChannelManager(shadowRoot) {
   const mainArea = shadowRoot.querySelector('#cp-main-area');

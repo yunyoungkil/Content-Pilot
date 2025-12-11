@@ -441,11 +441,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // 네이버 이미지 특별 처리
           if (
             msg.url.includes('postfiles.pstatic.net') ||
-            msg.url.includes('blogfiles.naver.net') ||
-            msg.url.includes('blogthumb.pstatic.net')
+            msg.url.includes('blogfiles.naver.net')
           ) {
             const response = await fetch(msg.url, {
               method: 'GET',
+              headers: {
+                Referer: 'https://blog.naver.com/',
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
               credentials: 'omit',
               cache: 'no-cache',
             });

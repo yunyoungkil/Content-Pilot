@@ -184,14 +184,21 @@ global.testHelpers = {
       listeners.push(listener);
     });
 
+    // expose triggerMessage as a helper on chrome.runtime for tests that call it directly
+    chrome.runtime.triggerMessage = (message) => {
+      listeners.forEach((listener) => {
+        try {
+          listener(message, {}, () => {});
+        } catch (e) {
+          // ignore
+        }
+      });
+    };
+
     return {
       listeners,
       sendMessage: chrome.runtime.sendMessage,
-      triggerMessage: (message) => {
-        listeners.forEach((listener) => {
-          listener(message, {}, () => {});
-        });
-      },
+      triggerMessage: chrome.runtime.triggerMessage,
     };
   },
 
