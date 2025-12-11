@@ -22,6 +22,11 @@ if (window.Quill && window.ImageResize) {
 }
 let quillEditor = null;
 
+// Guard against duplicate insert-image messages arriving almost simultaneously
+// (e.g. from multiple UI contexts). Ignore a duplicate insert for the same URL
+// if received within this window.
+let __cp_lastInsertedImage = { url: null, ts: 0 };
+
 // W-13: Undo/Redo 아이콘을 단순한 화살표 모양으로 명시적으로 등록합니다.
 const Icons = Quill.import('ui/icons');
 Icons['undo'] =
@@ -796,11 +801,26 @@ function initializeEditor() {
         console.log('➕ [Editor] ========================================');
         console.log('➕ [Editor] 📨 insert-image 메시지 수신!');
         console.log('➕ [Editor] ========================================');
+        // dedupe: if same URL inserted within 500ms, ignore to avoid double inserts
+        try {
+          const now = Date.now();
+          if (
+            data &&
+            data.url &&
+            __cp_lastInsertedImage.url === data.url &&
+            now - __cp_lastInsertedImage.ts < 500
+          ) {
+            console.debug('[Editor] 중복 이미지 삽입 감지, 무시:', data.url);
+            break;
+          }
+        } catch (e) {}
+
         const imageRange = quillEditor.getSelection() || {
           index: quillEditor.getLength(),
           length: 0,
         };
         if (data.url) {
+          __cp_lastInsertedImage = { url: data.url, ts: Date.now() };
           console.log('📸 [Editor] 이미지 삽입 중...');
           quillEditor.insertEmbed(imageRange.index, 'image', data.url);
           quillEditor.setSelection(imageRange.index + 1);

@@ -2,7 +2,7 @@
 // 칸반(기획 보드) 관련 서비스
 
 import { getDb, cleanDataForFirebase, getCurrentUserId } from './firebaseService.js';
-import { ref, get, set, remove, push } from './firebaseService.js';
+import { ref, get, set, remove, push, update, serverTimestamp } from './firebaseService.js';
 import { generateIdeaBriefing } from './aiService.js';
 import {
   checkDuplicateUrl,
@@ -12,7 +12,7 @@ import {
   encodeUrlForFirebaseKey,
 } from './collectorService.js';
 import { updateSinglePerformanceMetric } from './analyticsService.js';
-import { Logger } from '../utils.js';
+import { Logger, sendRuntimeMessageWithTimeout } from '../utils.js';
 // [추가] 상수 임포트
 import { COLLECTIONS } from '../constants.js';
 // [추가] 성능 최적화 서비스 임포트
@@ -243,7 +243,9 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     // 우선순위: AI가 추천한 검색어(recommendedSearches) 또는 recommendedKeywords를 사용
     // 없으면 기존 태그/키워드를 사용
     const workspaceKeywords =
-      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
+      ideaData.recommendedSearches ||
+      ideaData.recommendedKeywords ||
+      tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     // ▼▼▼ [중요] PRD v1.0에 따라 workspace 객체는 반드시 생성되어야 합니다.
@@ -255,7 +257,7 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
       channelId: channelId, // 👈 핵심: 채널 ID 저장 (없으면 null = 공용/미지정)
       tags: tags,
       origin: origin,
-        workspace: {
+      workspace: {
         // PRD v1.0 모델 - workspaceMode.js에서 필수로 사용
         // keywords: 포스팅에 포함될 SEO 최적화 키워드를 우선으로 저장
         keywords: workspaceKeywords || [],
@@ -278,7 +280,14 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     const newCardRef = push(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}/${targetStatus}`));
     const newCardKey = newCardRef.key;
     // Debug: Log origin and any thumbnail info before saving
-    try { console.log('[addIdeaToKanban DEBUG] Saving idea', { origin: newCard.origin, thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null }); } catch(e) {}
+    try {
+      console.log('[addIdeaToKanban DEBUG] Saving idea', {
+        origin: newCard.origin,
+        thumbnailUrls: ideaData.publishInfo?.thumbnailUrls || null,
+      });
+    } catch (e) {
+      void 0;
+    }
     await set(newCardRef, cleanDataForFirebase(newCard));
 
     // [최적화] URL 인덱스 업데이트 (origin.postUrl이 있는 경우)
@@ -314,7 +323,12 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
  * @param {string|null} channelId - 채널 ID
  * @returns {Promise<{success: boolean, firebaseKey?: string, error?: string, code?: string, message?: string, cardInfo?: Object}>}
  */
-export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = null) {
+export async function addIdeaToKanban(
+  ideaData,
+  status = 'ideas',
+  channelId = null,
+  skipAutoBriefing = false
+) {
   try {
     // 제목 검증
     if (!ideaData.title || !ideaData.title.trim()) {
@@ -366,9 +380,10 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       tags = [...(ideaData.tags || [])];
     }
 
-    // origin이 없는 경우 판별
+    // origin이 없는 경우 판별: keywords나 tags가 존재하면 AI가 생성한 것으로 간주
     if (!origin) {
-      if (ideaData.keywords && ideaData.keywords.length > 0) {
+      const inferredKeywords = ideaData.keywords || ideaData.tags || [];
+      if (inferredKeywords && inferredKeywords.length > 0) {
         origin = { type: 'ai_generated' };
       } else {
         origin = { type: 'manual_entry' };
@@ -395,7 +410,9 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     tags = [...new Set(tags)];
 
     const workspaceKeywords =
-      ideaData.recommendedSearches || ideaData.recommendedKeywords || tags.filter((t) => t !== '#AI-추천');
+      ideaData.recommendedSearches ||
+      ideaData.recommendedKeywords ||
+      tags.filter((t) => t !== '#AI-추천');
 
     // Firebase 저장 객체 생성
     const newCard = {
@@ -434,6 +451,17 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
     const cardId = pushResult.key;
     await pushResult.set(cleanDataForFirebase(finalData));
 
+    // Mark briefing as queued so UI can show user that an AI briefing will be generated.
+    // We write this under workspace/draft to keep draft metadata in a single place.
+    try {
+      await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}/workspace/draft`), {
+        briefingStatus: 'queued',
+        briefingQueuedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      Logger.warn('[addIdeaToKanban] briefingStatus queued update failed:', err);
+    }
+
     // [최적화] 캐시 무효화
     await invalidateKanbanCache();
 
@@ -458,14 +486,15 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
 
     // AI 브리핑 자동 생성
     // 성과 추적 전용(tracking_only)은 이미 발행된 포스트이므로 브리핑 생성하지 않음
-    const originType = ideaData.origin?.type;
+    // Use the normalized `origin` variable (not ideaData.origin) since we may set default origin earlier
+    const originType = origin?.type;
     const shouldGenerateBriefing =
       originType !== 'manual_entry' &&
       originType !== 'tracking_only' &&
       ideaData.title &&
       status === 'ideas';
 
-    if (shouldGenerateBriefing) {
+    if (shouldGenerateBriefing && !skipAutoBriefing) {
       Logger.info(
         `[addIdeaToKanban] AI 브리핑 자동 생성 시작 - cardId: ${cardId}, originType: ${
           originType || 'undefined'
@@ -473,31 +502,68 @@ export async function addIdeaToKanban(ideaData, status = 'ideas', channelId = nu
       );
 
       // Background를 통해서 AI 브리핑 생성 (referer 문제 해결)
-      chrome.runtime.sendMessage({
-        action: 'generate_idea_briefing',
-        cardId: cardId,
-        title: ideaData.title,
-        description: ideaData.description || '',
-        options: {
-          status: status,
-          generateOutline: true,
-          generateKeywords: true,
-          generateLongTail: true,
-          generateMainKeywords: true,
+      // Use the timeout-based message helper so we can detect timeouts and bubble useful errors
+      (async () => {
+        try {
+          const payload = {
+            action: 'generate_idea_briefing',
+            cardId: cardId,
+            title: ideaData.title,
+            description: ideaData.description || '',
+            options: {
+              status: status,
+              generateOutline: true,
+              generateKeywords: true,
+              generateLongTail: true,
+              generateMainKeywords: true,
+              originType: origin.type,
+              origin: origin,
+            },
+          };
+
+          // AI briefing calls can take time; give a larger timeout to avoid
+          // premature "message port closed" situations when the background
+          // is still processing LLM calls.
+          const response = await sendRuntimeMessageWithTimeout(payload, 15000);
+          Logger.debug(`[addIdeaToKanban] generate_idea_briefing raw response:`, response);
+          if (response && response.success) {
+            Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
+          } else {
+            let errorMsg = response?.error || 'Unknown error';
+            // If the runtime error is the message-port-close (connection race),
+            // treat as a warning rather than an error — background might still
+            // be processing (will update DB asynchronously).
+            if (typeof errorMsg === 'string' && errorMsg.includes('message port closed')) {
+              Logger.warn(
+                '[addIdeaToKanban] AI 브리핑 백그라운드 처리 중 포트 닫힘(정상) — 브리핑이 비동기로 처리되었을 수 있습니다:',
+                errorMsg
+              );
+              return;
+            }
+            try {
+              if (!response?.error && response && typeof response === 'object')
+                errorMsg = JSON.stringify(response);
+            } catch (e) {
+              void 0;
+            }
+            Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', errorMsg);
+          }
+        } catch (err) {
+          Logger.error(
+            '[addIdeaToKanban] AI 브리핑 생성 실패 (send error):',
+            err?.message || String(err)
+          );
         }
-      }, (response) => {
-        if (response && response.success) {
-          Logger.biz(`✅ [addIdeaToKanban] AI 브리핑 생성 완료 - cardId: ${cardId}`);
-        } else {
-          Logger.error('[addIdeaToKanban] AI 브리핑 생성 실패:', response?.error || 'Unknown error');
-        }
-      });
+      })();
     } else {
       Logger.debug(
         `[addIdeaToKanban] AI 브리핑 자동 생성 건너뜀 - originType: ${
           originType || 'undefined'
         }, status: ${status}, title: ${ideaData.title ? '있음' : '없음'}`
       );
+      if (skipAutoBriefing) {
+        Logger.debug(`[addIdeaToKanban] 브리핑 자동 생성은 백그라운드 호출에서 대리 처리 됩니다.`);
+      }
     }
 
     // 성과 추적 전용인 경우 publishedUrl이 있으면 성과 데이터 수집 시작
@@ -539,7 +605,67 @@ export async function removeIdeaFromKanban(firebaseKey, status = 'ideas') {
 
   try {
     const userId = await getCurrentUserId();
-    await remove(ref(getDb(), `kanban/${userId}/${status}/${firebaseKey}`));
+    const cardPath = `kanban/${userId}/${status}/${firebaseKey}`;
+    const cardSnap = await get(ref(getDb(), cardPath));
+    const cardData = cardSnap?.val();
+
+    // Remove the card
+    await remove(ref(getDb(), cardPath));
+
+    // Remove URL index entries (if present) and invalidate duplicate_check cache
+    try {
+      const updatePromises = [];
+      if (cardData?.origin?.postUrl) {
+      const originalUrl = cardData.origin.postUrl;
+      if (originalUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalUrl));
+          const originIndexPath = `url_index/${userId}/${encodedKey}/origin/${firebaseKey}`;
+          updatePromises.push(
+            remove(ref(getDb(), originIndexPath)).catch((error) => {
+              Logger.warn(
+                `[removeIdeaFromKanban] origin URL 인덱스 삭제 실패 (${originIndexPath}):`,
+                error
+              );
+              return null;
+            })
+          );
+          // invalidate duplicate check cache for this url
+          try {
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+            await performanceOptimizer.invalidateCache(cacheKey);
+          } catch (e) {
+            Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
+          }
+        }
+      }
+
+      if (cardData?.publishedUrl) {
+      const originalPubUrl = cardData.publishedUrl;
+      if (originalPubUrl) {
+          const encodedKey = encodeUrlForFirebaseKey(normalizeUrlForComparison(originalPubUrl));
+          const publishedIndexPath = `url_index/${userId}/${encodedKey}/published/${firebaseKey}`;
+          updatePromises.push(
+            remove(ref(getDb(), publishedIndexPath)).catch((error) => {
+              Logger.warn(
+                `[removeIdeaFromKanban] published URL 인덱스 삭제 실패 (${publishedIndexPath}):`,
+                error
+              );
+              return null;
+            })
+          );
+          try {
+            const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+            await performanceOptimizer.invalidateCache(cacheKey);
+          } catch (e) {
+            Logger.warn('[removeIdeaFromKanban] duplicate cache invalidate failed', e);
+          }
+        }
+      }
+
+      if (updatePromises.length > 0) await Promise.all(updatePromises);
+    } catch (indexError) {
+      Logger.warn('[removeIdeaFromKanban] URL 인덱스 삭제 중 오류:', indexError);
+    }
 
     Logger.info(
       `[removeIdeaFromKanban] 아이디어 제거 완료 - key: ${firebaseKey}, status: ${status}`
@@ -622,6 +748,26 @@ export async function deleteKanbanCard(cardId, status) {
 
         if (updatePromises.length > 0) {
           await Promise.all(updatePromises);
+        }
+
+        // Invalidate duplicate_check cache for origin/published urls
+        try {
+          if (cardData.origin?.postUrl) {
+            const originalUrl = cardData.origin.postUrl;
+            if (originalUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalUrl) : Buffer.from(originalUrl).toString('base64')).replace(/=/g, '')}`;
+              await performanceOptimizer.invalidateCache(cacheKey);
+            }
+          }
+          if (cardData.publishedUrl) {
+            const originalPubUrl = cardData.publishedUrl;
+            if (originalPubUrl) {
+              const cacheKey = `duplicate_check_${(typeof btoa !== 'undefined' ? btoa(originalPubUrl) : Buffer.from(originalPubUrl).toString('base64')).replace(/=/g, '')}`;
+              await performanceOptimizer.invalidateCache(cacheKey);
+            }
+          }
+        } catch (e) {
+          Logger.warn('[deleteKanbanCard] duplicate cache invalidate failed', e);
         }
       } catch (indexError) {
         Logger.warn('[deleteKanbanCard] URL 인덱스 삭제 중 오류:', indexError);

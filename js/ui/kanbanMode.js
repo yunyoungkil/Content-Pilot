@@ -1,6 +1,6 @@
 // js/ui/kanbanMode.js (수정 완료된 최종 버전)
 
-import { renderWorkspace } from './workspaceMode.js';
+import { renderWorkspace, isMeaningfulDraft } from './workspaceMode.js';
 import { showToast, Logger, debounce } from '../utils.js';
 import { renderHeaderAndTabs } from './header.js';
 
@@ -105,10 +105,14 @@ function renderKanban(container) {
       }
 
       if (msg.data) {
-        console.log('[KanbanMode] updateKanbanUI 호출 시작');
-        allKanbanData = msg.data || {};
-        updateKanbanUI(allKanbanData);
-        console.log('[KanbanMode] updateKanbanUI 호출 완료');
+        // Do NOT assign to module-scoped allKanbanData here — updateKanbanUI
+        // expects to compute previousData from the current module value so
+        // we must pass the incoming data directly. Assigning here would
+        // make previousData === current and the incremental diff would
+        // miss changes.
+        console.log('[KanbanMode] updateKanbanUI 호출 시작 (message handler)');
+        updateKanbanUI(msg.data);
+        console.log('[KanbanMode] updateKanbanUI 호출 완료 (message handler)');
       }
     }
     return false;
@@ -167,7 +171,10 @@ function loadKanbanData(retryCount = 0) {
     setTimeout(() => {
       if (Object.keys(allKanbanData).length === 0) {
         console.log('[KanbanMode] 콜백 미실행 감지, 재요청');
-        chrome.runtime.sendMessage({ action: 'get_kanban_data' });
+        if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+          const p = chrome.runtime.sendMessage({ action: 'get_kanban_data' });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
       }
     }, 1000);
   });
@@ -181,8 +188,11 @@ function addRealtimeUpdateListener() {
     if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) return;
 
     if (msg.action === 'kanban_data_updated') {
-      allKanbanData = msg.data || {};
-      updateKanbanUI(allKanbanData);
+      // Avoid setting allKanbanData before calling updateKanbanUI — that
+      // leads to previousData and currentData being identical and therefore
+      // no DOM diffs will be applied. Let updateKanbanUI handle the state
+      // transition to correctly compute incremental diffs.
+      updateKanbanUI(msg.data || {});
 
       // 워크스페이스가 열려있고 해당 아이디어 데이터가 업데이트된 경우 워크스페이스 갱신
       if (window.__cp_active_mode === 'workspace' && window.__cp_workspace_idea_id) {
@@ -709,23 +719,65 @@ function createKanbanCard(id, data, status) {
   if (linkedScrapsCount > 0) {
     metaInfoHtml += `<span class="kanban-card-meta linked-scraps-count">🔗 ${linkedScrapsCount}개</span>`;
   }
-  // K-1: draftContent 또는 workspace.draft가 있으면 초안 완료 표시
-  // null, 빈 문자열, 빈 객체는 제외
-  const hasDraftContent =
-    data.draftContent &&
-    data.draftContent !== null &&
-    data.draftContent !== '' &&
-    data.draftContent !== '<p><br></p>' &&
-    data.draftContent !== '<p></p>';
-  const hasWorkspaceDraft =
-    data.workspace?.draft &&
-    data.workspace.draft !== null &&
-    data.workspace.draft !== '' &&
-    data.workspace.draft !== '<p><br></p>' &&
-    data.workspace.draft !== '<p></p>';
+  // K-1: Use centralized helper (workspaceMode.isMeaningfulDraft) to determine
+  // whether a card actually contains a meaningful draft — this avoids showing
+  // '초안 완료' for link-only / placeholder drafts.
+  const hasDraftContent = isMeaningfulDraft(data.draftContent);
+  const hasWorkspaceDraft = isMeaningfulDraft(data.workspace?.draft);
 
+  // 브리핑 상태 retrieval: prefer top-level card fields but fall back to nested draft object
+  const draftObj = data.workspace?.draft || data.draft || null;
+  const cardLevelStatus = data.briefingStatus ?? null;
+  const cardLevelProgress =
+    typeof data.briefingProgress === 'number' ? data.briefingProgress : null;
+  const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
+  const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+  const progressNumeric =
+    typeof progressValue === 'number' && !Number.isNaN(progressValue)
+      ? Math.max(0, Math.min(100, Math.round(progressValue)))
+      : null;
+
+  // If draft textual content exists, show the '초안 완료' meta. Object-only drafts will not count.
   if (hasDraftContent || hasWorkspaceDraft) {
     metaInfoHtml += `<span class="kanban-card-meta draft-status-count">📝 초안 완료</span>`;
+  }
+
+  // 브리핑 상태가 있으면 카드에 상태 배지 표시 — show status badges regardless of whether textual draft exists
+  if (bs) {
+    let bsHtml = '';
+    let bsTitle = '';
+    switch (bs) {
+      case 'queued':
+        bsHtml = `<span class="kanban-card-meta briefing-status-tag queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
+        break;
+      case 'processing':
+        if (progressNumeric !== null) {
+          bsHtml = `
+              <span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중 - ${progressNumeric}%">
+                <span class="briefing-spinner">🔄</span>
+                <span class="briefing-progress-label">브리핑 생성 중 (${progressNumeric}%)</span>
+                <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressNumeric}%"></div></div>
+              </span>`;
+        } else {
+          bsHtml = `<span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
+        }
+        break;
+      case 'done':
+        bsHtml = `<span class="kanban-card-meta briefing-status-tag done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
+        break;
+      case 'failed':
+        bsTitle = draftObj.briefingError || '브리핑 실패';
+        // add a retry button that allows user to re-queue the briefing
+        bsHtml = `
+            <span class="kanban-card-meta briefing-status-tag failed" title="${bsTitle}">❌ 브리핑 실패</span>
+            <button class="briefing-retry-btn" data-card-id="${id}" data-status="${status}" title="브리핑 다시 시도">↻ 재시도</button>`;
+        break;
+      default:
+        // unknown statuses are ignored
+        break;
+    }
+
+    if (bsHtml) metaInfoHtml += bsHtml;
   }
 
   // 성과 지표가 있으면 카드에 시각적 표시 추가
@@ -917,12 +969,11 @@ function createKanbanCard(id, data, status) {
     }
   }
   // SEO 제목이 있으면 표시
-  const seoTitleHtml =
-    data.seoTitle
-      ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
+  const seoTitleHtml = data.seoTitle
+    ? `<div style="font-size: 11px; color: #666; margin-top: 4px; font-weight: normal; line-height: 1.3;">
         <span style="color: #4285f4;">SEO:</span> ${data.seoTitle}
       </div>`
-      : '';
+    : '';
 
   card.innerHTML = `
     <div class="kanban-card-body">
@@ -987,7 +1038,10 @@ function addKanbanEventListeners(container) {
     if (namespace === 'local' && changes.activeChannelId) {
       console.log('[Kanban] 채널 변경 감지, 데이터 다시 로드 및 UI 새로고침');
       // 채널이 변경되면 항상 데이터를 다시 로드하여 최신 상태 보장
-      chrome.runtime.sendMessage({ action: 'get_kanban_data' });
+      if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        const p = chrome.runtime.sendMessage({ action: 'get_kanban_data' });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
     }
   });
 
@@ -1088,6 +1142,23 @@ function addKanbanEventListeners(container) {
       if (cardData && cardData.performance) {
         showPerformanceDetailModal(container, cardId, cardData);
       }
+    } else if (e.target.closest('.briefing-retry-btn')) {
+      e.stopPropagation();
+      const btn = e.target.closest('.briefing-retry-btn');
+      const cardId = btn.dataset.cardId;
+      const status = btn.dataset.status || card.dataset.status;
+      // send retry request to background
+      chrome.runtime.sendMessage(
+        { action: 'retry_idea_briefing', data: { cardId, status } },
+        (response) => {
+          if (response && response.success) {
+            showToast('🔁 브리핑 재시도 요청이 큐에 추가되었습니다.');
+          } else {
+            showToast('❌ 브리핑 재시도 실패: ' + (response?.error || '알 수 없는 오류'));
+          }
+        }
+      );
+      return;
     } else {
       const cardId = card.dataset.id;
       const status = card.dataset.status;
@@ -1234,7 +1305,7 @@ function showAddCardInput(container, status, addCardBtn) {
         cursor: pointer;
         font-size: 13px;
       ">취소</button>
-    </div>
+      
   `;
 
   // 버튼 다음에 입력 필드 삽입
@@ -1244,6 +1315,13 @@ function showAddCardInput(container, status, addCardBtn) {
 
   const textarea = inputWrapper.querySelector('.kanban-add-card-input');
   const submitBtn = inputWrapper.querySelector('.kanban-add-card-submit-btn');
+  const aiBtn = null;
+  const suggestionsWrap = null;
+  const suggestionsLoading = null;
+  const suggestionsContent = null;
+  const suggestionsSearchesEl = null;
+  const suggestionsLongTailEl = null;
+  const suggestionsOutlineEl = null;
   const cancelBtn = inputWrapper.querySelector('.kanban-add-card-cancel-btn');
 
   // 포커스 및 자동 포커스
@@ -1264,6 +1342,8 @@ function showAddCardInput(container, status, addCardBtn) {
     submitCard(container, status, textarea.value.trim(), inputWrapper);
   });
 
+  // AI feature removed — no handler
+
   // 취소 버튼 클릭
   cancelBtn.addEventListener('click', () => {
     inputWrapper.remove();
@@ -1280,6 +1360,8 @@ function showAddCardInput(container, status, addCardBtn) {
     document.addEventListener('click', closeOnOutsideClick);
   }, 100);
 }
+
+// (removed) fetchSeoSuggestionsForTitle
 
 /**
  * 카드를 제출하는 함수
@@ -1300,6 +1382,8 @@ function submitCard(container, status, title, inputWrapper) {
     tags: [],
     createdAt: Date.now(),
   };
+
+  // (removed) AI suggestions not supported for quick-add
 
   // [수정] 활성 채널 ID를 가져와서 함께 전송
   chrome.storage.local.get('activeChannelId', (res) => {
@@ -1525,6 +1609,10 @@ function generateSimilarIdea(cardId, status, cardData) {
               keywords: [...(cardData.tags || []), '#유사-아이디어'],
               createdAt: Date.now(),
             };
+            // 명시적으로 origin 정보 추가 (AI 생성)
+            ideaData.origin = ideaData.origin || {};
+            ideaData.origin.type = 'ai_generated';
+            ideaData.origin.meta = { reason: 'similar_idea_from_ui', sourceCardId: cardId };
 
             // [수정] 활성 채널 ID를 가져와서 함께 전송
             chrome.storage.local.get('activeChannelId', (res) => {
@@ -1613,6 +1701,13 @@ ${performance.estimatedEarnings ? `- 수익: $${performance.estimatedEarnings.to
           description: `원본: ${cardData.publishedUrl}\n\n${response.text}`,
           keywords: [...(cardData.tags || []), '#리뉴얼-제안'],
           createdAt: Date.now(),
+        };
+        // 명시적으로 origin 정보 추가 (리뉴얼 제안)
+        ideaData.origin = ideaData.origin || {};
+        ideaData.origin.type = 'my_post_renewal';
+        ideaData.origin.meta = {
+          sourcePostUrl: cardData.publishedUrl,
+          reason: 'renewal_suggestion_from_ui',
         };
 
         // [수정] 활성 채널 ID를 가져와서 함께 전송

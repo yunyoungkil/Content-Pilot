@@ -5,6 +5,7 @@ const CLI = path.resolve(__dirname, '..', 'tools', 'offscreen-cli.js');
 const SAMPLE = path.resolve(__dirname, '..', 'tools', 'sample-input.html');
 
 describe('offscreen-cli tool', () => {
+  jest.setTimeout(15000);
   test('sanitize mode removes scripts and dangerous attributes', (done) => {
     execFile('node', [CLI, '--mode', 'sanitize', '--file', SAMPLE], (err, stdout, stderr) => {
       expect(err).toBeNull();

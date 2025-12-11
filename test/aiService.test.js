@@ -52,7 +52,8 @@ describe('AI Service', () => {
       global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
         // Default: handle fetch_image_as_base64 action with a synthetic base64 payload
         if (msg && msg.action === 'fetch_image_as_base64') {
-          if (typeof cb === 'function') cb({ success: true, data: 'R0FDRkE=', mimeType: 'image/png' });
+          if (typeof cb === 'function')
+            cb({ success: true, data: 'R0FDRkE=', mimeType: 'image/png' });
           return;
         }
         if (typeof cb === 'function') cb({ success: false });
@@ -277,7 +278,9 @@ describe('AI Service', () => {
         firebaseService.get.mockResolvedValueOnce({ val: () => linksMap });
 
         const { getRelevantAffiliateLinks } = require('../js/services/aiService.js');
-        const result = await getRelevantAffiliateLinks('test-user-id', 'Dyson V15 vacuum review', { preferredAffiliateId: 'link_2' });
+        const result = await getRelevantAffiliateLinks('test-user-id', 'Dyson V15 vacuum review', {
+          preferredAffiliateId: 'link_2',
+        });
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
         expect(result[0].id).toBe('link_2');
@@ -365,6 +368,19 @@ describe('AI Service', () => {
       expect(jsonLdSchema.headline).toBe('H');
       expect(Array.isArray(thumbnailCandidates)).toBe(true);
       expect(thumbnailCandidates[0].type).toBe('curiosity');
+      });
+
+      test('filters out example-only link outputs and falls back to placeholder', () => {
+        const svc = require('../js/services/aiService.js');
+        const rawExample = "[완벽 가이드] 쿠진아트 에어프라이어 그릴 오븐 청소 꿀팁 총정리!](https://costcatcher.k-posting.info/entry/abcdefg)";
+        const { cleanedDraft } = svc.processDraftResponse(rawExample, { title: '샘플 제목' });
+
+        // If the model returned only an example link line, we should not keep the raw link.
+        expect(cleanedDraft).not.toContain('https://');
+        // Should fallback to a helpful placeholder message
+        expect(cleanedDraft).toMatch(/내용을 생성하는 중 오류/);
+        // Should include the idea's title in the fallback
+        expect(cleanedDraft).toContain('샘플 제목');
     });
   });
 
@@ -408,7 +424,9 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
       jest.doMock('../js/utils.js', () => ({
         Logger: {
           debug: jest.fn(),
@@ -489,7 +507,7 @@ describe('AI Service', () => {
       // restore original fetch so we don't break other tests
       global.fetch = originalFetch;
       // debug
-      console.log('enhanceDraftWithFeatures test response =>', res);
+      // (removed noisy debug output)
       // draft content may vary depending on sanitization — main assertion here is that draft succeeded
       // Because crop failed, we should have partialFailure flag set
       expect(res.thumbnailGenerationPartialFailure).toBe(true);
@@ -539,7 +557,9 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
       jest.doMock('../js/utils.js', () => ({
         Logger: {
           debug: jest.fn(),
@@ -636,13 +656,21 @@ describe('AI Service', () => {
         get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
         getCurrentUserId: jest.fn(() => 'test-user-id'),
         cleanDataForFirebase: jest.fn((data) => data),
-        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) =>
+          Promise.resolve(`https://storage.test/${Date.now()}.png`)
+        ),
       }));
 
       jest.doMock('../js/services/offscreenService.js', () => ({
-        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
-        cropImageInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,cropped-image-data')),
-        composeThumbnailInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,COMPOSED')),
+        sanitizeHtmlInOffscreen: jest.fn((html) =>
+          Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)
+        ),
+        cropImageInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,cropped-image-data')
+        ),
+        composeThumbnailInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,COMPOSED')
+        ),
       }));
 
       jest.doMock('../js/services/promptService.js', () => ({
@@ -658,8 +686,18 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
-      jest.doMock('../js/utils.js', () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
+      jest.doMock('../js/utils.js', () => ({
+        Logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+          biz: jest.fn(),
+        },
+      }));
 
       global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
 
@@ -667,24 +705,51 @@ describe('AI Service', () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn((url, opts) => {
         if (String(url).includes('models/t')) {
-          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }] }) });
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }],
+            }),
+          });
         }
         if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
-          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              candidates: [
+                {
+                  content: {
+                    parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }],
+                  },
+                },
+              ],
+            }),
+          });
         }
-        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: { message: 'Not mocked' } }),
+        });
       });
 
       const svc = require('../js/services/aiService.js');
       const progressCb = jest.fn();
       const idea = { title: 'Progress Test', description: 'desc', tags: ['a'] };
-      await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: true, composeThumbnailText: true, onProgress: progressCb });
+      await svc.generateDraftFromIdea(idea, {
+        generateDraft: true,
+        generateThumbnail: true,
+        composeThumbnailText: true,
+        onProgress: progressCb,
+      });
       global.fetch = originalFetch;
 
       expect(progressCb).toHaveBeenCalled();
       // ensure we got at least progress for draft and thumbnail generation
       const steps = progressCb.mock.calls.map((c) => c[0].step);
-      expect(steps.includes('draft_generation') || steps.includes('thumbnail_generation')).toBe(true);
+      expect(steps.includes('draft_generation') || steps.includes('thumbnail_generation')).toBe(
+        true
+      );
     });
 
     test('should fallback when compose operation times out', async () => {
@@ -698,14 +763,20 @@ describe('AI Service', () => {
         get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
         getCurrentUserId: jest.fn(() => 'test-user-id'),
         cleanDataForFirebase: jest.fn((data) => data),
-        uploadImageToFirebaseStorage: jest.fn((dataUrl) => Promise.resolve(`https://storage.test/${Date.now()}.png`)),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) =>
+          Promise.resolve(`https://storage.test/${Date.now()}.png`)
+        ),
       }));
 
       jest.doMock('../js/services/offscreenService.js', () => ({
-        sanitizeHtmlInOffscreen: jest.fn((html) => Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)),
+        sanitizeHtmlInOffscreen: jest.fn((html) =>
+          Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)
+        ),
         // compose never resolves -> simulate hang
         composeThumbnailInOffscreen: jest.fn(() => new Promise(() => {})),
-        cropImageInOffscreen: jest.fn(() => Promise.resolve('data:image/png;base64,cropped-image-data')),
+        cropImageInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,cropped-image-data')
+        ),
       }));
 
       jest.doMock('../js/services/promptService.js', () => ({
@@ -721,8 +792,18 @@ describe('AI Service', () => {
         PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
       }));
 
-      jest.doMock('../js/constants.js', () => ({ AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' } }));
-      jest.doMock('../js/utils.js', () => ({ Logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), biz: jest.fn() } }));
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
+      jest.doMock('../js/utils.js', () => ({
+        Logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+          biz: jest.fn(),
+        },
+      }));
 
       global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
 
@@ -730,12 +811,32 @@ describe('AI Service', () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn((url, opts) => {
         if (String(url).includes('models/t')) {
-          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }] }) });
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              candidates: [{ content: { parts: [{ text: '# Title\n\nBody' }] } }],
+            }),
+          });
         }
         if (String(url).includes('gemini-2.0-flash-exp:generateContent')) {
-          return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }] } }] }) });
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              candidates: [
+                {
+                  content: {
+                    parts: [{ inlineData: { data: 'RkxBRElCQVNFMQ==', mimeType: 'image/png' } }],
+                  },
+                },
+              ],
+            }),
+          });
         }
-        return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: { message: 'Not mocked' } }) });
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: { message: 'Not mocked' } }),
+        });
       });
 
       const svc = require('../js/services/aiService.js');
@@ -763,6 +864,217 @@ describe('AI Service', () => {
       expect(res.thumbnailGenerationPartialFailure).toBe(true);
       expect(res.thumbnailUrls).toBeTruthy();
     });
+
+    test('should create default JSON-LD and metaDescription when model returns none, and add altText for existing thumbnails', async () => {
+      jest.resetModules();
+
+      // mocks for firebase and offscreen
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) =>
+          Promise.resolve(`https://storage.test/${Date.now()}.png`)
+        ),
+      }));
+
+      jest.doMock('../js/services/offscreenService.js', () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) =>
+          Promise.resolve(
+            `<h1>Generated Title</h1><p>This is the summary paragraph for the article that should become meta description.</p><p>More content here.</p>`
+          )
+        ),
+        cropImageInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,cropped-image-data')
+        ),
+        composeThumbnailInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,COMPOSED')
+        ),
+      }));
+
+      jest.doMock('../js/services/promptService.js', () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
+      jest.doMock('../js/utils.js', () => ({
+        Logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+          biz: jest.fn(),
+        },
+      }));
+
+      // ensure storage has API key
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // return a draft WITHOUT a <JSON-LD> section
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '# Generated Title\n\nThis is the summary paragraph for the article that should become meta description.\n\n## Subtitle\n\nBody content.',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        });
+      });
+
+      const svc = require('../js/services/aiService.js');
+
+      // Provide a publishInfo thumbnailUrls without altText to verify altText is inserted
+      const idea = {
+        title: 'SEO Test',
+        description: '',
+        tags: [],
+        publishInfo: { thumbnailUrls: { url_16x9: 'https://images.test/16x9.png' } },
+      };
+
+      const res = await svc.generateDraftFromIdea(idea, {
+        generateDraft: true,
+        generateThumbnail: false,
+      });
+      global.fetch = originalFetch;
+
+      expect(res).toBeDefined();
+      expect(res.success).toBe(true);
+      // jsonLdSchema should be created even though the model didn't provide it
+      expect(res.jsonLdSchema).toBeTruthy();
+      expect(res.jsonLdSchema.headline).toBeTruthy();
+      // metaDescription should be present and include expected snippet
+      expect(res.metaDescription).toBeTruthy();
+      expect(res.metaDescription).toMatch(/summary paragraph/);
+      // thumbnailUrls altText should be set from seoTitle or title
+      expect(res.thumbnailUrls).toBeTruthy();
+      expect(res.thumbnailUrls.altText).toBeTruthy();
+    });
+    test('should skip UI-only paragraphs (e.g. review counts) and use the actual article paragraph for metaDescription', async () => {
+      jest.resetModules();
+
+      // mocks for firebase and offscreen
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) =>
+          Promise.resolve(`https://storage.test/${Date.now()}.png`)
+        ),
+      }));
+
+      jest.doMock('../js/services/offscreenService.js', () => ({
+        sanitizeHtmlInOffscreen: jest.fn(() =>
+          Promise.resolve(
+            `<div class="ui">리뷰 10,519건\n랭킹순\n평점 높은순\nAI 리뷰요약</div><h1>Generated Title</h1><p>This is the real summary paragraph that should be used as meta description.</p><p>More content here.</p>`
+          )
+        ),
+        cropImageInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,cropped-image-data')
+        ),
+        composeThumbnailInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,COMPOSED')
+        ),
+      }));
+
+      jest.doMock('../js/services/promptService.js', () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
+      jest.doMock('../js/utils.js', () => ({
+        Logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+          biz: jest.fn(),
+        },
+      }));
+
+      // ensure storage has API key
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // return a draft WITHOUT a <JSON-LD> section, but containing a UI paragraph
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '# Generated Title\n\nThis is the summary paragraph for the article that should become meta description.\n\n## Subtitle\n\nBody content.',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        });
+      });
+
+      const svc = require('../js/services/aiService.js');
+
+      // Provide a publishInfo thumbnailUrls without altText to verify altText is inserted
+      const idea = {
+        title: 'SEO Test',
+        description: '',
+        tags: [],
+        publishInfo: { thumbnailUrls: { url_16x9: 'https://images.test/16x9.png' } },
+      };
+
+      const res = await svc.generateDraftFromIdea(idea, {
+        generateDraft: true,
+        generateThumbnail: false,
+      });
+      global.fetch = originalFetch;
+
+      expect(res).toBeDefined();
+      expect(res.success).toBe(true);
+      // metaDescription should use the real paragraph after the H1, not the UI block
+      expect(res.metaDescription).toBeTruthy();
+      expect(res.metaDescription).toMatch(/This is the real summary paragraph/);
+    });
     test.skip('should generate draft with affiliate links', async () => {
       // 매우 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
     });
@@ -777,12 +1089,209 @@ describe('AI Service', () => {
   });
 
   describe('generateIdeaBriefing', () => {
-    test.skip('should generate briefing for idea', async () => {
-      // 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
+    test('generate briefing for affiliate link', async () => {
+      // Mock callGeminiAPI to return JSON arrays for prompts
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI');
+      mock.mockImplementation(async (prompt) => {
+        if (prompt.includes('목차'))
+          return '["1. 소개", "2. 기능", "3. 사용법", "4. 팁", "5. 결론"]';
+        if (prompt.includes('주요 키워드')) return '["제품명", "리뷰", "할인", "구매", "비교"]';
+        if (prompt.includes('롱테일'))
+          return '["제품명 사용법", "제품명 리뷰 후기", "제품명 vs 경쟁제품", "제품명 할인 정보", "제품명 구매처"]';
+        if (prompt.includes('추천 검색어'))
+          return '["#제품명", "#리뷰", "#할인", "#구매", "#추천"]';
+        return '[]';
+      });
+
+      // Call generateIdeaBriefing directly with affiliate origin context
+      const result = await svc.generateIdeaBriefing('card-123', '제품명 베타', '효율적인 사용법', {
+        status: 'ideas',
+        generateOutline: true,
+        generateKeywords: true,
+        generateLongTail: true,
+        generateMainKeywords: true,
+        originType: 'affiliate_link',
+        origin: { productName: '제품명' },
+      });
+
+      // 새로운 반환 형식: 구조화된 결과 객체를 반환해야 함
+      expect(result).toBeDefined();
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.updates)).toBe(true);
+
+      // no-op: no spy used in this test
     });
 
-    test.skip('should handle JSON parsing errors', async () => {
-      // 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
+    test('writes processing status at start', async () => {
+      jest.resetModules();
+      // spy on update to see initial processing write
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn().mockResolvedValue(),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+        serverTimestamp: () => 'SERVER_TS',
+      }));
+
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI').mockImplementation(async (prompt) => '[]');
+
+      await svc.generateIdeaBriefing('card-proc', 'title', 'desc', { status: 'ideas' });
+
+      const firebase = require('../js/services/firebaseService.js');
+      // first update should include processing flag
+      expect(firebase.update).toHaveBeenCalled();
+      const firstUpdate = firebase.update.mock.calls[0][1];
+      expect(firstUpdate.briefingStatus).toBe('processing');
+
+      // should also have persisted an initial progress marker (5%)
+      const progressCall = firebase.update.mock.calls.find(
+        (c) => c[1] && typeof c[1].briefingProgress === 'number'
+      );
+      expect(progressCall).toBeTruthy();
+      expect(progressCall[1].briefingProgress).toBeGreaterThanOrEqual(0);
+
+      // test complete - no spy to restore in this case
+    });
+
+    test('writes done status when updates are saved successfully', async () => {
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn().mockResolvedValue(),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+        serverTimestamp: () => 'SERVER_TS',
+      }));
+
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI').mockImplementation(async (prompt) => {
+        if (prompt.includes('목차')) return '["1. intro"]';
+        if (prompt.includes('주요 키워드')) return '["kw1","kw2"]';
+        return '[]';
+      });
+
+      await svc.generateIdeaBriefing('card-success', 'title', 'desc', {
+        status: 'ideas',
+        generateOutline: true,
+        generateMainKeywords: true,
+      });
+
+      const firebase = require('../js/services/firebaseService.js');
+      const calls = firebase.update.mock.calls.map((c) => c[1]);
+      const doneCall = calls.find((p) => p && p.briefingStatus === 'done');
+      expect(doneCall).toBeDefined();
+      // progress should have been persisted at least once during the flow
+      const progressCallExists = calls.some((p) => p && typeof p.briefingProgress === 'number');
+      expect(progressCallExists).toBeTruthy();
+
+      // cleanup: no spy to restore in this test
+    });
+
+    test('returns done + no updates when model provides empty responses', async () => {
+      jest.resetModules();
+      // Make firebase.update a spy to capture calls BEFORE importing aiService
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn().mockResolvedValue(),
+        serverTimestamp: () => 'SERVER_TS',
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+      }));
+
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI');
+      // Simulate no response (null) so no updates keys are created
+      mock.mockImplementation(async () => null);
+      const res = await svc.generateIdeaBriefing('card-empty', 'Empty Case', 'No content', {
+        status: 'ideas',
+        generateOutline: true,
+        generateKeywords: true,
+        generateLongTail: true,
+        generateMainKeywords: true,
+        originType: 'manual_entry',
+        origin: {},
+      });
+
+      expect(res).toBeDefined();
+      expect(res.success).toBe(true);
+      expect(Array.isArray(res.updates)).toBe(true);
+      expect(res.updates.length).toBe(0);
+
+      // Should have written briefingStatus: 'done' (may have earlier 'processing' write)
+      const firebase = require('../js/services/firebaseService.js');
+      expect(firebase.update).toHaveBeenCalled();
+      const calls = firebase.update.mock.calls.map((c) => c[1]);
+      const doneCall = calls.find((p) => p && p.briefingStatus === 'done');
+      expect(doneCall).toBeDefined();
+
+      // no spy used in this test
+    });
+
+    test('should mark failed and return structured error when DB update fails', async () => {
+      jest.resetModules();
+      // Prepare firebase update mock: first call (processing) resolves,
+      // second call (saving updates) rejects to simulate DB failure,
+      // third call (failed marker) resolves.
+      // updateMock will reject only when saving actual update payload (no briefingStatus key)
+      const updateMock = jest.fn((path, payload) => {
+        // If payload looks like an updates object (has keys but not briefingStatus), simulate failure
+        if (payload && Object.keys(payload).length > 0 && !payload.briefingStatus) {
+          return Promise.reject(new Error('SAVE_FAIL'));
+        }
+        // Otherwise (processing flag or failure marker), succeed
+        return Promise.resolve();
+      });
+
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: updateMock,
+        serverTimestamp: () => 'SERVER_TS',
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        // getCurrentUserId returns a valid user id so the outer try block runs
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+      }));
+      // Simulate chrome storage failure to throw inside the try block, triggering outer catch
+      global.chrome.storage.local.get = jest.fn(() => {
+        throw new Error('SIMULATED_CHROME_FAIL');
+      });
+      const svc = require('../js/services/aiService.js');
+
+      const firebase = require('../js/services/firebaseService.js');
+      const res = await svc.generateIdeaBriefing('card-fail', 'FailCase', 'desc', {
+        status: 'ideas',
+        generateOutline: true,
+        generateKeywords: false,
+        generateLongTail: false,
+        generateMainKeywords: false,
+        originType: 'ai_generated',
+        origin: {},
+      });
+
+      // debug: inspect result
+      // (removed noisy debug output)
+      expect(res).toBeDefined();
+      expect(res.success).toBe(false);
+      expect(res.error).toBeDefined();
+
+      // Should have attempted to write failure status after update rejection
+      expect(firebase.update).toHaveBeenCalled();
+      const calls = firebase.update.mock.calls.map((c) => c[1]);
+      // The mock should have been called multiple times and one of the
+      // calls should set briefingStatus to 'failed'
+      const failCall = calls.find((p) => p && p.briefingStatus === 'failed');
+      expect(failCall).toBeDefined();
+
+      // no spy to restore in this test
     });
   });
 

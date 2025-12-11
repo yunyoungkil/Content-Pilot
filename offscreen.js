@@ -2,6 +2,7 @@
 
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { extractScrapTitle } from './js/utils/scrapTitleExtractor.js';
 
 // Debug: log immediately on script load so we can confirm the offscreen bundle
 // actually executed and attached its message listeners.
@@ -235,14 +236,30 @@ async function sanitizeAndFormatHtml(text) {
 }
 
 /**
- * 텍스트에서 불필요한 공백과 줄 바꿈을 제거하고 문단 구조를 유지합니다.
+ * 텍스트에서 불필요한 공백을 정리하되, 문단 구분은 보존합니다.
  */
 function formatCleanText(text) {
   if (!text) return '';
+  // 1. 연속된 줄바꿈(3개 이상)을 문단 구분자로 변경
   let processedText = text.replace(/\n\s*\n\s*\n/g, '__PARAGRAPH_BREAK__');
-  processedText = processedText.replace(/\n/g, ' ');
-  processedText = processedText.replace(/__PARAGRAPH_BREAK__/g, '\n');
-  processedText = processedText.replace(/\s+/g, ' ').trim();
+
+  // 2. 일반 줄바꿈은 유지 (제목 추출 등을 위해 구조 보존)
+  // 기존: processedText = processedText.replace(/\n/g, ' ');
+  // 변경: 줄바꿈을 하나로 통일하되 제거하지 않음
+  processedText = processedText.replace(/\n+/g, '\n');
+
+  // 3. 문단 구분자 복원
+  processedText = processedText.replace(/__PARAGRAPH_BREAK__/g, '\n\n');
+
+  // 4. 각 줄의 앞뒤 공백 제거
+  processedText = processedText
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n');
+
+  // 5. 연속된 공백 제거 (줄바꿈 제외)
+  processedText = processedText.replace(/[ \t]+/g, ' ').trim();
+
   return processedText;
 }
 
@@ -339,7 +356,9 @@ function parseContentAndMetrics(doc, urlObj) {
         try {
           const linkData = JSON.parse(parentLink.dataset.linkdata);
           if (linkData.src) imageUrl = linkData.src;
-        } catch (e) {}
+        } catch (e) {
+          void 0;
+        }
       }
       // 3. (티스토리 CDN) srcset에 CDN 주소가 있는지 확인
       if (!imageUrl) {
@@ -776,10 +795,15 @@ function safeSendReply(sendReply, payload) {
         // continue to fallback below
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 
   try {
-    chrome.runtime.sendMessage(payload).catch(() => {});
+    if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      const p = chrome.runtime.sendMessage(payload);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
   } catch (e) {
     console.debug('[Offscreen] runtime.sendMessage fallback failed', e);
   }
@@ -798,7 +822,32 @@ function sendFinalResponse(response) {
           ts: Date.now(),
           size: response && JSON.stringify(response).length,
         });
-        activeOffscreenPort.postMessage(response);
+
+        // Build a safe response object by copying direct properties using try/catch
+        // This avoids transferring objects with getters or proxies that could
+        // cause destination-side property access to throw.
+        const safeResponse = {};
+        try {
+          for (const k in response) {
+            try {
+              safeResponse[k] = response[k];
+            } catch (propErr) {
+              safeResponse[k] = null;
+            }
+          }
+        } catch (iterErr) {
+          // Fallback: shallow clone via JSON.stringify if iteration failed
+          try {
+            Object.assign(safeResponse, JSON.parse(JSON.stringify(response)));
+          } catch (_ignored) {
+            // As a last resort, copy known keys
+            safeResponse.action = response.action;
+            safeResponse.requestId = response.requestId;
+            safeResponse.success = response.success || false;
+          }
+        }
+
+        activeOffscreenPort.postMessage(safeResponse);
         return;
       } catch (e) {
         console.debug(
@@ -814,13 +863,22 @@ function sendFinalResponse(response) {
           ts: Date.now(),
           size: response && JSON.stringify(response).length,
         });
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 
   try {
-    chrome.runtime.sendMessage(response).catch(() => {});
-  } catch (e) {}
+    if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      const p = chrome.runtime.sendMessage(response);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  } catch (e) {
+    void 0;
+  }
 }
 
 function handleRequest(request, sendReply) {
@@ -894,19 +952,31 @@ function handleRequest(request, sendReply) {
         const doc = parser.parseFromString(html, 'text/html');
         const urlObj = new URL(baseUrl, document.baseURI);
 
-        const metaOg = doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
+        const metaOg =
+          doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
         const firstImg = doc.querySelector('img')?.getAttribute('src') || '';
         const thumbnail = metaOg || firstImg || '';
-        const description = doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
-        
+        const description =
+          doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+
+        const { metrics, cleanText } = parseContentAndMetrics(doc, urlObj);
+
+        // extract title using helper
+        const titleFromHtml = extractScrapTitle(html, cleanText, description);
+
         const metaTags = [];
-        const keywordsMeta = doc.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
+        const keywordsMeta =
+          doc.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
         if (keywordsMeta) {
-           metaTags.push(...keywordsMeta.split(/[,，、;；\s]+/).map(k => k.trim()).filter(Boolean));
+          metaTags.push(
+            ...keywordsMeta
+              .split(/[,，、;；\s]+/)
+              .map((k) => k.trim())
+              .filter(Boolean)
+          );
         }
         // ... (기타 태그 추출 로직 생략 - 기존과 동일) ...
         const uniqueTags = [...new Set(metaTags)];
-        const { metrics, cleanText } = parseContentAndMetrics(doc, urlObj);
 
         sendFinalResponse({
           action: 'parse_html_in_offscreen_response',
@@ -917,13 +987,14 @@ function handleRequest(request, sendReply) {
           metrics,
           cleanText,
           metaTags: uniqueTags.length > 0 ? uniqueTags : null,
+          title: titleFromHtml || '',
         });
       } catch (err) {
         sendFinalResponse({
           action: 'parse_html_in_offscreen_response',
           requestId, // ✅ ID 포함
           success: false,
-          error: err.message
+          error: err.message,
         });
       }
     })();
@@ -934,14 +1005,14 @@ function handleRequest(request, sendReply) {
   if (request.action === 'resize_image_in_offscreen') {
     const { imageDataUrl, maxWidth, maxHeight, quality } = request;
     safeSendReply(sendReply, { action: 'resize_image_in_offscreen_ack', requestId });
-    
+
     resizeImage(imageDataUrl, maxWidth, maxHeight, quality)
       .then((dataUrl) =>
-        sendFinalResponse({ 
-            action: 'resize_image_in_offscreen_response', 
-            success: true, 
-            dataUrl, 
-            requestId // ✅ ID 포함
+        sendFinalResponse({
+          action: 'resize_image_in_offscreen_response',
+          success: true,
+          dataUrl,
+          requestId, // ✅ ID 포함
         })
       )
       .catch((error) =>
@@ -949,7 +1020,7 @@ function handleRequest(request, sendReply) {
           action: 'resize_image_in_offscreen_response',
           success: false,
           error: error.message,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       );
     return false;
@@ -959,14 +1030,14 @@ function handleRequest(request, sendReply) {
   if (request.action === 'render_template_in_offscreen') {
     const { templateData, canvasWidth, canvasHeight, dynamicText } = request;
     safeSendReply(sendReply, { action: 'render_template_in_offscreen_ack', requestId });
-    
+
     renderTemplateInOffscreen(templateData, canvasWidth, canvasHeight, dynamicText)
       .then((dataUrl) =>
         sendFinalResponse({
           action: 'render_template_in_offscreen_response',
           success: true,
           dataUrl,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       )
       .catch((error) =>
@@ -974,7 +1045,7 @@ function handleRequest(request, sendReply) {
           action: 'render_template_in_offscreen_response',
           success: false,
           error: error.message,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       );
     return false;
@@ -984,14 +1055,14 @@ function handleRequest(request, sendReply) {
   if (request.action === 'crop_image_in_offscreen') {
     const { imageDataUrl, targetRatio } = request;
     safeSendReply(sendReply, { action: 'crop_image_in_offscreen_ack', requestId });
-    
+
     cropImage(imageDataUrl, targetRatio)
       .then((croppedDataUrl) =>
         sendFinalResponse({
           action: 'crop_image_in_offscreen_response',
           success: true,
           dataUrl: croppedDataUrl,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       )
       .catch((error) =>
@@ -999,7 +1070,7 @@ function handleRequest(request, sendReply) {
           action: 'crop_image_in_offscreen_response',
           success: false,
           error: error.message,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       );
     return false;
@@ -1009,14 +1080,14 @@ function handleRequest(request, sendReply) {
   if (request.action === 'compose_thumbnail_in_offscreen') {
     const { imageUrl, text, textPosition } = request;
     safeSendReply(sendReply, { action: 'compose_thumbnail_in_offscreen_ack', requestId });
-    
+
     composeThumbnail(imageUrl, text, textPosition || 'bottom')
       .then((dataUrl) =>
         sendFinalResponse({
           action: 'compose_thumbnail_in_offscreen_response',
           success: true,
           dataUrl,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       )
       .catch((error) =>
@@ -1024,20 +1095,110 @@ function handleRequest(request, sendReply) {
           action: 'compose_thumbnail_in_offscreen_response',
           success: false,
           error: error.message,
-          requestId // ✅ ID 포함
+          requestId, // ✅ ID 포함
         })
       );
     return false;
   }
 
-  // 8. debug echo
+  // 8. fetch URL (URL에서 HTML 가져오기)
+  if (request.action === 'fetch_url_in_offscreen') {
+    const { url } = request;
+    safeSendReply(sendReply, { action: 'fetch_url_in_offscreen_ack', requestId });
+
+    (async () => {
+      // Helper: try fetch with several options and return result
+      async function tryFetchWithOptions(fetchUrl, options = {}) {
+        try {
+          const resp = await fetch(fetchUrl, options);
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+          }
+          return await resp.text();
+        } catch (err) {
+          // rethrow so caller can decide fallback
+          throw err;
+        }
+      }
+
+      try {
+        // Attempt 1: default fetch
+        try {
+          const html = await tryFetchWithOptions(url, { redirect: 'follow' });
+          sendFinalResponse({
+            action: 'fetch_url_in_offscreen_response',
+            success: true,
+            html,
+            requestId, // ✅ ID 포함
+          });
+          return;
+        } catch (firstErr) {
+          // Keep original error for later reporting
+          const originalError = firstErr;
+
+          // Attempt 2: try with credentials included (some sites require cookies)
+          try {
+            const html2 = await tryFetchWithOptions(url, { redirect: 'follow', credentials: 'include' });
+            sendFinalResponse({
+              action: 'fetch_url_in_offscreen_response',
+              success: true,
+              html: html2,
+              requestId,
+            });
+            return;
+          } catch (secondErr) {
+            // Attempt 3: Domain specific proxy fallback for known sites (e.g., blog.naver.com)
+            try {
+              const host = new URL(url).hostname || '';
+              // Use a public rendering/proxy service as a last resort to bypass strict CORS
+              const jinaProxy = 'https://r.jina.ai/http://';
+              const proxyUrl = `${jinaProxy}${url}`;
+              const html3 = await tryFetchWithOptions(proxyUrl, { redirect: 'follow' });
+              sendFinalResponse({
+                action: 'fetch_url_in_offscreen_response',
+                success: true,
+                html: html3,
+                requestId,
+              });
+              return;
+            } catch (proxyErr) {
+              // Last attempt failed — report the most informative error available
+              const errToReport = proxyErr || secondErr || originalError;
+              sendFinalResponse({
+                action: 'fetch_url_in_offscreen_response',
+                success: false,
+                error: errToReport?.message || 'fetch failed',
+                errorName: errToReport?.name || '',
+                errorStack: errToReport?.stack || '',
+                requestId, // ✅ ID 포함
+              });
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        // Fallback: send a structured error with details for debugging
+        sendFinalResponse({
+          action: 'fetch_url_in_offscreen_response',
+          success: false,
+          error: error?.message || 'fetch failed',
+          errorName: error?.name || '',
+          errorStack: error?.stack || '',
+          requestId,
+        });
+      }
+    })();
+    return false;
+  }
+
+  // 9. debug echo
   if (request.action === 'debug_echo') {
     safeSendReply(sendReply, { action: 'debug_echo_ack', requestId });
-    sendFinalResponse({ 
-        action: 'debug_echo_response', 
-        success: true, 
-        echo: request, 
-        requestId // ✅ ID 포함
+    sendFinalResponse({
+      action: 'debug_echo_response',
+      success: true,
+      echo: request,
+      requestId, // ✅ ID 포함
     });
   }
 
@@ -1082,7 +1243,9 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(() => {
       try {
         activeOffscreenPort = null;
-      } catch (e) {}
+      } catch (e) {
+        void 0;
+      }
     });
 
     // Immediately send a small handshake so background can observe
@@ -1121,7 +1284,9 @@ chrome.runtime.onConnect.addListener((port) => {
   try {
     // port listener registration confirms handlers are ready
     window.__offscreen_handlers_installed = true;
-  } catch (e) {}
+  } catch (e) {
+    void 0;
+  }
 });
 
 // --- 오프스크린 준비 완료 메시지 전송 ---
@@ -1130,20 +1295,27 @@ function sendReadyMessage() {
   const payload = { action: 'offscreen_ready', ts: Date.now() };
   try {
     // sendMessage may throw synchronously in some contexts; catch both sync and async failures
-    chrome.runtime.sendMessage(payload).catch((err) => {
-      try {
-        console.error(
-          '[Offscreen] 준비 완료 메시지 전송 실패 (async):',
-          err && err.stack ? err.stack : err,
-          payload
-        );
-      } catch (e) {
-        console.error('[Offscreen] 준비 완료 메시지 전송 실패 (async) - logging failed', e);
+    if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      const p = chrome.runtime.sendMessage(payload);
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => {
+          try {
+            console.error(
+              '[Offscreen] 준비 완료 메시지 전송 실패 (async):',
+              err && err.stack ? err.stack : err,
+              payload
+            );
+          } catch (e) {
+            console.error('[Offscreen] 준비 완료 메시지 전송 실패 (async) - logging failed', e);
+          }
+        });
       }
-    });
+    }
     try {
       console.debug('[Offscreen] sendReadyMessage invoked', payload);
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
   } catch (err) {
     try {
       console.error(
@@ -1151,10 +1323,16 @@ function sendReadyMessage() {
         err && err.stack ? err.stack : err,
         payload
       );
-    } catch (e) {}
+    } catch (e) {
+      void 0;
+    }
+
     try {
       // best-effort fallback
-      chrome.runtime.sendMessage(payload).catch(() => {});
+      if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        const p2 = chrome.runtime.sendMessage(payload);
+        if (p2 && typeof p2.catch === 'function') p2.catch(() => {});
+      }
     } catch (e) {}
   }
 }

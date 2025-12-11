@@ -239,13 +239,65 @@ export function showLoadingToast(message = '로딩 중...', options = {}) {
   }
 }
 
+/**
+ * Send a runtime message and resolve with its response, but fall back to a timed 'timeout' error
+ * if the target never responds. This is useful for service-worker or background calls that may
+ * not always call the callback when the receiver crashes or times out.
+ * @param {Object} message - The runtime message payload
+ * @param {number} timeoutMs - Timeout in milliseconds (defaults to 5000)
+ * @returns {Promise<Object>} resolves with response object or {success:false, error:'timeout'}
+ */
+export function sendRuntimeMessageWithTimeout(message, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (res) => {
+      if (done) return;
+      done = true;
+      resolve(res);
+    };
+
+    try {
+      if (
+        !globalThis.chrome ||
+        !globalThis.chrome.runtime ||
+        !globalThis.chrome.runtime.sendMessage
+      ) {
+        finish({ success: false, error: 'chrome.runtime.sendMessage not available' });
+        return;
+      }
+
+      chrome.runtime.sendMessage(message, (resp) => {
+        // Prevent "Unchecked runtime.lastError: The message port closed before a response was received" logs
+        // by checking chrome.runtime.lastError and returning an explicit error object.
+        try {
+          if (chrome.runtime.lastError) {
+            finish({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        finish(resp || { success: true });
+      });
+    } catch (err) {
+      finish({ success: false, error: String(err) });
+    }
+
+    setTimeout(() => {
+      finish({ success: false, error: 'timeout' });
+    }, timeoutMs);
+  });
+}
+
 export function updateLoadingToast(message, progress, id = 'cp-loading-toast-modal') {
   const el = document.getElementById(id);
   if (!el) return;
   const span = el.querySelector('.cp-loading-toast-message');
   if (span && message) span.textContent = message;
   const bar = el.querySelector('.cp-loading-progress-bar');
-  if (bar && typeof progress === 'number') bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
+  if (bar && typeof progress === 'number')
+    bar.style.width = `${Math.min(Math.max(progress, 0), 100)}%`;
 }
 
 export function hideLoadingToast(id = 'cp-loading-toast-modal') {

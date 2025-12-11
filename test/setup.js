@@ -159,6 +159,7 @@ global.testHelpers = {
   // Chrome Runtime 모킹 헬퍼
   mockChromeRuntime: () => {
     const listeners = [];
+    if (!chrome.runtime.sendMessage) chrome.runtime.sendMessage = jest.fn();
     chrome.runtime.sendMessage.mockImplementation((message, callback) => {
       // For image fetch, do not notify listeners to avoid side effects; just return test data
       if (message && message.action === 'fetch_image_as_base64') {
@@ -177,6 +178,8 @@ global.testHelpers = {
       if (callback) callback({ success: true });
     });
 
+    if (!chrome.runtime.onMessage) chrome.runtime.onMessage = { addListener: jest.fn() };
+    if (!chrome.runtime.onMessage.addListener) chrome.runtime.onMessage.addListener = jest.fn();
     chrome.runtime.onMessage.addListener.mockImplementation((listener) => {
       listeners.push(listener);
     });
@@ -300,8 +303,15 @@ global.testHelpers = {
 
 // 테스트 전후 정리
 beforeEach(() => {
+  // Clear mocks and timers between tests so mock calls and
+  // timers are reset. Also ensure a safe default chrome.runtime
+  // sendMessage implementation so UI tests have a consistent
+  // base implementation to rely on.
   jest.clearAllMocks();
   jest.clearAllTimers();
+  // NOTE: keep mock implementations in individual tests
+  // (tests can call testHelpers.mockChromeRuntime() when
+  // they need runtime listener behavior).
 
   // 각 테스트마다 로컬 스토리지 초기화
   Object.defineProperty(window, "localStorage", {

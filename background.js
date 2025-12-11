@@ -9,25 +9,30 @@ try {
 }
 
 // 확장 프로그램 아이콘 클릭 시 Content Pilot 활성화
-if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+if (
+  typeof chrome !== 'undefined' &&
+  chrome.action &&
+  chrome.action.onClicked &&
+  chrome.action.onClicked.addListener
+) {
   chrome.action.onClicked.addListener(async (tab) => {
-  try {
-    // 현재 탭에 content script 삽입
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      files: ['dist/content.bundle.js']
-    });
+    try {
+      // 현재 탭에 content script 삽입
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        files: ['dist/content.bundle.js'],
+      });
 
-    // CSS도 삽입
-    await chrome.scripting.insertCSS({
-      target: { tabId: tab.id, allFrames: true },
-      files: ['css/style.css']
-    });
+      // CSS도 삽입
+      await chrome.scripting.insertCSS({
+        target: { tabId: tab.id, allFrames: true },
+        files: ['css/style.css'],
+      });
 
-    Logger.info('[Background] Content Pilot activated via icon click');
-  } catch (error) {
-    Logger.error('[Background] Failed to activate Content Pilot:', error);
-  }
+      Logger.info('[Background] Content Pilot activated via icon click');
+    } catch (error) {
+      Logger.error('[Background] Failed to activate Content Pilot:', error);
+    }
   });
 }
 
@@ -69,19 +74,19 @@ function normalizeUrlForDeletion(url) {
   try {
     // 1. HTML 엔티티(&amp;)를 일반 문자(&)로 변환 (가장 흔한 원인)
     let cleanUrl = url.replace(/&amp;/g, '&');
-    
+
     // 2. URL 객체 생성 (프로토콜, 쿼리스트링 분리)
     const u = new URL(cleanUrl);
-    
+
     // 3. 경로(pathname)를 디코딩하여 표준화 (%20 -> 공백, %2F -> / 등)
     // 쿼리스트링(?token=...)은 무시하고, 도메인+경로만 비교하여 일치율을 높임
     let decodedPath;
     try {
-        decodedPath = decodeURIComponent(u.pathname);
+      decodedPath = decodeURIComponent(u.pathname);
     } catch (e) {
-        decodedPath = u.pathname;
+      decodedPath = u.pathname;
     }
-    
+
     return (u.hostname + decodedPath).replace(/\/$/, '').trim();
   } catch (e) {
     // URL 파싱 실패 시 원본 그대로 반환
@@ -188,32 +193,37 @@ const KANBAN_CACHE_TTL = 30 * 1000; // 30초 TTL
 Logger.info('🚀 [System] Service Worker Started (Lightweight Router)');
 
 // 0. 확장 프로그램 아이콘 클릭 리스너
-if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked && chrome.action.onClicked.addListener) {
+if (
+  typeof chrome !== 'undefined' &&
+  chrome.action &&
+  chrome.action.onClicked &&
+  chrome.action.onClicked.addListener
+) {
   chrome.action.onClicked.addListener((tab) => {
-  if (tab.id) {
-    chrome.tabs.sendMessage(
-      tab.id,
-      {
-        action: 'open_content_pilot_panel',
-      },
-      () => {
-        if (chrome.runtime.lastError) {
-          // "message port closed"는 정상적인 상황 (탭이 닫히거나 content script가 없을 때)
-          // 다른 에러만 경고로 표시
-          const errorMsg = chrome.runtime.lastError.message || '';
-          if (
-            !errorMsg.includes('message port closed') &&
-            !errorMsg.includes('Could not establish connection')
-          ) {
-            Logger.warn('[sendMessage] 메시지 전송 실패:', errorMsg);
-          } else {
-            // 정상적인 상황이므로 디버그 레벨로만 로깅
-            Logger.debug('[sendMessage] 메시지 포트 닫힘 (정상):', errorMsg);
+    if (tab.id) {
+      chrome.tabs.sendMessage(
+        tab.id,
+        {
+          action: 'open_content_pilot_panel',
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            // "message port closed"는 정상적인 상황 (탭이 닫히거나 content script가 없을 때)
+            // 다른 에러만 경고로 표시
+            const errorMsg = chrome.runtime.lastError.message || '';
+            if (
+              !errorMsg.includes('message port closed') &&
+              !errorMsg.includes('Could not establish connection')
+            ) {
+              Logger.warn('[sendMessage] 메시지 전송 실패:', errorMsg);
+            } else {
+              // 정상적인 상황이므로 디버그 레벨로만 로깅
+              Logger.debug('[sendMessage] 메시지 포트 닫힘 (정상):', errorMsg);
+            }
           }
         }
-      }
-    );
-  }
+      );
+    }
   });
 }
 
@@ -314,7 +324,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // [추가] Keep-Alive 핑은 조용히 무시 (서비스 워커를 깨우는 용도)
   if (msg.action === 'keep_alive_ping') {
-    return false; 
+    return false;
   }
 
   // 비동기 응답 처리를 위한 헬퍼
@@ -480,11 +490,100 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === 'generate_idea_briefing') {
     const payload = msg.data || msg || {};
-    const { cardId, title, description, options } = payload;
+    const { cardId, title, description } = payload;
+    // Normalize options: accept flags in top-level payload or in nested options
+    let normalizedOptions;
+    const hasAnyFlag =
+      !!payload.options ||
+      payload.generateOutline !== undefined ||
+      payload.generateKeywords !== undefined ||
+      payload.generateLongTail !== undefined ||
+      payload.generateMainKeywords !== undefined ||
+      payload.status !== undefined ||
+      payload.originType !== undefined ||
+      payload.origin !== undefined ||
+      payload.onProgress !== undefined;
+
+    if (hasAnyFlag) {
+      normalizedOptions = {
+        ...(payload.options || {}),
+        generateOutline: payload.options?.generateOutline ?? payload.generateOutline ?? false,
+        generateKeywords: payload.options?.generateKeywords ?? payload.generateKeywords ?? false,
+        generateLongTail: payload.options?.generateLongTail ?? payload.generateLongTail ?? false,
+        generateMainKeywords:
+          payload.options?.generateMainKeywords ?? payload.generateMainKeywords ?? false,
+        status: payload.options?.status ?? payload.status ?? 'ideas',
+        originType: payload.options?.originType ?? payload.originType ?? null,
+        origin: payload.options?.origin ?? payload.origin ?? null,
+        onProgress: payload.options?.onProgress ?? payload.onProgress ?? null,
+      };
+    } else {
+      normalizedOptions = undefined;
+    }
+
     return handleAsync(
-      generateIdeaBriefing(cardId, title, description, options)
-        .then(() => ({ success: true }))
+      generateIdeaBriefing(cardId, title, description, normalizedOptions)
+        .then((res) => {
+          if (res && res.success === false) {
+            return {
+              success: false,
+              error: res.error || res.reason || 'Unknown error from AI service',
+            };
+          }
+          return { success: true };
+        })
         .catch((error) => ({ success: false, error: error.message }))
+    );
+  }
+  if (msg.action === 'retry_idea_briefing') {
+    // enqueue a retry: set DB state to queued and then schedule generateIdeaBriefing in background
+    const payload = msg.data || msg || {};
+    const { cardId, status = 'ideas' } = payload;
+    return handleAsync(
+      (async () => {
+        try {
+          const userId = await getCurrentUserId();
+          if (!userId) return { success: false, error: 'no_user' };
+          const updatePath = `kanban/${userId}/${status}/${cardId}`;
+          // read existing card so we can pass title/description to the generator
+          try {
+            const snapshot = await get(ref(getDb(), updatePath));
+            const cardData = snapshot?.val();
+            if (!cardData) return { success: false, error: 'card_not_found' };
+
+            // mark queued and reset progress/error fields
+            try {
+              await update(ref(getDb(), updatePath), {
+                briefingStatus: 'queued',
+                briefingQueuedAt: serverTimestamp(),
+                briefingError: null,
+                briefingCompletedAt: null,
+                briefingProgress: 0,
+              });
+            } catch (e) {
+              Logger.warn('[retry_idea_briefing] DB update failed:', e?.message || String(e));
+            }
+
+            // schedule the generator (do not await to keep UI responsive)
+            try {
+              generateIdeaBriefing(cardId, cardData.title || '', cardData.description || '', {
+                status,
+              }).catch((err) => {
+                Logger.error(
+                  '[retry_idea_briefing] generateIdeaBriefing error:',
+                  err?.message || String(err)
+                );
+              });
+            } catch (e) {}
+
+            return { success: true };
+          } catch (err) {
+            return { success: false, error: err?.message || String(err) };
+          }
+        } catch (err) {
+          return { success: false, error: err?.message || String(err) };
+        }
+      })()
     );
   }
   if (msg.action === 'ai_generate_images') {
@@ -639,12 +738,68 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const ideaData = JSON.parse(msg.data);
         const status = msg.status || 'ideas';
         const channelId = msg.channelId || null;
-        const result = await addIdeaToKanban(ideaData, status, channelId);
+
+        // Run the DB save step but skip the internal auto-briefing inside the service
+        // because we're running inside the background context and should create the
+        // briefing directly here (avoids nested runtime messaging and potential timeouts).
+        const result = await addIdeaToKanban(ideaData, status, channelId, true);
 
         // [캐시 무효화] 칸반 데이터 변경 시 캐시 초기화
         kanbanDataCache = null;
         kanbanDataCacheTimestamp = 0;
         Logger.debug(`[add_idea_to_kanban] 캐시 무효화 완료`);
+
+        // If the DB write succeeded and the card should have a briefing, generate it
+        try {
+          const originType = ideaData.origin?.type;
+          const shouldGenerateBriefing =
+            originType !== 'manual_entry' &&
+            originType !== 'tracking_only' &&
+            ideaData.title &&
+            status === 'ideas';
+
+          if (result?.success && shouldGenerateBriefing) {
+            (async () => {
+              try {
+                Logger.info(
+                  `[background:add_idea_to_kanban] 직접 AI 브리핑 생성 시작 - card from UI message`
+                );
+                // call generateIdeaBriefing in background context directly
+                const briefResult = await generateIdeaBriefing(
+                  result.firebaseKey || result.firebase_key || result.id || null,
+                  ideaData.title,
+                  ideaData.description || '',
+                  {
+                    status: status,
+                    generateOutline: true,
+                    generateKeywords: true,
+                    generateLongTail: true,
+                    generateMainKeywords: true,
+                    originType: originType,
+                    origin: ideaData.origin || null,
+                  }
+                );
+                // generateIdeaBriefing returns undefined on success in current
+                // implementation — treat undefined or explicit success as success
+                if (briefResult === undefined || (briefResult && briefResult.success)) {
+                  Logger.biz(`[background:add_idea_to_kanban] 직접 AI 브리핑 생성 완료`);
+                } else {
+                  Logger.warn(`[background:add_idea_to_kanban] 직접 AI 브리핑 실패:`, briefResult);
+                }
+              } catch (err) {
+                Logger.error(
+                  '[background:add_idea_to_kanban] AI 브리핑 생성 실패:',
+                  err?.message || String(err)
+                );
+              }
+            })();
+          }
+        } catch (err) {
+          Logger.error(
+            '[background:add_idea_to_kanban] 브리핑 스케줄링 중 오류:',
+            err?.message || String(err)
+          );
+        }
 
         return result;
       })()
@@ -1040,10 +1195,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             if (verifyData) {
               // 필드가 존재하는지 확인 (undefined가 아니면 필드가 존재함)
-              const hasDraftField = verifyData.draftContent !== undefined;
-              const hasPublishInfoField = verifyData.publishInfo !== undefined;
-              const hasSeoTitleField = verifyData.seoTitle !== undefined;
-              const hasWorkspaceDraftField = verifyData.workspace?.draft !== undefined;
+              // Treat null as removed: only consider a field present if it's !== undefined and !== null
+              const hasDraftField =
+                verifyData.draftContent !== undefined && verifyData.draftContent !== null;
+              const hasPublishInfoField =
+                verifyData.publishInfo !== undefined && verifyData.publishInfo !== null;
+              const hasSeoTitleField =
+                verifyData.seoTitle !== undefined && verifyData.seoTitle !== null;
+              const hasWorkspaceDraftField =
+                verifyData.workspace?.draft !== undefined && verifyData.workspace?.draft !== null;
 
               Logger.debug(
                 `[delete_draft_and_publish_info] 필드 존재 확인 - draftContent: ${hasDraftField}, publishInfo: ${hasPublishInfoField}, seoTitle: ${hasSeoTitleField}, workspace.draft: ${hasWorkspaceDraftField}`
@@ -1084,10 +1244,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const finalVerifySnap = await get(ref(getDb(), cardPath));
                 const finalVerifyData = finalVerifySnap?.val();
 
-                const finalHasDraft = finalVerifyData?.draftContent !== undefined;
-                const finalHasPublishInfo = finalVerifyData?.publishInfo !== undefined;
-                const finalHasSeoTitle = finalVerifyData?.seoTitle !== undefined;
-                const finalHasWorkspaceDraft = finalVerifyData?.workspace?.draft !== undefined;
+                const finalHasDraft =
+                  finalVerifyData?.draftContent !== undefined &&
+                  finalVerifyData?.draftContent !== null;
+                const finalHasPublishInfo =
+                  finalVerifyData?.publishInfo !== undefined &&
+                  finalVerifyData?.publishInfo !== null;
+                const finalHasSeoTitle =
+                  finalVerifyData?.seoTitle !== undefined && finalVerifyData?.seoTitle !== null;
+                const finalHasWorkspaceDraft =
+                  finalVerifyData?.workspace?.draft !== undefined &&
+                  finalVerifyData?.workspace?.draft !== null;
 
                 if (
                   finalHasDraft ||
@@ -1244,7 +1411,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { page = 1, pageSize = 50 } = msg;
         const offset = (page - 1) * pageSize;
 
-        Logger.info(`[get_paginated_performance_data] 요청 수신 - page: ${page}, pageSize: ${pageSize}`);
+        Logger.info(
+          `[get_paginated_performance_data] 요청 수신 - page: ${page}, pageSize: ${pageSize}`
+        );
 
         const snap = await get(ref(getDb(), `${COLLECTIONS.KANBAN}/${userId}`));
         const allCards = snap?.val() || {};
@@ -1289,7 +1458,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const paginatedData = performanceCards.slice(offset, offset + pageSize);
         const hasMore = offset + pageSize < total;
 
-        Logger.info(`[get_paginated_performance_data] 반환 - total: ${total}, page: ${page}, returned: ${paginatedData.length}, hasMore: ${hasMore}`);
+        Logger.info(
+          `[get_paginated_performance_data] 반환 - total: ${total}, page: ${page}, returned: ${paginatedData.length}, hasMore: ${hasMore}`
+        );
 
         return {
           success: true,
@@ -1297,7 +1468,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           hasMore: hasMore,
           total: total,
           page: page,
-          pageSize: pageSize
+          pageSize: pageSize,
         };
       })()
     );
@@ -1471,7 +1642,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const now = Date.now();
 
         // 캐시 확인 (5분 이내)
-        if (channelsAndKeyCache && (now - channelsAndKeyCacheTimestamp) < CHANNELS_CACHE_TTL) {
+        if (channelsAndKeyCache && now - channelsAndKeyCacheTimestamp < CHANNELS_CACHE_TTL) {
           Logger.debug(`[get_channels_and_key] 캐시된 데이터 반환 - userId: ${userId}`);
           return channelsAndKeyCache;
         }
@@ -1749,7 +1920,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         const { data } = msg;
         const channelId = msg.channelId !== undefined ? msg.channelId : null;
-        return await saveScrapElement(data, channelId);
+        const result = await saveScrapElement(data, channelId);
+
+        // After successful save, force a refresh of scrap list & broadcast update
+        if (result && result.success) {
+          try {
+            // Trigger getFirebaseScraps which will send 'scraps_data_updated' to content scripts
+            await getFirebaseScraps(channelId);
+          } catch (e) {
+            Logger.warn('[Background] getFirebaseScraps 호출 실패:', e?.message || e);
+          }
+
+          try {
+            // also send a lightweight notification so UIs can proactively request fresh data
+            chrome.tabs.query({}, (tabs) => {
+              tabs.forEach((tab) => {
+                if (tab.id) {
+                  try {
+                    chrome.tabs.sendMessage(tab.id, { action: 'cp_scraps_updated' });
+                  } catch (_sendErr) {
+                    // ignore
+                  }
+                }
+              });
+            });
+          } catch (e) {
+            Logger.warn('[Background] cp_scraps_updated 브로드캐스트 실패:', e?.message || e);
+          }
+        }
+
+        return result;
       })()
     );
   }
@@ -1763,36 +1963,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
-// [추가/확인] 이미지 삭제 핸들러
-if (msg.action === 'remove_scrap_image') {
-  console.log('[Background] 이미지 삭제 요청 수신:', msg.data);
-  const { scrapId, imageUrl } = msg.data || {};
+  // [추가/확인] 이미지 삭제 핸들러
+  if (msg.action === 'remove_scrap_image') {
+    console.log('[Background] 이미지 삭제 요청 수신:', msg.data);
+    const { scrapId, imageUrl } = msg.data || {};
 
-  removeScrapImage(scrapId, imageUrl)
-    .then(result => {
-      console.log('[Background] 삭제 처리 결과:', result);
-      // Notify other extension contexts so UIs can refresh immediately
-      try {
-        // only broadcast when DB was actually updated
-        if (result && result.success && result.changed) {
-          chrome.runtime.sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } });
+    removeScrapImage(scrapId, imageUrl)
+      .then((result) => {
+        console.log('[Background] 삭제 처리 결과:', result);
+        // Notify other extension contexts so UIs can refresh immediately
+        try {
+          // only broadcast when DB was actually updated
+          if (result && result.success && result.changed) {
+            try {
+              if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                chrome.runtime
+                  .sendMessage({ action: 'scrap_image_removed', data: { scrapId, imageUrl } })
+                  .catch(() => {});
+              }
+            } catch (e) {
+              console.warn('[Background] 브로드캐스트 실패:', e.message);
+            }
+          }
+        } catch (e) {
+          console.warn('[Background] 브로드캐스트 실패:', e.message);
         }
-      } catch (e) {
-        console.warn('[Background] 브로드캐스트 실패:', e.message);
-      }
-      sendResponse(result);
-    })
-    .catch(error => {
-      console.error('[Background] 삭제 처리 중 오류:', error);
-      sendResponse({ success: false, error: error.message });
-    });
+        sendResponse(result);
+      })
+      .catch((error) => {
+        console.error('[Background] 삭제 처리 중 오류:', error);
+        sendResponse({ success: false, error: error.message });
+      });
 
-  return true; // 비동기 응답 필수
-}  if (msg.action === 'delete_scrap') {
+    return true; // 비동기 응답 필수
+  }
+  if (msg.action === 'delete_scrap') {
     return handleAsync(
       (async () => {
         const scrapId = msg.id;
-        return await deleteScrap(scrapId);
+        const res = await deleteScrap(scrapId);
+        // Broadcast new scraps list to all tabs so UI updates even if content scripts don't re-request
+        try {
+          await getFirebaseScraps(null);
+        } catch (e) {
+          Logger.warn('[delete_scrap] getFirebaseScraps broadcast 실패:', e?.message || e);
+        }
+        return res;
       })()
     );
   }
@@ -1971,6 +2187,62 @@ if (msg.action === 'remove_scrap_image') {
         Logger.debug(`[unlink_scrap_from_idea] 캐시 무효화 완료`);
 
         return { success: true };
+      })()
+    );
+  }
+
+  if (msg.action === 'add_image_to_scrap') {
+    return handleAsync(
+      (async () => {
+        const { scrapId, imageUrl } = msg.data || msg;
+        if (!scrapId || !imageUrl) {
+          return { success: false, error: '스크랩 ID 또는 이미지 URL이 유효하지 않습니다.' };
+        }
+
+        const userId = await getCurrentUserId();
+        const scrapPath = `scraps/${userId}/${scrapId}`;
+        const scrapSnap = await get(ref(getDb(), scrapPath));
+        const scrapData = scrapSnap?.val();
+
+        if (!scrapData) {
+          return { success: false, error: '스크랩을 찾을 수 없습니다.' };
+        }
+
+        // allImages 배열에 이미지 추가 (중복 방지)
+        let allImages = scrapData.allImages || [];
+        if (!Array.isArray(allImages)) {
+          allImages = [];
+        }
+
+        // 중복 체크 - 정규화된 URL로 비교
+        const normalizedNewUrl = normalizeUrlForDeletion(imageUrl);
+        const isDuplicate = allImages.some(
+          (existingUrl) => normalizeUrlForDeletion(existingUrl) === normalizedNewUrl
+        );
+
+        if (!isDuplicate) {
+          allImages.push(imageUrl);
+
+          // image 필드가 비어있으면 첫 번째 이미지로 설정
+          const updates = {
+            allImages: allImages,
+          };
+
+          if (!scrapData.image) {
+            updates.image = imageUrl;
+          }
+
+          await update(ref(getDb(), scrapPath), cleanDataForFirebase(updates));
+
+          Logger.biz(
+            `✅ [add_image_to_scrap] 스크랩에 이미지 추가 완료 - scrapId: ${scrapId}, imageUrl: ${imageUrl}`
+          );
+
+          return { success: true, allImages: allImages };
+        } else {
+          Logger.debug(`[add_image_to_scrap] 이미 존재하는 이미지 - scrapId: ${scrapId}`);
+          return { success: true, allImages: allImages, duplicate: true };
+        }
       })()
     );
   }

@@ -8,7 +8,7 @@ import {
   getCurrentUserId,
 } from './firebaseService.js';
 // [중요] firebase/database import 제거 - REST API 사용으로 대체됨
-import { ref, update, get } from './firebaseService.js';
+import { ref, update, get, serverTimestamp } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 // analyzePerformanceData previously used to fetch performance data for prompts, no longer needed
 import { Logger } from '../utils.js';
@@ -28,7 +28,9 @@ async function fetchImageAsBase64(url) {
     // First try background fetch via runtime message (helps bypass page CSP)
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       try {
+        // (no-op) default schema will be populated below
         const BG_FETCH_TIMEOUT_MS = 5000;
+        void 0;
         const bgMsgPromise = new Promise((resolve) => {
           try {
             chrome.runtime.sendMessage({ action: 'fetch_image_as_base64', url }, (resp) => {
@@ -40,11 +42,17 @@ async function fetchImageAsBase64(url) {
         });
         const responseMsg = await Promise.race([
           bgMsgPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('bg fetch timeout')), BG_FETCH_TIMEOUT_MS)
+          ),
         ]);
         // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
         if (responseMsg && responseMsg.success) {
-          try { console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url); } catch(e) {}
+          try {
+            console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url);
+          } catch (e) {
+            void 0;
+          }
           if (responseMsg.dataUrl) {
             const m = responseMsg.dataUrl.match(/^data:(.+);base64,(.*)$/);
             if (m) return { mimeType: m[1], data: m[2] };
@@ -55,16 +63,31 @@ async function fetchImageAsBase64(url) {
           }
         }
       } catch (e) {
-      Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
-      try { console.log('[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL', url); } catch(e) {}
+        Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
+        try {
+          console.log(
+            '[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL',
+            url
+          );
+        } catch (e) {
+          void 0;
+        }
       }
     }
 
     Logger.debug('[fetchImageAsBase64] Falling back to fetch for URL:', url);
-    try { console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url); } catch(e) {}
+    try {
+      console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url);
+    } catch (e) {
+      void 0;
+    }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
-    try { console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url); } catch(e) {}
+    try {
+      console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url);
+    } catch (e) {
+      void 0;
+    }
     const blob = await response.blob();
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -212,7 +235,7 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
       headers: {
         'Content-Type': 'application/json',
         // Referer 제한 우회를 위한 헤더 (Chrome 확장에서는 제한적)
-        'Origin': 'chrome-extension://' + chrome.runtime.id,
+        Origin: 'chrome-extension://' + chrome.runtime.id,
       },
       // [수정] Gemini 요청 본문 구조 ({ contents: [{ parts: [{ text }, { inlineData }] }] })
       body: JSON.stringify({
@@ -320,6 +343,61 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
     cleanedDraft = String(rawDraft || '').trim();
   }
 
+  // Heuristic: remove trailing/standalone example-only links that sometimes come from LLMs
+  // Example problematic outputs look like:
+  //   [완벽 가이드] ...](https://some-site/entry/long-url)
+  // or a file containing only a raw URL. These are not useful as the draft body
+  // and should be filtered out so the app can treat them as a failed generation.
+  try {
+    const lines = cleanedDraft.split(/\r?\n/).map((l) => l.trim());
+    const isLinkOnly = (ln) => {
+      if (!ln) return false;
+      try {
+        // direct URL only
+        if (/^https?:\/\/[\S]+$/i.test(ln)) return true;
+        // angled url: <https://...>
+        if (/^<https?:\/\/[^>]+>$/i.test(ln)) return true;
+
+        // markdown link: [text](https://...)
+        if (/^\[[^\]]+\]\(https?:\/\/[^)]+\)$/i.test(ln)) return true;
+
+        // More robust heuristic: if the line contains one or more URLs and
+        // after stripping URLs and simple markdown tokens the remaining text is small,
+        // treat it as a link-only example line.
+        const urls = ln.match(/https?:\/\/[\S]+/gi) || [];
+        if (urls.length > 0) {
+          const withoutUrls = ln
+            .replace(/https?:\/\/[\S]+/gi, '')
+            .replace(/\[.*?\]|\(.*?\)|<.*?>/g, '')
+            .trim();
+          if (withoutUrls.length < 15) return true;
+        }
+      } catch (e) {
+        return false;
+      }
+      return false;
+    };
+
+    let filtered = lines.filter((l) => !isLinkOnly(l));
+    // If the draft is a single line containing a URL, treat it as example-only
+    // (many LLM outputs can be a single-line example link). Force fallback.
+    if (lines.length === 1 && /https?:\/\//i.test(lines[0])) {
+      filtered = [];
+    }
+    if (filtered.length > 0 && filtered.join('\n').trim().length >= 40) {
+      // Replace cleanedDraft with filtered text when filtering likely removed only noise
+      cleanedDraft = filtered.join('\n').trim();
+    } else if (
+      filtered.length === 0 &&
+      (lines.some((l) => isLinkOnly(l)) || lines.some((l) => /https?:\/\//i.test(l)))
+    ) {
+      // The whole draft was link/example-only — treat as failure and use fallback
+      cleanedDraft = `# ${ideaData.title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
+    }
+  } catch (e) {
+    Logger.debug('[processDraftResponse] example link filter failed', e);
+  }
+
   if (!cleanedDraft || cleanedDraft.trim().length === 0) {
     // last fallback - minimal placeholder
     cleanedDraft = `# ${ideaData.title || '제목 없음'}\n\n내용을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.`;
@@ -396,45 +474,175 @@ export async function enhanceDraftWithFeatures({
       permalink: permalink.substring(0, 30),
     });
     // Emit progress: thumbnail generation started
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({ step: 'thumbnail_generation', progress: 50, message: '썸네일 생성 중...' });
+    } catch (e) {
+      void 0;
+    }
 
-    // Image source selection
+    // === 이미지 소스 선택 (우선순위) ===
+    // 1순위: 에디터 내 이미지
+    // 2순위: 연결 자료(스크랩) 이미지
+    // 3순위: 제휴 링크 이미지
+    let selectedImageUrl = null;
+    let imageSourceType = null;
+
+    Logger.debug('[enhanceDraftWithFeatures] 이미지 소스 선택 디버깅:', {
+      hasFormattedDraft: !!formattedDraft,
+      formattedDraftLength: formattedDraft?.length || 0,
+      hasLinkedScrapsContent: !!ideaData.linkedScrapsContent,
+      linkedScrapsContentLength: ideaData.linkedScrapsContent?.length || 0,
+      hasAffiliateLinks: !!affiliateLinks,
+      affiliateLinksLength: affiliateLinks?.length || 0,
+    });
+
+    // 1순위: 에디터 내 이미지 추출 (단, Firebase Storage 썸네일은 제외)
+    if (formattedDraft) {
+      try {
+        const imgTagRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+        let match;
+        while ((match = imgTagRegex.exec(formattedDraft)) !== null) {
+          const url = match[1];
+          // Firebase Storage의 thumbnails 폴더 이미지는 제외 (재생성 시 순환 참조 방지)
+          if (
+            url &&
+            !url.includes('firebasestorage.googleapis.com') &&
+            !url.includes('/thumbnails/')
+          ) {
+            selectedImageUrl = url;
+            imageSourceType = 'editor';
+            Logger.info('[enhanceDraftWithFeatures] ✅ 1순위 이미지 선택: 에디터 내 이미지', {
+              url: selectedImageUrl.substring(0, 80),
+            });
+            break;
+          }
+        }
+
+        if (!selectedImageUrl) {
+          Logger.debug('[enhanceDraftWithFeatures] 에디터에 사용 가능한 이미지 없음 (썸네일 제외)');
+        }
+      } catch (e) {
+        Logger.warn('[enhanceDraftWithFeatures] 에디터 이미지 추출 실패:', e);
+      }
+    }
+
+    // 2순위: 연결 자료(스크랩) 이미지
+    if (
+      !selectedImageUrl &&
+      ideaData.linkedScrapsContent &&
+      Array.isArray(ideaData.linkedScrapsContent)
+    ) {
+      Logger.debug('[enhanceDraftWithFeatures] 연결 자료 확인:', {
+        count: ideaData.linkedScrapsContent.length,
+        scraps: ideaData.linkedScrapsContent.map((s) => ({
+          title: s.title,
+          hasImage: !!s.image,
+          imageUrl: s.image?.substring(0, 50),
+        })),
+      });
+
+      for (const scrap of ideaData.linkedScrapsContent) {
+        if (scrap.image) {
+          selectedImageUrl = scrap.image;
+          imageSourceType = 'scrap';
+          Logger.info('[enhanceDraftWithFeatures] ✅ 2순위 이미지 선택: 연결 자료 이미지', {
+            scrapTitle: scrap.title,
+            url: selectedImageUrl.substring(0, 80),
+          });
+          break;
+        }
+      }
+
+      if (!selectedImageUrl) {
+        Logger.debug('[enhanceDraftWithFeatures] 연결 자료에 이미지 없음');
+      }
+    }
+
+    // 3순위: 제휴 링크 이미지 (기존 로직 유지)
+    let productLink = null;
+    if (!selectedImageUrl && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
+      Logger.debug('[enhanceDraftWithFeatures] 제휴 링크 확인:', {
+        count: affiliateLinks.length,
+        links: affiliateLinks.map((l) => ({
+          id: l.id,
+          hasCardData: !!l.cardData,
+          hasImage: !!(l.cardData && l.cardData.imageUrl),
+          imageUrl: l.cardData?.imageUrl?.substring(0, 50),
+        })),
+      });
+
+      // Prefer exact affiliate link if provided in ideaData.origin
+      productLink =
+        (ideaData?.origin?.affiliateLinkId
+          ? affiliateLinks.find(
+              (l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl
+            )
+          : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
+
+      if (productLink && productLink.cardData && productLink.cardData.imageUrl) {
+        selectedImageUrl = productLink.cardData.imageUrl;
+        imageSourceType = 'affiliate';
+        const reason =
+          ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId
+            ? 'origin_match'
+            : 'best_candidate';
+        Logger.info('[enhanceDraftWithFeatures] ✅ 3순위 이미지 선택: 제휴 링크 이미지', {
+          id: productLink.id,
+          url: selectedImageUrl.substring(0, 80),
+          reason,
+        });
+      } else {
+        Logger.debug('[enhanceDraftWithFeatures] 제휴 링크에 이미지 없음');
+      }
+    }
+
+    // 선택된 이미지로 썸네일 생성
     let generatedImages = [];
     let isProductSynthesis = false;
 
-    let productLink = null;
-    if (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
-      // Prefer exact affiliate link if provided in ideaData.origin
-      productLink = (ideaData?.origin?.affiliateLinkId
-        ? affiliateLinks.find((l) => l.id === ideaData.origin.affiliateLinkId && l.cardData && l.cardData.imageUrl)
-        : null) || affiliateLinks.find((link) => link.cardData && link.cardData.imageUrl);
-    }
-    if (productLink) {
-      const reason = (ideaData?.origin?.affiliateLinkId && productLink.id === ideaData.origin.affiliateLinkId) ? 'origin_match' : 'best_candidate';
-      Logger.info('[enhanceDraftWithFeatures] selected productLink for synthesis', { id: productLink.id, url: productLink.url, reason });
-      try { console.log('[enhanceDraftWithFeatures DEBUG] selected productLink', { id: productLink.id, url: productLink.url, reason }); } catch(e) {}
-    } else {
-      Logger.info('[enhanceDraftWithFeatures] no productLink selected (no affiliate images present)');
-      try { console.log('[enhanceDraftWithFeatures DEBUG] no productLink selected'); } catch(e) {}
-    }
+    if (selectedImageUrl) {
+      Logger.info(
+        '[enhanceDraftWithFeatures] 선택된 이미지 소스:',
+        imageSourceType,
+        selectedImageUrl.substring(0, 50)
+      );
 
-    if (productLink) {
-      try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis', progress: 55, message: '상품 이미지 합성 시작...' }); } catch(e) {}
-      const productBase64 = await fetchImageAsBase64(productLink.cardData.imageUrl);
-      if (productBase64) {
-        const synthesisPrompt = `Create a professional product photograph featuring the object from the provided reference image. Place the object into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
+      // 이미지 기반 합성 시도
+      try {
+        if (typeof onProgress === 'function')
+          onProgress({
+            step: 'image_synthesis',
+            progress: 55,
+            message: `${imageSourceType === 'editor' ? '에디터' : imageSourceType === 'scrap' ? '연결 자료' : '제휴 링크'} 이미지 합성 시작...`,
+          });
+      } catch (e) {
+        void 0;
+      }
+
+      const imageBase64 = await fetchImageAsBase64(selectedImageUrl);
+      if (imageBase64) {
+        const synthesisPrompt = `Create a professional photograph featuring the subject from the provided reference image. Place it into: "${selectedThumbnail.thumbnailPromptEn}". Use photorealistic style.`;
         try {
-          generatedImages = await generateAiImage(synthesisPrompt, 1, productBase64);
-          Logger.info('[enhanceDraftWithFeatures] product synthesis images count:', generatedImages.length);
-          try { if (typeof onProgress === 'function') onProgress({ step: 'product_synthesis_complete', progress: 70, message: '상품 합성 이미지 생성 완료' }); } catch(e) {}
+          generatedImages = await generateAiImage(synthesisPrompt, 1, imageBase64);
+          Logger.info('[enhanceDraftWithFeatures] 이미지 합성 완료:', generatedImages.length);
+          try {
+            if (typeof onProgress === 'function')
+              onProgress({
+                step: 'image_synthesis_complete',
+                progress: 70,
+                message: '이미지 합성 완료',
+              });
+          } catch (e) {
+            void 0;
+          }
           isProductSynthesis = true;
         } catch (err) {
-          Logger.warn(
-            '[enhanceDraftWithFeatures] product synthesis failed, falling back to pure AI generate',
-            err
-          );
+          Logger.warn('[enhanceDraftWithFeatures] 이미지 합성 실패, AI 생성으로 전환', err);
         }
       }
+    } else {
+      Logger.info('[enhanceDraftWithFeatures] 참고 이미지 없음, AI 생성 모드로 진행');
     }
 
     if (!generatedImages || generatedImages.length === 0) {
@@ -455,9 +663,23 @@ export async function enhanceDraftWithFeatures({
       }
 
       // 수정된 프롬프트로 이미지 생성 요청
-      try { console.log('[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt', finalImagePrompt); } catch(e) {}
+      try {
+        console.log(
+          '[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt',
+          finalImagePrompt
+        );
+      } catch (e) {
+        void 0;
+      }
       generatedImages = await generateAiImage(finalImagePrompt, 1);
-      try { console.log('[enhanceDraftWithFeatures DEBUG] generateAiImage returned:', Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages); } catch(e) {}
+      try {
+        console.log(
+          '[enhanceDraftWithFeatures DEBUG] generateAiImage returned:',
+          Array.isArray(generatedImages) ? generatedImages.length : typeof generatedImages
+        );
+      } catch (e) {
+        void 0;
+      }
       Logger.info('[enhanceDraftWithFeatures] AI generate images count:', generatedImages.length);
     }
 
@@ -473,7 +695,14 @@ export async function enhanceDraftWithFeatures({
       const textPosition = selectedThumbnail.textPosition || 'bottom';
       // safety: protect offscreen operations with a timeout to avoid indefinite hangs in tests or runtime
       try {
-        try { console.log('[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for', sourceImageUrl); } catch(e) {}
+        try {
+          console.log(
+            '[enhanceDraftWithFeatures DEBUG] calling composeThumbnailInOffscreen for',
+            sourceImageUrl
+          );
+        } catch (e) {
+          void 0;
+        }
         const COMPOSE_TIMEOUT_MS = 8000;
         const composePromise = composeThumbnailInOffscreen(
           sourceImageUrl,
@@ -483,20 +712,42 @@ export async function enhanceDraftWithFeatures({
         // Promise.race to ensure the operation doesn't hang forever
         composedDataUrl = await Promise.race([
           composePromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('compose timeout')), COMPOSE_TIMEOUT_MS)
+          ),
         ]);
-        try { console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded'); } catch(e) {}
-        Logger.info('[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:', sourceImageUrl);
+        try {
+          console.log('[enhanceDraftWithFeatures DEBUG] composeThumbnailInOffscreen succeeded');
+        } catch (e) {
+          void 0;
+        }
+        Logger.info(
+          '[enhanceDraftWithFeatures] composeThumbnailInOffscreen succeeded for:',
+          sourceImageUrl
+        );
       } catch (composeErr) {
-          Logger.debug('[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:', composeErr && composeErr.message);
+        Logger.debug(
+          '[enhanceDraftWithFeatures] composeThumbnailInOffscreen error:',
+          composeErr && composeErr.message
+        );
         Logger.warn(
           '[enhanceDraftWithFeatures] compose failed, will try fallback to source image dataUrl',
           composeErr && composeErr.message
         );
         try {
           const sourceBase64 = await fetchImageAsBase64(sourceImageUrl);
-          try { console.log('[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:', !!(sourceBase64 && sourceBase64.data)); } catch(e) {}
-          Logger.debug('[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:', sourceBase64 && !!sourceBase64.data);
+          try {
+            console.log(
+              '[enhanceDraftWithFeatures DEBUG] fetchImageAsBase64 result:',
+              !!(sourceBase64 && sourceBase64.data)
+            );
+          } catch (e) {
+            void 0;
+          }
+          Logger.debug(
+            '[enhanceDraftWithFeatures] fetchImageAsBase64 fallback result:',
+            sourceBase64 && !!sourceBase64.data
+          );
           if (sourceBase64) {
             // fetchImageAsBase64 returns {mimeType, data} object; construct a data URL as a safe fallback (assume png)
             const candidateDataUrl = `data:image/png;base64,${sourceBase64.data}`;
@@ -552,11 +803,15 @@ export async function enhanceDraftWithFeatures({
     const cropPromises = [
       Promise.race([
         cropImageInOffscreen(sourceForCrop, 1),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)
+        ),
       ]).then((dataUrl) => ({ ratio: '1x1', dataUrl })),
       Promise.race([
         cropImageInOffscreen(sourceForCrop, 4 / 3),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('crop timeout')), CROP_TIMEOUT_MS)
+        ),
       ]).then((dataUrl) => ({ ratio: '4x3', dataUrl })),
     ];
 
@@ -576,7 +831,16 @@ export async function enhanceDraftWithFeatures({
     }
 
     // Upload
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_start', progress: 85, message: '썸네일 업로드 시작...' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({
+          step: 'thumbnail_upload_start',
+          progress: 85,
+          message: '썸네일 업로드 시작...',
+        });
+    } catch (e) {
+      void 0;
+    }
     const uploadPromises = [
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
@@ -613,11 +877,87 @@ export async function enhanceDraftWithFeatures({
       url_16x9,
       altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
     };
-    try { if (typeof onProgress === 'function') onProgress({ step: 'thumbnail_upload_complete', progress: 95, message: '썸네일 업로드 완료' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({
+          step: 'thumbnail_upload_complete',
+          progress: 95,
+          message: '썸네일 업로드 완료',
+        });
+    } catch (e) {
+      void 0;
+    }
 
     // Update jsonLdSchema if present
     if (jsonLdSchema) {
       jsonLdSchema.image = [url_1x1, url_4x3, url_16x9];
+    } else {
+      // If the model did not provide JSON-LD, synthesize a minimal schema so
+      // downstream consumers (publishers / export) have a reliable structured
+      // representation for SEO.
+      try {
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+
+        // Create a description candidate: prefer ideaData.description, fall back
+        // to the first ~160 chars of the cleaned/formatted draft text (stripped of tags)
+        let rawTextForDesc = (ideaData.description || '').toString().trim();
+
+        if (!rawTextForDesc && formattedDraft) {
+          // Prefer the first meaningful paragraph after the H1 if available
+          // or fallback to the first paragraph otherwise. Try to avoid common
+          // UI/auxiliary paragraphs that list filters, counts, or UI labels
+          // (e.g. '리뷰 10,519건', '랭킹순', '포토/동영상', 'AI 리뷰요약').
+          try {
+            const afterH1Match = formattedDraft.match(/<h1[\s\S]*?<\/h1>([\s\S]*)/i);
+            const scopeHtml = (afterH1Match && afterH1Match[1]) || formattedDraft;
+            const stripped = scopeHtml.replace(/<[^>]+>/g, '\n');
+            const paragraphs = (stripped || '')
+              .split(/\n\s*\n/)
+              .map((p) => p.trim())
+              .filter(Boolean);
+            const UI_TOKENS = /리뷰|랭킹|최신순|평점|포토\/?동영상|AI 리뷰요약|스토어PI|전체보기/i;
+            const candidate = paragraphs.find((p) => p.length >= 40 && !UI_TOKENS.test(p));
+            const firstNonUiPara = candidate || paragraphs.find((p) => !UI_TOKENS.test(p));
+            rawTextForDesc = (firstNonUiPara || paragraphs[0] || '').trim();
+          } catch (err) {
+            // fallback to the old behavior if anything goes wrong
+            const stripped = formattedDraft.replace(/<[^>]+>/g, '\n');
+            const firstPara = (stripped || '').split(/\n\s*\n/)[0] || stripped;
+            rawTextForDesc = (firstPara || '').trim();
+          }
+        }
+
+        let desc = (rawTextForDesc || '').substring(0, 200).trim();
+        if (desc.length > 197) desc = desc.substring(0, 197) + '...';
+
+        const authorName = channelInfo?.inputUrl
+          ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+          : 'Content Pilot';
+
+        const defaultSchema = {
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          headline: seoTitle || ideaData.title || '',
+          description: desc || (seoTitle || ideaData.title || '').slice(0, 160),
+          author: { '@type': 'Person', name: authorName },
+          datePublished: today,
+          dateModified: today,
+        };
+
+        // attach images when thumbnailUrls are available
+        if (thumbnailUrls) {
+          const imgs = [];
+          if (thumbnailUrls.url_1x1) imgs.push(thumbnailUrls.url_1x1);
+          if (thumbnailUrls.url_4x3) imgs.push(thumbnailUrls.url_4x3);
+          if (thumbnailUrls.url_16x9) imgs.push(thumbnailUrls.url_16x9);
+          if (imgs.length > 0) defaultSchema.image = imgs;
+        }
+
+        jsonLdSchema = defaultSchema;
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] 기본 JSON-LD 생성 실패:', e);
+      }
     }
 
     // Insert into formattedDraft (first image or after h1)
@@ -647,7 +987,12 @@ export async function enhanceDraftWithFeatures({
       Logger.warn('[enhanceDraftWithFeatures] HTML insertion failed:', insertErr);
     }
 
-    try { if (typeof onProgress === 'function') onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' }); } catch(e) {}
+    try {
+      if (typeof onProgress === 'function')
+        onProgress({ step: 'done', progress: 100, message: '썸네일 생성 완료' });
+    } catch (e) {
+      void 0;
+    }
     Logger.info('[enhanceDraftWithFeatures] 썸네일 생성 및 업로드 완료');
     return { formattedDraft, thumbnailUrls, thumbnailGenerationPartialFailure, jsonLdSchema };
   } catch (e) {
@@ -699,7 +1044,12 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
       })
       // Exclude invalid entries (no keywords/url) or zero score, unless it's preferred
       .filter(({ link, score }) => {
-        if (!link.keywords || !Array.isArray(link.keywords) || link.keywords.length === 0 || !link.url) {
+        if (
+          !link.keywords ||
+          !Array.isArray(link.keywords) ||
+          link.keywords.length === 0 ||
+          !link.url
+        ) {
           Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
           return false;
         }
@@ -714,11 +1064,30 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
 
     const relevantLinks = scored.map((s) => s.link);
     try {
-      Logger.debug('[getRelevantAffiliateLinks] link scores:', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl, productName: s.link.productName })));
+      Logger.debug(
+        '[getRelevantAffiliateLinks] link scores:',
+        scored.map((s) => ({
+          id: s.link.id,
+          score: s.score,
+          hasImage: !!s.link.cardData?.imageUrl,
+          productName: s.link.productName,
+        }))
+      );
     } catch (e) {
       Logger.debug('[getRelevantAffiliateLinks] score logging failed', e);
     }
-    try { console.log('[getRelevantAffiliateLinks DEBUG] link scores', scored.map((s) => ({ id: s.link.id, score: s.score, hasImage: !!s.link.cardData?.imageUrl }))); } catch(e) {}
+    try {
+      console.log(
+        '[getRelevantAffiliateLinks DEBUG] link scores',
+        scored.map((s) => ({
+          id: s.link.id,
+          score: s.score,
+          hasImage: !!s.link.cardData?.imageUrl,
+        }))
+      );
+    } catch (e) {
+      void 0;
+    }
 
     // 최대 10개까지만 반환 (프롬프트 과부하 방지)
     const result = relevantLinks.slice(0, 10);
@@ -1005,16 +1374,31 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(
       ' '
     )} ${ideaData.description || ''}`;
-    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, { preferredAffiliateId: ideaData?.origin?.affiliateLinkId });
+    const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, {
+      preferredAffiliateId: ideaData?.origin?.affiliateLinkId,
+    });
     try {
       Logger.info('[generateDraftFromIdea] affiliateLinks candidates:', {
         preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
-        candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null }))
+        candidates: (affiliateLinks || []).map((l) => ({
+          id: l.id,
+          imageUrl: l.cardData?.imageUrl || null,
+        })),
       });
     } catch (e) {
       Logger.debug('[generateDraftFromIdea] affiliate candidate logging failed');
     }
-    try { console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', { preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null, candidates: (affiliateLinks || []).map((l) => ({ id: l.id, imageUrl: l.cardData?.imageUrl || null })) }); } catch(e) {}
+    try {
+      console.log('[generateDraftFromIdea DEBUG] affiliateLinks candidates', {
+        preferredAffiliateId: ideaData?.origin?.affiliateLinkId || null,
+        candidates: (affiliateLinks || []).map((l) => ({
+          id: l.id,
+          imageUrl: l.cardData?.imageUrl || null,
+        })),
+      });
+    } catch (e) {
+      void 0;
+    }
 
     // 5. 글쓰기 스킬 주입 (동적 옵션)
     if (ideaData.skills && Array.isArray(ideaData.skills)) {
@@ -1601,7 +1985,16 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       thumbnailCandidates = ideaData.publishInfo?.thumbnailInfo || [];
     } else {
       Logger.info('[generateDraftFromIdea] 📝 초안 생성 시작');
-      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'draft_generation', progress: 20, message: '초안 생성 중...' }); } catch (e) {}
+      try {
+        if (typeof options.onProgress === 'function')
+          options.onProgress({
+            step: 'draft_generation',
+            progress: 20,
+            message: '초안 생성 중...',
+          });
+      } catch (e) {
+        void 0;
+      }
 
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
@@ -1646,7 +2039,16 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
-      try { if (typeof options.onProgress === 'function') options.onProgress({ step: 'thumbnail_prepare', progress: 35, message: '썸네일 후보 분석 중...' }); } catch (e) {}
+      try {
+        if (typeof options.onProgress === 'function')
+          options.onProgress({
+            step: 'thumbnail_prepare',
+            progress: 35,
+            message: '썸네일 후보 분석 중...',
+          });
+      } catch (e) {
+        void 0;
+      }
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;
@@ -1667,7 +2069,8 @@ ${defaultDescription}
 
       // 3. SEO 최적화된 제목 추출 (h1 태그에서)
       // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
-      let seoTitle = null;
+      // NOTE: previously 'let seoTitle = null' shadowed outer variable — use outer 'seoTitle'
+      seoTitle = null;
       const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
       if (h1Match && h1Match[1]) {
         seoTitle = h1Match[1].trim();
@@ -1705,6 +2108,7 @@ ${defaultDescription}
       if (!seoTitle) {
         seoTitle = title;
       }
+      console.debug('[DIAG generateDraftFromIdea] seoTitle extracted from draft:', seoTitle);
     } // 초안 생성 블록 종료
 
     // [신규] 4-1. JSON-LD 스키마 후처리 (seoTitle 추출 후 실제 데이터로 보완)
@@ -1713,12 +2117,14 @@ ${defaultDescription}
         const now = new Date();
         const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
+        console.debug(
+          '[DIAG generateDraftFromIdea] JSON-LD post-processing - seoTitle before:',
+          seoTitle
+        );
         // headline이 없거나 비어있으면 seoTitle 사용
         if (!jsonLdSchema.headline || jsonLdSchema.headline.trim() === '') {
           jsonLdSchema.headline = seoTitle || ideaData.title || '';
-        }
-
-        // description이 없거나 비어있으면 ideaData.description 사용
+        } // description이 없거나 비어있으면 ideaData.description 사용
         if (!jsonLdSchema.description || jsonLdSchema.description.trim() === '') {
           jsonLdSchema.description = ideaData.description || '';
           // description이 너무 길면 200자로 제한
@@ -1991,6 +2397,33 @@ ${defaultDescription}
       }
     }
 
+    // Ensure thumbnail altText exists for accessibility/SEO
+    if (thumbnailUrls) {
+      try {
+        if (!thumbnailUrls.altText) {
+          thumbnailUrls.altText =
+            (seoTitle || ideaData.title || '').slice(0, 150) || 'Thumbnail image';
+        }
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] 썸네일 altText 설정 실패:', e);
+      }
+    }
+
+    // Create a metaDescription (150-200 chars) for publishing / preview
+    let metaDescription = '';
+    try {
+      if (jsonLdSchema && jsonLdSchema.description) {
+        metaDescription = jsonLdSchema.description;
+      } else if (ideaData.description) {
+        metaDescription = (ideaData.description || '').substring(0, 200).trim();
+      } else if (formattedDraft) {
+        const txt = formattedDraft.replace(/<[^>]+>/g, ' ');
+        metaDescription = txt.replace(/\s+/g, ' ').trim().substring(0, 200);
+      }
+    } catch (e) {
+      Logger.warn('[generateDraftFromIdea] metaDescription 생성 실패:', e);
+    }
+
     // POST-PROCESS: validate and optionally auto-insert affiliate links
     try {
       const storageRes = await chrome.storage.local.get('autoInsertAffiliateLinks');
@@ -2021,7 +2454,57 @@ ${defaultDescription}
       formattedDraft?.substring(0, 200) + '...'
     );
 
-    return {
+    // Ensure final jsonLdSchema is present for downstream consumers
+    if (!jsonLdSchema) {
+      try {
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+
+        const authorName = channelInfo?.inputUrl
+          ? new URL(channelInfo.inputUrl).hostname.replace('www.', '')
+          : 'Content Pilot';
+
+        const imgArr = [];
+        if (thumbnailUrls) {
+          if (thumbnailUrls.url_1x1) imgArr.push(thumbnailUrls.url_1x1);
+          if (thumbnailUrls.url_4x3) imgArr.push(thumbnailUrls.url_4x3);
+          if (thumbnailUrls.url_16x9) imgArr.push(thumbnailUrls.url_16x9);
+        }
+
+        jsonLdSchema = {
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          headline: seoTitle || ideaData.title || '',
+          description: metaDescription || ideaData.description || '',
+          author: { '@type': 'Person', name: authorName },
+          datePublished: today,
+          dateModified: today,
+        };
+
+        if (imgArr.length > 0) jsonLdSchema.image = imgArr;
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] final JSON-LD 생성 실패:', e);
+      }
+    }
+
+    // Final safety: ensure seoTitle is always populated for downstream consumers
+    try {
+      if (!seoTitle) {
+        // prefer jsonLdSchema headline, then H1 extracted from formattedDraft, then ideaData fields
+        seoTitle =
+          jsonLdSchema?.headline ||
+          (typeof formattedDraft === 'string' &&
+            (formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i) || [])[1]) ||
+          ideaData?.seoTitle ||
+          ideaData?.title ||
+          '';
+      }
+    } catch (e) {
+      // non-fatal — fallback will be empty string
+      seoTitle = seoTitle || '';
+    }
+
+    const finalResponse = {
       success: true,
       draft: formattedDraft,
       permalink: permalink,
@@ -2031,7 +2514,16 @@ ${defaultDescription}
       thumbnailUrls: thumbnailUrls, // [신규] 자동 생성된 썸네일 URL (3가지 비율)
       thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
       jsonLdSchema: jsonLdSchema, // [신규] JSON-LD 구조화된 데이터
+      metaDescription: metaDescription,
     };
+    console.debug('[DIAG generateDraftFromIdea] final response:', {
+      hasDraft: !!formattedDraft,
+      seoTitle,
+      permalink,
+      tagsCount: tagsForPublish?.length,
+      hasThumbnailUrls: !!thumbnailUrls,
+    });
+    return finalResponse;
   } catch (e) {
     Logger.error('[generateDraftFromIdea] 오류:', e);
     return { success: false, error: e.message };
@@ -2040,7 +2532,7 @@ ${defaultDescription}
 
 // 6. 아이디어 브리핑
 export async function generateIdeaBriefing(cardId, title, description, options = {}) {
-  const { onProgress, status = 'ideas' } = options; // status 옵션 추가
+  const { onProgress, status = 'ideas', originType = null, origin = null } = options; // status 옵션 추가 + origin context
   const userId = await getCurrentUserId(); // 동적으로 사용자 ID 가져오기
   const updates = {};
 
@@ -2068,12 +2560,116 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           }
         });
       });
-      return; // 에러를 throw하지 않고 조용히 종료
+      return { success: false, reason: 'no_gemini_api_key' }; // 에러를 throw하지 않고 명시적인 실패 반환
     }
+
+    // Mark briefing as processing right away so UI can show progress state
+    try {
+      // update both top-level and workspace/draft so UI that reads either location stays consistent
+      await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
+        briefingStatus: 'processing',
+        briefingStartedAt: serverTimestamp(),
+        briefingProgress: 0,
+      });
+      try {
+        await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}/workspace/draft`), {
+          briefingStatus: 'processing',
+          briefingStartedAt: serverTimestamp(),
+          briefingProgress: 0,
+        });
+      } catch (nestedErr) {
+        // ignore nested update failure
+      }
+    } catch (e) {
+      Logger.warn(
+        '[generateIdeaBriefing] briefing processing state update failed:',
+        e?.message || String(e)
+      );
+    }
+
+    // helper to persist briefing progress into DB so UI can show progress bars
+    const persistProgress = async (p) => {
+      try {
+        // keep p numeric and between 0..100
+        const value = typeof p === 'number' ? Math.max(0, Math.min(100, Math.round(p))) : null;
+        if (value === null) return;
+        // update both top-level and nested workspace/draft when possible
+        await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
+          briefingProgress: value,
+        });
+        try {
+          await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}/workspace/draft`), {
+            briefingProgress: value,
+          });
+        } catch (nestedErr) {
+          // ignore nested path update failures
+        }
+      } catch (ex) {
+        // don't fail the main flow for UI sync issues
+        Logger.debug(
+          '[generateIdeaBriefing] briefing progress persistence failed:',
+          ex?.message || String(ex)
+        );
+      }
+    };
+
+    // set small initial progress marker
+    try {
+      await persistProgress(5);
+    } catch (e) {}
+
+    // helper to parse array responses robustly (try JSON parse, extract array, code block)
+    const tryParseArray = (res) => {
+      try {
+        if (!res) return null;
+        let arr = null;
+        try {
+          arr = JSON.parse(res.trim());
+        } catch (e1) {}
+        if (!Array.isArray(arr)) {
+          const arrayMatch = res.match(/\[[\s\S]*?\]/);
+          if (arrayMatch) {
+            try {
+              arr = JSON.parse(arrayMatch[0]);
+            } catch (e2) {
+              arr = null;
+            }
+          }
+          if (!Array.isArray(arr)) {
+            const codeBlockMatch = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+            if (codeBlockMatch) {
+              try {
+                arr = JSON.parse(codeBlockMatch[1]);
+              } catch (e3) {
+                arr = null;
+              }
+            }
+          }
+        }
+        return Array.isArray(arr) ? arr : null;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    // Build context text for prompts: include title + description + affiliate/product info when available
+    const buildContextText = () => {
+      let ctx = title;
+      if (description && description.trim()) ctx += ` - ${description.trim()}`;
+      if (originType === 'affiliate_link' && origin) {
+        const name = origin.productName || origin.productName || origin.name || '';
+        if (name) ctx += ` - 상품명: ${name}`;
+        if (origin.platform) ctx += ` - 플랫폼: ${origin.platform}`;
+      }
+      return ctx;
+    };
+
+    const contextText = buildContextText();
 
     if (options.generateOutline) {
       Logger.debug(`[generateIdeaBriefing] 목차 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
+      // include context (title + description + affiliate info) to improve quality
+      const prompt = `"${contextText}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2109,8 +2705,17 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          // JSON 배열 추출 시도 (여러 방법)
-          let outlineArray = null;
+          let outlineArray = tryParseArray(res);
+          // if parsing failed, retry once with explicit instruction
+          if (!Array.isArray(outlineArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 목차 5개를 반드시 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              outlineArray = tryParseArray(retryRes);
+            } catch (retryErr) {
+              /* ignore retry error */
+            }
+          }
 
           // 방법 1: 직접 JSON 파싱 시도
           try {
@@ -2159,12 +2764,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       }
 
       if (onProgress) onProgress(30);
+      // persist progress for UI
+      await persistProgress(30);
     }
 
     // 주요 키워드 생성
     if (options.generateMainKeywords) {
       Logger.debug(`[generateIdeaBriefing] 주요 키워드 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2184,7 +2791,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let keywordsArray = null;
+          let keywordsArray = tryParseArray(res);
+          if (!Array.isArray(keywordsArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              keywordsArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             keywordsArray = JSON.parse(res.trim());
           } catch (e1) {
@@ -2222,12 +2836,13 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       }
 
       if (onProgress) onProgress(50);
+      await persistProgress(50);
     }
 
     // 롱테일 키워드 생성
     if (options.generateLongTail) {
       Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2247,7 +2862,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let longTailArray = null;
+          let longTailArray = tryParseArray(res);
+          if (!Array.isArray(longTailArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              longTailArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             longTailArray = JSON.parse(res.trim());
           } catch (e1) {
@@ -2285,12 +2907,13 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       }
 
       if (onProgress) onProgress(70);
+      await persistProgress(70);
     }
 
     // 일반 키워드/추천 검색어 생성
     if (options.generateKeywords) {
       Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작`);
-      const prompt = `"${title}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -2310,7 +2933,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       if (res && !res.startsWith('오류:')) {
         try {
-          let keywordsArray = null;
+          let keywordsArray = tryParseArray(res);
+          if (!Array.isArray(keywordsArray)) {
+            try {
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryRes = await callGeminiAPI(retryPrompt);
+              keywordsArray = tryParseArray(retryRes);
+            } catch (retryErr) {}
+          }
           try {
             keywordsArray = JSON.parse(res.trim());
           } catch (e1) {
@@ -2352,6 +2982,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       }
 
       if (onProgress) onProgress(90);
+      await persistProgress(90);
     }
 
     if (Object.keys(updates).length > 0) {
@@ -2362,6 +2993,28 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       );
       try {
         await update(ref(getDb(), updatePath), cleanDataForFirebase(updates));
+        // mark completion metadata so UI and other consumers know briefing finished
+        try {
+          await update(ref(getDb(), updatePath), {
+            briefingStatus: 'done',
+            briefingCompletedAt: serverTimestamp(),
+            briefingProgress: 100,
+          });
+        } catch (e) {
+          Logger.warn(
+            '[generateIdeaBriefing] briefing completion state update failed:',
+            e?.message || String(e)
+          );
+        }
+        // also update the nested workspace/draft location if present to keep initial queued flag in sync
+        try {
+          await update(ref(getDb(), `${updatePath}/workspace/draft`), {
+            briefingStatus: 'done',
+            briefingCompletedAt: serverTimestamp(),
+            briefingProgress: 100,
+          });
+        } catch (nestedErr) {}
+
         Logger.biz(
           `✅ [generateIdeaBriefing] 브리핑 생성 완료 - cardId: ${cardId}, status: ${status}, 업데이트 항목: ${Object.keys(
             updates
@@ -2369,7 +3022,15 @@ export async function generateIdeaBriefing(cardId, title, description, options =
         );
       } catch (updateError) {
         Logger.error(`[generateIdeaBriefing] Firebase 업데이트 실패:`, updateError);
-        throw updateError;
+        // mark failure and return structured error
+        try {
+          await update(ref(getDb(), updatePath), {
+            briefingStatus: 'failed',
+            briefingError: String(updateError),
+            briefingCompletedAt: serverTimestamp(),
+          });
+        } catch (e) {}
+        return { success: false, error: updateError?.message || String(updateError) };
       }
 
       // REST API 모드에서는 실시간 리스너가 작동하지 않으므로, UI 갱신을 위해 최신 데이터를 가져와서 메시지 전송
@@ -2429,6 +3090,16 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       Logger.warn(
         `[generateIdeaBriefing] 업데이트할 데이터 없음 - 모든 생성 옵션이 실패했거나 비활성화됨`
       );
+      // mark no-updates as a completed but empty briefing
+      try {
+        await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
+          briefingStatus: 'done',
+          briefingCompletedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        void 0;
+      }
+      return { success: true, updates: [] };
     }
   } catch (error) {
     Logger.error(
@@ -2436,8 +3107,30 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       error
     );
     // 에러를 다시 throw하여 상위에서 처리할 수 있도록 함
-    throw error;
+    // persist failure state
+    try {
+      await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
+        briefingStatus: 'failed',
+        briefingError: error?.message || String(error),
+        briefingCompletedAt: serverTimestamp(),
+        briefingProgress: 0,
+      });
+    } catch (e) {
+      void 0;
+    }
+    // also propagate failed status to nested workspace/draft
+    try {
+      await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}/workspace/draft`), {
+        briefingStatus: 'failed',
+        briefingError: error?.message || String(error),
+        briefingCompletedAt: serverTimestamp(),
+        briefingProgress: 0,
+      });
+    } catch (nestedErr) {}
+    return { success: false, error: error?.message || String(error) };
   }
+  // 성공 시 구조화된 결과를 반환
+  return { success: true, updates: Object.keys(updates) };
 }
 
 // 7. 이미지 생성 (병렬 처리 적용) - Imagen 3 API 적용
