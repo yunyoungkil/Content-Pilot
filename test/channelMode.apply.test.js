@@ -37,17 +37,24 @@ describe('ChannelMode - apply/save flow', () => {
     // Input valid URL
     blogUrlEl.value = 'https://blog.example.com/user';
 
-    // Click apply
+    // Click apply (로컬에 반영만 되고, 백엔드 저장은 아직 일어나지 않음)
     const applyBtn = container.querySelector('#modal-apply-btn');
     expect(applyBtn).toBeTruthy();
     applyBtn.click();
-
-    // wait for async saveChannelsToFirebase -> chrome.runtime.sendMessage
     await testHelpers.waitForMs(20);
 
-    // Assert that save_channels_and_key message was sent
-    const calls = chrome.runtime.sendMessage.mock.calls;
-    const found = calls.some((c) => c[0] && c[0].action === 'save_channels_and_key');
-    expect(found).toBe(true);
+    // 모달 적용 시에는 아직 백엔드 저장 호출이 없어야 함
+    let saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(0);
+
+    // 이제 '설정 저장하기' 버튼을 눌러 실제 저장을 수행
+    const saveAllBtn = container.querySelector('#save-all-channels-btn');
+    expect(saveAllBtn).toBeTruthy();
+    saveAllBtn.click();
+    await testHelpers.waitForMs(20);
+
+    // 저장 요청이 한 번 발생해야 함
+    saveCalls = chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'save_channels_and_key');
+    expect(saveCalls.length).toBe(1);
   });
 });
