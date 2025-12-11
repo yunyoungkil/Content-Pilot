@@ -3,6 +3,13 @@ import { jest } from '@jest/globals';
 describe('Workspace scrap detail image drag/drop linking', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
+    jest.resetAllMocks();
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_tui_shadow_listener_attached = false;
+
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
@@ -57,9 +64,12 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     // Now show scrap detail modal with scrapData
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] };
     showScrapDetailModal(scrapDetailData, container);
-    await new Promise((r) => setTimeout(r, 100));
-
-    const modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
+    let modal = null;
+    for (let i = 0; i < 20; i++) {
+      modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
+      if (modal) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(modal).toBeTruthy();
 
     const wrapper = modal.querySelector('#scrap-detail-images > div');

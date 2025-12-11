@@ -3,6 +3,13 @@ import { jest } from '@jest/globals';
 describe('Workspace scrap detail insert image', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
+    jest.resetAllMocks();
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_tui_shadow_listener_attached = false;
+
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
@@ -45,14 +52,19 @@ describe('Workspace scrap detail insert image', () => {
 
     // render full workspace structure (this will ensure modal elements are present)
     renderWorkspace(container, idea);
-    // allow DOM updates
-    await new Promise((r) => setTimeout(r, 100));
-    // update workspace to load scraps
+    // wait for scraps list to populate (polled wait)
     updateWorkspaceScraps(container, idea);
-    // ensure event listeners are attached
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-
-    await new Promise((r) => setTimeout(r, 50));
+    let scrapItem = null;
+    for (let i = 0; i < 20; i++) {
+      const allScrapsList = container.querySelector('.all-scraps-list');
+      if (allScrapsList) {
+        scrapItem = allScrapsList.querySelector('.scrap-card-item');
+        if (scrapItem) break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(scrapItem).toBeTruthy();
 
     // now get the iframe created by renderWorkspace, and mock its contentWindow.postMessage
     iframe = container.querySelector('#quill-editor-iframe');
@@ -62,19 +74,17 @@ describe('Workspace scrap detail insert image', () => {
       Object.defineProperty(iframe, 'contentWindow', { value: { postMessage: jest.fn() }, configurable: true });
     }
 
-    // The all-scraps-list should now have a scrap card
-    const allScrapsList = container.querySelector('.all-scraps-list');
-    const scrapItem = allScrapsList.querySelector('.scrap-card-item');
-    expect(scrapItem).toBeTruthy();
-
     // Instead of relying on the click -> get_scrap_detail flow, directly show the modal with test data
     const { showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
     const scrapDetailData = { id: 's1', url: 'https://example.test/page', text: '스크랩 내용', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] };
     showScrapDetailModal(scrapDetailData, container);
-    // wait for modal to render (allow showScrapDetailModal to populate images and attach handlers)
-    await new Promise((r) => setTimeout(r, 200));
-
-    const modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
+    // wait for modal to render (polled wait)
+    let modal = null;
+    for (let i = 0; i < 20; i++) {
+      modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
+      if (modal) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(modal).toBeTruthy();
 
     console.log('DEBUG modal images count:', modal.querySelectorAll('img').length);
