@@ -1991,13 +1991,8 @@ ${cardData.reviewCount ? `리뷰: ${cardData.reviewCount.toLocaleString()}개` :
       reviewCount: cardData.reviewCount,
       isRocket: cardData.isRocket,
       badges: cardData.badges,
-<<<<<<< HEAD
       insertMode: cardData.insertMode,
     },
-=======
-      insertMode: cardData.insertMode,
-    },
->>>>>>> bugfix/5922fc4a
     // Include SEO fields if present so downstream idea creation uses them
     recommendedSearches: link.recommendedSearches || link.recommendedKeywords || [],
     longTailKeywords: link.longTailKeywords || [],
