@@ -1701,6 +1701,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         // set()으로 덮어쓰기하여 빈 배열도 확실하게 저장
+        // 서버 보호: 기존에 저장된 채널의 platformType이 payload에서 누락되어
+        // 의도치 않게 삭제되는 것을 방지하기 위해 기존 DB 데이터를 읽어 병합합니다.
+        try {
+          const existingSnap = await get(ref(getDb(), `channels/${userId}`));
+          const existing = existingSnap?.val() || {};
+          const existingBlogs = (existing.myChannels && existing.myChannels.blogs) || [];
+
+          // id 기반 매핑(없으면 apiUrl / url 기반 deterministic id 사용)
+          const { mergeBlogsPreservePlatform } = require('./js/services/channelUtils.js');
+
+          if (safeChannels.myChannels && Array.isArray(safeChannels.myChannels.blogs)) {
+            safeChannels.myChannels.blogs = mergeBlogsPreservePlatform(existingBlogs, safeChannels.myChannels.blogs);
+          }
+        } catch (e) {
+          Logger.warn('[save_channels_and_key] 기존 채널 병합 중 오류, 그대로 덮어씌움:', e && e.message);
+        }
+
         await set(ref(getDb(), `channels/${userId}`), safeChannels);
 
         // [캐시 무효화] 채널 데이터 변경 시 캐시 초기화

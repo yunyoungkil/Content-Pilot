@@ -82,6 +82,41 @@ Object.defineProperty(window, "self", {
   writable: false,
 });
 
+// Track window event listeners to allow clean teardown between tests
+(() => {
+  const originalAdd = window.addEventListener.bind(window);
+  const originalRemove = window.removeEventListener.bind(window);
+  const tracked = new Map(); // eventType => Set<listener>
+
+  window.addEventListener = (type, listener, opts) => {
+    if (!tracked.has(type)) tracked.set(type, new Set());
+    tracked.get(type).add(listener);
+    return originalAdd(type, listener, opts);
+  };
+
+  window.removeEventListener = (type, listener, opts) => {
+    if (tracked.has(type)) tracked.get(type).delete(listener);
+    return originalRemove(type, listener, opts);
+  };
+
+  // Expose helper for tests to remove all tracked listeners
+  Object.defineProperty(global, '_clearTrackedWindowListeners', {
+    value: () => {
+      for (const [type, set] of tracked.entries()) {
+        for (const listener of Array.from(set)) {
+          try {
+            originalRemove(type, listener);
+          } catch (e) {
+            /* ignore */
+          }
+        }
+      }
+      tracked.clear();
+    },
+    writable: false,
+  });
+})();
+
 // Service Worker 환경 모킹
 global.ServiceWorkerGlobalScope = class {};
 
@@ -330,6 +365,17 @@ beforeEach(() => {
     },
     writable: true,
   });
+});
+
+afterEach(() => {
+  // Clear any window listeners that were registered during the test
+  try {
+    if (typeof global._clearTrackedWindowListeners === 'function') {
+      global._clearTrackedWindowListeners();
+    }
+  } catch (e) {
+    /* ignore */
+  }
 });
 
 afterEach(() => {

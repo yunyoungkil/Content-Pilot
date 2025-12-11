@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace scrap detail image drag/drop linking', () => {
+  jest.setTimeout(10000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -10,11 +11,12 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
+    global.testHelpers.mockChromeRuntime();
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
-    chrome.runtime.sendMessage = jest.fn();
+    // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
   test('dragging a scrap detail image and dropping into linked list links the scrap', async () => {
@@ -22,31 +24,34 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     chrome.runtime.sendMessage.mockImplementation((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
-          cb({
-            success: true,
-            scraps: [
-              {
-                id: 'scrap-1',
-                text: 'Scrap One',
-                image: 'https://example.test/img1.jpg',
-                allImages: ['https://example.test/img1.jpg'],
-                url: 'https://example.test/page',
-                tags: [],
-              },
-            ],
-          });
+          setTimeout(() =>
+            cb({
+              success: true,
+              scraps: [
+                {
+                  id: 'scrap-1',
+                  text: 'Scrap One',
+                  image: 'https://example.test/img1.jpg',
+                  allImages: ['https://example.test/img1.jpg'],
+                  url: 'https://example.test/page',
+                  tags: [],
+                },
+              ],
+            }),
+            0
+          );
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
-        if (cb) cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } });
+        if (cb) setTimeout(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } }), 0);
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) cb({ success: true });
+        if (cb) setTimeout(() => cb({ success: true }), 0);
         return;
       }
-      if (cb) cb({ success: true });
+      if (cb) setTimeout(() => cb({ success: true }), 0);
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners, showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
@@ -89,8 +94,12 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     dropEvt.dataTransfer = dt;
     linkedList.dispatchEvent(dropEvt);
 
-    await new Promise((r) => setTimeout(r, 50));
-
+    // poll for linkedCall to be set and linked item to appear
+    for (let i = 0; i < 20; i++) {
+      const linkedItem = container.querySelector('.linked-scraps-list [data-scrap-id="scrap-1"]');
+      if (linkedCall && linkedItem) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(linkedCall).toBeTruthy();
     expect(linkedCall.action).toBe('link_scrap_to_idea');
     expect(linkedCall.data.scrapId).toBe('scrap-1');

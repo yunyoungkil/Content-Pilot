@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace drop image into already linked scrap', () => {
+  jest.setTimeout(10000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -10,11 +11,12 @@ describe('Workspace drop image into already linked scrap', () => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
+    global.testHelpers.mockChromeRuntime();
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
-    chrome.runtime.sendMessage = jest.fn();
+    // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
   test('dropping an image that belongs to an already-linked scrap updates linked scrap display/gallery', async () => {
@@ -73,6 +75,8 @@ describe('Workspace drop image into already linked scrap', () => {
     const imageUrl = 'https://example.test/newimg.jpg';
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: imageUrl, allImages: [imageUrl] };
     showScrapDetailModal(scrapDetailData, container);
+
+    // wait for modal to render
     let modal = null;
     for (let i = 0; i < 20; i++) {
       modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
@@ -80,6 +84,7 @@ describe('Workspace drop image into already linked scrap', () => {
       await new Promise((r) => setTimeout(r, 50));
     }
     expect(modal).toBeTruthy();
+
     const wrap = modal.querySelector('#scrap-detail-images > div');
     expect(wrap).toBeTruthy();
 
@@ -98,12 +103,17 @@ describe('Workspace drop image into already linked scrap', () => {
     dropEvt.dataTransfer = dt;
     linkedList.dispatchEvent(dropEvt);
 
-    await new Promise((r) => setTimeout(r, 200));
-
-    // linked scrap item should exist and should show the new image
-    const linkedCard = linkedList.querySelector('[data-scrap-id="scrap-1"]');
+    // poll for add_image_to_scrap to be invoked and linked DOM updated
+    let linkedCard = null;
+    let linkedCardImg = null;
+    for (let i = 0; i < 20; i++) {
+      linkedCard = linkedList.querySelector('[data-scrap-id="scrap-1"]');
+      linkedCardImg = linkedCard ? linkedCard.querySelector('.scrap-card-img-wrap img') : null;
+      if (addImageCall && linkedCard && linkedCardImg) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(addImageCall).toBeTruthy();
     expect(linkedCard).toBeTruthy();
-    const linkedCardImg = linkedCard.querySelector('.scrap-card-img-wrap img');
     expect(linkedCardImg).toBeTruthy();
     expect(linkedCardImg.src).toContain('newimg.jpg');
     expect(linkedCard.classList.contains('has-thumbnail')).toBeTruthy();

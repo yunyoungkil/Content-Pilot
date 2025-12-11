@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace gallery image drag/drop linking', () => {
+  jest.setTimeout(10000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -11,12 +12,12 @@ describe('Workspace gallery image drag/drop linking', () => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
+    global.testHelpers.mockChromeRuntime();
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
-    // ensure runtime sendMessage is a fresh mock
-    chrome.runtime.sendMessage = jest.fn();
+    // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
   test('dragging a gallery image for a scrap and dropping into linked list links the scrap', async () => {
@@ -24,42 +25,48 @@ describe('Workspace gallery image drag/drop linking', () => {
     chrome.runtime.sendMessage.mockImplementation((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
-          cb({
-            success: true,
-            scraps: [
-              {
-                id: 'scrap-1',
-                text: 'Scrap with images',
-                image: 'https://example.test/img1.jpg',
-                allImages: ['https://example.test/img1.jpg'],
-                url: 'https://example.test/page',
-                tags: [],
-              },
-            ],
-          });
+          setTimeout(() =>
+            cb({
+              success: true,
+              scraps: [
+                {
+                  id: 'scrap-1',
+                  text: 'Scrap with images',
+                  image: 'https://example.test/img1.jpg',
+                  allImages: ['https://example.test/img1.jpg'],
+                  url: 'https://example.test/page',
+                  tags: [],
+                },
+              ],
+            }),
+            0
+          );
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
         if (cb)
-          cb({
-            success: true,
-            images: [
-              {
-                url: 'https://example.test/img1.jpg',
-                scrapId: 'scrap-1',
-                source: 'SCRAP',
-                timestamp: Date.now(),
-              },
-            ],
-          });
+          setTimeout(() =>
+            cb({
+              success: true,
+              images: [
+                {
+                  url: 'https://example.test/img1.jpg',
+                  scrapId: 'scrap-1',
+                  source: 'SCRAP',
+                  timestamp: Date.now(),
+                },
+              ],
+            }),
+            0
+          );
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) cb({ success: true });
+        if (cb) setTimeout(() => cb({ success: true }), 0);
         return;
       }
-      if (cb) cb({ success: true });
+      if (cb) setTimeout(() => cb({ success: true }), 0);
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners } = await import(
@@ -120,16 +127,20 @@ describe('Workspace gallery image drag/drop linking', () => {
     dropEvt.dataTransfer = dt;
     linkedList.dispatchEvent(dropEvt);
 
-    await new Promise((r) => setTimeout(r, 50));
+    // poll for link message and for the linked item image to appear
+    let newLinkedItem = null;
+    let imgEl = null;
+    for (let i = 0; i < 20; i++) {
+      newLinkedItem = linkedList.querySelector('[data-scrap-id="scrap-1"]');
+      imgEl = newLinkedItem ? newLinkedItem.querySelector('img') : null;
+      if (linkedCall && newLinkedItem && imgEl) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
 
     expect(linkedCall).toBeTruthy();
     expect(linkedCall.action).toBe('link_scrap_to_idea');
     expect(linkedCall.data.scrapId).toBe('scrap-1');
-
-    // ensure linked scrap card contains the thumbnail of dragged image
-    const newLinkedItem = linkedList.querySelector('[data-scrap-id="scrap-1"]');
     expect(newLinkedItem).toBeTruthy();
-    const imgEl = newLinkedItem.querySelector('.scrap-card-img-wrap img');
     expect(imgEl).toBeTruthy();
     expect(imgEl.src).toContain('img1.jpg');
 

@@ -10,11 +10,12 @@ describe('Workspace scrap detail insert image', () => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
+    global.testHelpers.mockChromeRuntime();
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });
       return Promise.resolve({ activeChannelId: 'channel-1' });
     });
-    chrome.runtime.sendMessage = jest.fn();
+    // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
   test('clicking insert on scrap detail image posts insert-image to editor iframe', async () => {
