@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TipTap POC</title>
+    <style>
+      #tiptap-editor {
+        min-height: 220px;
+        border: 1px solid #ccc;
+        padding: 8px;
+        border-radius: 4px;
+      }
+      .toolbar { margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>TipTap POC — TipTap UI</h1>
+    <div class="toolbar">
+      <button id="btn-bold">Bold</button>
+      <button id="btn-italic">Italic</button>
+      <button id="btn-add-image">Insert Image</button>
+    </div>
+    <div id="tiptap-editor"></div>
+
+    <script type="module">
+      import { initTiptapEditor, insertImage } from './js/ui/tiptap/editor.poc.js';
+      const editor = initTiptapEditor({ elementId: 'tiptap-editor', content: '<p>TipTap POC content</p>' });
+      document.getElementById('btn-bold').addEventListener('click', () => editor.chain().focus().toggleBold().run());
+      document.getElementById('btn-italic').addEventListener('click', () => editor.chain().focus().toggleItalic().run());
+      document.getElementById('btn-add-image').addEventListener('click', async () => {
+        const url = prompt('Image URL');
+        if (url) insertImage(editor, url);
+      });
+    </script>
+  </body>
+  </html>
