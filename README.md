@@ -395,3 +395,5 @@ Content Pilot은 다양한 모드를 제공하여 콘텐츠 생명주기의 각 
 - **`CODE_REVIEW_content.js.md`**: content.js 코드 리뷰
 
 모든 문서는 `docs/` 폴더에 주제별로 정리되어 있습니다.
+
+- Close: Implement channel migration modal and scan scope expansion ? Fixes #17
