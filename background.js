@@ -100,6 +100,9 @@ import {
   findDeletedCompetitors,
 } from './js/services/cascadeDeleteService.js';
 
+// 채널 ID 계산 유틸
+import { genId } from './js/services/channelUtils.js';
+
 import {
   generateDraftFromIdea,
   generateIdeaBriefing,
@@ -143,6 +146,8 @@ import {
   deleteScrap,
   removeScrapImage,
 } from './js/services/scrapService.js';
+
+import { runDataMigration, checkMigrationNeeded } from './js/services/migrationService.js';
 
 import {
   sanitizeHtmlInOffscreen,
@@ -228,7 +233,8 @@ if (
 }
 
 // 1. 알람 리스너 (스케줄러)
-chrome.alarms.onAlarm.addListener((alarm) => {
+if (typeof chrome !== 'undefined' && chrome.alarms && chrome.alarms.onAlarm && chrome.alarms.onAlarm.addListener) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'fetch-channels') {
     Logger.biz('⏰ [Alarm] 채널 데이터 수집 시작');
     fetchAllChannelData();
@@ -236,10 +242,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     Logger.biz('⏰ [Alarm] 성과 지표 업데이트 시작');
     updateAllPerformanceMetrics();
   }
-});
+  });
+}
 
 // [최적화] 콘텐츠 스크립트와의 롱 런타임 연결(Keep-alive) 처리
-chrome.runtime.onConnect.addListener((port) => {
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onConnect && chrome.runtime.onConnect.addListener) {
+  chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'content-script-keepalive') {
     Logger.debug(`[Background] 콘텐츠 스크립트 연결됨: ${port.sender?.tab?.id}`);
 
@@ -252,7 +260,6 @@ chrome.runtime.onConnect.addListener((port) => {
       );
     });
   }
-
   // Offscreen document persistent init port - register globally so the
   // service worker doesn't miss the connection when it occurs outside
   // the local ensureOffscreenDocument lifecycle window.
@@ -269,10 +276,12 @@ chrome.runtime.onConnect.addListener((port) => {
       Logger.warn('[Background] offscreen-init 포트 등록 중 예외 발생', e && e.message);
     }
   }
-});
+  });
+}
 
 // 2. 설치/업데이트 리스너
-chrome.runtime.onInstalled.addListener((details) => {
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalled && chrome.runtime.onInstalled.addListener) {
+  chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install' || details.reason === 'update') {
     Logger.info(`[System] Extension ${details.reason}d. Registering alarms...`);
     chrome.alarms.create('fetch-channels', {
@@ -307,7 +316,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     // 데이터가 적고 수동 관리중이므로 해당 자동 실행을 제거합니다.
     // 필요 시 추후에 마이그레이션 로직을 다시 추가할 수 있습니다.
   }
-});
+  });
+}
 
 // 3. 메시지 라우터 (Message Router)
 /**
@@ -316,12 +326,27 @@ chrome.runtime.onInstalled.addListener((details) => {
  */
 console.log('[Background] 메시지 라우터 등록 시작');
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Allow messages that embed action inside `data` or `payload`
+  if (!msg.action && msg.data && typeof msg.data.action === 'string') {
+    msg.action = msg.data.action;
+  }
+  if (!msg.action && msg.payload && typeof msg.payload.action === 'string') {
+    msg.action = msg.payload.action;
+  }
+  // Normalize action string for robust matching (trim, lowercase, camelCase->underscore, hyphen->underscore)
+  if (msg && typeof msg.action === 'string') {
+    msg.action = msg.action
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/-/g, '_')
+      .replace(/([a-z])([A-Z])/g, '$1_$2')
+      .toLowerCase();
+  }
   console.log('[Background] 메시지 수신:', msg.action);
   // Offscreen 응답 메시지는 라우터에서 제외 (OffscreenService 내부 Promise가 처리)
   if (msg.action.endsWith('_in_offscreen_response')) {
     return false; // 다른 리스너가 처리하도록 함
   }
-
   // [추가] Keep-Alive 핑은 조용히 무시 (서비스 워커를 깨우는 용도)
   if (msg.action === 'keep_alive_ping') {
     return false;
@@ -443,6 +468,122 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           count: result.deletedCount,
           details: result.details,
         };
+      })()
+    );
+  }
+  // 채널 데이터 마이그레이션 요청
+  if (msg.action === 'migrate_channel') {
+    return handleAsync(
+      (async () => {
+        const { channelId, targetPlatform, dryRun, options } = msg;
+        const userId = await getCurrentUserId();
+        if (userId === CONSTANTS.USER_ID) {
+          return { success: false, error: '로그인이 필요합니다.' };
+        }
+
+        // 권한 검사: 채널이 사용자 소유 여부 확인 (실패 시 차단)
+        // 단, 테스트/환경에서 firebase REST helper가 주입되지 않은 경우에는 체크를 건너뜁니다.
+        if (typeof get !== 'function' || typeof ref !== 'function') {
+          Logger.warn('[migrate_channel] firebaseService.get/ref 함수가 없어 권한 검사를 건너뜁니다.');
+        } else {
+        let found = false;
+        try {
+          // Use get with either a ref(getDb(), path) if getDb exists, else call get(path)
+          let channelsSnap;
+          try {
+            if (typeof getDb === 'function') channelsSnap = await get(ref(getDb(), `channels/${userId}`));
+            else channelsSnap = await get(`channels/${userId}`);
+          } catch (e) {
+            // Fallback, try direct get as plain path
+            channelsSnap = await get(`channels/${userId}`);
+          }
+          const channelsData = channelsSnap?.val() || {};
+          const myBlogs = channelsData.myChannels?.blogs || [];
+          const myYoutubes = channelsData.myChannels?.youtubes || [];
+          const allChannels = [...(myBlogs || []), ...(myYoutubes || [])];
+          function safeGenId(b) {
+            try {
+              if (!b) return null;
+              if (b.id) return b.id;
+              if (b.apiUrl) return btoa(b.apiUrl).replace(/=/g, '');
+              if (b.inputUrl || b.url) return btoa((b.inputUrl || b.url).replace(/\/$/, '')).replace(/=/g, '');
+              return null;
+            } catch (e) {
+              return b?.id || null;
+            }
+          }
+          found = allChannels.some((ch) => (ch && (ch.id === channelId || safeGenId(ch) === channelId)) || false);
+        } catch (err) {
+          Logger.warn('[migrate_channel] 채널 소유권 확인 실패:', err);
+          return { success: false, error: '권한 검사 중 오류가 발생했습니다.' };
+        }
+          if (!found) {
+            return { success: false, error: '권한이 없습니다: 이 채널은 현재 사용자 소유가 아닙니다.' };
+          }
+        }
+
+        // Dry-run인 경우 즉시 실행
+        if (!!dryRun) {
+          const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null, collections: options?.collections || null, debug: options?.debug || false });
+          if (!result.success) return { success: false, error: result.message };
+          return { success: true, message: result.message, dryRunResult: result.dryRunResult, updatedCount: result.updatedCount };
+        }
+
+        // 실제 실행: 작업(잡)으로 등록하고 비동기로 처리
+        const jobId = `migration-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        // push job to local storage queue
+        try {
+          const storage = await new Promise((resolve) => chrome.storage.local.get(['migrationJobs'], resolve));
+          const jobs = storage.migrationJobs || [];
+          jobs.push({ id: jobId, userId, channelId, targetPlatform, status: 'queued', createdAt: Date.now() });
+          Logger.info('[migrate_channel] enqueuing job', jobId, 'jobsCount(before set):', jobs.length);
+          await new Promise((resolve) => chrome.storage.local.set({ migrationJobs: jobs }, resolve));
+          Logger.info('[migrate_channel] job enqueued', jobId, 'jobsCount(after set):', jobs.length);
+
+          // Start processing in background (fire and forget)
+          (async () => {
+            try {
+              // update job status to running
+              const s1 = await new Promise((resolve) => chrome.storage.local.get(['migrationJobs'], resolve));
+              const jobs1 = s1.migrationJobs || [];
+              const idx = jobs1.findIndex((j) => j.id === jobId);
+              if (idx >= 0) jobs1[idx].status = 'running';
+              await new Promise((resolve) => chrome.storage.local.set({ migrationJobs: jobs1 }, resolve));
+
+              const res = await runDataMigration(userId, channelId, { dryRun: false, targetPlatform: targetPlatform || null, collections: options?.collections || null, debug: options?.debug || false });
+
+              const s2 = await new Promise((resolve) => chrome.storage.local.get(['migrationJobs'], resolve));
+              const jobs2 = s2.migrationJobs || [];
+              const i2 = jobs2.findIndex((j) => j.id === jobId);
+              if (i2 >= 0) {
+                jobs2[i2].status = res.success ? 'completed' : 'failed';
+                jobs2[i2].result = res;
+                jobs2[i2].finishedAt = Date.now();
+              }
+              await new Promise((resolve) => chrome.storage.local.set({ migrationJobs: jobs2 }, resolve));
+            } catch (jobErr) {
+              Logger.error('[Background] migration job failed:', jobErr);
+              try {
+                const s3 = await new Promise((resolve) => chrome.storage.local.get(['migrationJobs'], resolve));
+                const jobs3 = s3.migrationJobs || [];
+                const i3 = jobs3.findIndex((j) => j.id === jobId);
+                if (i3 >= 0) {
+                  jobs3[i3].status = 'failed';
+                  jobs3[i3].result = { success: false, error: jobErr.message };
+                  jobs3[i3].finishedAt = Date.now();
+                }
+                await new Promise((resolve) => chrome.storage.local.set({ migrationJobs: jobs3 }, resolve));
+              } catch (t) {
+                Logger.warn('[Background] failed to persist job failure info:', t);
+              }
+            }
+          })();
+
+          return { success: true, jobId };
+        } catch (e) {
+          Logger.error('[Background] migration job enqueue failed:', e);
+          return { success: false, error: '작업 등록 실패' };
+        }
       })()
     );
   }
@@ -1377,7 +1518,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const snap = await get(dbRef);
         const data = snap?.val() || {};
-        const cardsCount = Object.keys(data).length;
+        const cardsCount =
+          (Object.keys(data?.ideas || {}).length || 0) +
+          (Object.keys(data?.['in-progress'] || {}).length || 0) +
+          (Object.keys(data?.done || {}).length || 0);
         Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };
@@ -2691,8 +2835,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // 알 수 없는 액션
-  Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
-  sendResponse({ success: false, error: `Unknown action: ${msg.action}` });
+  Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`, msg);
+  sendResponse({ success: false, error: `Unknown action: ${msg.action}`, info: msg });
   return false;
 });
 

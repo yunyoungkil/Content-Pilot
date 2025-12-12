@@ -136,6 +136,9 @@ const {
   toggleScrapSharing,
 } = require('./js/services/scrapService.js');
 
+// Migration service
+const { runDataMigration, checkMigrationNeeded } = require('./js/services/migrationService.js');
+
 const {
   sanitizeHtmlInOffscreen,
   resizeImageInOffscreen,
@@ -431,6 +434,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           count: result.deletedCount,
           details: result.details,
         };
+      })()
+    );
+  }
+
+  // 채널 데이터 마이그레이션 요청
+  if (msg.action === 'migrate_channel') {
+    return handleAsync(
+      (async () => {
+        try {
+          const { channelId, targetPlatform, dryRun } = msg;
+          const userId = await getCurrentUserId();
+          if (userId === CONSTANTS.USER_ID) {
+            return { success: false, error: '로그인이 필요합니다.' };
+          }
+
+          // 현재 마이그레이션은 migrationService에서 처리
+          const result = await runDataMigration(userId, channelId, {
+            dryRun: !!dryRun,
+            targetPlatform: targetPlatform || null,
+            ...(msg.options || {}),
+          });
+
+          // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
+          if (!result.success) {
+            return { success: false, error: result.message || result.error || '마이그레이션 실패' };
+          }
+          return {
+            success: true,
+            message: result.message,
+            dryRunResult: result.dryRunResult,
+            updatedCount: result.updatedCount,
+          };
+        } catch (err) {
+          Logger.error('[Background] migrate_channel 오류:', err);
+          return { success: false, error: err.message || '알 수 없는 오류 발생' };
+        }
       })()
     );
   }
@@ -1328,7 +1367,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!kanbanRealtimeListenerAttached) {
           onValue(dbRef, (snapshot) => {
             const data = snapshot?.val() || {};
-            const cardsCount = Object.keys(data).length;
+            const cardsCount =
+              (Object.keys((data && data.ideas) || {}).length || 0) +
+              (Object.keys((data && data['in-progress']) || {}).length || 0) +
+              (Object.keys((data && data.done) || {}).length || 0);
             Logger.debug(`[get_kanban_data] 실시간 업데이트 - 카드 개수: ${cardsCount}`);
             // 모든 탭에 업데이트 메시지 전송
             chrome.tabs.query({}, (tabs) => {
@@ -1352,7 +1394,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const snap = await get(dbRef);
         const data = snap?.val() || {};
-        const cardsCount = Object.keys(data).length;
+        const cardsCount =
+          (Object.keys((data && data.ideas) || {}).length || 0) +
+          (Object.keys((data && data['in-progress']) || {}).length || 0) +
+          (Object.keys((data && data.done) || {}).length || 0);
         Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };

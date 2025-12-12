@@ -411,9 +411,9 @@ export function extractTitleFromText(text) {
     // then a phrase that mentions product (bestProductPhrase), then brand.
     // If we didn't find an exact combined n-gram, try a "window" search
     // to find brand+product appearing within a 5-word window and return the span.
+    let brandIndexes = [];
+    let productIndexes = [];
     if (!bestCombinedPhrase) {
-      const brandIndexes = [];
-      const productIndexes = [];
       for (let i = 0; i < words.length; i++) {
         if (brandTokenRegex.test(words[i])) brandIndexes.push(i);
         if (productTokenRegex.test(words[i])) productIndexes.push(i);

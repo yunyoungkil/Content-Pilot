@@ -14,7 +14,6 @@ function mergeBlogsPreservePlatform(existingBlogs = [], incomingBlogs = []) {
     if (id) existingMap.set(id, b);
   });
 
-
   return (incomingBlogs || []).map((b) => {
     const id = genId(b);
     const existingB = id ? existingMap.get(id) : null;

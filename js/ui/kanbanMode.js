@@ -242,9 +242,13 @@ function addRealtimeUpdateListener() {
  * [최적화] 증분 업데이트 방식으로 변경
  */
 async function updateKanbanUI(allCards) {
+  const totalCards =
+    Object.keys(allCards?.ideas || {}).length +
+    Object.keys(allCards?.['in-progress'] || {}).length +
+    Object.keys(allCards?.done || {}).length;
   console.log('[KanbanMode] updateKanbanUI 호출:', {
     hasKanbanContainer: !!kanbanContainer,
-    cardsCount: Object.keys(allCards || {}).length,
+    cardsCount: totalCards,
     allCards: allCards,
   });
 
