@@ -89,23 +89,63 @@ export async function runDataMigration(userId, targetChannelId = null, options =
     let totalItems = 0;
     const itemsToMigrate = [];
 
-    // 헬퍼: 카드에서 채널 ID를 추출 (다양한 스키마 대응)
-    function extractChannelIdFromCard(card) {
-      if (!card) return null;
-      // 우선순위: channelId, channel?.id, publishInfo?.channelId, channel
-      const cid = card.channelId ?? (card.channel && card.channel.id) ?? (card.publishInfo && card.publishInfo.channelId) ?? card.channel ?? null;
-      // treat empty string as missing
-      if (cid === '' || cid === null || cid === undefined) return null;
-      return cid;
+    // 헬퍼: 객체에서 채널 ID를 재귀적으로 탐색해 반환
+    function findChannelIdInObject(obj, depth = 0) {
+      if (!obj || depth > 8) return null;
+      if (typeof obj !== 'object') return null;
+
+      // direct channelId
+      if (Object.prototype.hasOwnProperty.call(obj, 'channelId')) {
+        const v = obj.channelId;
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+
+      // channel can be an object with id or a plain id value
+      if (Object.prototype.hasOwnProperty.call(obj, 'channel')) {
+        const c = obj.channel;
+        if (typeof c === 'string' && c) return c;
+        if (c && typeof c === 'object') {
+          if (c.id) return c.id;
+        }
+      }
+
+      // publishInfo.channelId common path
+      if (obj.publishInfo && obj.publishInfo.channelId) return obj.publishInfo.channelId;
+
+      // nested search
+      for (const key of Object.keys(obj)) {
+        try {
+          const value = obj[key];
+          if (!value) continue;
+          if (typeof value === 'object') {
+            const sub = findChannelIdInObject(value, depth + 1);
+            if (sub) return sub;
+          }
+          // arrays
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              if (typeof item === 'object') {
+                const found = findChannelIdInObject(item, depth + 1);
+                if (found) return found;
+              }
+            }
+          }
+        } catch (e) {
+          // ignore circular or unexpected data
+        }
+      }
+      return null;
     }
 
     // 칸반 데이터 카운트 및 수집
     for (const status in kanban) {
       for (const id in kanban[status]) {
         const card = kanban[status][id];
-        const chId = extractChannelIdFromCard(card);
+        const chId = findChannelIdInObject(card);
         if (!chId) {
-          itemsToMigrate.push({ type: 'kanban', status, id, card });
+          // status가 'ideas'인 경우 별도 타입으로 분류하여 보고
+          const type = status === 'ideas' ? 'ideas' : 'kanban';
+          itemsToMigrate.push({ type, status, id, card });
           totalItems++;
         }
       }
@@ -114,7 +154,7 @@ export async function runDataMigration(userId, targetChannelId = null, options =
     // 스크랩 데이터 카운트 및 수집
     for (const id in scraps) {
       const scrap = scraps[id];
-      const scrapChannelId = scrap?.channelId ?? null;
+      const scrapChannelId = findChannelIdInObject(scrap) ?? null;
       if (!scrapChannelId) {
         itemsToMigrate.push({ type: 'scraps', id, scrap });
         totalItems++;
@@ -145,7 +185,7 @@ export async function runDataMigration(userId, targetChannelId = null, options =
         continue;
       }
       try {
-        if (item.type === 'kanban') {
+        if (item.type === 'kanban' || item.type === 'ideas') {
           await update(ref(getDb(), `kanban/${userId}/${item.status}/${item.id}`), {
             channelId: finalTargetChannelId,
           });
@@ -183,7 +223,11 @@ export async function runDataMigration(userId, targetChannelId = null, options =
     // dryRun인 경우 결과를 각 항목 표본과 함께 반환
     if (dryRun) {
       // group counts and sample ids by type
-      const groups = { kanban: { count: 0, sample: [] }, scraps: { count: 0, sample: [] } };
+      const groups = {
+        kanban: { count: 0, sample: [] },
+        scraps: { count: 0, sample: [] },
+        ideas: { count: 0, sample: [] },
+      };
       itemsToMigrate.forEach((it) => {
         if (!groups[it.type]) groups[it.type] = { count: 0, sample: [] };
         groups[it.type].count += 1;

@@ -106,7 +106,14 @@ export function showChannelMigrationModal(root, channel) {
         Object.keys(g).forEach((type) => {
           const group = g[type];
           if (group.count && group.count > 0) {
-            const readableName = type === 'kanban' ? '칸반' : type === 'scraps' ? '스크랩' : type;
+            const readableName =
+              type === 'kanban'
+                ? '칸반'
+                : type === 'scraps'
+                ? '스크랩'
+                : type === 'ideas'
+                ? '아이디어'
+                : type;
             lines.push(`- ${readableName}: ${group.count}개`);
             if (group.sample && Array.isArray(group.sample) && group.sample.length > 0) {
               lines.push(`  샘플:`);

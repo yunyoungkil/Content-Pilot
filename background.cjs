@@ -442,17 +442,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'migrate_channel') {
     return handleAsync(
       (async () => {
-        const { channelId, targetPlatform, dryRun } = msg;
-        const userId = await getCurrentUserId();
-        if (userId === CONSTANTS.USER_ID) {
-          return { success: false, error: '로그인이 필요합니다.' };
-        }
+        try {
+          const { channelId, targetPlatform, dryRun } = msg;
+          const userId = await getCurrentUserId();
+          if (userId === CONSTANTS.USER_ID) {
+            return { success: false, error: '로그인이 필요합니다.' };
+          }
 
-        // 현재 마이그레이션은 migrationService에서 처리
-        const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null });
-        // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
-        if (!result.success) return { success: false, error: result.message };
-        return { success: true, message: result.message, dryRunResult: result.dryRunResult, updatedCount: result.updatedCount };
+          // 현재 마이그레이션은 migrationService에서 처리
+          const result = await runDataMigration(userId, channelId, {
+            dryRun: !!dryRun,
+            targetPlatform: targetPlatform || null,
+          });
+
+          // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
+          if (!result.success) {
+            return { success: false, error: result.message || result.error || '마이그레이션 실패' };
+          }
+          return {
+            success: true,
+            message: result.message,
+            dryRunResult: result.dryRunResult,
+            updatedCount: result.updatedCount,
+          };
+        } catch (err) {
+          Logger.error('[Background] migrate_channel 오류:', err);
+          return { success: false, error: err.message || '알 수 없는 오류 발생' };
+        }
       })()
     );
   }
