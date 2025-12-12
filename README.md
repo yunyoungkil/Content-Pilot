@@ -163,6 +163,13 @@ nvm use 22
 
 ---
 
+### TipTap POC (실험)
+
+- `editor.html`의 Quill 툴바에 있는 `TipTap` 버튼을 클릭하면 TipTap 기반의 편집기 POC로 전환됩니다.
+- TipTap에서는 이미지 붙여넣기 시 오프스크린 리사이즈 및 Firebase Storage 업로드(`upload_thumbnail_to_storage`)를 자동으로 호출해 URL로 교체합니다.
+- Quill에서 사용 중인 콘텐츠(HTML)를 TipTap으로 마이그레이션하려면 `TipTap` 버튼을 클릭하면 현재 Quill의 HTML이 TipTap 편집기 콘텐츠로 설정됩니다.
+- 이는 POC 용으로 일부 기능만 지원하며, 정식 마이그레이션 전에는 `insert-html`, `insert-image`, `insert-text` 등 메시지는 Quill에서 기본 동작합니다.
+
 ## 📂 프로젝트 구조 및 파일 설명
 
 ### 프로젝트 구조도

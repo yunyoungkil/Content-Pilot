@@ -747,8 +747,19 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
 
   // If this idea is currently open in the workspace UI, refresh the publish-info panel
   try {
-    const currentWorkspace = document.querySelector('.workspace-container');
-    if (currentWorkspace && window.__cp_workspace_idea_data?.id === ideaData.id) {
+    // Find the workspace container corresponding to this idea.
+    // Prefer the active workspace (global __cp_workspace_idea_data), otherwise
+    // search for any workspace that references the idea via data-idea-id on linked-scraps.
+    let targetWorkspace = null;
+    const activeWorkspace = document.querySelector('.workspace-container');
+    if (activeWorkspace && window.__cp_workspace_idea_data?.id === ideaData.id) {
+      targetWorkspace = activeWorkspace;
+    } else {
+      const candidate = document.querySelector(`.linked-scraps-list[data-idea-id="${ideaData.id}"]`);
+      if (candidate) targetWorkspace = candidate.closest('.workspace-container');
+    }
+
+    if (targetWorkspace) {
       console.debug(
         '[DIAG applyDraftResponseToIdea] refreshing publish-info UI for ideaId:',
         ideaData.id,
@@ -761,7 +772,7 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
           ? ideaData.publishInfo.tags.join(', ')
           : ideaData.publishInfo?.tags || '';
         showPublishInfo(
-          currentWorkspace,
+          targetWorkspace,
           ideaData.publishInfo?.permalink,
           tagsForDisplay,
           ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
@@ -771,7 +782,7 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
       // Also refresh thumbnail button after draft generation
       if (typeof renderThumbnailButton === 'function') {
         console.debug('[DIAG applyDraftResponseToIdea] calling renderThumbnailButton');
-        renderThumbnailButton(currentWorkspace, ideaData);
+        renderThumbnailButton(targetWorkspace, ideaData);
       }
     }
   } catch (e) {
@@ -2031,22 +2042,37 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
         buttonContainer.insertBefore(fragment, buttonContainer.firstChild);
       }
     } else {
-      // no draft: ensure generate button exists, and remove regenerate / delete
-      if (!hasGenerateBtn) {
-        // remove any regenerate/delete buttons
-        ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
-          (id) => {
-            const el = buttonContainer.querySelector(`#${id}`);
-            if (el && el.parentNode) el.remove();
-          }
-        );
+      // no draft: always remove regenerate / delete buttons to avoid stale buttons
+      ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach((id) => {
+        const el = buttonContainer.querySelector(`#${id}`);
+        if (el && el.parentNode) el.remove();
+      });
 
+      // Ensure generate button exists
+      if (!hasGenerateBtn) {
         const genBtn = document.createElement('button');
         genBtn.id = 'generate-draft-btn';
         genBtn.style.cssText = 'flex:1;';
         genBtn.textContent = '✨ AI 초안 생성';
         buttonContainer.appendChild(genBtn);
       }
+    }
+
+    // TipTap 전환 버튼 (항상 노출)
+    const hasSwitchEditorBtn = !!buttonContainer.querySelector('#switch-editor-btn');
+    if (!hasSwitchEditorBtn) {
+      const switchBtn = document.createElement('button');
+      switchBtn.id = 'switch-editor-btn';
+      switchBtn.style.cssText = 'margin-left:6px;';
+      switchBtn.textContent = 'TipTap';
+      switchBtn.title = 'Switch editor to TipTap (experimental)';
+      switchBtn.addEventListener('click', () => {
+        const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+        if (editorIframe && editorIframe.contentWindow) {
+          editorIframe.contentWindow.postMessage({ action: 'switch-editor', data: { mode: 'tiptap' } }, '*');
+        }
+      });
+      buttonContainer.appendChild(switchBtn);
     }
   } catch (e) {
     // non-fatal

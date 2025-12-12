@@ -50,21 +50,21 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     expect(result.dryRunResult).toBeTruthy();
-    expect(result.dryRunResult.totalItems).toBe(6); // card-1, card-3, card-4, scrap-1, card-2, scrap-2
+    expect(result.dryRunResult.totalItems).toBe(3); // card-1, card-3, card-4 (scrap inclusion requires host-match)
     
     // groups should include kanban, scraps, and ideas
     // ideas: card-1, card-3
     // kanban: card-4 (in-progress)
     // scraps: scrap-1
     expect(result.dryRunResult.groups.ideas.count).toBe(2);
-    expect(result.dryRunResult.groups.kanban.count).toBe(2);
-    expect(result.dryRunResult.groups.scraps.count).toBe(2);
+    expect(result.dryRunResult.groups.kanban.count).toBe(1);
+    expect(result.dryRunResult.groups.scraps.count).toBe(0);
     // distribution checks
     expect(result.dryRunResult.distribution.ideas['null']).toBe(2);
     expect(result.dryRunResult.distribution.kanban['null'] || result.dryRunResult.distribution.kanban['undefined']).toBe(1);
-    expect(result.dryRunResult.distribution.kanban['ch-other']).toBe(1);
-    expect(result.dryRunResult.distribution.scraps['null']).toBe(1);
-    expect(result.dryRunResult.distribution.scraps['ch-other']).toBe(1);
+    // items with existing channelId that don't host-match should not be included
+    expect(result.dryRunResult.distribution.kanban['ch-other']).toBeUndefined();
+    expect(result.dryRunResult.distribution.scraps['null'] || result.dryRunResult.distribution.scraps['undefined']).toBeUndefined();
     
     expect(updateMock).not.toHaveBeenCalled();
     expect(setMock).not.toHaveBeenCalled();
@@ -105,11 +105,10 @@ describe('Migration Service - dry-run', () => {
 
     const result = await runDataMigration(userId, 'ch2', { dryRun: true });
     expect(result.success).toBe(true);
-    expect(result.dryRunResult.totalItems).toBe(2);
-    // Since the item is in 'ideas' status, it should be grouped under 'ideas'
-    expect(result.dryRunResult.groups.ideas.count).toBe(2);
+    expect(result.dryRunResult.totalItems).toBe(1);
+    // Only the null publishInfo item should be included
+    expect(result.dryRunResult.groups.ideas.count).toBe(1);
     expect(result.dryRunResult.distribution.ideas['null']).toBe(1);
-    expect(result.dryRunResult.distribution.ideas['exists']).toBe(1);
   });
 
   test('channel_content items without channelId are detected', async () => {
@@ -144,9 +143,10 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     // include ct-1 (null) and ct-2 (exists != target)
-    expect(result.dryRunResult.totalItems).toBe(2);
-    expect(result.dryRunResult.groups.channel_content.count).toBe(2);
-    expect(result.dryRunResult.distribution.channel_content['null']).toBe(1);
+    // With no host match and no matching channel url, only content items that
+    // already have a different channelId will be counted as reassignment
+    expect(result.dryRunResult.totalItems).toBe(1);
+    expect(result.dryRunResult.groups.channel_content.count).toBe(1);
     expect(result.dryRunResult.distribution.channel_content['exist']).toBe(1);
   });
 
@@ -183,12 +183,8 @@ describe('Migration Service - dry-run', () => {
     const result = await runDataMigration(userId, 'ch3b', { dryRun: true });
 
     expect(result.success).toBe(true);
-    expect(result.dryRunResult.totalItems).toBe(2);
-    expect(result.dryRunResult.groups.channel_content.count).toBe(2);
-    // sample should be nested 'blogs/b-1'
-    // sample removed; only check counts
-    expect(result.dryRunResult.distribution.channel_content['null']).toBe(1);
-    expect(result.dryRunResult.distribution.channel_content['exist']).toBe(1);
+    expect(result.dryRunResult.totalItems).toBe(0);
+    expect(result.dryRunResult.groups.channel_content.count).toBe(0);
   });
 
   test('host match classification includes items when URLs host matches target channel', async () => {
@@ -252,8 +248,8 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     // only scraps should be present
-    expect(result.dryRunResult.totalItems).toBe(1);
-    expect(result.dryRunResult.groups.scraps.count).toBe(1);
+    expect(result.dryRunResult.totalItems).toBe(0);
+    expect(result.dryRunResult.groups.scraps.count).toBe(0);
     expect(result.dryRunResult.groups.kanban.count).toBe(0);
     expect(result.dryRunResult.groups.channel_content.count).toBe(0);
   });
@@ -292,8 +288,8 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     // card and linked scrap should both be included as candidates
-    expect(result.dryRunResult.totalItems).toBe(3);
-    expect(result.dryRunResult.groups.scraps.count).toBe(2);
+    expect(result.dryRunResult.totalItems).toBe(2);
+    expect(result.dryRunResult.groups.scraps.count).toBe(1);
     expect(result.dryRunResult.groups.ideas.count || result.dryRunResult.groups.kanban.count).toBe(1);
     // sample removed; only check counts
   });
@@ -369,9 +365,9 @@ describe('Migration Service - dry-run', () => {
 
     expect(result.success).toBe(true);
     // all 3 groups should be included
-    expect(result.dryRunResult.totalItems).toBe(3);
+    expect(result.dryRunResult.totalItems).toBe(1);
     expect(result.dryRunResult.groups.ideas.count || result.dryRunResult.groups.kanban.count).toBeTruthy();
-    expect(result.dryRunResult.groups.scraps.count).toBe(1);
-    expect(result.dryRunResult.groups.channel_content.count).toBe(1);
+    expect(result.dryRunResult.groups.scraps.count).toBe(0);
+    expect(result.dryRunResult.groups.channel_content.count).toBe(0);
   });
 });

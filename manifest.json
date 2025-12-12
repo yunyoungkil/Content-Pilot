@@ -64,8 +64,7 @@
         "css/affiliate-modal.css",
         "editor.html",
         "editor.js",
-        "lib/quill.js",
-        "lib/quill.snow.css",
+        
         "lib/tui-image-editor.min.js",
         "lib/tui-image-editor.min.css",
         "lib/fabric.min.js",

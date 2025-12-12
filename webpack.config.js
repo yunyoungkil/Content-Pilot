@@ -15,7 +15,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].bundle.js',
-    publicPath: '', // Chrome Extension에서는 상대 경로 사용
+    publicPath: 'dist/', // 동적 청크는 dist/ 하위에서 로드되도록 설정
     chunkFilename: '[id]-[name].bundle.js', // 청크 파일명에 ID와 이름을 포함하여 디버깅 용이하게
     clean: true,
   },

@@ -1,5 +1,17 @@
 import { Logger } from './js/utils.js';
 
+// Dynamic chunk path: ensure Webpack chunk loader uses chrome extension absolute URL
+try {
+  if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+    // Set webpack public path at runtime for dynamic imports
+    // eslint-disable-next-line no-undef, no-empty
+    __webpack_public_path__ = chrome.runtime.getURL('dist/');
+  }
+} catch (e) {
+  // non-fatal when not in extension runtime
+  void 0;
+}
+
 // 툴바 커스텀 버튼 렌더링 (Quill 초기화 후)
 setTimeout(() => {
   const toolbar = document.querySelector('.ql-toolbar');
@@ -20,7 +32,325 @@ let __cp_controlsScrollRoot = null; // 스크롤 이벤트를 구독하는 루�
 if (window.Quill && window.ImageResize) {
   Quill.register('modules/imageResize', window.ImageResize, true);
 }
+
+// TipTap 초기화 함수 (동적 import 기반)
+async function initTipTap(initialHtml = '') {
+  if (tiptapEditor) return tiptapEditor;
+  try {
+    const [{ Editor }, StarterKitModule, ImageModule, LinkModule] = await Promise.all([
+      import('@tiptap/core'),
+      import('@tiptap/starter-kit'),
+      import('@tiptap/extension-image'),
+      import('@tiptap/extension-link'),
+    ]);
+
+    // Normalize import variations (ESM/CJS interop). Some build outputs wrap
+    // the actual extension factory under `.default` or as named exports.
+    const normalize = (mod, name) => {
+      if (!mod) return null;
+      // Try named export first (e.g., StarterKit), then default, then module itself
+      const candidate = (name && mod[name]) || mod.default || mod;
+      if (typeof candidate === 'function') return candidate;
+      // handle double-wrapped default (.default.default)
+      if (candidate && typeof candidate.default === 'function') return candidate.default;
+      // If original mod has named function under .default[name] (e.g., default is object)
+      if (mod && mod.default && mod.default[name] && typeof mod.default[name] === 'function') return mod.default[name];
+      // if it's an object (extension instance), return as-is
+      if (typeof candidate === 'object') return candidate;
+      return null;
+    };
+
+    const StarterKit = normalize(StarterKitModule, 'StarterKit');
+    const Image = normalize(ImageModule, 'Image');
+    const Link = normalize(LinkModule, 'Link');
+    // store for re-init when lazy-loading extensions
+    _StarterKit = StarterKit;
+    _Image = Image;
+    _Link = Link;
+    _EditorClass = Editor;
+    // Table extensions will be loaded lazily when the user inserts a table.
+    let Table = null;
+    let TableRow = null;
+    let TableCell = null;
+    let TableHeader = null;
+
+    const container = document.createElement('div');
+    container.id = 'tiptap-container';
+    container.style.height = '100%';
+    container.style.boxSizing = 'border-box';
+    container.style.padding = '12px';
+    container.style.display = 'none';
+    document.body.appendChild(container);
+
+    // Add a small button to switch back to Quill
+    try {
+      const switchBack = document.createElement('button');
+      switchBack.innerText = '← Quill';
+      switchBack.type = 'button';
+      switchBack.title = 'Switch back to Quill';
+      switchBack.style.position = 'absolute';
+      switchBack.style.left = '8px';
+      switchBack.style.top = '8px';
+      switchBack.style.zIndex = '9999';
+      switchBack.addEventListener('click', () => {
+        if (document.querySelector('#tiptap-container')) {
+          document.querySelector('#tiptap-container').style.display = 'none';
+        }
+        if (document.querySelector('#editor-container')) {
+          document.querySelector('#editor-container').style.display = 'block';
+        }
+        activeEditor = 'quill';
+      });
+      container.appendChild(switchBack);
+    } catch (e) {}
+
+    tiptapEditor = new Editor({
+      element: container,
+      extensions: [
+        // StarterKit may be a function factory or an object
+        ...(typeof StarterKit === 'function' ? [StarterKit()] : StarterKit ? [StarterKit] : []),
+        ...(Image && typeof Image.configure === 'function' ? [Image.configure({ inline: false })] : Image ? [Image] : []),
+        ...(Link && typeof Link.configure === 'function' ? [Link.configure({ openOnClick: true })] : Link ? [Link] : []),
+        // Table extension intentionally not included initially (lazy loaded)
+      ],
+      content: initialHtml || '<p></p>',
+      editorProps: {
+        attributes: { class: 'tiptap-editor' },
+      },
+      onUpdate: ({ editor }) => {
+        window.parent.postMessage(
+          { action: 'content-changed', data: { html: editor.getHTML(), text: editor.getText() } },
+          '*'
+        );
+      },
+    });
+
+    // Create a simple TipTap toolbar for parity with Quill
+    try {
+      const toolbarEl = document.createElement('div');
+      toolbarEl.id = 'tiptap-toolbar';
+      toolbarEl.style.cssText = 'display:flex;gap:6px;padding:8px;border-bottom:1px solid #eee;align-items:center;';
+      const makeBtn = (text, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        b.title = title;
+        b.style.cssText = 'padding:6px 8px;border-radius:4px;cursor:pointer;';
+        b.addEventListener('click', onClick);
+        return b;
+      };
+      toolbarEl.appendChild(makeBtn('B', '굵게 (Ctrl+B)', () => tiptapEditor.chain().focus().toggleBold().run()));
+      toolbarEl.appendChild(makeBtn('I', '기울임 (Ctrl+I)', () => tiptapEditor.chain().focus().toggleItalic().run()));
+      toolbarEl.appendChild(makeBtn('H2', 'Heading 2', () => tiptapEditor.chain().focus().setNode('heading', { level: 2 }).run()));
+      toolbarEl.appendChild(makeBtn('H3', 'Heading 3', () => tiptapEditor.chain().focus().setNode('heading', { level: 3 }).run()));
+      toolbarEl.appendChild(makeBtn('UL', 'Bullet list', () => tiptapEditor.chain().focus().toggleBulletList().run()));
+      toolbarEl.appendChild(makeBtn('OL', 'Numbered list', () => tiptapEditor.chain().focus().toggleOrderedList().run()));
+      toolbarEl.appendChild(makeBtn('Quote', 'Blockquote', () => tiptapEditor.chain().focus().toggleBlockquote().run()));
+      toolbarEl.appendChild(makeBtn('Code', 'Code block', () => tiptapEditor.chain().focus().toggleCodeBlock().run()));
+      toolbarEl.appendChild(makeBtn('Undo', 'Undo', () => tiptapEditor.chain().focus().undo().run()));
+      toolbarEl.appendChild(makeBtn('Redo', 'Redo', () => tiptapEditor.chain().focus().redo().run()));
+      toolbarEl.appendChild(makeBtn('Left', 'Align left', () => {
+        try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'left' }).run(); } catch (e) {}
+      }));
+      toolbarEl.appendChild(makeBtn('Center', 'Align center', () => {
+        try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'center' }).run(); } catch (e) {}
+      }));
+      toolbarEl.appendChild(makeBtn('Right', 'Align right', () => {
+        try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'right' }).run(); } catch (e) {}
+      }));
+      // Color picker
+      const colorPicker = makeBtn('Color', 'Text color', () => {});
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.style.marginLeft = '6px';
+      colorInput.addEventListener('input', (ev) => {
+        const value = ev.target.value;
+        try { tiptapEditor.chain().focus().setMark('textStyle', { color: value }).run(); } catch (e) {}
+      });
+      colorPicker.appendChild(colorInput);
+      toolbarEl.appendChild(colorPicker);
+      // Font size increase/decrease
+      toolbarEl.appendChild(makeBtn('A-', 'Font smaller', () => {
+        try { tiptapEditor.chain().focus().setMark('textStyle', { fontSize: '12px' }).run(); } catch (e) {}
+      }));
+      toolbarEl.appendChild(makeBtn('A+', 'Font larger', () => {
+        try { tiptapEditor.chain().focus().setMark('textStyle', { fontSize: '18px' }).run(); } catch (e) {}
+      }));
+
+      // Insert Image button + file input
+      const insertImageBtn = makeBtn('Img', 'Insert image', async () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            const dataUrl = ev.target.result;
+            try {
+              const resized = await window.chrome?.runtime?.sendMessage?.({ action: 'resize_image_in_offscreen', data: { imageDataUrl: dataUrl, maxWidth: 1920 } });
+              const dataToUpload = resized && resized.success ? resized.dataUrl : dataUrl;
+              const filename = `editor-image-${Date.now()}.png`;
+              const uploadResp = await window.chrome?.runtime?.sendMessage?.({ action: 'upload_thumbnail_to_storage', data: { dataUrl: dataToUpload, filename } });
+              const src = uploadResp && uploadResp.success && uploadResp.url ? uploadResp.url : dataUrl;
+              tiptapEditor.chain().focus().setImage({ src }).run();
+            } catch (err) {
+              tiptapEditor.chain().focus().setImage({ src: dataUrl }).run();
+            }
+          };
+          reader.readAsDataURL(file);
+        };
+        input.click();
+      });
+      toolbarEl.appendChild(insertImageBtn);
+
+      toolbarEl.appendChild(makeBtn('Table', 'Insert table 3x3', async () => {
+        try {
+          // Lazy load TipTap table extensions and reinitialize editor if needed
+          if (!window.__cp_tiptap_table_loaded) {
+            const [TableModule, TableRowModule, TableCellModule, TableHeaderModule] = await Promise.all([
+              import('@tiptap/extension-table'),
+              import('@tiptap/extension-table-row'),
+              import('@tiptap/extension-table-cell'),
+              import('@tiptap/extension-table-header'),
+            ]);
+            Table = normalize(TableModule, 'Table');
+            TableRow = normalize(TableRowModule, 'TableRow');
+            TableCell = normalize(TableCellModule, 'TableCell');
+            TableHeader = normalize(TableHeaderModule, 'TableHeader');
+            const currentHtml = tiptapEditor.getHTML();
+            try { tiptapEditor.destroy(); } catch (e) {}
+            tiptapEditor = new Editor({
+              element: container,
+              extensions: [
+                ...(typeof StarterKit === 'function' ? [StarterKit()] : StarterKit ? [StarterKit] : []),
+                ...(Image && typeof Image.configure === 'function' ? [Image.configure({ inline: false })] : Image ? [Image] : []),
+                ...(Link && typeof Link.configure === 'function' ? [Link.configure({ openOnClick: true })] : Link ? [Link] : []),
+                ...(Table && typeof Table.configure === 'function' ? [Table.configure({ resizable: true })] : Table ? [Table] : []),
+                ...(typeof TableRow === 'function' ? [TableRow()] : TableRow ? [TableRow] : []),
+                ...(typeof TableHeader === 'function' ? [TableHeader()] : TableHeader ? [TableHeader] : []),
+                ...(typeof TableCell === 'function' ? [TableCell()] : TableCell ? [TableCell] : []),
+              ],
+              content: currentHtml || '<p></p>',
+              editorProps: { attributes: { class: 'tiptap-editor' } },
+              onUpdate: ({ editor }) => {
+                window.parent.postMessage({ action: 'content-changed', data: { html: editor.getHTML(), text: editor.getText() } }, '*');
+              },
+            });
+            window.__cp_tiptap_table_loaded = true;
+          }
+          tiptapEditor.chain().focus().insertTable({ rows: 3, cols: 3 }).run();
+        } catch (err) {
+          console.error('[Editor] Table insert failed:', err);
+        }
+      }));
+      container.insertAdjacentElement('beforebegin', toolbarEl);
+    } catch (e) {}
+
+
+    // paste image handling — upload via background and replace
+    tiptapEditor.view.dom.addEventListener('paste', async (ev) => {
+      const items = (ev.clipboardData && ev.clipboardData.items) || [];
+      for (const item of items) {
+        if (item.type && item.type.indexOf('image') === 0) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+            const dataUrl = e.target.result;
+            try {
+              const resized = await window.chrome?.runtime?.sendMessage?.({
+                action: 'resize_image_in_offscreen',
+                data: { imageDataUrl: dataUrl, maxWidth: 1920 },
+              });
+              const dataToUpload = resized && resized.success ? resized.dataUrl : dataUrl;
+              const filename = `editor-image-${Date.now()}.png`;
+              const uploadResp = await window.chrome?.runtime?.sendMessage?.({
+                action: 'upload_thumbnail_to_storage',
+                data: { dataUrl: dataToUpload, filename },
+              });
+              const src = uploadResp && uploadResp.success && uploadResp.url ? uploadResp.url : dataUrl;
+              tiptapEditor.chain().focus().setImage({ src }).run();
+            } catch (err) {
+              tiptapEditor.chain().focus().setImage({ src: dataUrl }).run();
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+
+    return tiptapEditor;
+  } catch (err) {
+    console.error('Failed to initialize TipTap:', err);
+    return null;
+  }
+}
+// Export functions for tests
+export { initTipTap, ensureTextStyleLoaded };
+
+// Lazy load and enable @tiptap/extension-text-align
+async function ensureTextAlignLoaded() {
+  if (window.__cp_tiptap_textalign_loaded || !tiptapEditor) return;
+  try {
+    const TextAlignModule = await import('@tiptap/extension-text-align');
+    const TextAlign = (TextAlignModule && (TextAlignModule.default || TextAlignModule.TextAlign || TextAlignModule)) || null;
+    const currentHtml = tiptapEditor.getHTML();
+    try { tiptapEditor.destroy(); } catch (e) {}
+    const Starter = typeof _StarterKit === 'function' ? _StarterKit() : _StarterKit;
+    tiptapEditor = new _EditorClass({
+      element: document.querySelector('#tiptap-container'),
+      extensions: [
+        Starter,
+        _Image && typeof _Image.configure === 'function' ? _Image.configure({ inline: false }) : _Image,
+        _Link && typeof _Link.configure === 'function' ? _Link.configure({ openOnClick: true }) : _Link,
+        TextAlign && (typeof TextAlign.configure === 'function' ? TextAlign.configure({ types: ['heading', 'paragraph'] }) : TextAlign),
+      ].filter(Boolean),
+      content: currentHtml || '<p></p>',
+      editorProps: { attributes: { class: 'tiptap-editor' } },
+    });
+    window.__cp_tiptap_textalign_loaded = true;
+    return tiptapEditor;
+  } catch (e) {
+    console.warn('[Editor] Failed to load textAlign extension', e);
+  }
+  return null;
+}
+export { ensureTextAlignLoaded };
+
+// Helper: ensure textStyle extension is loaded by reinitializing editor
+async function ensureTextStyleLoaded() {
+  if (window.__cp_tiptap_textstyle_loaded || !tiptapEditor) return;
+  try {
+    const { default: TextStyle } = await import('@tiptap/extension-text-style');
+    const currentHtml = tiptapEditor.getHTML();
+    try { tiptapEditor.destroy(); } catch (e) {}
+    const Starter = typeof _StarterKit === 'function' ? _StarterKit() : _StarterKit;
+    tiptapEditor = new _EditorClass({
+      element: document.querySelector('#tiptap-container'),
+      extensions: [
+        Starter,
+        _Image && typeof _Image.configure === 'function' ? _Image.configure({ inline: false }) : _Image,
+        _Link && typeof _Link.configure === 'function' ? _Link.configure({ openOnClick: true }) : _Link,
+        TextStyle && (typeof TextStyle === 'function' ? TextStyle() : TextStyle),
+      ].filter(Boolean),
+      content: currentHtml || '<p></p>',
+      editorProps: { attributes: { class: 'tiptap-editor' } },
+    });
+    window.__cp_tiptap_textstyle_loaded = true;
+  } catch (e) {
+    console.warn('[Editor] Failed to load textStyle extension', e);
+  }
+}
 let quillEditor = null;
+let tiptapEditor = null;
+// Keep module references for re-initialization when lazy-loading extensions
+let _StarterKit = null;
+let _Image = null;
+let _Link = null;
+let _EditorClass = null;
+let activeEditor = 'quill'; // 'quill' or 'tiptap'
 
 // Guard against duplicate insert-image messages arriving almost simultaneously
 // (e.g. from multiple UI contexts). Ignore a duplicate insert for the same URL
@@ -663,9 +993,19 @@ function initializeEditor() {
           hasText: data.text !== undefined,
           html: data.html,
         });
-        if (data.delta) {
-          quillEditor.setContents(data.delta);
-          console.log('[Editor] Delta로 콘텐츠 설정 완료');
+          if (data.delta) {
+            if (activeEditor === 'tiptap') {
+              import('./js/utils/quillToTiptap.js')
+                  .then((util) => util.convertDeltaToTipTapJSON(data.delta))
+                  .then((json) => {
+                    if (tiptapEditor && json) tiptapEditor.commands.setContent(json);
+                    else quillEditor.setContents(data.delta);
+                  })
+                .catch(() => quillEditor.setContents(data.delta));
+            } else {
+              quillEditor.setContents(data.delta);
+              console.log('[Editor] Delta로 콘텐츠 설정 완료');
+            }
         } else if (data.html !== undefined) {
           // 빈 문자열이거나 빈 HTML인 경우 완전히 초기화
           if (
@@ -675,42 +1015,71 @@ function initializeEditor() {
             data.html === '<p></p>'
           ) {
             console.log('[Editor] 빈 HTML 감지, 에디터 완전 초기화');
-            quillEditor.setContents([]);
-            quillEditor.setText('');
+            if (activeEditor === 'tiptap' && tiptapEditor) {
+              tiptapEditor.commands.setContent('<p></p>');
+            } else {
+              quillEditor.setContents([]);
+              quillEditor.setText('');
+            }
             console.log('[Editor] 에디터 초기화 완료, 현재 길이:', quillEditor.getLength());
           } else {
             console.log('[Editor] HTML 콘텐츠 설정:', data.html.substring(0, 50) + '...');
-            quillEditor.setContents([]);
-            quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
-            quillEditor.setSelection(quillEditor.getLength(), 0);
+            if (activeEditor === 'tiptap') {
+              initTipTap(data.html).then(() => {
+                if (tiptapEditor) tiptapEditor.commands.setContent(data.html);
+              });
+            } else {
+              quillEditor.setContents([]);
+              quillEditor.clipboard.dangerouslyPasteHTML(0, data.html);
+              quillEditor.setSelection(quillEditor.getLength(), 0);
+            }
           }
         } else if (data.text !== undefined) {
           console.log('[Editor] 텍스트 콘텐츠 설정:', data.text || '');
-          quillEditor.setText(data.text || '');
+          if (activeEditor === 'tiptap' && tiptapEditor) {
+            tiptapEditor.commands.setContent(`<p>${(data.text || '').replace(/</g, '&lt;')}</p>`);
+          } else {
+            quillEditor.setText(data.text || '');
+          }
         } else {
           // data가 없거나 모든 필드가 undefined인 경우 초기화
           console.log('[Editor] 모든 필드가 undefined, 에디터 초기화');
-          quillEditor.setContents([]);
-          quillEditor.setText('');
+          if (activeEditor === 'tiptap' && tiptapEditor) {
+            tiptapEditor.commands.setContent('<p></p>');
+          } else {
+            quillEditor.setContents([]);
+            quillEditor.setText('');
+          }
         }
         break;
       case 'get-content':
-        // 요청 ID가 있으면 응답 메시지 전송
+        // 요청 ID가 있으면 응답 메시지 전송 (TipTap/Quill 구분)
         if (data && data.requestId) {
-          window.parent.postMessage(
-            {
-              action: 'content-response',
-              requestId: data.requestId,
-              data: { html: quillEditor.root.innerHTML },
-            },
-            '*'
-          );
+          if (activeEditor === 'tiptap' && tiptapEditor) {
+            window.parent.postMessage(
+              {
+                action: 'content-response',
+                requestId: data.requestId,
+                data: { html: tiptapEditor.getHTML() },
+              },
+              '*'
+            );
+          } else {
+            window.parent.postMessage(
+              {
+                action: 'content-response',
+                requestId: data.requestId,
+                data: { html: quillEditor.root.innerHTML },
+              },
+              '*'
+            );
+          }
         }
         // 이미지 삽입 등 외부 요청 시 현재 내용 저장
         window.parent.postMessage(
           {
             action: 'cp_save_draft',
-            content: quillEditor.root.innerHTML,
+            content: activeEditor === 'tiptap' && tiptapEditor ? tiptapEditor.getHTML() : quillEditor.root.innerHTML,
           },
           '*'
         );
@@ -725,9 +1094,30 @@ function initializeEditor() {
         }
         break;
       case 'apply-format':
-        const range = quillEditor.getSelection();
-        if (range && range.length > 0) {
-          quillEditor.formatText(range.index, range.length, data.format, data.value);
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          switch (data.format) {
+            case 'bold':
+              tiptapEditor.chain().focus().toggleBold().run();
+              break;
+            case 'italic':
+              tiptapEditor.chain().focus().toggleItalic().run();
+              break;
+            case 'link':
+              if (data.value) tiptapEditor.chain().focus().setLink({ href: data.value }).run();
+              else tiptapEditor.chain().focus().unsetLink().run();
+              break;
+            default:
+              // fallback to Quill for unsupported formats (underline etc.)
+              const range = quillEditor.getSelection();
+              if (range && range.length > 0) {
+                quillEditor.formatText(range.index, range.length, data.format, data.value);
+              }
+          }
+        } else {
+          const range = quillEditor.getSelection();
+          if (range && range.length > 0) {
+            quillEditor.formatText(range.index, range.length, data.format, data.value);
+          }
         }
         break;
       case 'insert-text':
@@ -739,12 +1129,16 @@ function initializeEditor() {
           });
           break;
         }
-        const currentRange = quillEditor.getSelection() || {
-          index: quillEditor.getLength(),
-          length: 0,
-        };
-        quillEditor.insertText(currentRange.index, data.text);
-        quillEditor.setSelection(currentRange.index + data.text.length);
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          tiptapEditor.commands.insertContent(data.text);
+        } else {
+          const currentRange = quillEditor.getSelection() || {
+            index: quillEditor.getLength(),
+            length: 0,
+          };
+          quillEditor.insertText(currentRange.index, data.text);
+          quillEditor.setSelection(currentRange.index + data.text.length);
+        }
         // ▲▲▲ [수정 완료] ▲▲▲
         break;
       case 'insert-html':
@@ -765,7 +1159,17 @@ function initializeEditor() {
           // HTML 구조를 유지하기 위해 항상 dangerouslyPasteHTML 사용
           // (affiliate 카드와 같은 복잡한 HTML 구조를 위해)
           console.log('🔄 [Editor] HTML 구조 삽입 시도:', data.html.substring(0, 100) + '...');
-          quillEditor.clipboard.dangerouslyPasteHTML(sel.index, data.html);
+          if (activeEditor === 'tiptap' && tiptapEditor) {
+            try {
+              tiptapEditor.commands.insertContent(data.html);
+              console.log('✅ [Editor] TipTap에 HTML 구조 삽입 완료');
+            } catch (e) {
+              console.warn('❌ [Editor] TipTap insertContent 실패, Quill로 폴백', e);
+              quillEditor.clipboard.dangerouslyPasteHTML(sel.index, data.html);
+            }
+          } else {
+            quillEditor.clipboard.dangerouslyPasteHTML(sel.index, data.html);
+          }
           setTimeout(() => {
             try {
               quillEditor.setSelection(quillEditor.getLength(), 0);
@@ -801,6 +1205,41 @@ function initializeEditor() {
         console.log('➕ [Editor] ========================================');
         console.log('➕ [Editor] 📨 insert-image 메시지 수신!');
         console.log('➕ [Editor] ========================================');
+        // If TipTap is active, handle image insertion via TipTap APIs
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          try {
+            if (data && data.url) {
+              tiptapEditor.chain().focus().setImage({ src: data.url }).run();
+              break;
+            }
+            // If dataUrl provided (base64), upload first
+            if (data && data.dataUrl) {
+              const filename = `editor-image-${Date.now()}.png`;
+              // Use IIFE async wrapper to avoid top-level await in message handler
+              (async () => {
+                try {
+                  const resized = await window.chrome?.runtime?.sendMessage?.({
+                    action: 'resize_image_in_offscreen',
+                    data: { imageDataUrl: data.dataUrl, maxWidth: 1920 },
+                  });
+                  const dataToUpload = resized && resized.success ? resized.dataUrl : data.dataUrl;
+                  const uploadResp = await window.chrome?.runtime?.sendMessage?.({
+                    action: 'upload_thumbnail_to_storage',
+                    data: { dataUrl: dataToUpload, filename },
+                  });
+                  const src = uploadResp && uploadResp.success && uploadResp.url ? uploadResp.url : data.dataUrl;
+                  tiptapEditor.chain().focus().setImage({ src }).run();
+                } catch (e) {
+                  tiptapEditor.chain().focus().setImage({ src: data.dataUrl }).run();
+                }
+              })();
+              break;
+            }
+          } catch (e) {
+            console.error('[Editor] TipTap insert-image handling failed:', e);
+          }
+          // fallback to quill if tiptap handling didn't run through
+        }
         // dedupe: if same URL inserted within 500ms, ignore to avoid double inserts
         try {
           const now = Date.now();
@@ -863,28 +1302,62 @@ function initializeEditor() {
           }, 100);
         }
         break;
+      case 'switch-editor':
+        if (data && data.mode === 'tiptap') {
+          const html = quillEditor ? quillEditor.root.innerHTML : '';
+          initTipTap(html).then(() => {
+            if (tiptapEditor) {
+              document.querySelector('#editor-container').style.display = 'none';
+              document.querySelector('#tiptap-container').style.display = 'block';
+              activeEditor = 'tiptap';
+            }
+          });
+        } else if (data && data.mode === 'quill') {
+          document.querySelector('#tiptap-container')?.style?.display && (document.querySelector('#tiptap-container').style.display = 'none');
+          document.querySelector('#editor-container')?.style?.display && (document.querySelector('#editor-container').style.display = 'block');
+          activeEditor = 'quill';
+        }
+        break;
       case 'focus':
         quillEditor.focus();
+        break;
+      case 'tiptap-focus':
+        if (tiptapEditor) tiptapEditor.chain().focus().run();
         break;
       case 'blur':
         quillEditor.blur();
         break;
       case 'apply-heading':
-        const headingRange = quillEditor.getSelection();
-        if (headingRange && headingRange.length > 0) {
-          quillEditor.formatText(headingRange.index, headingRange.length, 'header', data.level);
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          // TipTap: apply heading to selection
+          tiptapEditor.chain().focus().toggleHeading({ level: data.level }).run();
+        } else {
+          const headingRange = quillEditor.getSelection();
+          if (headingRange && headingRange.length > 0) {
+            quillEditor.formatText(headingRange.index, headingRange.length, 'header', data.level);
+          }
         }
         break;
       case 'apply-list':
-        const listRange = quillEditor.getSelection();
-        if (listRange) {
-          quillEditor.formatLine(listRange.index, listRange.length, 'list', data.type);
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          if (data.type === 'ordered') tiptapEditor.chain().focus().toggleOrderedList().run();
+          else tiptapEditor.chain().focus().toggleBulletList().run();
+        } else {
+          const listRange = quillEditor.getSelection();
+          if (listRange) {
+            quillEditor.formatLine(listRange.index, listRange.length, 'list', data.type);
+          }
         }
         break;
       case 'clear-formatting':
-        const clearRange = quillEditor.getSelection();
-        if (clearRange && clearRange.length > 0) {
-          quillEditor.removeFormat(clearRange.index, clearRange.length);
+        if (activeEditor === 'tiptap' && tiptapEditor) {
+          // TipTap: remove formatting from selection
+          tiptapEditor.chain().focus().unsetAllMarks().clearNodes().run();
+        } else {
+          const clearRange = quillEditor.getSelection();
+          if (clearRange && clearRange.length > 0) {
+            quillEditor.removeFormat(clearRange.index, clearRange.length);
+          }
         }
         break;
       case 'scroll-to-text':
@@ -1020,6 +1493,25 @@ document.addEventListener('DOMContentLoaded', function () {
           element.setAttribute('aria-label', title);
         }
       }
+      // TipTap 전환 버튼 추가 (POC)
+      try {
+        const tipTapBtn = document.createElement('button');
+        tipTapBtn.type = 'button';
+        tipTapBtn.className = 'ql-switch-to-tiptap';
+        tipTapBtn.innerText = 'TipTap';
+        tipTapBtn.title = 'Switch to TipTap (experimental)';
+        tipTapBtn.style.marginLeft = '8px';
+        tipTapBtn.addEventListener('click', async () => {
+          const html = quillEditor ? quillEditor.root.innerHTML : '';
+          await initTipTap(html);
+          if (tiptapEditor) {
+            document.querySelector('#editor-container').style.display = 'none';
+            document.querySelector('#tiptap-container').style.display = 'block';
+            activeEditor = 'tiptap';
+          }
+        });
+        toolbarContainer.appendChild(tipTapBtn);
+      } catch (e) {}
     });
   }
   window.parent.postMessage({ action: 'editor-ready' }, '*');
