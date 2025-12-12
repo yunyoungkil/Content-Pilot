@@ -453,6 +453,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const result = await runDataMigration(userId, channelId, {
             dryRun: !!dryRun,
             targetPlatform: targetPlatform || null,
+            ...(msg.options || {}),
           });
 
           // runDataMigration 기본 구현은 비활성화 상태 메시지를 반환
@@ -1366,7 +1367,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!kanbanRealtimeListenerAttached) {
           onValue(dbRef, (snapshot) => {
             const data = snapshot?.val() || {};
-            const cardsCount = Object.keys(data).length;
+            const cardsCount =
+              (Object.keys((data && data.ideas) || {}).length || 0) +
+              (Object.keys((data && data['in-progress']) || {}).length || 0) +
+              (Object.keys((data && data.done) || {}).length || 0);
             Logger.debug(`[get_kanban_data] 실시간 업데이트 - 카드 개수: ${cardsCount}`);
             // 모든 탭에 업데이트 메시지 전송
             chrome.tabs.query({}, (tabs) => {
@@ -1390,7 +1394,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const snap = await get(dbRef);
         const data = snap?.val() || {};
-        const cardsCount = Object.keys(data).length;
+        const cardsCount =
+          (Object.keys((data && data.ideas) || {}).length || 0) +
+          (Object.keys((data && data['in-progress']) || {}).length || 0) +
+          (Object.keys((data && data.done) || {}).length || 0);
         Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };

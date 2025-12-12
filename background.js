@@ -475,7 +475,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'migrate_channel') {
     return handleAsync(
       (async () => {
-        const { channelId, targetPlatform, dryRun } = msg;
+        const { channelId, targetPlatform, dryRun, options } = msg;
         const userId = await getCurrentUserId();
         if (userId === CONSTANTS.USER_ID) {
           return { success: false, error: '로그인이 필요합니다.' };
@@ -524,7 +524,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // Dry-run인 경우 즉시 실행
         if (!!dryRun) {
-          const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null });
+          const result = await runDataMigration(userId, channelId, { dryRun: !!dryRun, targetPlatform: targetPlatform || null, collections: options?.collections || null, debug: options?.debug || false });
           if (!result.success) return { success: false, error: result.message };
           return { success: true, message: result.message, dryRunResult: result.dryRunResult, updatedCount: result.updatedCount };
         }
@@ -550,7 +550,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               if (idx >= 0) jobs1[idx].status = 'running';
               await new Promise((resolve) => chrome.storage.local.set({ migrationJobs: jobs1 }, resolve));
 
-              const res = await runDataMigration(userId, channelId, { dryRun: false, targetPlatform: targetPlatform || null });
+              const res = await runDataMigration(userId, channelId, { dryRun: false, targetPlatform: targetPlatform || null, collections: options?.collections || null, debug: options?.debug || false });
 
               const s2 = await new Promise((resolve) => chrome.storage.local.get(['migrationJobs'], resolve));
               const jobs2 = s2.migrationJobs || [];
@@ -1518,7 +1518,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const snap = await get(dbRef);
         const data = snap?.val() || {};
-        const cardsCount = Object.keys(data).length;
+        const cardsCount =
+          (Object.keys(data?.ideas || {}).length || 0) +
+          (Object.keys(data?.['in-progress'] || {}).length || 0) +
+          (Object.keys(data?.done || {}).length || 0);
         Logger.info(`[get_kanban_data] 데이터 로드 완료 - 카드 개수: ${cardsCount}`);
 
         const responseData = { success: true, data: data };

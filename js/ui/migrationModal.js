@@ -15,7 +15,9 @@ export function showMigrationModal(shadowRoot, migrationInfo) {
   const { orphanCount, channelCount, channelOptions, autoAssign } = migrationInfo;
 
   // 모달이 이미 있으면 제거
-  const existingModal = (shadowRoot && shadowRoot.querySelector && shadowRoot.querySelector('#migration-modal')) || document.querySelector('#migration-modal');
+  const existingModal =
+    (shadowRoot && shadowRoot.querySelector && shadowRoot.querySelector('#migration-modal')) ||
+    document.querySelector('#migration-modal');
   if (existingModal) {
     existingModal.remove();
   }

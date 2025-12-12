@@ -69,7 +69,7 @@ class FirebasePerformanceOptimizer {
 
     // 로컬 스토리지 정리
     try {
-      const storage = await chrome.storage.local.get(null);
+      const storage = (await chrome.storage.local.get(null)) || {};
       const keysToRemove = Object.keys(storage).filter(
         (key) => key.startsWith('fb_cache_') && key.includes(pattern)
       );

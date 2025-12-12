@@ -73,9 +73,13 @@
 - UI: Dry-run 결과는 유형별(칸반/스크랩)로 그룹화되어 개수와 샘플 목록을 보기 좋게 표시합니다.
 - 백엔드: `migrate_channel` 메시지 핸들러가 추가되었고, `runDataMigration(userId, channelId, { dryRun, targetPlatform })` 방식으로 동작합니다.
 - 테스트: 단위/통합 테스트가 추가되어 dry-run 결과 검증(그룹화 포함), background 핸들러 호출, UI 모달 동작을 검증합니다.
+- 백엔드: `migrate_channel` 메시지 핸들러가 추가되었고, `runDataMigration(userId, channelId, { dryRun, targetPlatform })` 방식으로 동작합니다.
+- 백엔드: Dry-run 및 실제 실행 시 `channel_content` 컬렉션을 스캔하도록 확장되어, 관련 항목을 후보로 포착하고 마이그레이션 시 업데이트합니다.
+- 백엔드: `migrateChannelIdCascade`도 `channel_content` 항목을 포함하도록 개선되어 채널 ID 변경 시 연관된 컨텐츠가 일괄적으로 업데이트됩니다.
+- 테스트: 단위/통합 테스트가 추가되어 dry-run 결과 검증(그룹화 포함), background 핸들러 호출, UI 모달 동작을 검증합니다. `channel_content` 관련 테스트도 추가되었습니다.
 
 ## 남아 있는 문제 (버그 / 개선 우선순위)
-1. Dry-run이 스크랩(스크랩 자료)에만 후보를 보여주는 것처럼 보이는 상황: 현재 로직은 `kanban`과 `scraps`를 모두 스캔하지만, 다른 데이터(아이디어/칸반 관련 필드, linkedScrap, 연관된 리치 엔티티 등)를 스캔하지 않으면 일부 후보가 누락될 수 있습니다. 추가로 다음 컬렉션/위치를 검사할 필요가 있습니다:
+1. Dry-run이 스크랩(스크랩 자료)에만 후보를 보여주는 것처럼 보이는 상황: 현재 로직은 `kanban`, `scraps`, `channel_content`를 스캔하지만, 다른 데이터(아이디어/칸반 관련 필드, linkedScrap, 연관된 리치 엔티티 등)를 스캔하지 않으면 일부 후보가 누락될 수 있습니다. 추가로 다음 컬렉션/위치 및 구조를 검사할 필요가 있습니다:
    - `kanban` 카드 내부의 `publishInfo.channelId`, `channel.id`, `channel` 등 다양한 스키마
    - `ideas` 또는 `linkedScrap`처럼 간접 참조되는 엔티티
    - 외부 저장/연결 데이터 (channelId를 보관하는 별도 구조)

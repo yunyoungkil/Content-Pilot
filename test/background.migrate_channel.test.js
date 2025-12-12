@@ -43,7 +43,7 @@ describe('Background - migrate_channel handler', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     // sendResponse should have been called with the dry-run result
-    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1', { dryRun: true, targetPlatform: null });
+    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1', { dryRun: true, targetPlatform: null, collections: null, debug: false });
   });
 
   test('returns error when channel is not owned by user', async () => {
@@ -140,5 +140,71 @@ describe('Background - migrate_channel handler', () => {
     expect(storage.migrationJobs).toBeDefined();
     expect(storage.migrationJobs.length).toBe(1);
     expect(storage.migrationJobs[0].id).toBe(resp.jobId);
+  });
+
+  test('passes collections options through to runDataMigration', async () => {
+    const runDataMigrationMock = jest.fn().mockResolvedValue({ success: true, message: 'Dry-run OK', dryRunResult: { items: 2 } });
+    const getCurrentUserId = jest.fn().mockResolvedValue('user-123');
+
+    jest.doMock('../js/services/migrationService.js', () => ({
+      runDataMigration: runDataMigrationMock,
+      checkMigrationNeeded: jest.fn().mockResolvedValue({ success: true, needsMigration: false }),
+    }));
+
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId,
+      initializeFirebase: jest.fn(),
+      CONSTANTS: { USER_ID: 'default_user' },
+    }));
+    jest.doMock('../js/services/authService.js', () => ({
+      restoreAuthSession: jest.fn().mockResolvedValue(null),
+      startGoogleAuth: jest.fn(),
+      revokeGoogleAuth: jest.fn(),
+      getValidToken: jest.fn().mockResolvedValue(null),
+    }));
+    jest.doMock('../js/constants.js', () => ({
+      USER_ID: 'default_user',
+    }));
+
+    const bg = await import('../background.js');
+    const runtimeHandler = global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const sendResponse = jest.fn();
+    runtimeHandler({ action: 'migrate_channel', channelId: 'ch1', dryRun: true, options: { collections: ['scraps'] } }, {}, sendResponse);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1', { dryRun: true, targetPlatform: null, collections: ['scraps'], debug: false });
+  });
+
+  test('passes debug option through to runDataMigration', async () => {
+    const runDataMigrationMock = jest.fn().mockResolvedValue({ success: true, message: 'Dry-run OK', dryRunResult: { items: 2 } });
+    const getCurrentUserId = jest.fn().mockResolvedValue('user-123');
+
+    jest.doMock('../js/services/migrationService.js', () => ({
+      runDataMigration: runDataMigrationMock,
+      checkMigrationNeeded: jest.fn().mockResolvedValue({ success: true, needsMigration: false }),
+    }));
+
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId,
+      initializeFirebase: jest.fn(),
+      CONSTANTS: { USER_ID: 'default_user' },
+    }));
+    jest.doMock('../js/services/authService.js', () => ({
+      restoreAuthSession: jest.fn().mockResolvedValue(null),
+      startGoogleAuth: jest.fn(),
+      revokeGoogleAuth: jest.fn(),
+      getValidToken: jest.fn().mockResolvedValue(null),
+    }));
+    jest.doMock('../js/constants.js', () => ({
+      USER_ID: 'default_user',
+    }));
+
+    const bg = await import('../background.js');
+    const runtimeHandler = global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const sendResponse = jest.fn();
+    runtimeHandler({ action: 'migrate_channel', channelId: 'ch1', dryRun: true, options: { collections: ['scraps'], debug: true } }, {}, sendResponse);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(runDataMigrationMock).toHaveBeenCalledWith('user-123', 'ch1', { dryRun: true, targetPlatform: null, collections: ['scraps'], debug: true });
   });
 });
