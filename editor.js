@@ -99,13 +99,39 @@ async function initTipTap(initialHtml = '') {
                     return { style: `width: ${attributes.width}` };
                   },
                 },
+                textAlign: {
+                  default: 'center',
+                  renderHTML: attributes => {
+                    if (!attributes.textAlign) return {};
+                    return { 'data-align': attributes.textAlign };
+                  },
+                }
+              };
+            },
+            addKeyboardShortcuts() {
+              return {
+                'Alt-Shift-l': () => this.editor.commands.updateAttributes('image', { textAlign: 'left' }),
+                'Alt-Shift-e': () => this.editor.commands.updateAttributes('image', { textAlign: 'center' }),
+                'Alt-Shift-r': () => this.editor.commands.updateAttributes('image', { textAlign: 'right' }),
               };
             },
             addNodeView() {
               return ({ node, editor, getPos }) => {
                 const { view } = editor;
+                
+                // Outer container for alignment
                 const container = document.createElement('div');
-                container.classList.add('image-resizer');
+                container.classList.add('image-resizer-container');
+                container.style.display = 'flex';
+                
+                // Inner wrapper for resizing context
+                const wrapper = document.createElement('div');
+                wrapper.classList.add('image-resizer'); // Keep class for CSS hooks
+                wrapper.style.position = 'relative';
+                wrapper.style.display = 'inline-block';
+                wrapper.style.lineHeight = '0';
+                
+                container.appendChild(wrapper);
                 
                 const img = document.createElement('img');
                 img.src = node.attrs.src;
@@ -113,17 +139,52 @@ async function initTipTap(initialHtml = '') {
                 if (node.attrs.title) img.title = node.attrs.title;
                 if (node.attrs.width) img.style.width = node.attrs.width;
                 
-                container.appendChild(img);
+                wrapper.appendChild(img);
                 
+                // Alignment Actions
+                const actions = document.createElement('div');
+                actions.classList.add('image-actions');
+                
+                const createBtn = (align, path) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.title = `Align ${align}`;
+                    btn.innerHTML = `<svg viewBox="0 0 24 24">${path}</svg>`;
+                    
+                    btn.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (typeof getPos === 'function') {
+                            const pos = getPos();
+                            if (pos !== undefined) {
+                                view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, {
+                                    ...node.attrs,
+                                    textAlign: align
+                                }));
+                            }
+                        }
+                    });
+                    return btn;
+                };
+                
+                const leftBtn = createBtn('left', '<path d="M15 15H3v2h12v-2zm0-8H3v2h12V7zM3 13h18v-2H3v2zm0 8h18v-2H3v2zM3 3v2h18V3H3z" fill="currentColor"/>');
+                const centerBtn = createBtn('center', '<path d="M7 15v2h10v-2H7zm-4 6h18v-2H3v2zm0-8h18v-2H3v2zm4-6v2h10V7H7zM3 3v2h18V3H3z" fill="currentColor"/>');
+                const rightBtn = createBtn('right', '<path d="M3 21h18v-2H3v2zm6-4h12v-2H9v2zm-6-4h18v-2H3v2zm6-4h12V7H9v2zM3 3v2h18V3H3z" fill="currentColor"/>');
+                
+                actions.appendChild(leftBtn);
+                actions.appendChild(centerBtn);
+                actions.appendChild(rightBtn);
+                wrapper.appendChild(actions);
+
                 // Left Handle
                 const handleLeft = document.createElement('div');
                 handleLeft.classList.add('resize-handle', 'left');
-                container.appendChild(handleLeft);
+                wrapper.appendChild(handleLeft);
 
                 // Right Handle
                 const handleRight = document.createElement('div');
                 handleRight.classList.add('resize-handle', 'right');
-                container.appendChild(handleRight);
+                wrapper.appendChild(handleRight);
                 
                 let startX, startWidth;
                 let activeHandle = null; // 'left' or 'right'
@@ -175,21 +236,39 @@ async function initTipTap(initialHtml = '') {
                 handleLeft.addEventListener('mousedown', (e) => startDrag(e, 'left'));
                 handleRight.addEventListener('mousedown', (e) => startDrag(e, 'right'));
                 
+                const updateState = (n) => {
+                    // Update Image
+                    img.src = n.attrs.src;
+                    img.alt = n.attrs.alt;
+                    if (n.attrs.title) img.title = n.attrs.title;
+                    if (n.attrs.width) img.style.width = n.attrs.width;
+                    
+                    // Update Alignment
+                    const align = n.attrs.textAlign || 'center';
+                    if (align === 'left') container.style.justifyContent = 'flex-start';
+                    else if (align === 'right') container.style.justifyContent = 'flex-end';
+                    else container.style.justifyContent = 'center';
+                    
+                    // Update Buttons
+                    leftBtn.classList.toggle('active', align === 'left');
+                    centerBtn.classList.toggle('active', align === 'center');
+                    rightBtn.classList.toggle('active', align === 'right');
+                };
+                
+                updateState(node);
+                
                 return {
                   dom: container,
                   update: (updatedNode) => {
                     if (updatedNode.type.name !== 'image') return false;
-                    img.src = updatedNode.attrs.src;
-                    img.alt = updatedNode.attrs.alt;
-                    if (updatedNode.attrs.title) img.title = updatedNode.attrs.title;
-                    if (updatedNode.attrs.width) img.style.width = updatedNode.attrs.width;
+                    updateState(updatedNode);
                     return true;
                   },
                   selectNode: () => {
-                      container.classList.add('ProseMirror-selectednode');
+                      wrapper.classList.add('ProseMirror-selectednode');
                   },
                   deselectNode: () => {
-                      container.classList.remove('ProseMirror-selectednode');
+                      wrapper.classList.remove('ProseMirror-selectednode');
                   }
                 };
               };
