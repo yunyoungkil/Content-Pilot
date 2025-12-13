@@ -3,6 +3,11 @@ import { jest } from '@jest/globals';
 describe('Workspace action buttons dynamic update', () => {
   beforeEach(() => {
     jest.resetModules();
+    // reset potentially leaked global TUI/workspace flags
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_tui_shadow_listener_attached = false;
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
   });
 

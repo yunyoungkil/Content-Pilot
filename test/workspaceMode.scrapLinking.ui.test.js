@@ -3,6 +3,12 @@ import { jest } from '@jest/globals';
 describe('Workspace scrap drag/drop linking', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
+    jest.resetAllMocks();
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_tui_shadow_listener_attached = false;
     // ensure callback-style chrome.storage works
     chrome.storage.local.get.mockImplementation((key, cb) => {
       if (typeof cb === 'function') cb({ activeChannelId: 'channel-1' });

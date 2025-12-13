@@ -3,6 +3,12 @@ import { jest } from '@jest/globals';
 describe('Workspace UI - publish info after draft generation', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
+    jest.resetAllMocks();
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_tui_shadow_listener_attached = false;
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
     global.testHelpers.mockChromeRuntime();
   });

@@ -345,12 +345,23 @@ global.testHelpers = {
 
 // 테스트 전후 정리
 beforeEach(() => {
+  // Note: Do not call jest.resetModules() here; individual tests should
+  // reset modules when required to avoid breaking shared mocks.
   // Clear mocks and timers between tests so mock calls and
   // timers are reset. Also ensure a safe default chrome.runtime
   // sendMessage implementation so UI tests have a consistent
   // base implementation to rely on.
   jest.clearAllMocks();
   jest.clearAllTimers();
+  // Reset any global TUI/workspace flags to avoid cross-test leakage
+  try {
+    window.__cp_tui_global_listener_attached = false;
+    window.__cp_tui_listener_attached = false;
+    window.__cp_tui_shadow_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+  } catch (e) {
+    // ignore in non-browser environments
+  }
   // NOTE: keep mock implementations in individual tests
   // (tests can call testHelpers.mockChromeRuntime() when
   // they need runtime listener behavior).

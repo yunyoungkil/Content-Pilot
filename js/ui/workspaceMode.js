@@ -755,7 +755,9 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
     if (activeWorkspace && window.__cp_workspace_idea_data?.id === ideaData.id) {
       targetWorkspace = activeWorkspace;
     } else {
-      const candidate = document.querySelector(`.linked-scraps-list[data-idea-id="${ideaData.id}"]`);
+      const candidate = document.querySelector(
+        `.linked-scraps-list[data-idea-id="${ideaData.id}"]`
+      );
       if (candidate) targetWorkspace = candidate.closest('.workspace-container');
     }
 
@@ -1320,9 +1322,7 @@ export function showScrapDetailModal(scrapData, container = null) {
             const rootNode =
               container && container.getRootNode ? container.getRootNode() : document;
             const editorIframe =
-              (rootNode &&
-                rootNode.querySelector &&
-                rootNode.querySelector('#editor-iframe')) ||
+              (rootNode && rootNode.querySelector && rootNode.querySelector('#editor-iframe')) ||
               document.querySelector('#editor-iframe');
             if (editorIframe && editorIframe.contentWindow) {
               console.log('[Workspace] modal insert -> editorIframe found:', !!editorIframe);
@@ -2043,10 +2043,12 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       }
     } else {
       // no draft: always remove regenerate / delete buttons to avoid stale buttons
-      ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach((id) => {
-        const el = buttonContainer.querySelector(`#${id}`);
-        if (el && el.parentNode) el.remove();
-      });
+      ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
+        (id) => {
+          const el = buttonContainer.querySelector(`#${id}`);
+          if (el && el.parentNode) el.remove();
+        }
+      );
 
       // Ensure generate button exists
       if (!hasGenerateBtn) {
@@ -2057,8 +2059,6 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
         buttonContainer.appendChild(genBtn);
       }
     }
-
-
   } catch (e) {
     // non-fatal
     console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
@@ -2647,7 +2647,7 @@ export function renderWorkspace(container, ideaData) {
             console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
             const editorIframe = workspaceContainer.querySelector('#editor-iframe');
 
-            const tuiEditorMessageHandler = function (e ) {
+            const tuiEditorMessageHandler = function (e) {
               if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
                 console.log('[Workspace] TUI 에디터 편집 완료, 결과 처리 중...');
 
