@@ -42,7 +42,12 @@ describe('ChannelMode - migration modal dry-run action', () => {
               channel_content: { count: 1 },
             },
             distribution: {
-              // intentionally empty to simulate missing distribution entries
+              channel_content: { 'blog-1': 1 },
+              scraps: { 'ch-abc': 1 },
+              ideas: {},
+              kanban_inprogress: {},
+              kanban_done: {},
+              kanban: {},
             },
             overallDistribution: {
               channel_content: { 'blog-1': 1 },
@@ -94,7 +99,7 @@ describe('ChannelMode - migration modal dry-run action', () => {
     expect(resultEl.textContent).toContain('총 2개 항목');
     // header/counters removed - ensure distribution lines are present instead
     // distribution checks: only overall distribution entries are shown (non-null)
-    expect(resultEl.textContent).toContain('실제 채널콘텐츠 분포:');
+    expect(resultEl.textContent).toContain('대상 채널콘텐츠 분포:');
     expect(resultEl.textContent).toContain('blog-1: 1');
     // Verify selected collections were sent (all selected by default)
     expect(capturedMigrateMsg).toBeTruthy();
@@ -103,7 +108,7 @@ describe('ChannelMode - migration modal dry-run action', () => {
     expect(capturedMigrateMsg.options.debug).toBe(true);
     // sample removed in new UI; no truncation expected
     // Distribution lines should include each collection label with counts and channel ID breakdown
-    expect(resultEl.textContent).toContain('실제 스크랩 분포:');
+    expect(resultEl.textContent).toContain('대상 스크랩 분포:');
     expect(resultEl.textContent).toContain('ch-abc: 1');
   });
 
@@ -139,8 +144,9 @@ describe('ChannelMode - migration modal dry-run action', () => {
     const dryRunCheckbox = modal.querySelector('#migration-dryrun');
     dryRunCheckbox.checked = true;
 
-    // uncheck kanban and channel_content
-    modal.querySelector('input[value="kanban"]').checked = false;
+    // uncheck kanban statuses and channel_content
+    modal.querySelector('input[value="kanban_inprogress"]').checked = false;
+    modal.querySelector('input[value="kanban_done"]').checked = false;
     modal.querySelector('input[value="ideas"]').checked = false;
     modal.querySelector('input[value="channel_content"]').checked = false;
 

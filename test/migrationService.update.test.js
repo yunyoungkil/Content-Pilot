@@ -38,14 +38,10 @@ describe('Migration Service - update (real run)', () => {
 
     const result = await runDataMigration(userId, 'chX', { dryRun: false });
     expect(result.success).toBe(true);
-    // verify DB updates were called for all three types
+    // verify DB updates were called for kanban (scraps/channel_content require host-match)
     expect(updateMock).toHaveBeenCalled();
     const calls = updateMock.mock.calls.map((c) => c[0]);
-    expect(calls).toEqual(expect.arrayContaining([
-      `kanban/${userId}/in-progress/card-1`,
-      `scraps/${userId}/scrap-1`,
-      `channel_content/${userId}/ct-1`
-    ]));
+    expect(calls).toEqual(expect.arrayContaining([`kanban/${userId}/in-progress/card-1`]));
   });
 
   test('updates only the selected collections when provided', async () => {
@@ -79,11 +75,8 @@ describe('Migration Service - update (real run)', () => {
 
     const result = await runDataMigration(userId, 'chX', { dryRun: false, collections: ['scraps'] });
     expect(result.success).toBe(true);
-    // update should only be called for scraps
-    expect(updateMock).toHaveBeenCalled();
-    const calls = updateMock.mock.calls.map((c) => c[0]);
-    expect(calls).toEqual(expect.arrayContaining([`scraps/${userId}/scrap-1`]));
-    expect(calls).not.toEqual(expect.arrayContaining([`kanban/${userId}/in-progress/card-1`, `channel_content/${userId}/ct-1`]));
+    // update should not be called when only scraps collection is selected (host matching required)
+    expect(updateMock).not.toHaveBeenCalled();
   });
 
   test('updates items when URL host matches target channel', async () => {
@@ -151,13 +144,9 @@ describe('Migration Service - update (real run)', () => {
 
     const result = await runDataMigration(userId, 'chX', { dryRun: false, collections: [] });
     expect(result.success).toBe(true);
-    // update should be called for all three
+    // update should be called for kanban only (scraps/channel_content require host-match)
     expect(updateMock).toHaveBeenCalled();
     const calls = updateMock.mock.calls.map((c) => c[0]);
-    expect(calls).toEqual(expect.arrayContaining([
-      `kanban/${userId}/in-progress/card-1`,
-      `scraps/${userId}/scrap-1`,
-      `channel_content/${userId}/ct-1`
-    ]));
+    expect(calls).toEqual(expect.arrayContaining([`kanban/${userId}/in-progress/card-1`]));
   });
 });

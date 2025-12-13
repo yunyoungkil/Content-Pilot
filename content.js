@@ -423,8 +423,8 @@ if (window.self === window.top) {
         // TUI 에디터에서 편집 완료 시 처리
         const sourceInfo = event.data.source || "editor";
         const editorIframe =
-          workspaceContainer?.querySelector("#quill-editor-iframe") ||
-          host?.shadowRoot?.querySelector("#quill-editor-iframe");
+          workspaceContainer?.querySelector("#editor-iframe") ||
+          host?.shadowRoot?.querySelector("#editor-iframe");
 
         const tuiEditorMessageHandler = function (e) {
           if (e.data?.action === "tui-editor-result" && e.data.dataUrl) {
@@ -734,8 +734,8 @@ const globalContentMessageListener = (event) => {
       // TUI 에디터에서 편집 완료 시 처리
       const sourceInfo = event.data.source || "editor";
       const editorIframe =
-        workspaceContainer?.querySelector("#quill-editor-iframe") ||
-        host?.shadowRoot?.querySelector("#quill-editor-iframe");
+        workspaceContainer?.querySelector("#editor-iframe") ||
+        host?.shadowRoot?.querySelector("#editor-iframe");
 
       const tuiEditorMessageHandler = function (e) {
         if (e.data?.action === "tui-editor-result" && e.data.dataUrl) {

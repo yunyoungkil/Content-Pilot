@@ -69,7 +69,7 @@ describe('Workspace scrap detail insert image', () => {
     expect(scrapItem).toBeTruthy();
 
     // now get the iframe created by renderWorkspace, and mock its contentWindow.postMessage
-    iframe = container.querySelector('#quill-editor-iframe');
+    iframe = container.querySelector('#editor-iframe');
     if (iframe && iframe.contentWindow) {
       iframe.contentWindow.postMessage = jest.fn();
     } else if (iframe) {

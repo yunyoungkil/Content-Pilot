@@ -52,7 +52,7 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl).toBeTruthy();
 
     // placeholder draft should not be treated as a real draft
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 120));
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });

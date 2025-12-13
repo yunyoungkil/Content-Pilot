@@ -1912,7 +1912,7 @@ async function loadLinks(container) {
             return null;
           };
 
-          const quillIframe = findIframeInRoots('#quill-editor-iframe');
+          const quillIframe = findIframeInRoots('#editor-iframe');
           if (quillIframe && quillIframe.contentWindow) tryIframes.push(quillIframe.contentWindow);
           const tuiIframe = findIframeInRoots('#tui-editor-iframe');
           if (tuiIframe && tuiIframe.contentWindow) tryIframes.push(tuiIframe.contentWindow);

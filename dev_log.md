@@ -1,7 +1,7 @@
 # Content Pilot Development Log
 
 ## 프로젝트 개요
-Content Pilot은 웹 콘텐츠 큐레이션을 위한 Chrome 확장 프로그램입니다. Manifest V3 기반으로 구축되어 Alt 키 토글 하이라이터, 원클릭 스크랩, Firebase 실시간 동기화, iframe 기반 Quill 에디터, 워크스페이스 기반 콘텐츠 관리 기능을 제공합니다.
+Content Pilot은 웹 콘텐츠 큐레이션을 위한 Chrome 확장 프로그램입니다. Manifest V3 기반으로 구축되어 Alt 키 토글 하이라이터, 원클릭 스크랩, Firebase 실시간 동기화, iframe 기반 TipTap 에디터, 워크스페이스 기반 콘텐츠 관리 기능을 제공합니다.
 
 ## 개발 지침 설정 (2025년 11월 27일)
 

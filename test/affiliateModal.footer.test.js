@@ -121,7 +121,7 @@ describe('affiliate modal footer layout', () => {
     
       // insert to editor tries to postMessage to iframe; create a fake iframe
       const editorIframe = document.createElement('iframe');
-      editorIframe.id = 'quill-editor-iframe';
+      editorIframe.id = 'editor-iframe';
       document.body.appendChild(editorIframe);
       // allow the DOM to settle and any observers to update
       await new Promise((r) => setTimeout(r, 10));

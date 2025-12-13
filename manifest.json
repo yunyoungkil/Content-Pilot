@@ -64,8 +64,7 @@
         "css/affiliate-modal.css",
         "editor.html",
         "editor.js",
-        "lib/quill.js",
-        "lib/quill.snow.css",
+        
         "lib/tui-image-editor.min.js",
         "lib/tui-image-editor.min.css",
         "lib/fabric.min.js",
@@ -74,9 +73,7 @@
         "lib/tui-code-snippet.js",
         "tui-editor.html",
         "tui-editor.js",
-        "dist/*.bundle.js",
-        "dist/276-*.bundle.js",
-        "dist/997-*.bundle.js"
+        "dist/*.bundle.js"
       ],
       "matches": ["<all_urls>"]
     }

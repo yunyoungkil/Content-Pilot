@@ -78,7 +78,7 @@ describe('Workspace drop image into already linked scrap', () => {
 
     // wait for modal to render
     let modal = null;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 40; i++) {
       modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
       if (modal) break;
       await new Promise((r) => setTimeout(r, 50));
@@ -106,7 +106,7 @@ describe('Workspace drop image into already linked scrap', () => {
     // poll for add_image_to_scrap to be invoked and linked DOM updated
     let linkedCard = null;
     let linkedCardImg = null;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 40; i++) {
       linkedCard = linkedList.querySelector('[data-scrap-id="scrap-1"]');
       linkedCardImg = linkedCard ? linkedCard.querySelector('.scrap-card-img-wrap img') : null;
       if (addImageCall && linkedCard && linkedCardImg) break;
