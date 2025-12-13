@@ -55,11 +55,19 @@ async function initTipTap(initialHtml = '') {
 
   _initPromise = (async () => {
     try {
-      const [{ Editor }, StarterKitModule, ImageModule, LinkModule] = await Promise.all([
+      const [{ Editor }, StarterKitModule, ImageModule, LinkModule, TaskListModule, TaskItemModule, UnderlineModule, TextAlignModule, PlaceholderModule, HighlightModule, TextStyleModule, ColorModule] = await Promise.all([
         import(/* webpackChunkName: "tiptap-core" */ '@tiptap/core'),
         import(/* webpackChunkName: "tiptap-starter" */ '@tiptap/starter-kit'),
         import(/* webpackChunkName: "tiptap-image" */ '@tiptap/extension-image'),
         import(/* webpackChunkName: "tiptap-link" */ '@tiptap/extension-link'),
+        import(/* webpackChunkName: "tiptap-task-list" */ '@tiptap/extension-task-list'),
+        import(/* webpackChunkName: "tiptap-task-item" */ '@tiptap/extension-task-item'),
+        import(/* webpackChunkName: "tiptap-underline" */ '@tiptap/extension-underline'),
+        import(/* webpackChunkName: "tiptap-text-align" */ '@tiptap/extension-text-align'),
+        import(/* webpackChunkName: "tiptap-placeholder" */ '@tiptap/extension-placeholder'),
+        import(/* webpackChunkName: "tiptap-highlight" */ '@tiptap/extension-highlight'),
+        import(/* webpackChunkName: "tiptap-text-style" */ '@tiptap/extension-text-style'),
+        import(/* webpackChunkName: "tiptap-color" */ '@tiptap/extension-color'),
       ]);
       // ... (rest of initialization)
       // Normalize import variations (ESM/CJS interop). Some build outputs wrap
@@ -81,6 +89,14 @@ async function initTipTap(initialHtml = '') {
       const StarterKit = normalize(StarterKitModule, 'StarterKit');
       const Image = normalize(ImageModule, 'Image');
       const Link = normalize(LinkModule, 'Link');
+      const TaskList = normalize(TaskListModule, 'TaskList');
+      const TaskItem = normalize(TaskItemModule, 'TaskItem');
+      const Underline = normalize(UnderlineModule, 'Underline');
+      const TextAlign = normalize(TextAlignModule, 'TextAlign');
+      const Placeholder = normalize(PlaceholderModule, 'Placeholder');
+      const Highlight = normalize(HighlightModule, 'Highlight');
+      const TextStyle = normalize(TextStyleModule, 'TextStyle');
+      const Color = normalize(ColorModule, 'Color');
 
       // Custom Image Extension with Resize
       let CustomImage = null;
@@ -309,6 +325,14 @@ async function initTipTap(initialHtml = '') {
           ...(typeof StarterKit === 'function' ? [StarterKit()] : StarterKit ? [StarterKit] : []),
           ...(CustomImage ? [CustomImage.configure({ inline: false })] : Image ? [Image.configure({ inline: false })] : []),
           ...(Link && typeof Link.configure === 'function' ? [Link.configure({ openOnClick: true })] : Link ? [Link] : []),
+          ...(TaskList ? [TaskList] : []),
+          ...(TaskItem ? [TaskItem.configure({ nested: true })] : []),
+          ...(Underline ? [Underline] : []),
+          ...(TextAlign ? [TextAlign.configure({ types: ['heading', 'paragraph', 'image'] })] : []),
+          ...(Placeholder ? [Placeholder.configure({ placeholder: 'Write something...' })] : []),
+          ...(Highlight ? [Highlight.configure({ multicolor: true })] : []),
+          ...(TextStyle ? [TextStyle] : []),
+          ...(Color ? [Color] : []),
           // Table extension intentionally not included initially (lazy loaded)
         ],
         content: initialHtml || '<p></p>',
@@ -328,129 +352,279 @@ async function initTipTap(initialHtml = '') {
       const loadingDiv = Array.from(container.children).find(c => c.textContent === 'Loading Editor...');
       if (loadingDiv) container.removeChild(loadingDiv);
 
-      // Create a simple TipTap toolbar for parity with Quill
+      // Bind TipTap toolbar
       try {
-        const toolbarEl = document.createElement('div');
-        toolbarEl.id = 'tiptap-toolbar';
-        // Styles are now in editor.html CSS
-
-        const makeBtn = (text, title, onClick) => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.textContent = text;
-          b.title = title;
-          // Styles are now in editor.html CSS
-          b.addEventListener('click', onClick);
-          return b;
-        };
-        toolbarEl.appendChild(makeBtn('B', '굵게 (Ctrl+B)', () => tiptapEditor.chain().focus().toggleBold().run()));
-        toolbarEl.appendChild(makeBtn('I', '기울임 (Ctrl+I)', () => tiptapEditor.chain().focus().toggleItalic().run()));
-        toolbarEl.appendChild(makeBtn('H2', 'Heading 2', () => tiptapEditor.chain().focus().setNode('heading', { level: 2 }).run()));
-        toolbarEl.appendChild(makeBtn('H3', 'Heading 3', () => tiptapEditor.chain().focus().setNode('heading', { level: 3 }).run()));
-        toolbarEl.appendChild(makeBtn('UL', 'Bullet list', () => tiptapEditor.chain().focus().toggleBulletList().run()));
-        toolbarEl.appendChild(makeBtn('OL', 'Numbered list', () => tiptapEditor.chain().focus().toggleOrderedList().run()));
-        toolbarEl.appendChild(makeBtn('Quote', 'Blockquote', () => tiptapEditor.chain().focus().toggleBlockquote().run()));
-        toolbarEl.appendChild(makeBtn('Code', 'Code block', () => tiptapEditor.chain().focus().toggleCodeBlock().run()));
-        toolbarEl.appendChild(makeBtn('Undo', 'Undo', () => tiptapEditor.chain().focus().undo().run()));
-        toolbarEl.appendChild(makeBtn('Redo', 'Redo', () => tiptapEditor.chain().focus().redo().run()));
-        toolbarEl.appendChild(makeBtn('Left', 'Align left', () => {
-          try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'left' }).run(); } catch (e) {}
-        }));
-        toolbarEl.appendChild(makeBtn('Center', 'Align center', () => {
-          try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'center' }).run(); } catch (e) {}
-        }));
-        toolbarEl.appendChild(makeBtn('Right', 'Align right', () => {
-          try { tiptapEditor.chain().focus().setNode('paragraph', { textAlign: 'right' }).run(); } catch (e) {}
-        }));
-        // Color picker
-        const colorPicker = makeBtn('Color', 'Text color', () => {});
-        const colorInput = document.createElement('input');
-        colorInput.type = 'color';
-        // Styles in CSS
-        colorInput.addEventListener('input', (ev) => {
-          const value = ev.target.value;
-          try { tiptapEditor.chain().focus().setMark('textStyle', { color: value }).run(); } catch (e) {}
-        });
-        colorPicker.appendChild(colorInput);
-        toolbarEl.appendChild(colorPicker);
-        // Font size increase/decrease
-        toolbarEl.appendChild(makeBtn('A-', 'Font smaller', () => {
-          try { tiptapEditor.chain().focus().setMark('textStyle', { fontSize: '12px' }).run(); } catch (e) {}
-        }));
-        toolbarEl.appendChild(makeBtn('A+', 'Font larger', () => {
-          try { tiptapEditor.chain().focus().setMark('textStyle', { fontSize: '18px' }).run(); } catch (e) {}
-        }));
-
-        // Insert Image button + file input
-        const insertImageBtn = makeBtn('Img', 'Insert image', async () => {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = 'image/*';
-          input.onchange = async (e) => {
-            const file = e.target.files && e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async (ev) => {
-              const dataUrl = ev.target.result;
-              try {
-                const resized = await window.chrome?.runtime?.sendMessage?.({ action: 'resize_image_in_offscreen', data: { imageDataUrl: dataUrl, maxWidth: 1920 } });
-                const dataToUpload = resized && resized.success ? resized.dataUrl : dataUrl;
-                const filename = `editor-image-${Date.now()}.png`;
-                const uploadResp = await window.chrome?.runtime?.sendMessage?.({ action: 'upload_thumbnail_to_storage', data: { dataUrl: dataToUpload, filename } });
-                const src = uploadResp && uploadResp.success && uploadResp.url ? uploadResp.url : dataUrl;
-                tiptapEditor.chain().focus().setImage({ src }).run();
-              } catch (err) {
-                tiptapEditor.chain().focus().setImage({ src: dataUrl }).run();
-              }
+        const toolbar = document.getElementById('tiptap-toolbar');
+        if (toolbar) {
+            const bind = (id, callback) => {
+                const btn = document.getElementById(id);
+                if (btn) btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    callback();
+                });
             };
-            reader.readAsDataURL(file);
-          };
-          input.click();
-        });
-        toolbarEl.appendChild(insertImageBtn);
 
-        toolbarEl.appendChild(makeBtn('Table', 'Insert table 3x3', async () => {
-          try {
-            // Lazy load TipTap table extensions and reinitialize editor if needed
-            if (!window.__cp_tiptap_table_loaded) {
-              const [TableModule, TableRowModule, TableCellModule, TableHeaderModule] = await Promise.all([
-                import('@tiptap/extension-table'),
-                import('@tiptap/extension-table-row'),
-                import('@tiptap/extension-table-cell'),
-                import('@tiptap/extension-table-header'),
-              ]);
-              Table = normalize(TableModule, 'Table');
-              TableRow = normalize(TableRowModule, 'TableRow');
-              TableCell = normalize(TableCellModule, 'TableCell');
-              TableHeader = normalize(TableHeaderModule, 'TableHeader');
-              const currentHtml = tiptapEditor.getHTML();
-              try { tiptapEditor.destroy(); } catch (e) {}
-              tiptapEditor = new Editor({
-                element: container,
-                extensions: [
-                  ...(typeof StarterKit === 'function' ? [StarterKit()] : StarterKit ? [StarterKit] : []),
-                  ...(Image && typeof Image.configure === 'function' ? [Image.configure({ inline: false })] : Image ? [Image] : []),
-                  ...(Link && typeof Link.configure === 'function' ? [Link.configure({ openOnClick: true })] : Link ? [Link] : []),
-                  ...(Table && typeof Table.configure === 'function' ? [Table.configure({ resizable: true })] : Table ? [Table] : []),
-                  ...(typeof TableRow === 'function' ? [TableRow()] : TableRow ? [TableRow] : []),
-                  ...(typeof TableHeader === 'function' ? [TableHeader()] : TableHeader ? [TableHeader] : []),
-                  ...(typeof TableCell === 'function' ? [TableCell()] : TableCell ? [TableCell] : []),
-                ],
-                content: currentHtml || '<p></p>',
-                editorProps: { attributes: { class: 'tiptap-editor' } },
-                onUpdate: ({ editor }) => {
-                  window.parent.postMessage({ action: 'content-changed', data: { html: editor.getHTML(), text: editor.getText() } }, '*');
-                },
-              });
-              window.__cp_tiptap_table_loaded = true;
+            bind('undo', () => tiptapEditor.chain().focus().undo().run());
+            bind('redo', () => tiptapEditor.chain().focus().redo().run());
+            bind('bold', () => tiptapEditor.chain().focus().toggleBold().run());
+            bind('italic', () => tiptapEditor.chain().focus().toggleItalic().run());
+            bind('underline', () => tiptapEditor.chain().focus().toggleUnderline().run());
+            bind('strike', () => tiptapEditor.chain().focus().toggleStrike().run());
+            
+            // Highlight Popup Logic
+            const highlightBtn = document.getElementById('highlight');
+            const colorPopup = document.getElementById('color-popup');
+            if (highlightBtn && colorPopup) {
+                highlightBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const rect = highlightBtn.getBoundingClientRect();
+                    colorPopup.style.top = `${rect.bottom + 4}px`;
+                    colorPopup.style.left = `${rect.left}px`;
+                    colorPopup.classList.toggle('is-visible');
+                    document.getElementById('link-popup')?.classList.remove('is-visible');
+                });
+                
+                // Close popup when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!highlightBtn.contains(e.target) && !colorPopup.contains(e.target)) {
+                        colorPopup.classList.remove('is-visible');
+                    }
+                });
+
+                // Color options
+                colorPopup.querySelectorAll('.color-option').forEach(opt => {
+                    opt.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const color = opt.getAttribute('data-color');
+                        tiptapEditor.chain().focus().toggleHighlight({ color }).run();
+                        colorPopup.classList.remove('is-visible');
+                    });
+                });
+
+                // Remove highlight
+                document.getElementById('remove-highlight')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    tiptapEditor.chain().focus().unsetHighlight().run();
+                    colorPopup.classList.remove('is-visible');
+                });
             }
-            tiptapEditor.chain().focus().insertTable({ rows: 3, cols: 3 }).run();
-          } catch (err) {
-            console.error('[Editor] Table insert failed:', err);
-          }
-        }));
-        container.insertAdjacentElement('beforebegin', toolbarEl);
-      } catch (e) {}
+            
+            const listSelect = document.getElementById('list-select');
+            if (listSelect) {
+                listSelect.addEventListener('change', (e) => {
+                    const type = e.target.value;
+                    // Reset lists first if needed, or just toggle
+                    if (type === 'bullet') tiptapEditor.chain().focus().toggleBulletList().run();
+                    else if (type === 'ordered') tiptapEditor.chain().focus().toggleOrderedList().run();
+                    else if (type === 'task') tiptapEditor.chain().focus().toggleTaskList().run();
+                    
+                    // Reset select to default label if toggled off? 
+                    // Actually, toggle behavior might be tricky with a select. 
+                    // If I select "Bullet", it becomes bullet. If I select it again... select doesn't fire change if value is same.
+                    // So we should probably reset the select value to default after action, or handle it differently.
+                    // But for now, let's just run the command.
+                    // Better UX: If I select "Bullet", it turns into bullet list.
+                    // If I want to turn it off, I might need to select "Lists" (default) or toggle another one.
+                    // Let's make the default option selectable to clear lists?
+                    // Or just rely on the fact that toggling another list type switches it.
+                    // To toggle OFF, user might need to click the active button in a button group, but here we have a select.
+                    // Let's assume selecting the same type again isn't possible with standard select change event.
+                    // We can reset the value to '' after execution so user can select it again?
+                    // Let's try keeping the value as the active state.
+                });
+            }
+
+            bind('blockquote', () => tiptapEditor.chain().focus().toggleBlockquote().run());
+            bind('code-block', () => tiptapEditor.chain().focus().toggleCodeBlock().run());
+            bind('align-left', () => tiptapEditor.chain().focus().setTextAlign('left').run());
+            bind('align-center', () => tiptapEditor.chain().focus().setTextAlign('center').run());
+            bind('align-right', () => tiptapEditor.chain().focus().setTextAlign('right').run());
+            bind('align-justify', () => tiptapEditor.chain().focus().setTextAlign('justify').run());
+            
+            // Link Popup Logic
+            const linkBtn = document.getElementById('add-link');
+            const linkPopup = document.getElementById('link-popup');
+            const linkInput = document.getElementById('link-url-input');
+            
+            if (linkBtn && linkPopup && linkInput) {
+                linkBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    if (linkPopup.classList.contains('is-visible')) {
+                        linkPopup.classList.remove('is-visible');
+                        return;
+                    }
+
+                    const previousUrl = tiptapEditor.getAttributes('link').href;
+                    linkInput.value = previousUrl || '';
+                    
+                    const rect = linkBtn.getBoundingClientRect();
+                    linkPopup.style.top = `${rect.bottom + 4}px`;
+                    linkPopup.style.left = `${rect.left - 100}px`; // Shift left slightly
+                    linkPopup.classList.add('is-visible');
+                    document.getElementById('color-popup')?.classList.remove('is-visible');
+                    setTimeout(() => linkInput.focus(), 50);
+                });
+
+                const applyLink = () => {
+                    const url = linkInput.value;
+                    if (url === '') {
+                        tiptapEditor.chain().focus().extendMarkRange('link').unsetLink().run();
+                    } else {
+                        tiptapEditor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+                    }
+                    linkPopup.classList.remove('is-visible');
+                };
+
+                document.getElementById('apply-link')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    applyLink();
+                });
+
+                document.getElementById('remove-link')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    tiptapEditor.chain().focus().extendMarkRange('link').unsetLink().run();
+                    linkPopup.classList.remove('is-visible');
+                });
+
+                linkInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        applyLink();
+                    }
+                });
+
+                // Close popup when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!linkBtn.contains(e.target) && !linkPopup.contains(e.target)) {
+                        linkPopup.classList.remove('is-visible');
+                    }
+                });
+            }
+
+            // Image Upload Modal Logic
+            const imageBtn = document.getElementById('add-image');
+            const imageModal = document.getElementById('image-modal');
+            const dropZone = document.getElementById('drop-zone');
+            
+            if (imageBtn && imageModal && dropZone) {
+                imageBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    imageModal.classList.add('is-visible');
+                });
+
+                imageModal.addEventListener('click', (e) => {
+                    if (e.target === imageModal) {
+                        imageModal.classList.remove('is-visible');
+                    }
+                });
+
+                const handleImageUpload = async (file) => {
+                    if (!file || !file.type.startsWith('image/')) return;
+                    
+                    imageModal.classList.remove('is-visible');
+                    
+                    // Show loading placeholder or similar if needed
+                    // For now, just reuse the existing logic
+                    const reader = new FileReader();
+                    reader.onload = async (ev) => {
+                        const dataUrl = ev.target.result;
+                        try {
+                            const resized = await window.chrome?.runtime?.sendMessage?.({ action: 'resize_image_in_offscreen', data: { imageDataUrl: dataUrl, maxWidth: 1920 } });
+                            const dataToUpload = resized && resized.success ? resized.dataUrl : dataUrl;
+                            const filename = `editor-image-${Date.now()}.png`;
+                            const uploadResp = await window.chrome?.runtime?.sendMessage?.({ action: 'upload_thumbnail_to_storage', data: { dataUrl: dataToUpload, filename } });
+                            const src = uploadResp && uploadResp.success && uploadResp.url ? uploadResp.url : dataUrl;
+                            tiptapEditor.chain().focus().setImage({ src }).run();
+                        } catch (err) {
+                            tiptapEditor.chain().focus().setImage({ src: dataUrl }).run();
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                };
+
+                // Click to upload
+                dropZone.addEventListener('click', () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        handleImageUpload(file);
+                    };
+                    input.click();
+                });
+
+                // Drag and Drop
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('drag-over');
+                });
+
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('drag-over');
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('drag-over');
+                    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+                    handleImageUpload(file);
+                });
+            }
+
+            const headingSelect = document.getElementById('heading-select');
+            if (headingSelect) {
+                headingSelect.addEventListener('change', (e) => {
+                    const level = e.target.value;
+                    if (level === 'p') {
+                        tiptapEditor.chain().focus().setParagraph().run();
+                    } else {
+                        tiptapEditor.chain().focus().toggleHeading({ level: parseInt(level) }).run();
+                    }
+                });
+            }
+            
+            // Update toolbar state on selection update
+            tiptapEditor.on('selectionUpdate', ({ editor }) => {
+                const updateActive = (id, isActive) => {
+                    const btn = document.getElementById(id);
+                    if (btn) btn.classList.toggle('is-active', isActive);
+                };
+                
+                updateActive('bold', editor.isActive('bold'));
+                updateActive('italic', editor.isActive('italic'));
+                updateActive('underline', editor.isActive('underline'));
+                updateActive('strike', editor.isActive('strike'));
+                updateActive('highlight', editor.isActive('highlight'));
+                
+                if (listSelect) {
+                    if (editor.isActive('bulletList')) listSelect.value = 'bullet';
+                    else if (editor.isActive('orderedList')) listSelect.value = 'ordered';
+                    else if (editor.isActive('taskList')) listSelect.value = 'task';
+                    else listSelect.value = ''; // Reset to default "Lists" option
+                }
+
+                updateActive('blockquote', editor.isActive('blockquote'));
+                updateActive('code-block', editor.isActive('codeBlock'));
+                updateActive('align-left', editor.isActive({ textAlign: 'left' }));
+                updateActive('align-center', editor.isActive({ textAlign: 'center' }));
+                updateActive('align-right', editor.isActive({ textAlign: 'right' }));
+                updateActive('align-justify', editor.isActive({ textAlign: 'justify' }));
+                
+                if (headingSelect) {
+                    if (editor.isActive('heading', { level: 1 })) headingSelect.value = '1';
+                    else if (editor.isActive('heading', { level: 2 })) headingSelect.value = '2';
+                    else if (editor.isActive('heading', { level: 3 })) headingSelect.value = '3';
+                    else headingSelect.value = 'p';
+                }
+            });
+        }
+      } catch (e) {
+        console.error('Toolbar setup failed', e);
+      }
 
 
       // paste image handling — upload via background and replace
@@ -570,7 +744,9 @@ async function ensureTextStyleLoaded() {
 }
 // Quill shim: provide minimal API surface used elsewhere so legacy calls don't error
 const quillEditor = {
-  root: { innerHTML: () => (tiptapEditor ? tiptapEditor.getHTML() : '') },
+  root: { 
+    get innerHTML() { return tiptapEditor ? tiptapEditor.getHTML() : ''; } 
+  },
   getText: (index, length) => {
     if (!tiptapEditor) return '';
     if (typeof index === 'undefined') return tiptapEditor.getText();

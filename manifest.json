@@ -73,9 +73,7 @@
         "lib/tui-code-snippet.js",
         "tui-editor.html",
         "tui-editor.js",
-        "dist/*.bundle.js",
-        "dist/276-*.bundle.js",
-        "dist/997-*.bundle.js"
+        "dist/*.bundle.js"
       ],
       "matches": ["<all_urls>"]
     }
