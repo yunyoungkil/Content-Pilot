@@ -30,7 +30,7 @@ module.exports = {
       chunks: (chunk) => {
         // content script와 background script는 코드 분할하지 않음 (동적 로딩 제한)
         return (
-          chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen'
+          chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor'
         );
       },
       cacheGroups: {
@@ -39,7 +39,7 @@ module.exports = {
           test: /[\\/]js[\\/]ui[\\/]/,
           name: 'ui',
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 10,
         },
         // 서비스 관련 모듈들을 별도 청크로 분리 (content, background 제외)
@@ -47,7 +47,7 @@ module.exports = {
           test: /[\\/]js[\\/]services[\\/]/,
           name: 'services',
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 10,
         },
         // 코어 모듈들을 별도 청크로 분리 (content, background 제외)
@@ -55,7 +55,7 @@ module.exports = {
           test: /[\\/]js[\\/]core[\\/]/,
           name: 'core',
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 10,
         },
         // 유틸리티 모듈들을 별도 청크로 분리 (content, background 제외)
@@ -63,7 +63,7 @@ module.exports = {
           test: /[\\/]js[\\/]utils\.js$/,
           name: 'utils',
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 10,
         },
         // node_modules의 큰 라이브러리들을 분리 (content, background 제외)
@@ -71,7 +71,7 @@ module.exports = {
           test: /[\\/]node_modules[\\/]/,
           name: 'vendor',
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 5,
         },
         // 기본 청크 분할 (나머지 공통 모듈들, content, background 제외)
@@ -79,7 +79,7 @@ module.exports = {
           name: 'common',
           minChunks: 2,
           chunks: (chunk) =>
-            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen',
+            chunk.name !== 'content' && chunk.name !== 'background' && chunk.name !== 'offscreen' && chunk.name !== 'editor',
           priority: 1,
         },
       },

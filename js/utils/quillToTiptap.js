@@ -3,42 +3,11 @@
 
 /**
  * Convert a Quill Editor instance or Quill Delta to HTML string.
- * For POC we prefer to call with the live Quill editor instance so
- * we can use the rendered HTML. If a Delta is passed, we create a
- * temporary Quill instance to render it.
+ * DEPRECATED: Quill has been removed. This function now returns an empty string.
  */
 export async function convertQuillDeltaToHtml(quillOrDelta) {
-  try {
-    // If this is a Quill instance, prefer its root.innerHTML
-    if (quillOrDelta && typeof quillOrDelta.root !== 'undefined') {
-      return quillOrDelta.root.innerHTML || '';
-    }
-
-    // If a delta object is passed, render it into a temporary element
-    if (quillOrDelta && quillOrDelta.ops) {
-      // Lazy load Quill to avoid bundling at top-level
-      // eslint-disable-next-line global-require
-      const Quill = window.Quill || require('quill');
-      const container = document.createElement('div');
-      container.style.display = 'none';
-      document.body.appendChild(container);
-      const temp = new Quill(container);
-      temp.setContents(quillOrDelta);
-      const html = container.querySelector('.ql-editor')
-        ? container.querySelector('.ql-editor').innerHTML
-        : container.innerHTML;
-      setTimeout(() => {
-        try {
-          document.body.removeChild(container);
-        } catch (e) {}
-      }, 0);
-      return html || '';
-    }
-
-    return '';
-  } catch (e) {
-    return '';
-  }
+  console.warn('convertQuillDeltaToHtml is deprecated and Quill is removed.');
+  return '';
 }
 
 export function convertQuillDeltaToPlainText(delta) {
@@ -65,7 +34,6 @@ export async function convertDeltaToTipTapJSON(delta) {
   for (const op of delta.ops) {
     if (typeof op.insert === 'string' && /<table\b|<tbody\b|<tr\b|<td\b|<th\b/i.test(op.insert)) {
       // Convert the delta to HTML and try mapping table structure to TipTap JSON
-      const { _convertHtmlTableToTipTapJSON } = await import('./quillToTiptap.js');
       // Prefer to parse the explicit op.insert HTML fragment rather than rendering a full delta
       const htmlFragment = op.insert;
       try {

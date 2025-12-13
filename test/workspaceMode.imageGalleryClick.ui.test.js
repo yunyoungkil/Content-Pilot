@@ -38,7 +38,7 @@ describe('Workspace image gallery click', () => {
 
     // create editor iframe so sendCommand will postMessage
     const iframe = document.createElement('iframe');
-    iframe.id = 'quill-editor-iframe';
+    iframe.id = 'editor-iframe';
     // jsdom exposes contentWindow as a read-only getter — override via defineProperty
     Object.defineProperty(iframe, 'contentWindow', {
       value: { postMessage: jest.fn() },

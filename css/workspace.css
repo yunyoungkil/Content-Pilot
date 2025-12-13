@@ -860,7 +860,7 @@
 }
 
 /* Quill 에디터 iframe 스타일 */
-#quill-editor-iframe {
+#editor-iframe {
   flex: 1 1 auto;
   height: 0;
   min-height: 0;

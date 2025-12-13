@@ -685,7 +685,7 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   // 초안 내용 가져오기 헬퍼 함수
   async function getDraftContent() {
     return new Promise((resolve) => {
-      const editorIframe = document.querySelector('#quill-editor-iframe');
+      const editorIframe = document.querySelector('#editor-iframe');
       if (!editorIframe || !editorIframe.contentWindow) {
         resolve('');
         return;
@@ -951,7 +951,7 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
     // 공통 콜백 함수들
     const onInsert = (dataUrl, altText) => {
-      const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+      const editorIframe = workspaceEl.querySelector('#editor-iframe');
       if (editorIframe && editorIframe.contentWindow) {
         editorIframe.contentWindow.postMessage(
           {
@@ -1322,8 +1322,8 @@ export function showScrapDetailModal(scrapData, container = null) {
             const editorIframe =
               (rootNode &&
                 rootNode.querySelector &&
-                rootNode.querySelector('#quill-editor-iframe')) ||
-              document.querySelector('#quill-editor-iframe');
+                rootNode.querySelector('#editor-iframe')) ||
+              document.querySelector('#editor-iframe');
             if (editorIframe && editorIframe.contentWindow) {
               console.log('[Workspace] modal insert -> editorIframe found:', !!editorIframe);
               console.log('[Workspace] modal insert -> posting insert-image to editor:', url);
@@ -1778,7 +1778,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           const currentIdeaData = window.__cp_workspace_idea_data || ideaData;
 
           // 에디터 내용 가져오기
-          const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+          const editorIframe = workspaceEl.querySelector('#editor-iframe');
           let editorHtml = '';
 
           if (editorIframe && editorIframe.contentWindow) {
@@ -2058,22 +2058,7 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       }
     }
 
-    // TipTap 전환 버튼 (항상 노출)
-    const hasSwitchEditorBtn = !!buttonContainer.querySelector('#switch-editor-btn');
-    if (!hasSwitchEditorBtn) {
-      const switchBtn = document.createElement('button');
-      switchBtn.id = 'switch-editor-btn';
-      switchBtn.style.cssText = 'margin-left:6px;';
-      switchBtn.textContent = 'TipTap';
-      switchBtn.title = 'Switch editor to TipTap (experimental)';
-      switchBtn.addEventListener('click', () => {
-        const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
-        if (editorIframe && editorIframe.contentWindow) {
-          editorIframe.contentWindow.postMessage({ action: 'switch-editor', data: { mode: 'tiptap' } }, '*');
-        }
-      });
-      buttonContainer.appendChild(switchBtn);
-    }
+
   } catch (e) {
     // non-fatal
     console.warn('[Workspace] updateWorkspaceActionButtons error updating DOM:', e);
@@ -2480,7 +2465,7 @@ export function renderWorkspace(container, ideaData) {
             }
         </div>
         <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-            <iframe id="quill-editor-iframe" src="${chrome.runtime.getURL(
+            <iframe id="editor-iframe" src="${chrome.runtime.getURL(
               'editor.html'
             )}" style="flex:1; width:100%; border:none;"></iframe>
             <div id="linked-scraps-section" style="height:150px; overflow-x:auto; overflow-y:hidden; border-top:1px solid #eee; padding:10px;">
@@ -2660,9 +2645,9 @@ export function renderWorkspace(container, ideaData) {
 
             const sourceInfo = event.data.source || 'editor';
             console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
-            const editorIframe = workspaceContainer.querySelector('#quill-editor-iframe');
+            const editorIframe = workspaceContainer.querySelector('#editor-iframe');
 
-            const tuiEditorMessageHandler = function (e) {
+            const tuiEditorMessageHandler = function (e ) {
               if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
                 console.log('[Workspace] TUI 에디터 편집 완료, 결과 처리 중...');
 
@@ -2870,7 +2855,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
   const tabBtns = workspaceEl.querySelectorAll('.resource-tab-btn');
   const allScrapsList = workspaceEl.querySelector('.all-scraps-list');
   const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
-  const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+  const editorIframe = workspaceEl.querySelector('#editor-iframe');
   const resourceLibrary = workspaceEl.querySelector('#resource-library-panel');
 
   console.log('[Workspace] editorIframe 찾기:', editorIframe);
@@ -2924,7 +2909,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                       const imageGalleryGrid = resourceLibrary.querySelector('.image-gallery-grid');
                       if (imageGalleryGrid) {
                         const sendCommand = (action, data = {}) => {
-                          const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+                          const editorIframe = workspaceEl.querySelector('#editor-iframe');
                           if (editorIframe && editorIframe.contentWindow) {
                             editorIframe.contentWindow.postMessage({ action, data }, '*');
                           }
@@ -3526,7 +3511,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               console.log('🎉 [Workspace] ========================================');
               console.log('📊 [Workspace] 결과 데이터 URL 길이:', e.data.dataUrl.length, 'bytes');
 
-              const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+              const editorIframe = workspaceEl.querySelector('#editor-iframe');
 
               // 썸네일 메이커에서 온 경우: 에디터에 삽입
               if (
@@ -3921,7 +3906,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
       if (!confirm('초안을 삭제하시겠습니까?')) return;
 
       // 에디터 즉시 초기화
-      const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+      const editorIframe = workspaceEl.querySelector('#editor-iframe');
       if (editorIframe && editorIframe.contentWindow) {
         let attemptCount = 0;
         const clearEditor = () => {
@@ -4752,7 +4737,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
           return;
         }
       }
-      const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+      const editorIframe = workspaceEl.querySelector('#editor-iframe');
       if (!editorIframe || !editorIframe.contentWindow) {
         resolve('');
         return;
@@ -5157,7 +5142,7 @@ export function updateWorkspaceScraps(container, ideaData) {
               if (imageGalleryGrid) {
                 // updateImageGalleryFromAllScraps 호출
                 const sendCommand = (action, data = {}) => {
-                  const editorIframe = workspaceEl.querySelector('#quill-editor-iframe');
+                  const editorIframe = workspaceEl.querySelector('#editor-iframe');
                   if (editorIframe && editorIframe.contentWindow) {
                     editorIframe.contentWindow.postMessage({ action, data }, '*');
                   }
@@ -5312,7 +5297,7 @@ export function updateWorkspaceScraps(container, ideaData) {
         // TUI 에디터에서 편집 완료 시 처리
         const sourceInfo = event.data.source || 'editor';
         console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
-        const editorIframe = workspaceContainer.querySelector('#quill-editor-iframe');
+        const editorIframe = workspaceContainer.querySelector('#editor-iframe');
 
         const tuiEditorMessageHandler = function (e) {
           if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
@@ -5538,7 +5523,7 @@ async function handleGenerateAction(btn, options) {
     if (host && host.shadowRoot) workspaceContainer = host.shadowRoot;
   }
   const editorIframe = workspaceContainer
-    ? workspaceContainer.querySelector('#quill-editor-iframe')
+    ? workspaceContainer.querySelector('#editor-iframe')
     : null;
 
   if (!ideaData) {

@@ -174,7 +174,7 @@ export function createAndShowPanel() {
 
             // TUI 에디터에서 편집 완료 시 처리
             const sourceInfo = event.data.source || 'editor';
-            const editorIframe = workspaceContainer?.querySelector('#quill-editor-iframe');
+            const editorIframe = workspaceContainer?.querySelector('#editor-iframe');
 
             const tuiEditorMessageHandler = function (e) {
               if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {

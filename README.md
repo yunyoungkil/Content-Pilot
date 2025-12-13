@@ -73,7 +73,7 @@ latest stable / Canary) if you rely on the `offscreen` manifest field.
 - **Build System**: Webpack, Babel
 - **Backend & Database**: Firebase (Realtime Database)
 - **Platform**: Chrome Extension (Manifest V3 with Offscreen Document)
-- **Editor**: Quill Rich Text Editor
+- **Editor**: TipTap Editor (Headless) + Custom UI
 - **API Integration**: Google Analytics 4 API, Google AdSense API, Google Gemini API
 - **Authentication**: Google OAuth 2.0
 - **Security**: DOMPurify (XSS 방어)
@@ -163,12 +163,11 @@ nvm use 22
 
 ---
 
-### TipTap POC (실험)
+### TipTap Editor
 
-- `editor.html`의 Quill 툴바에 있는 `TipTap` 버튼을 클릭하면 TipTap 기반의 편집기 POC로 전환됩니다.
+- 기존 Quill 에디터는 제거되었으며, TipTap 에디터가 기본 에디터로 사용됩니다.
 - TipTap에서는 이미지 붙여넣기 시 오프스크린 리사이즈 및 Firebase Storage 업로드(`upload_thumbnail_to_storage`)를 자동으로 호출해 URL로 교체합니다.
-- Quill에서 사용 중인 콘텐츠(HTML)를 TipTap으로 마이그레이션하려면 `TipTap` 버튼을 클릭하면 현재 Quill의 HTML이 TipTap 편집기 콘텐츠로 설정됩니다.
-- 이는 POC 용으로 일부 기능만 지원하며, 정식 마이그레이션 전에는 `insert-html`, `insert-image`, `insert-text` 등 메시지는 Quill에서 기본 동작합니다.
+- `editor.html`은 TipTap 에디터를 로드하며, `editor.js`에서 초기화 및 메시지 처리를 담당합니다.
 
 ## 📂 프로젝트 구조 및 파일 설명
 
@@ -200,9 +199,7 @@ Content-Pilot/
 │   │   ├── 📜 performanceDashboardMode.js  # 성과 대시보드
 │   │   └── 📜 performanceReportMode.js     # 성과 리포트
 │   ├── 📁 utils/                  # 유틸리티 함수
-│   │   ├── 📜 editor-markdown-auto.js
-│   │   └── 📜 markdownToQuill.js
-│   ├── 📜 main.js                 # 메인 진입점
+│   │   └── 📜 quillToTiptap.js│   ├── 📜 main.js                 # 메인 진입점
 │   ├── 📜 state.js                # 전역 상태 관리
 │   └── 📜 constants.js            # 상수 정의
 ├── 📁 css/                        # 스타일시트
@@ -215,7 +212,6 @@ Content-Pilot/
 │   └── 📜 icon-*.png             # 확장 프로그램 아이콘
 ├── 📁 lib/                        # 외부 라이브러리
 │   ├── 📜 firebase-*.js          # Firebase SDK
-│   ├── 📜 quill.js               # Quill 에디터
 │   └── 📜 ... (기타 라이브러리)
 └── 📁 docs/                       # 문서
     └── 📜 성과-데이터-시각화-사용-패턴.md
@@ -236,7 +232,7 @@ Content-Pilot/
 
 - **`webpack.config.js`**: Webpack 빌더의 **설정 파일**입니다. `content.js`, `background.js`, `offscreen.js`를 시작점으로 `js/` 폴더의 여러 JavaScript 파일들을 어떻게 하나의 최종 결과물(`dist/*.bundle.js`)로 합칠지 정의합니다.
 
-- **`package.json`**: 프로젝트의 **정보 파일**입니다. 프로젝트의 이름, 버전과 함께 `webpack`, `babel`, `quill` 등 개발에 필요한 도구(패키지)들의 목록을 관리합니다.
+- **`package.json`**: 프로젝트의 **정보 파일**입니다. 프로젝트의 이름, 버전과 함께 `webpack`, `babel`, `tiptap` 등 개발에 필요한 도구(패키지)들의 목록을 관리합니다.
 
 #### 디렉토리
 
@@ -269,7 +265,7 @@ Content-Pilot/
 
 - **`/images`**: 확장 프로그램 아이콘 및 UI 이미지 파일들을 보관합니다.
 
-- **`/lib`**: Firebase SDK, Quill 에디터, TUI Image Editor 등 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
+- **`/lib`**: Firebase SDK, TUI Image Editor 등 외부에서 가져온 라이브러리 파일들을 보관합니다. `background.js`가 `importScripts`를 통해 이 파일들을 불러옵니다.
 
 - **`/docs`**: 프로젝트 문서 및 사용 가이드가 위치합니다.
   - `guides/`: 사용 가이드 및 개발 가이드
