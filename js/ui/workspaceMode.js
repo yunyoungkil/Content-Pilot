@@ -2275,6 +2275,73 @@ export function renderWorkspace(container, ideaData) {
             .catch(() => {});
         }
       }
+
+      // 텍스트 변경 자동 저장 (Debounce 1000ms)
+      // editor.js sends: { action: 'content-changed', data: { html: '...', text: '...' } }
+      const isContentChanged = event.data?.action === 'content-changed';
+      const contentData = isContentChanged ? (event.data.data?.html || event.data.content) : null;
+
+      if (isContentChanged && contentData) {
+        if (window.__cp_autosave_timer) {
+          clearTimeout(window.__cp_autosave_timer);
+        }
+
+        window.__cp_autosave_timer = setTimeout(() => {
+          try {
+            Logger.debug('[Workspace] Auto-saving draft (debounce triggered)', {
+              ideaId: window.__cp_workspace_idea_id,
+              contentLength: (contentData || '').length,
+            });
+          } catch (err) {
+            // ignore
+          }
+
+          // 초안 삭제 후 5초 이내에는 자동 저장 차단
+          const now = Date.now();
+          if (
+            window.__cp_draft_deletion_block_time &&
+            now - window.__cp_draft_deletion_block_time < 5000
+          ) {
+            Logger.debug(
+              `[Workspace] 초안 삭제 후 자동 저장 차단 (Auto-save skipped)`
+            );
+            return;
+          }
+
+          // 빈 내용 필터링
+          const content = contentData || '';
+          const trimmedContent = content.trim();
+          if (
+            !trimmedContent ||
+            trimmedContent === '<p><br></p>' ||
+            trimmedContent === '<p></p>' ||
+            trimmedContent === '<br>'
+          ) {
+            return;
+          }
+
+          if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+            const payload = {
+              action: 'save_idea_draft',
+              ideaId: window.__cp_workspace_idea_id,
+              draft: content,
+              ts: Date.now(),
+            };
+            
+            try {
+              chrome.runtime.sendMessage(payload, (response) => {
+                if (chrome.runtime.lastError) {
+                  Logger.error('[Workspace] Auto-save error:', chrome.runtime.lastError);
+                } else {
+                  Logger.debug('[Workspace] Auto-save success:', response);
+                }
+              });
+            } catch (e) {
+              Logger.error('[Workspace] Auto-save sendMessage threw:', e);
+            }
+          }
+        }, 1000);
+      }
     });
     window.__cp_workspace_save_listener = true;
   }
