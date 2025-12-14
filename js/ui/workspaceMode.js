@@ -860,17 +860,12 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   }
 
   if (!buttonContainer) {
-    const headerEl = workspaceEl.querySelector('#workspace-title-header');
-    if (headerEl && headerEl.parentNode) {
-      const newContainer = document.createElement('div');
-      newContainer.id = 'workspace-action-buttons';
-      newContainer.style.cssText =
-        'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
-      headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
-      buttonContainer = newContainer;
-    } else {
-      return;
-    }
+    // No dedicated action-buttons container — fall back to workspace root.
+    // We intentionally do NOT create a static `#workspace-action-buttons`
+    // element; runtime code should place controls into publish-info area
+    // or directly into the workspace container instead.
+    buttonContainer = workspaceEl;
+    console.debug('[DIAG renderThumbnailButton] no #workspace-action-buttons found, using workspace root as fallback');
   }
 
   // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
@@ -2161,16 +2156,11 @@ ${contentHtml}
 export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   let buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
   if (!buttonContainer) {
-    const headerEl = workspaceEl.querySelector('#workspace-title-header');
-    if (headerEl && headerEl.parentNode) {
-      const newContainer = document.createElement('div');
-      newContainer.id = 'workspace-action-buttons';
-      newContainer.style.cssText = 'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
-      headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
-      buttonContainer = newContainer;
-    } else {
-      return;
-    }
+    // Do not create a static `#workspace-action-buttons` container.
+    // Use the workspace root as a fallback target so buttons can be
+    // inserted into the publish-info area or directly into the workspace.
+    buttonContainer = workspaceEl;
+    console.debug('[DIAG updateWorkspaceActionButtons] no #workspace-action-buttons found, using workspace root as fallback');
   }
 
   // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
