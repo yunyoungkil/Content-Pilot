@@ -839,7 +839,13 @@ function initializeEditor() {
               const newHtml = html.replace(selectedUrl, newUrl);
               tiptapEditor.commands.setContent(newHtml);
               window.__cp_editingImageRange = null;
-              window.parent.postMessage({ action: 'cp_save_draft', content: tiptapEditor.getHTML() }, '*');
+              try {
+                const _ts = Date.now();
+                Logger.debug('[Editor] Sending cp_save_draft (replace-image)', { ts: _ts, length: (tiptapEditor?.getHTML?.() || '').length });
+                window.parent.postMessage({ action: 'cp_save_draft', content: tiptapEditor.getHTML(), ts: _ts }, '*');
+              } catch (e) {
+                console.error('[Editor] Failed to post cp_save_draft (replace-image):', e);
+              }
               console.log('✅ [Editor] 이미지 교체 완료 (TipTap)');
             } else {
               console.warn('[Editor] 선택된 이미지가 TipTap 콘텐츠에서 발견되지 않음');
@@ -966,13 +972,20 @@ function initializeEditor() {
           }
         }
         // 이미지 삽입 등 외부 요청 시 현재 내용 저장
-        window.parent.postMessage(
-          {
-            action: 'cp_save_draft',
-            content: (tiptapEditor ? tiptapEditor.getHTML() : ''),
-          },
-          '*'
-        );
+        try {
+          const _ts = Date.now();
+          Logger.debug('[Editor] Sending cp_save_draft (get-content)', { ts: _ts, length: (tiptapEditor ? tiptapEditor.getHTML() : '').length });
+          window.parent.postMessage(
+            {
+              action: 'cp_save_draft',
+              content: (tiptapEditor ? tiptapEditor.getHTML() : ''),
+              ts: _ts,
+            },
+            '*'
+          );
+        } catch (e) {
+          console.error('[Editor] Failed to post cp_save_draft (get-content):', e);
+        }
         break;
       case 'clear-selection':
         // 선택 영역 해제

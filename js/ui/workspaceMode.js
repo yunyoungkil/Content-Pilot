@@ -2238,6 +2238,15 @@ export function renderWorkspace(container, ideaData) {
   if (!window.__cp_workspace_save_listener) {
     window.addEventListener('message', (event) => {
       if (event.data?.action === 'cp_save_draft' && event.data.content) {
+        try {
+          Logger.debug('[Workspace] cp_save_draft received', {
+            ideaId: window.__cp_workspace_idea_id,
+            ts: event.data?.ts,
+            contentLength: (event.data.content || '').length,
+          });
+        } catch (err) {
+          Logger.debug('[Workspace] cp_save_draft received (unable to serialize payload)');
+        }
         // 초안 삭제 후 5초 이내에는 자동 저장 차단
         const now = Date.now();
         if (
@@ -2266,13 +2275,29 @@ export function renderWorkspace(container, ideaData) {
         }
 
         if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-          chrome.runtime
-            .sendMessage({
-              action: 'save_idea_draft',
-              ideaId: window.__cp_workspace_idea_id,
-              draft: event.data.content,
-            })
-            .catch(() => {});
+          const payload = {
+            action: 'save_idea_draft',
+            ideaId: window.__cp_workspace_idea_id,
+            draft: event.data.content,
+            ts: event.data?.ts || Date.now(),
+          };
+          Logger.debug('[Workspace] Sending save_idea_draft', { payload });
+          try {
+            const maybePromise = chrome.runtime.sendMessage(payload, (response) => {
+              if (chrome.runtime.lastError) {
+                Logger.error('[Workspace] save_idea_draft callback error:', chrome.runtime.lastError);
+              } else {
+                Logger.debug('[Workspace] save_idea_draft response (callback):', response);
+              }
+            });
+            if (maybePromise && typeof maybePromise.then === 'function') {
+              maybePromise
+                .then((res) => Logger.debug('[Workspace] save_idea_draft promise resolved:', res))
+                .catch((err) => Logger.error('[Workspace] save_idea_draft promise rejected:', err));
+            }
+          } catch (e) {
+            Logger.error('[Workspace] save_idea_draft sendMessage threw:', e);
+          }
         }
       }
     });
@@ -5685,12 +5710,10 @@ async function handleGenerateAction(btn, options) {
           applyDraftResponseToIdea(ideaData, response);
 
           // 저장
+          const _payload = { action: 'save_idea_draft', ideaId: ideaData.id, draft: response.draft, ts: Date.now() };
+          Logger.debug('[Workspace] Sending save_idea_draft (AI draft generation)', { payload: _payload });
           chrome.runtime.sendMessage(
-            {
-              action: 'save_idea_draft',
-              ideaId: ideaData.id,
-              draft: response.draft,
-            },
+            _payload,
             (res) => {
               if (res && res.moved) {
                 ideaData.status = res.newStatus;
