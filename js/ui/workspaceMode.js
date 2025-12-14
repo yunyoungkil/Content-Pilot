@@ -1718,6 +1718,39 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     );
 
     // 이벤트 리스너
+      // Render regenerate/thumbnail/delete buttons under the copy-html button
+      try {
+        const actionsContainerId = 'publish-info-actions';
+        let actionsContainer = publishInfoPanel.querySelector(`#${actionsContainerId}`);
+        if (!actionsContainer) {
+          actionsContainer = document.createElement('div');
+          actionsContainer.id = actionsContainerId;
+          actionsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
+          // create buttons (styled like copy-html-btn)
+          const makeBtn = (id, text) => {
+            const b = document.createElement('button');
+            b.id = id;
+            b.textContent = text;
+            b.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
+            return b;
+          };
+
+          const regenDraftBtn = makeBtn('regenerate-draft-btn', '📝 텍스트만 다시 쓰기');
+          const regenThumbBtn = makeBtn('regenerate-thumbnail-btn', '🎨 썸네일만 다시 그리기');
+          const delDraftBtn = makeBtn('delete-draft-in-workspace', '❌ 초안 삭제');
+
+          actionsContainer.appendChild(regenDraftBtn);
+          actionsContainer.appendChild(regenThumbBtn);
+          actionsContainer.appendChild(delDraftBtn);
+          publishInfoPanel.appendChild(actionsContainer);
+        }
+
+        // Show or hide based on presence of meaningful draft
+        const hasDraft = isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
+        actionsContainer.style.display = hasDraft ? 'flex' : 'none';
+      } catch (err) {
+        // ignore UI action render failures
+      }
     const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
     if (connectBtn && fullUrl) {
       connectBtn.addEventListener('click', () => {
@@ -2009,37 +2042,21 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
 
     // If draft exists but regenerate buttons are missing, create them
     if (hasDraft) {
-      if (!hasRegenerateBtn) {
-        // remove generate button (if present)
-        const genBtn = buttonContainer.querySelector('#generate-draft-btn');
-        if (genBtn && genBtn.parentNode) genBtn.remove();
+      // remove generate button (if present)
+      const genBtn = buttonContainer.querySelector('#generate-draft-btn');
+      if (genBtn && genBtn.parentNode) genBtn.remove();
 
-        const fragment = document.createDocumentFragment();
-
-        const regenTextBtn = document.createElement('button');
-        regenTextBtn.id = 'regenerate-draft-btn';
-        regenTextBtn.style.cssText = 'flex:1; min-width:140px;';
-        regenTextBtn.textContent = '📝 텍스트만 다시 쓰기';
-        fragment.appendChild(regenTextBtn);
-
-        if (!hasRegenerateThumbBtn) {
-          const regenThumbBtn = document.createElement('button');
-          regenThumbBtn.id = 'regenerate-thumbnail-btn';
-          regenThumbBtn.style.cssText = 'flex:1; min-width:140px;';
-          regenThumbBtn.textContent = '🎨 썸네일만 다시 그리기';
-          fragment.appendChild(regenThumbBtn);
+      // Ensure publish-info panel shows regenerate/delete actions (move buttons here)
+      try {
+        const ideaData = window.__cp_workspace_idea_data || {};
+        const tagsForDisplay = Array.isArray(ideaData.publishInfo?.tags)
+          ? ideaData.publishInfo.tags.join(', ')
+          : ideaData.publishInfo?.tags || '';
+        if (typeof showPublishInfo === 'function') {
+          showPublishInfo(buttonContainer.closest('.workspace-container'), ideaData.publishInfo?.permalink, tagsForDisplay, ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '', ideaData);
         }
-
-        if (!hasDeleteDraftBtn) {
-          const delBtn = document.createElement('button');
-          delBtn.id = 'delete-draft-in-workspace';
-          delBtn.className = 'draft-delete-btn';
-          delBtn.textContent = '❌ 초안 삭제';
-          fragment.appendChild(delBtn);
-        }
-
-        // Insert at beginning to match original ordering
-        buttonContainer.insertBefore(fragment, buttonContainer.firstChild);
+      } catch (e) {
+        // non-fatal
       }
     } else {
       // no draft: always remove regenerate / delete buttons to avoid stale buttons
@@ -2049,6 +2066,19 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
           if (el && el.parentNode) el.remove();
         }
       );
+
+      // Also remove any moved buttons from publish-info panel
+      try {
+        const pubArea = buttonContainer.closest('.workspace-container')?.querySelector('#publish-info-content');
+        if (pubArea) {
+          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach((id) => {
+            const el = pubArea.querySelector(`#${id}`);
+            if (el && el.parentNode) el.remove();
+          });
+        }
+      } catch (e) {
+        // ignore
+      }
 
       // Ensure generate button exists
       if (!hasGenerateBtn) {
@@ -2087,18 +2117,40 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       wrapper.appendChild(input);
       wrapper.appendChild(span);
 
-      if (regenTextBtn && regenTextBtn.parentNode) {
-        // insert checkbox as the first child in the buttons container so it appears first
+      // Prefer inserting into publish-info actions container when regenerate
+      // actions are located there. Fall back to main action bar if needed.
+      let inserted = false;
+      try {
+        const pubActions = buttonContainer
+          .closest('.workspace-container')
+          ?.querySelector('#publish-info-content')
+          ?.querySelector('#publish-info-actions');
+        const pubRegen = pubActions?.querySelector('#regenerate-draft-btn');
+        if (pubActions && pubRegen) {
+          pubActions.insertBefore(wrapper, pubActions.firstElementChild || null);
+          inserted = true;
+          console.debug(
+            '[Workspace] compose-thumbnail-text checkbox inserted into publish-info-actions, checked:',
+            input.checked
+          );
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      if (!inserted && regenTextBtn && regenTextBtn.parentNode) {
         regenTextBtn.parentNode.insertBefore(wrapper, regenTextBtn.parentNode.firstChild);
+        inserted = true;
         console.debug(
-          '[Workspace] compose-thumbnail-text checkbox inserted after regenerate-draft-btn, checked:',
+          '[Workspace] compose-thumbnail-text checkbox inserted next to regenerate-draft-btn in action bar, checked:',
           input.checked
         );
-      } else {
+      }
+      if (!inserted) {
         // fallback to appending to container
         buttonContainer.appendChild(wrapper);
         console.debug(
-          '[Workspace] compose-thumbnail-text checkbox appended to container, checked:',
+          '[Workspace] compose-thumbnail-text checkbox appended to action bar container (fallback), checked:',
           input.checked
         );
       }

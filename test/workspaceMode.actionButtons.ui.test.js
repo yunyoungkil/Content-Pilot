@@ -9,6 +9,11 @@ describe('Workspace action buttons dynamic update', () => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_tui_shadow_listener_attached = false;
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
+    // Ensure get_my_channels callback runs synchronously in tests
+    chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (typeof cb === 'function')
+        cb({ channels: { myChannels: { blogs: [{ inputUrl: 'https://example.test' }] } } });
+    });
   });
 
   test('generate button replaced by regenerate + delete when draft exists', async () => {
@@ -32,10 +37,17 @@ describe('Workspace action buttons dynamic update', () => {
     // simulate draft applied and update action buttons
     await updateWorkspaceActionButtons(workspaceEl, true);
 
-    expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeTruthy();
-    expect(workspaceEl.querySelector('#regenerate-thumbnail-btn')).toBeTruthy();
-    expect(workspaceEl.querySelector('#delete-draft-in-workspace')).toBeTruthy();
-    expect(workspaceEl.querySelector('#generate-draft-btn')).toBeFalsy();
+    // regenerate/delete buttons should be moved out of the main action bar
+    const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
+    expect(buttonContainer.querySelector('#regenerate-draft-btn')).toBeFalsy();
+    expect(buttonContainer.querySelector('#regenerate-thumbnail-btn')).toBeFalsy();
+    expect(buttonContainer.querySelector('#delete-draft-in-workspace')).toBeFalsy();
+    expect(buttonContainer.querySelector('#generate-draft-btn')).toBeFalsy();
+
+    const publishArea = workspaceEl.querySelector('#publish-info-content');
+    expect(publishArea.querySelector('#regenerate-draft-btn')).toBeTruthy();
+    expect(publishArea.querySelector('#regenerate-thumbnail-btn')).toBeTruthy();
+    expect(publishArea.querySelector('#delete-draft-in-workspace')).toBeTruthy();
 
     // now clear draft and ensure it switches back
     await updateWorkspaceActionButtons(workspaceEl, false);
@@ -57,7 +69,16 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl).toBeTruthy();
 
     // placeholder draft should not be treated as a real draft
-    await new Promise((r) => setTimeout(r, 120));
+    async function waitForSelector(container, selector, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el) return el;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return null;
+    }
+    await waitForSelector(container, '#workspace-action-buttons');
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });
@@ -80,7 +101,16 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl).toBeTruthy();
 
     // link-only content should not be treated as a real draft
-    await new Promise((r) => setTimeout(r, 20));
+    async function waitForSelector(container, selector, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el) return el;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return null;
+    }
+    await waitForSelector(container, '#workspace-action-buttons');
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });
@@ -103,7 +133,16 @@ describe('Workspace action buttons dynamic update', () => {
     expect(workspaceEl).toBeTruthy();
 
     // object-only draft should not be considered as having content
-    await new Promise((r) => setTimeout(r, 20));
+    async function waitForSelector(container, selector, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector(selector);
+        if (el) return el;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return null;
+    }
+    await waitForSelector(container, '#workspace-action-buttons');
     expect(workspaceEl.querySelector('#generate-draft-btn')).toBeTruthy();
     expect(workspaceEl.querySelector('#regenerate-draft-btn')).toBeFalsy();
   });
