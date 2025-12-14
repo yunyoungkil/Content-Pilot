@@ -110,6 +110,7 @@ async function initTipTap(initialHtml = '') {
                 title: { default: null },
                 width: {
                   default: null,
+                  parseHTML: element => element.style.width,
                   renderHTML: attributes => {
                     if (!attributes.width) return {};
                     return { style: `width: ${attributes.width}` };
@@ -117,6 +118,7 @@ async function initTipTap(initialHtml = '') {
                 },
                 textAlign: {
                   default: 'center',
+                  parseHTML: element => element.getAttribute('data-align'),
                   renderHTML: attributes => {
                     if (!attributes.textAlign) return {};
                     return { 'data-align': attributes.textAlign };
@@ -134,6 +136,7 @@ async function initTipTap(initialHtml = '') {
             addNodeView() {
               return ({ node, editor, getPos }) => {
                 const { view } = editor;
+                let currentNode = node;
                 
                 // Outer container for alignment
                 const container = document.createElement('div');
@@ -174,7 +177,7 @@ async function initTipTap(initialHtml = '') {
                             const pos = getPos();
                             if (pos !== undefined) {
                                 view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, {
-                                    ...node.attrs,
+                                    ...currentNode.attrs,
                                     textAlign: align
                                 }));
                             }
@@ -231,7 +234,7 @@ async function initTipTap(initialHtml = '') {
                         const pos = getPos();
                         if (pos !== undefined) {
                             view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, {
-                                ...node.attrs,
+                                ...currentNode.attrs,
                                 width: `${currentWidth}px`
                             }));
                         }
@@ -253,6 +256,7 @@ async function initTipTap(initialHtml = '') {
                 handleRight.addEventListener('mousedown', (e) => startDrag(e, 'right'));
                 
                 const updateState = (n) => {
+                    currentNode = n;
                     // Update Image
                     img.src = n.attrs.src;
                     img.alt = n.attrs.alt;
