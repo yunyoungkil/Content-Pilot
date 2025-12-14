@@ -829,28 +829,45 @@ function renderThumbnailButton(workspaceEl, ideaData) {
         ?.parentElement?.querySelector('#workspace-action-buttons');
   }
   // 이미 버튼이 있으면 중단
-  if (!buttonContainer || buttonContainer.querySelector('#btn-create-thumbnail')) {
-    console.debug('[DIAG renderThumbnailButton] button already exists or container not found', {
-      hasContainer: !!buttonContainer,
-      existingBtn: !!buttonContainer?.querySelector('#btn-create-thumbnail'),
-    });
-    // If the container is missing but we didn't find a button (possible in
-    // case some previous DOM mutations removed the action-buttons container),
-    // attempt to create the action-buttons container so we can attach the
-    // thumbnail button. This helps tests and consumers where the DOM was
-    // partially mutated by other code.
-    if (!buttonContainer && !buttonContainer?.querySelector('#btn-create-thumbnail')) {
-      const headerEl = workspaceEl.querySelector('#workspace-title-header');
-      if (headerEl && headerEl.parentNode) {
-        const newContainer = document.createElement('div');
-        newContainer.id = 'workspace-action-buttons';
-        newContainer.style.cssText =
-          'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
-        headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
-        buttonContainer = newContainer;
-      } else {
-        return;
+  // [수정] 버튼이 있으면 위치만 확인하고 이동시킨 후 리턴
+  const existingBtn = workspaceEl.querySelector('#btn-create-thumbnail');
+  if (existingBtn) {
+    const composeControls = workspaceEl.querySelector('.compose-thumbnail-controls');
+    console.debug('[DIAG renderThumbnailButton] existingBtn found. composeControls:', !!composeControls);
+    
+    if (composeControls && (existingBtn.previousElementSibling !== composeControls || existingBtn.parentNode !== composeControls.parentNode)) {
+      console.debug(
+        '[DIAG renderThumbnailButton] moving existing button after compose-thumbnail-controls',
+        {
+            btnParent: existingBtn.parentNode?.id || existingBtn.parentNode?.className,
+            controlsParent: composeControls.parentNode?.id || composeControls.parentNode?.className
+        }
+      );
+      
+      // 스타일 조정 (사이드바에 들어갈 경우)
+      if (composeControls.parentNode.id === 'publish-info-actions') {
+          existingBtn.style.width = '100%';
+          existingBtn.style.marginLeft = '0';
       }
+
+      if (composeControls.nextSibling) {
+        composeControls.parentNode.insertBefore(existingBtn, composeControls.nextSibling);
+      } else {
+        composeControls.parentNode.appendChild(existingBtn);
+      }
+    }
+    return;
+  }
+
+  if (!buttonContainer) {
+    const headerEl = workspaceEl.querySelector('#workspace-title-header');
+    if (headerEl && headerEl.parentNode) {
+      const newContainer = document.createElement('div');
+      newContainer.id = 'workspace-action-buttons';
+      newContainer.style.cssText =
+        'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+      headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
+      buttonContainer = newContainer;
     } else {
       return;
     }
@@ -880,45 +897,31 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   const thumbBtn = document.createElement('button');
   thumbBtn.id = 'btn-create-thumbnail';
   thumbBtn.style.cssText =
-    'padding:8px 16px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:0 2px 8px rgba(108, 92, 231, 0.3);transition:all 0.2s; margin-left: 8px;';
+    'width: 100%; padding: 10px; background: rgb(66, 133, 244); color: rgb(255, 255, 255); border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
   thumbBtn.textContent = '🎨 썸네일 만들기';
 
-  // If thumbnail URLs exist already, show a small preview indicator
-  if (hasThumbnailUrls) {
-    const urlObj = ideaData.publishInfo?.thumbnailUrls || ideaData.thumbnailUrls;
-    // choose first non-empty url
-    const finalUrl = (urlObj?.url_16x9 || urlObj?.url_4x3 || urlObj?.url_1x1 || '')?.trim();
-    if (finalUrl) {
-      const preview = document.createElement('img');
-      preview.style.cssText =
-        'width:32px; height:32px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle;';
-      preview.src = finalUrl;
-      // set a helpful alt text to avoid showing raw fallback characters like '?'
-      preview.alt = urlObj?.altText || ideaData.seoTitle || ideaData.title || '썸네일 이미지';
-      // if image fails to load, remove it to prevent broken icon or stray alt rendering
-      preview.onerror = () => {
-        try {
-          if (preview.parentNode) preview.parentNode.removeChild(preview);
-        } catch (e) {
-          /* ignore */
-        }
-      };
-      const wrapper = document.createElement('span');
-      wrapper.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
-      wrapper.appendChild(preview);
-      const textNode = document.createElement('span');
-      textNode.textContent = thumbBtn.textContent;
-      wrapper.appendChild(textNode);
-      // replace text content with wrapper
-      thumbBtn.textContent = '';
-      thumbBtn.appendChild(wrapper);
-    }
-    // close hasThumbnailUrls block
-  }
+
 
   // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
+  // [2025-12-14] compose-thumbnail-controls가 있다면 그 뒤로 이동
+  const composeControls = workspaceEl.querySelector('.compose-thumbnail-controls');
   const deleteBtn = buttonContainer.querySelector('#delete-draft-in-workspace');
-  if (deleteBtn) {
+
+  if (composeControls) {
+    // 스타일 조정 (사이드바에 들어갈 경우)
+    if (composeControls.parentNode.id === 'publish-info-actions') {
+        thumbBtn.style.width = '100%';
+        thumbBtn.style.marginLeft = '0';
+    }
+
+    // composeControls 바로 뒤에 삽입 (다음 형제 요소 앞)
+    // 이렇게 하면 composeControls -> thumbBtn -> (나머지) 순서가 됨
+    if (composeControls.nextSibling) {
+      composeControls.parentNode.insertBefore(thumbBtn, composeControls.nextSibling);
+    } else {
+      composeControls.parentNode.appendChild(thumbBtn);
+    }
+  } else if (deleteBtn) {
     // buttonContainer.insertBefore(...) 대신 deleteBtn.parentNode.insertBefore(...) 사용
     // deleteBtn이 div로 감싸져 있어도, 그 부모(div)에게 삽입을 요청하므로 안전함
     deleteBtn.parentNode.insertBefore(thumbBtn, deleteBtn);
@@ -1646,27 +1649,29 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
     const publishInfoPanel = document.createElement('div');
     publishInfoPanel.className = 'publish-info-panel';
-    publishInfoPanel.style.cssText = `padding: 16px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;`;
+    // [수정] 패딩을 줄여서(16px -> 10px) 내부 공간을 넓게 사용하도록 조정
+    publishInfoPanel.style.cssText = `padding: 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;`;
 
     const ideaTitle = ideaData?.title || '';
 
+    // [수정] input 요소들에 box-sizing: border-box 추가하여 레이아웃 안정성 확보
     publishInfoPanel.innerHTML = `
       <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 4px;">📝 발행 정보</div>
-      <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
-          <input type="text" id="idea-title-input" value="${ideaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+          <input type="text" id="idea-title-input" value="${ideaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
-          <input type="text" id="seo-title-input" value="${seoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+          <input type="text" id="seo-title-input" value="${seoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
           <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="permalink-input" value="${
               permalink || ''
-            }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
+            }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
             ${
               fullUrl
                 ? `<button id="connect-permalink-btn" style="padding: 6px 12px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🔗 연결</button>`
@@ -1681,16 +1686,14 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">태그</label>
-          <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="tags-input" value="${
               tags || ''
-            }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff;">
-            <button id="copy-tags-btn" style="padding: 6px 12px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; font-size: 12px;">📋 복사</button>
+            }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+            <button id="copy-tags-btn" title="태그 복사" style="padding: 6px 8px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; font-size: 12px;">📋</button>
           </div>
         </div>
-        <div>
-          <button id="copy-html-btn" style="width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">📄 HTML 복사 (JSON-LD 포함)</button>
-        </div>
+        <!-- copy-html-btn will be inserted into #publish-info-actions for consistent placement -->
       </div>
     `;
 
@@ -1722,32 +1725,160 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       try {
         const actionsContainerId = 'publish-info-actions';
         let actionsContainer = publishInfoPanel.querySelector(`#${actionsContainerId}`);
+
+        // Determine whether we have a meaningful draft before mutating buttons.
+        const hasDraft = isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
+
         if (!actionsContainer) {
           actionsContainer = document.createElement('div');
           actionsContainer.id = actionsContainerId;
-          actionsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
-          // create buttons (styled like copy-html-btn)
-          const makeBtn = (id, text) => {
-            const b = document.createElement('button');
-            b.id = id;
-            b.textContent = text;
-            b.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
-            return b;
-          };
-
-          const regenDraftBtn = makeBtn('regenerate-draft-btn', '📝 텍스트만 다시 쓰기');
-          const regenThumbBtn = makeBtn('regenerate-thumbnail-btn', '🎨 썸네일만 다시 그리기');
-          const delDraftBtn = makeBtn('delete-draft-in-workspace', '❌ 초안 삭제');
-
-          actionsContainer.appendChild(regenDraftBtn);
-          actionsContainer.appendChild(regenThumbBtn);
-          actionsContainer.appendChild(delDraftBtn);
+          actionsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
           publishInfoPanel.appendChild(actionsContainer);
         }
 
-        // Show or hide based on presence of meaningful draft
-        const hasDraft = isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
-        actionsContainer.style.display = hasDraft ? 'flex' : 'none';
+        // create buttons helper
+        const makeBtn = (id, text) => {
+          const b = document.createElement('button');
+          b.id = id;
+          b.textContent = text;
+          b.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
+          return b;
+        };
+
+        // The HTML copy button only makes sense when a draft exists. Create
+        // it alongside the regenerate/delete buttons and remove it when no
+        // draft is present to avoid exposing a non-functional control.
+
+        // Ensure regenerate/thumbnail/delete buttons exist only when we have a draft;
+        // otherwise remove them if present (keeps UI deterministic across rerenders).
+        if (hasDraft) {
+          // Ensure the HTML copy button exists in the actions container
+          if (!actionsContainer.querySelector('#copy-html-btn')) {
+            const cbtn = document.createElement('button');
+            cbtn.id = 'copy-html-btn';
+            cbtn.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
+            cbtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
+            actionsContainer.insertBefore(cbtn, actionsContainer.firstElementChild || null);
+          }
+          if (!actionsContainer.querySelector('#regenerate-draft-btn')) actionsContainer.appendChild(makeBtn('regenerate-draft-btn', '📝 텍스트만 다시 쓰기'));
+          if (!actionsContainer.querySelector('#regenerate-thumbnail-btn')) actionsContainer.appendChild(makeBtn('regenerate-thumbnail-btn', '🎨 썸네일만 다시 그리기'));
+          if (!actionsContainer.querySelector('#delete-draft-in-workspace')) actionsContainer.appendChild(makeBtn('delete-draft-in-workspace', '❌ 초안 삭제'));
+
+          // Insert the inline compose-thumbnail-text checkbox next to the regenerate-thumbnail button
+          const regenThumbBtn = actionsContainer.querySelector('#regenerate-thumbnail-btn');
+          if (regenThumbBtn && !actionsContainer.querySelector('.compose-thumbnail-controls')) {
+            // Wrap the regenerate thumbnail button with a controls container so
+            // the checkbox sits immediately before the button (input + button).
+            const controls = document.createElement('div');
+            controls.className = 'compose-thumbnail-controls';
+            // make controls look like a single button-like block; allow it to flex
+            controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.id = 'compose-thumbnail-text-checkbox';
+            input.checked = false;
+            input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+            // use native tooltip on hover to show the description
+            input.title = '썸네일 텍스트 오버레이 적용';
+
+            // initialize checked state from storage if available
+            try {
+              chrome.storage.local.get('composeThumbnailText').then((s) => {
+                input.checked = !!s.composeThumbnailText;
+              });
+            } catch (e) {
+              // ignore
+            }
+
+            input.addEventListener('change', (e) => {
+              const isChecked = e.target.checked;
+              chrome.storage.local.set({ composeThumbnailText: isChecked });
+            });
+
+            // Insert controls before the existing button, then move the button
+            // inside the controls so the DOM becomes: <div.controls><input/><button id="regenerate-thumbnail-btn">...</button></div>
+            regenThumbBtn.parentNode.insertBefore(controls, regenThumbBtn);
+            // style the button to flex and match the controls' appearance
+            regenThumbBtn.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+            controls.appendChild(input);
+            controls.appendChild(regenThumbBtn);
+            // Keep the text-regenerate button outside of the compose controls
+            // so it remains a separate action (visually adjacent but not nested).
+          }
+        } else {
+          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace', 'copy-html-btn'].forEach((id) => {
+            const el = actionsContainer.querySelector(`#${id}`);
+            if (el && el.parentNode) el.remove();
+          });
+        }
+
+        // Show the actions container always so the generate button/checkbox can be
+        // placed here when there is no draft.
+        actionsContainer.style.display = 'flex';
+
+        // copy buttons should be visible only when AI draft exists (appear with regenerate buttons)
+        const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
+        const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
+        if (copyHtmlBtn) copyHtmlBtn.style.display = hasDraft ? 'block' : 'none';
+        if (copyTagsBtn) copyTagsBtn.style.display = hasDraft ? 'inline-block' : 'none';
+
+        // If no draft: show generate button and ensure checkbox is placed near copy-html (publish-info)
+        if (!hasDraft) {
+          // create a compose-controls wrapper in publish-info-actions so the
+          // generate button and the compose checkbox visually match the
+          // .compose-thumbnail-controls used when a draft exists.
+          const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
+          if (pubActions) {
+            let controls = pubActions.querySelector('.compose-thumbnail-controls');
+            if (!controls) {
+              controls = document.createElement('div');
+              controls.className = 'compose-thumbnail-controls';
+              controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+
+              // checkbox
+              const input = document.createElement('input');
+              input.type = 'checkbox';
+              input.id = 'compose-thumbnail-text-checkbox';
+              input.checked = false;
+              input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+              input.title = '썸네일 텍스트 오버레이 적용';
+              try {
+                chrome.storage.local.get('composeThumbnailText').then((s) => {
+                  input.checked = !!s.composeThumbnailText;
+                });
+              } catch (e) {
+                // ignore
+              }
+              input.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                chrome.storage.local.set({ composeThumbnailText: isChecked });
+              });
+
+              // generate button (styled to flex like regenerate button)
+              const genBtn = document.createElement('button');
+              genBtn.id = 'generate-draft-btn';
+              genBtn.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+              genBtn.textContent = '✨ AI 초안 생성';
+
+              controls.appendChild(input);
+              controls.appendChild(genBtn);
+              pubActions.insertBefore(controls, pubActions.firstElementChild || null);
+            }
+          }
+        } else {
+          // remove any generate button from publish-info if draft exists
+          const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
+          if (pubActions) {
+            const genBtn = pubActions.querySelector('#generate-draft-btn');
+            if (genBtn && genBtn.parentNode) {
+              // remove the surrounding compose controls container if it exists
+              const controls = genBtn.closest('.compose-thumbnail-controls');
+              if (controls && controls.parentNode) controls.remove();
+              else genBtn.remove();
+            }
+          }
+        }
       } catch (err) {
         // ignore UI action render failures
       }
@@ -1953,6 +2084,16 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         }
       });
     }
+
+    // [추가] publish-info 패널이 렌더링된 후 썸네일 버튼을 올바른 위치에 추가
+    // showPublishInfo가 DOM을 새로 그리기 때문에 버튼이 사라질 수 있음 -> 다시 렌더링 요청
+    try {
+      if (typeof renderThumbnailButton === 'function') {
+        renderThumbnailButton(workspaceEl, ideaData);
+      }
+    } catch (e) {
+      console.warn('[Workspace] renderThumbnailButton call failed in showPublishInfo:', e);
+    }
   });
 }
 
@@ -2018,8 +2159,19 @@ ${contentHtml}
 // 워크스페이스 액션 버튼 업데이트 헬퍼 함수
 // -----------------------------------------------------------------------------
 export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
-  const buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
-  if (!buttonContainer) return;
+  let buttonContainer = workspaceEl.querySelector('#workspace-action-buttons');
+  if (!buttonContainer) {
+    const headerEl = workspaceEl.querySelector('#workspace-title-header');
+    if (headerEl && headerEl.parentNode) {
+      const newContainer = document.createElement('div');
+      newContainer.id = 'workspace-action-buttons';
+      newContainer.style.cssText = 'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+      headerEl.parentNode.insertBefore(newContainer, headerEl.nextSibling);
+      buttonContainer = newContainer;
+    } else {
+      return;
+    }
+  }
 
   // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
   let composeThumbnailText = false;
@@ -2042,9 +2194,19 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
 
     // If draft exists but regenerate buttons are missing, create them
     if (hasDraft) {
-      // remove generate button (if present)
+      // remove generate button (if present) from action bar and publish-info area
       const genBtn = buttonContainer.querySelector('#generate-draft-btn');
       if (genBtn && genBtn.parentNode) genBtn.remove();
+      try {
+        const pubActions = buttonContainer
+          .closest('.workspace-container')
+          ?.querySelector('#publish-info-content')
+          ?.querySelector('#publish-info-actions');
+        const genBtnInPub = pubActions?.querySelector('#generate-draft-btn');
+        if (genBtnInPub && genBtnInPub.parentNode) genBtnInPub.remove();
+      } catch (e) {
+        // ignore
+      }
 
       // Ensure publish-info panel shows regenerate/delete actions (move buttons here)
       try {
@@ -2080,13 +2242,34 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
         // ignore
       }
 
-      // Ensure generate button exists
+      // Ensure generate button exists - prefer publish-info area (near copy-html) for placement
       if (!hasGenerateBtn) {
         const genBtn = document.createElement('button');
         genBtn.id = 'generate-draft-btn';
-        genBtn.style.cssText = 'flex:1;';
+        genBtn.style.cssText = 'width: auto; padding: 10px; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
         genBtn.textContent = '✨ AI 초안 생성';
-        buttonContainer.appendChild(genBtn);
+        // try to insert into publish-info-actions if available
+        try {
+          let publishContent = buttonContainer
+            .closest('.workspace-container')
+            ?.querySelector('#publish-info-content');
+          let pubActions = publishContent?.querySelector('#publish-info-actions');
+          // create publish-info-actions container if it doesn't exist so we have a
+          // consistent place to put generate button and compose checkbox
+          if (!pubActions && publishContent) {
+            pubActions = document.createElement('div');
+            pubActions.id = 'publish-info-actions';
+            pubActions.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+            publishContent.appendChild(pubActions);
+          }
+          if (pubActions) {
+            pubActions.insertBefore(genBtn, pubActions.firstElementChild || null);
+          } else {
+            buttonContainer.appendChild(genBtn);
+          }
+        } catch (e) {
+          buttonContainer.appendChild(genBtn);
+        }
       }
     }
   } catch (e) {
@@ -2096,50 +2279,62 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
 
   // Insert the compose-thumbnail-text checkbox next to the regenerate-draft button
   try {
-    const existingCheckbox = buttonContainer.querySelector('#compose-thumbnail-text-checkbox');
+    const existingCheckbox = buttonContainer.closest('.workspace-container')?.querySelector('#compose-thumbnail-text-checkbox');
     if (!existingCheckbox) {
       const regenTextBtn = buttonContainer.querySelector('#regenerate-draft-btn');
-      const wrapper = document.createElement('label');
-      wrapper.id = 'compose-thumbnail-text-wrapper';
-      wrapper.style.cssText =
-        'display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-left:8px;';
-
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.id = 'compose-thumbnail-text-checkbox';
       input.checked = !!composeThumbnailText;
-      input.style.cssText = 'margin:0;cursor:pointer;accent-color:#6c5ce7;';
+      input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+      input.title = '썸네일 텍스트 오버레이 적용';
 
-      const span = document.createElement('span');
-      span.textContent = '썸네일 텍스트 오버레이';
-      span.style.userSelect = 'none';
+// Prefer inserting into publish-info actions container when possible (near copy-html)
+        let inserted = false;
+        try {
+          const pubActions = buttonContainer
+            .closest('.workspace-container')
+            ?.querySelector('#publish-info-content')
+            ?.querySelector('#publish-info-actions');
+          if (pubActions) {
+            if (hasDraft) {
+              // For drafts, the publish panel rendering (showPublishInfo)
+              // is responsible for creating the regenerate/thumnail controls
+              // and placing the checkbox inside that wrapper. Skip inserting
+              // a duplicate input here to avoid inconsistent DOM structure.
+            } else {
+              // No draft: prefer to insert into a .compose-thumbnail-controls wrapper
+              // so the generate button and checkbox share the same visual style.
+              let controls = pubActions.querySelector('.compose-thumbnail-controls');
+              if (!controls) {
+                controls = document.createElement('div');
+                controls.className = 'compose-thumbnail-controls';
+                controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
 
-      wrapper.appendChild(input);
-      wrapper.appendChild(span);
-
-      // Prefer inserting into publish-info actions container when regenerate
-      // actions are located there. Fall back to main action bar if needed.
-      let inserted = false;
-      try {
-        const pubActions = buttonContainer
-          .closest('.workspace-container')
-          ?.querySelector('#publish-info-content')
-          ?.querySelector('#publish-info-actions');
-        const pubRegen = pubActions?.querySelector('#regenerate-draft-btn');
-        if (pubActions && pubRegen) {
-          pubActions.insertBefore(wrapper, pubActions.firstElementChild || null);
-          inserted = true;
-          console.debug(
-            '[Workspace] compose-thumbnail-text checkbox inserted into publish-info-actions, checked:',
-            input.checked
-          );
-        }
+                const existingGen = pubActions.querySelector('#generate-draft-btn');
+                if (existingGen) {
+                  // move existing generate button into the controls wrapper
+                  existingGen.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+                  pubActions.insertBefore(controls, existingGen);
+                  controls.appendChild(input);
+                  controls.appendChild(existingGen);
+                } else {
+                  pubActions.insertBefore(controls, pubActions.firstElementChild || null);
+                  controls.appendChild(input);
+                }
+              } else {
+                controls.insertBefore(input, controls.firstElementChild || null);
+              }
+              inserted = true;
+              console.debug('[Workspace] compose-thumbnail-text checkbox inserted into publish-info-actions, checked:', input.checked);
+            }
+          }
       } catch (e) {
         // ignore
       }
 
       if (!inserted && regenTextBtn && regenTextBtn.parentNode) {
-        regenTextBtn.parentNode.insertBefore(wrapper, regenTextBtn.parentNode.firstChild);
+        regenTextBtn.parentNode.insertBefore(input, regenTextBtn.parentNode.firstChild);
         inserted = true;
         console.debug(
           '[Workspace] compose-thumbnail-text checkbox inserted next to regenerate-draft-btn in action bar, checked:',
@@ -2201,6 +2396,14 @@ export function renderWorkspace(container, ideaData) {
   // Keep top-level thumbnailUrls in sync (legacy fields may exist at top-level)
   if (!ideaData.thumbnailUrls && ideaData.publishInfo?.thumbnailUrls) {
     ideaData.thumbnailUrls = ideaData.publishInfo.thumbnailUrls;
+  }
+
+  // Also ensure publishInfo has thumbnailUrls if top-level contains them
+  // (some older flows may write to top-level; keep both in sync so UI is
+  // robust when re-entering workspaces).
+  if (!ideaData.publishInfo) ideaData.publishInfo = {};
+  if (!ideaData.publishInfo.thumbnailUrls && ideaData.thumbnailUrls) {
+    ideaData.publishInfo.thumbnailUrls = ideaData.thumbnailUrls;
   }
 
   // [수정] 1. 데이터 동기화 로직 추가
@@ -2570,27 +2773,15 @@ export function renderWorkspace(container, ideaData) {
           isTrackingOnly
             ? trackingOnlyContent
             : `
-        <div id="workspace-action-buttons" style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
-            ${
-              hasDraft
-                ? `
-            <button id="regenerate-draft-btn" style="flex:1; min-width:140px;">📝 텍스트만 다시 쓰기</button>
-            <button id="regenerate-thumbnail-btn" style="flex:1; min-width:140px;">🎨 썸네일만 다시 그리기</button>
-            <button id="delete-draft-in-workspace" class="draft-delete-btn">❌ 초안 삭제</button>
-            `
-                : `
-            <button id="generate-draft-btn" style="flex:1;">✨ AI 초안 생성</button>
-            `
-            }
-        </div>
-        <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
+
+        <div style="flex:1; display:flex; flex-direction:column; /* gap:8px; */">
             <iframe id="editor-iframe" src="${chrome.runtime.getURL(
               'editor.html'
             )}" style="flex:1; width:100%; border:none;"></iframe>
-            <div id="linked-scraps-section" style="height:150px; overflow-x:auto; overflow-y:hidden; border-top:1px solid #eee; padding:10px;">
+            <div id="linked-scraps-section" style="/* height:150px; */overflow-x:auto;overflow-y:hidden;/* border-top:1px solid #eee; *//* padding:10px; */">
                 <div class="scrap-list linked-scraps-list empty-state" data-idea-id="${
                   ideaData.id
-                }" style="display:flex; flex-wrap:nowrap; gap:8px; align-items:center;">
+                }" style="display:flex;flex-wrap:nowrap;/* gap:8px; */align-items:center;">
                     <p style="white-space:nowrap; color:#888; margin:0;">스크랩을 이곳으로 끌어다 놓아 연결하세요.</p>
                 </div>
             </div>
@@ -5745,7 +5936,14 @@ async function handleGenerateAction(btn, options) {
     }
 
     // 5. AI 요청 데이터 준비
-    btn.innerHTML = '✍️ 텍스트 작성 중...';
+    // 버튼 피드백은 요청 옵션에 맞춰 텍스트/썸네일 전용으로 구분합니다.
+    if (options.generateDraft) {
+      btn.innerHTML = '✍️ 텍스트 작성 중...';
+    } else if (options.generateThumbnail) {
+      btn.innerHTML = '🎨 썸네일 생성 중...';
+    } else {
+      btn.innerHTML = '⏳ 작업 중...';
+    }
 
     const baseDraftData = {
       ...ideaData, // ✅ [수정] ideaData를 맨 위로 올려야 합니다!
@@ -5861,13 +6059,15 @@ async function handleGenerateAction(btn, options) {
             if (typeof renderThumbnailButton === 'function' && workspaceEl) {
               renderThumbnailButton(workspaceEl, ideaData);
             }
+            // 사용자 피드백 추가
+            import('../utils.js').then((utils) => utils.showToast('✅ 썸네일 생성 완료!'));
           }
           return;
         }
 
         // 8. 2단계: 썸네일 생성 시작
         console.log('[Workspace] 🎨 2단계 썸네일 생성 시작...');
-        btn.innerHTML = '🎨 썸네일 그리는 중...';
+        btn.innerHTML = '🎨 썸네일 생성 중...';
 
         const secondStepData = {
           ...baseDraftData,

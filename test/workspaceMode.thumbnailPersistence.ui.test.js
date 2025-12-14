@@ -47,11 +47,10 @@ describe('Workspace thumbnail persistence', () => {
     const btn = workspaceEl.querySelector('#btn-create-thumbnail');
     expect(btn).toBeTruthy();
 
-    // preview image should be present and have the expected src and alt attributes
+    // image preview removed by design; ensure button contains only text
     const previewImg = btn.querySelector('img');
-    expect(previewImg).toBeTruthy();
-    expect(previewImg.src).toBe('https://example.test/16x9.png');
-    expect(previewImg.alt).toBe('Thumb Test');
+    expect(previewImg).toBeFalsy();
+    expect(btn.textContent.trim()).toBe('🎨 썸네일 만들기');
 
     // simulate leaving and re-entering: re-render workspace with same idea object
     // ensure the thumbnail button still exists (persistence)
@@ -169,11 +168,18 @@ describe('Workspace thumbnail persistence', () => {
     const regenBtn = publishArea.querySelector('#regenerate-draft-btn');
     expect(regenBtn).toBeTruthy();
 
-    // wrapper should be the first child in the publish-info button container
-    const container = regenBtn.parentNode;
-    const firstChild = container.firstElementChild;
-    expect(firstChild).toBeTruthy();
-    expect(firstChild.id).toBe('compose-thumbnail-text-wrapper');
+    // checkbox input should be present and be placed adjacent to the regenerate button
+    const checkbox = publishArea.querySelector('#compose-thumbnail-text-checkbox');
+    expect(checkbox).toBeTruthy();
+    const controls = checkbox.parentNode;
+    // checkbox should be inside the compose controls
+    expect(controls.classList.contains('compose-thumbnail-controls')).toBe(true);
+    // regenerate-draft button must NOT be nested inside the compose controls
+    expect(regenBtn.closest('.compose-thumbnail-controls')).toBeNull();
+    // and it should be placed adjacent to the controls (either side)
+    expect(
+      regenBtn.previousElementSibling === controls || regenBtn.nextElementSibling === controls
+    ).toBe(true);
 
     container4.remove();
   });
