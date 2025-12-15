@@ -88,4 +88,54 @@ describe('Workspace UI - repeated save', () => {
     expect(saveBtn.disabled).toBe(true);
     expect(idea.title).toBe('Second Edit');
   });
+
+  test('resets _isSaving flag after timeout if callback is not called', async () => {
+    jest.useFakeTimers();
+    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+
+    const idea = {
+      id: 'card-timeout-save',
+      title: 'Original Title',
+      status: 'ideas',
+      publishInfo: {},
+    };
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderWorkspace(container, idea);
+
+    jest.advanceTimersByTime(300); // Wait for showPublishInfo
+
+    const input = container.querySelector('#idea-title-input');
+    const saveBtn = container.querySelector('#save-idea-title-btn');
+
+    // mock sendMessage to NOT call callback
+    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => {
+        // Do nothing (simulate timeout/no response)
+    });
+
+    // 1. Click Save
+    input.value = 'Timeout Edit';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    jest.advanceTimersByTime(20);
+    
+    saveBtn.click();
+    
+    // Check that save was attempted
+    expect(sendSpy).toHaveBeenCalled();
+    
+    // Try to click again immediately - should be blocked
+    sendSpy.mockClear();
+    saveBtn.click();
+    expect(sendSpy).not.toHaveBeenCalled(); // Blocked by _isSaving
+
+    // Advance time by 5000ms
+    jest.advanceTimersByTime(5000);
+
+    // Try to click again - should work now
+    saveBtn.click();
+    expect(sendSpy).toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
 });

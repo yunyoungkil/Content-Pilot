@@ -1765,6 +1765,24 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         }
         publishInfoArea._isSaving = true;
 
+        // Safety timeout to reset flag if callback never runs (e.g. background script error or timeout)
+        setTimeout(() => {
+          if (publishInfoArea._isSaving) {
+            console.warn('[Workspace] Save timeout - resetting _isSaving flag');
+            publishInfoArea._isSaving = false;
+            
+            // Re-enable button if content is still dirty (different from last known saved state)
+            const btn = publishInfoArea.querySelector('#save-idea-title-btn');
+            const input = publishInfoArea.querySelector('#idea-title-input');
+            const currentVal = input ? input.value.trim() : '';
+            
+            if (btn && currentVal && currentVal !== ideaData.title) {
+              btn.disabled = false;
+              publishInfoArea._titleChanged = true;
+            }
+          }
+        }, 5000);
+
         console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
         chrome.runtime.sendMessage(
           {
