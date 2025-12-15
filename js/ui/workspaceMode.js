@@ -1759,6 +1759,12 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
       // Internal save impl that updates local UI state
       const doSaveTitleImpl = (newTitle) => {
+        if (publishInfoArea._isSaving) {
+          console.debug('[Workspace] Save already in progress, skipping duplicate save');
+          return;
+        }
+        publishInfoArea._isSaving = true;
+
         console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
         chrome.runtime.sendMessage(
           {
@@ -1772,6 +1778,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             },
           },
           (response) => {
+            publishInfoArea._isSaving = false;
+
             if (response && response.success) {
               ideaData.title = newTitle;
               // update header display text
@@ -1793,17 +1801,26 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
                 if (el.dataset.ideaTitle !== undefined) el.dataset.ideaTitle = newTitle;
               });
 
-              if (saveIdeaBtn) saveIdeaBtn.disabled = true;
-              // clear pending flag on the publish area
-              try {
+              // Check if user has typed more since save started
+              const currentInput = publishInfoArea.querySelector('#idea-title-input');
+              const currentVal = currentInput ? currentInput.value.trim() : null;
+              
+              if (currentVal !== null && currentVal !== newTitle) {
+                console.debug('[Workspace] Content changed during save, keeping button enabled');
+                if (saveIdeaBtn) saveIdeaBtn.disabled = false;
+                publishInfoArea._titleChanged = true;
+              } else {
+                if (saveIdeaBtn) saveIdeaBtn.disabled = true;
                 publishInfoArea._titleChanged = false;
-              } catch (e) {
-                // ignore
+                publishInfoArea._pendingTitle = null;
               }
+
               showToast('✅ 제목이 저장되었습니다.');
             } else {
               console.error('[Workspace] 제목 저장 실패:', response);
               showToast('❌ 제목 저장에 실패했습니다.');
+              // Re-enable button on failure so user can try again
+              if (saveIdeaBtn) saveIdeaBtn.disabled = false;
             }
           }
         );
@@ -1828,6 +1845,10 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           }
           // only save if changed or force requested
           if (force || newTitle !== ideaData.title) {
+            if (publishInfoArea._isSaving) {
+              console.debug('[Workspace] Save already in progress, skipping');
+              return;
+            }
             const btn = publishInfoArea.querySelector('#save-idea-title-btn');
             if (btn) btn.disabled = true;
             publishInfoArea._titleChanged = false;
@@ -1879,16 +1900,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         // ignore
       }
 
-      // Also attach a direct click listener to the current save button
-      // to ensure clicks trigger save even if delegated handlers miss the event.
-      try {
-        if (saveIdeaBtn && !saveIdeaBtn.__cp_click_attached) {
-          saveIdeaBtn.addEventListener('click', () => publishInfoArea._doSaveTitle(true));
-          saveIdeaBtn.__cp_click_attached = true;
-        }
-      } catch (e) {
-        // ignore
-      }
+      // (Removed direct click listener on saveIdeaBtn to avoid double-firing with delegated handler)
+
 
       // Attach delegated handlers on the publish area once so they survive panel re-renders.
       if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
