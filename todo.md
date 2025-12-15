@@ -83,6 +83,18 @@
 
 ## ✅ 최근 완료된 작업
 
+### UI Regressions Fix (Cursor Blinking & Data Load)
+
+- [x] **Fix Cursor Blinking in Publish Info Panel**
+  - Modified `showPublishInfo` in `js/ui/workspaceMode.js` to reuse existing DOM elements instead of destroying/recreating them.
+  - Implemented in-place updates for title, SEO title, permalink, and tags to preserve input focus during auto-saves.
+- [x] **Fix Data Load Failure on Workspace Exit**
+  - Updated `loadKanbanData` in `js/ui/kanbanMode.js` to ensure the retry mechanism includes a callback to update the UI.
+  - Fixed race condition where the board would stay in "Loading..." state if the initial request failed.
+- [x] **Run test suite and verify fixes**
+  - Verified `workspaceMode.publishInfo.ui.test.js` (Passed)
+  - Verified `kanbanMode.ui.test.js` (Passed)
+
 ### workspace 객체 누락 버그 수정
 
 - [x] workspaceMode.js의 renderWorkspace 함수에 방어 코드 추가

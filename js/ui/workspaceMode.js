@@ -761,6 +761,15 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
       if (candidate) targetWorkspace = candidate.closest('.workspace-container');
     }
 
+    // If we couldn't find a matching workspace specifically for this idea,
+    // fall back to any visible workspace container so the draft response
+    // still refreshes the currently open workspace in test and single-workspace
+    // environments.
+    if (!targetWorkspace) {
+      const anyWorkspace = document.querySelector('.workspace-container');
+      if (anyWorkspace) targetWorkspace = anyWorkspace;
+    }
+
     if (targetWorkspace) {
       console.debug(
         '[DIAG applyDraftResponseToIdea] refreshing publish-info UI for ideaId:',
@@ -815,19 +824,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     draftContent: !!ideaData?.draftContent,
     thumbnailInfo: !!ideaData?.publishInfo?.thumbnailInfo,
   });
-  // Locate the action-buttons container. Prefer the nextElementSibling after
-  // the title header, but fall back to known IDs to be robust when the DOM
-  // structure differs (tests or other code may leave mutated DOM between runs).
-  let buttonContainer = workspaceEl.querySelector('#workspace-title-header')?.nextElementSibling;
-  if (!buttonContainer) {
-    // prefer explicit action-buttons container if present
-    buttonContainer =
-      workspaceEl.querySelector('#workspace-action-buttons') ||
-      // as a final fallback, search under the title header's parent element
-      workspaceEl
-        .querySelector('#workspace-title-header')
-        ?.parentElement?.querySelector('#workspace-action-buttons');
-  }
+  // Locate the action-buttons container. Prefer an explicit `#workspace-action-buttons`
+  // element when present; otherwise fall back to the workspace root. This removes
+  // the dependency on the (soon-to-be-removed) title header element.
+  let buttonContainer = workspaceEl.querySelector('#workspace-action-buttons') || workspaceEl;
   // 이미 버튼이 있으면 중단
   // [수정] 버튼이 있으면 위치만 확인하고 이동시킨 후 리턴
   const existingBtn = workspaceEl.querySelector('#btn-create-thumbnail');
@@ -1506,9 +1506,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   } catch (e) {
     void 0; // debug probe should not break runtime
   }
-  // 기존 패널 제거
-  const existingInfo = workspaceEl.querySelector('.publish-info-panel');
-  if (existingInfo) existingInfo.remove();
+  // 기존 패널 제거 (주석 처리: 포커스 유지를 위해 재사용 시도)
+  // const existingInfo = workspaceEl.querySelector('.publish-info-panel');
+  // if (existingInfo) existingInfo.remove();
 
   // 파라미터 정규화 (null, undefined 처리)
   permalink = permalink || '';
@@ -1633,49 +1633,69 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
   }
 
-  // 채널 정보 가져오기
-  chrome.runtime.sendMessage({ action: 'get_my_channels' }, (channelsResponse) => {
-    const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
-    const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
-    const channelUrl = firstChannel?.inputUrl || '';
+  // [Modified] Check for existing panel to avoid focus loss
+  let publishInfoArea = workspaceEl.querySelector('#publish-info-content');
+  if (!publishInfoArea) {
+    const container = workspaceEl.querySelector('#publish-info-area');
+    if (container) publishInfoArea = container;
+  }
 
-    let isTistory = channelUrl.includes('tistory.com');
-    let fullUrl = buildPermalinkUrl(channelUrl, permalink, isTistory);
+  let publishInfoPanel = publishInfoArea ? publishInfoArea.querySelector('.publish-info-panel') : null;
+  const isUpdate = !!publishInfoPanel;
 
-    const publishInfoPanel = document.createElement('div');
+  // Escape user-provided values to avoid HTML injection or broken attributes
+  const escapeHtml = (s) =>
+    String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const ideaTitle = ideaData?.title || '';
+  const safeIdeaTitle = escapeHtml(ideaTitle);
+  const safeSeoTitle = escapeHtml(seoTitle);
+  const safePermalink = escapeHtml(permalink);
+  const safeTags = escapeHtml(tags);
+  // initial fullUrl may be empty; will be updated when channel info loads
+  let fullUrl = '';
+  let safeFullUrl = escapeHtml(fullUrl);
+
+  if (!isUpdate) {
+    publishInfoPanel = document.createElement('div');
     publishInfoPanel.className = 'publish-info-panel';
     // [수정] 패딩을 줄여서(16px -> 10px) 내부 공간을 넓게 사용하도록 조정
     publishInfoPanel.style.cssText = `padding: 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;`;
-
-    const ideaTitle = ideaData?.title || '';
 
     // [수정] input 요소들에 box-sizing: border-box 추가하여 레이아웃 안정성 확보
     publishInfoPanel.innerHTML = `
       <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 4px;">📝 발행 정보</div>
       <div style="display: flex; flex-direction: column; gap: 10px;">
         <div>
-          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
-          <input type="text" id="idea-title-input" value="${ideaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
-        </div>
+            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" id="idea-title-input" value="${safeIdeaTitle}" readonly style="flex:1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+            </div>
+          </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
-          <input type="text" id="seo-title-input" value="${seoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+          <input type="text" id="seo-title-input" value="${safeSeoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
           <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="permalink-input" value="${
-              permalink || ''
+              safePermalink || ''
             }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
             ${
-              fullUrl
+              safeFullUrl
                 ? `<button id="connect-permalink-btn" style="padding: 6px 12px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🔗 연결</button>`
                 : ''
             }
           </div>
           ${
-            fullUrl
-              ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">전체 URL: <span style="color: #1a73e8;">${fullUrl}</span></div>`
+            safeFullUrl
+              ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">전체 URL: <span style="color: #1a73e8;">${safeFullUrl}</span></div>`
               : ''
           }
         </div>
@@ -1683,27 +1703,57 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">태그</label>
             <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="tags-input" value="${
-              tags || ''
+              safeTags || ''
             }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
             <button id="copy-tags-btn" title="태그 복사" style="padding: 6px 8px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; font-size: 12px;">📋</button>
           </div>
         </div>
         <!-- copy-html-btn will be inserted into #publish-info-actions for consistent placement -->
-      </div>
-    `;
+      </div>`;
 
-    const publishInfoArea = workspaceEl.querySelector('#publish-info-content');
     if (publishInfoArea) {
       publishInfoArea.innerHTML = '';
-      console.debug('[DIAG showPublishInfo] appending publish-info-panel to #publish-info-content');
       publishInfoArea.appendChild(publishInfoPanel);
-    } else {
-      // publish-info-content가 없으면 publish-info-area에 직접 추가
-      const publishInfoAreaContainer = workspaceEl.querySelector('#publish-info-area');
-      if (publishInfoAreaContainer) {
-        publishInfoAreaContainer.innerHTML = '';
-        publishInfoAreaContainer.appendChild(publishInfoPanel);
+    }
+  } else {
+    // Update existing inputs if not focused
+    const updateInput = (selector, value) => {
+      const input = publishInfoPanel.querySelector(selector);
+      if (input && document.activeElement !== input) {
+        input.value = value;
       }
+    };
+    updateInput('#idea-title-input', safeIdeaTitle);
+    updateInput('#seo-title-input', safeSeoTitle);
+    updateInput('#permalink-input', safePermalink);
+    updateInput('#tags-input', safeTags);
+  }
+
+    // Now request channel info to compute full permalink URL and update
+    // the UI when it arrives. This keeps the UI responsive even if the
+    // background doesn't call back immediately.
+    try {
+      chrome.runtime.sendMessage({ action: 'get_my_channels' }, (channelsResponse) => {
+        const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
+        const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
+        const channelUrl = firstChannel?.inputUrl || '';
+
+        const isTistory = channelUrl.includes('tistory.com');
+        fullUrl = buildPermalinkUrl(channelUrl, permalink, isTistory);
+        safeFullUrl = escapeHtml(fullUrl || '');
+
+        const permalinkInput = publishInfoPanel.querySelector('#permalink-input');
+        if (permalinkInput) {
+          // If fullUrl is available, use it. Otherwise fallback to the raw permalink slug.
+          // This prevents the field from blanking out if channel info is missing.
+          permalinkInput.value = fullUrl || permalink || '';
+        }
+        // update any full-url displays if present
+        const fullUrlSpan = publishInfoPanel.querySelector('.publish-full-url');
+        if (fullUrlSpan) fullUrlSpan.textContent = fullUrl || '';
+      });
+    } catch (e) {
+      // ignore if sendMessage is not available or behaves differently in tests
     }
 
     // Diagnostic: check if seo-title-input is present in DOM after rendering
@@ -1714,6 +1764,187 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       'value:',
       seoInput?.value
     );
+
+    // Make idea title editable here (replacing header inline edit)
+    const ideaInput = publishInfoPanel.querySelector('#idea-title-input');
+    if (ideaInput) {
+      // Allow editing in publish panel
+      ideaInput.removeAttribute('readonly');
+
+      // Internal save impl that updates local UI state
+      const doSaveTitleImpl = (newTitle) => {
+        if (publishInfoArea._isSaving) {
+          console.debug('[Workspace] Save already in progress, skipping duplicate save');
+          return;
+        }
+        publishInfoArea._isSaving = true;
+
+        // Safety timeout to reset flag if callback never runs (e.g. background script error or timeout)
+        setTimeout(() => {
+          if (publishInfoArea._isSaving) {
+            console.warn('[Workspace] Save timeout - resetting _isSaving flag');
+            publishInfoArea._isSaving = false;
+            
+            // Check if content is still dirty
+            const input = publishInfoArea.querySelector('#idea-title-input');
+            const currentVal = input ? input.value.trim() : '';
+            
+            if (currentVal && currentVal !== ideaData.title) {
+              publishInfoArea._titleChanged = true;
+            }
+          }
+        }, 5000);
+
+        console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: {
+                title: newTitle,
+              },
+            },
+          },
+          (response) => {
+            publishInfoArea._isSaving = false;
+
+            if (response && response.success) {
+              ideaData.title = newTitle;
+              // update header display text
+              // header element removed — rely on publish panel and kanban card updates
+
+              // update Kanban card(s)
+              const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${ideaData.id}"]`);
+              if (kanbanCard) {
+                kanbanCard.dataset.title = newTitle;
+                const kTitle = kanbanCard.querySelector('.kanban-card-title');
+                if (kTitle) kTitle.textContent = newTitle;
+              }
+
+              // update dashboard or other card lists that carry data-idea-id
+              document.querySelectorAll(`[data-idea-id="${ideaData.id}"]`).forEach((el) => {
+                const cardTitle = el.querySelector('.card-title') || el.querySelector('.kanban-card-title') || el.querySelector('.card-title');
+                if (cardTitle) cardTitle.textContent = newTitle;
+                if (el.dataset.ideaTitle !== undefined) el.dataset.ideaTitle = newTitle;
+              });
+
+              // Check if user has typed more since save started
+              const currentInput = publishInfoArea.querySelector('#idea-title-input');
+              const currentVal = currentInput ? currentInput.value.trim() : null;
+              
+              if (currentVal !== null && currentVal !== newTitle) {
+                console.debug('[Workspace] Content changed during save, keeping dirty state');
+                publishInfoArea._titleChanged = true;
+              } else {
+                publishInfoArea._titleChanged = false;
+                publishInfoArea._pendingTitle = null;
+              }
+
+              showToast('✅ 제목이 저장되었습니다.');
+            } else {
+              console.error('[Workspace] 제목 저장 실패:', response);
+              showToast('❌ 제목 저장에 실패했습니다.');
+            }
+          }
+        );
+      };
+
+      // wire up per-panel functions to the container so delegated handlers can call latest impl
+      try {
+        publishInfoArea._doSaveTitle = (force = false) => {
+          const el = publishInfoArea.querySelector('#idea-title-input');
+          if (!el) {
+            console.debug('[DIAG _doSaveTitle] no idea-title-input found');
+            return;
+          }
+          const newTitle = el.value.trim();
+          console.debug('[DIAG _doSaveTitle] called, force:', !!force, 'newTitle:', newTitle, 'ideaData.title:', ideaData && ideaData.title);
+          if (!newTitle) {
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            return;
+          }
+          // only save if changed or force requested
+          if (force || newTitle !== ideaData.title) {
+            if (publishInfoArea._isSaving) {
+              console.debug('[Workspace] Save already in progress, skipping');
+              return;
+            }
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            console.debug('[DIAG _doSaveTitle] performing save for title:', newTitle);
+            doSaveTitleImpl(newTitle);
+          } else {
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            console.debug('[DIAG _doSaveTitle] no change detected, skipping save');
+          }
+        };
+        // allow external callers to force a save using an explicit title value
+        publishInfoArea._doSaveTitleFromExternal = (externalTitle) => {
+          if (!externalTitle) return;
+          const t = String(externalTitle).trim();
+          console.debug('[DIAG _doSaveTitleFromExternal] called, title:', t, 'ideaData.title:', ideaData && ideaData.title);
+          if (t && t !== ideaData.title) {
+            doSaveTitleImpl(t);
+          } else {
+            console.debug('[DIAG _doSaveTitleFromExternal] no change or empty, skipping');
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
+
+      // expose a test-friendly global save trigger to allow forcing a save
+      try {
+        window.__cp_force_save_title = () => {
+          console.debug('[DIAG __cp_force_save_title] called');
+          // prefer the currently-visible input value to avoid stale closures
+          const cur = document.querySelector('#idea-title-input');
+          const val = cur ? String(cur.value || '').trim() : null;
+          const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
+          console.debug('[DIAG __cp_force_save_title] current input value:', val, 'pubContainer present:', !!pubContainer);
+          if (pubContainer && typeof pubContainer._doSaveTitleFromExternal === 'function') {
+            pubContainer._doSaveTitleFromExternal(val);
+            return;
+          }
+          // fallback to calling per-area _doSaveTitle(true) if available
+          if (publishInfoArea && typeof publishInfoArea._doSaveTitle === 'function') {
+            publishInfoArea._doSaveTitle(true);
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
+
+      // (Removed direct click listener on saveIdeaBtn to avoid double-firing with delegated handler)
+
+
+      // Attach delegated handlers on the publish area once so they survive panel re-renders.
+      if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
+        publishInfoArea.addEventListener('input', (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'idea-title-input') {
+            console.debug('[DIAG publishInfo input] target value:', targ.value);
+            publishInfoArea._titleChanged = true;
+            publishInfoArea._pendingTitle = targ.value;
+          }
+        });
+
+        publishInfoArea.addEventListener('blur', (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'idea-title-input' && publishInfoArea._titleChanged) {
+            publishInfoArea._doSaveTitle();
+          }
+        }, true);
+
+        publishInfoArea.dataset.cpPublishHandlersAttached = '1';
+      }
+    }
+
+    // header title removed — publish-info panel provides title editing
 
     // 이벤트 리스너
       // Render regenerate/thumbnail/delete buttons under the copy-html button
@@ -2089,7 +2320,28 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     } catch (e) {
       console.warn('[Workspace] renderThumbnailButton call failed in showPublishInfo:', e);
     }
-  });
+}
+
+// Helper to read activeChannelId from chrome.storage.local supporting
+// both callback-style and promise-style implementations (tests may
+// stub either form).
+function getActiveChannelId(cb) {
+  try {
+    const res = chrome.storage.local.get('activeChannelId', (r) => {
+      if (typeof cb === 'function') cb(r);
+    });
+    if (res && typeof res.then === 'function') {
+      return res.then((r) => {
+        if (typeof cb === 'function') cb(r);
+        return r;
+      });
+    }
+    // If callback-style only, return a resolved promise; caller can still use callback.
+    return Promise.resolve();
+  } catch (e) {
+    if (typeof cb === 'function') cb({ activeChannelId: null });
+    return Promise.resolve({ activeChannelId: null });
+  }
 }
 
 // 완전한 HTML 생성 함수 (JSON-LD 포함)
@@ -2369,6 +2621,27 @@ export function renderWorkspace(container, ideaData) {
   );
   Logger.debug('[Workspace] container:', container);
   Logger.debug('[Workspace] ideaData:', ideaData);
+
+  // If an existing workspace is present and has an unsaved title change,
+  // trigger save before rendering the new workspace so the card reflects the
+  // updated title when the user leaves the workspace.
+  try {
+    const existingWorkspace = container.querySelector('.workspace-container');
+    if (existingWorkspace) {
+      // Try to find the element where properties are attached (content or area)
+      let publishInfoArea = existingWorkspace.querySelector('#publish-info-content');
+      if (!publishInfoArea) {
+        publishInfoArea = existingWorkspace.querySelector('#publish-info-area');
+      }
+      
+      if (publishInfoArea && publishInfoArea._titleChanged && typeof publishInfoArea._doSaveTitle === 'function') {
+        publishInfoArea._doSaveTitle(true);
+        console.debug('[Workspace] Pending title change detected; triggered save before leaving workspace.');
+      }
+    }
+  } catch (e) {
+    console.warn('[Workspace] Error while attempting to flush pending title save:', e);
+  }
 
   // 방어 코드
   ideaData.workspace = ideaData.workspace || {};
@@ -2750,15 +3023,45 @@ export function renderWorkspace(container, ideaData) {
   `
     : '';
 
-  container.innerHTML = `
+  // [최적화] 이미 워크스페이스가 렌더링되어 있고, 같은 아이디어 ID라면 전체 리렌더링을 건너뜀
+  const existingWorkspace = container.querySelector('.workspace-container');
+  const existingIdeaId = existingWorkspace?.querySelector('.linked-scraps-list')?.dataset?.ideaId;
+  
+  let workspaceEl;
+
+  if (existingWorkspace && existingIdeaId === ideaData.id) {
+    console.debug('[Workspace] 동일한 아이디어 ID 감지, 부분 업데이트 수행:', ideaData.id);
+    workspaceEl = existingWorkspace;
+    
+    // 연결된 스크랩 목록 업데이트 (필요한 경우)
+    const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
+    if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
+      getActiveChannelId((res) => {
+        chrome.runtime.sendMessage(
+          { action: 'get_all_scraps', channelId: res.activeChannelId },
+          (r) => {
+            if (r && r.success && r.scraps) {
+              const linkedScraps = r.scraps.filter((s) => ideaData.linkedScraps.includes(s.id));
+              if (linkedScraps.length > 0) {
+                linkedScrapsList.classList.remove('empty-state');
+                linkedScrapsList.innerHTML = linkedScraps
+                  .map((s) => createScrapCard(s, true))
+                  .join('');
+                linkedScrapsList.querySelectorAll('.linked-scrap-item').forEach((item) => {
+                  setupLinkedScrapItem(item);
+                });
+              }
+            }
+          }
+        );
+      });
+    }
+  } else {
+    console.debug('[Workspace] 전체 워크스페이스 렌더링 수행');
+    container.innerHTML = `
     <div class="workspace-container">
       <div id="main-editor-panel" class="workspace-column" style="display:flex; flex-direction:column;">
-        <div id="workspace-title-header" style="padding:12px; border-bottom:1px solid #eee; background:#f8f9fa;">
-            <input type="text" id="workspace-title-input" value="${
-              ideaData.title || '제목 없음'
-            }" style="width:100%; font-size:16px; border:none; background:transparent; font-weight:bold;">
-            <button id="save-title-btn" style="display:none;">저장</button>
-        </div>
+        <!-- header removed: title editing now happens via publish-info panel -->
         ${
           isTrackingOnly
             ? trackingOnlyContent
@@ -2851,7 +3154,7 @@ export function renderWorkspace(container, ideaData) {
     </div>
   `;
 
-  const workspaceEl = container.querySelector('.workspace-container');
+    workspaceEl = container.querySelector('.workspace-container');
   Logger.debug('[Workspace] workspaceEl 찾기:', workspaceEl);
 
   // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
@@ -3071,7 +3374,8 @@ export function renderWorkspace(container, ideaData) {
     console.warn('⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:', err.message);
   }
 
-  addWorkspaceEventListeners(workspaceEl, ideaData, container);
+    addWorkspaceEventListeners(workspaceEl, ideaData, container);
+  }
 
   // Render thumbnail button proactively (best-effort). In some test or DOM
   // ordering scenarios the async action-button update may be delayed — rendering
@@ -3132,16 +3436,23 @@ export function renderWorkspace(container, ideaData) {
     if (Array.isArray(tagsForDisplay)) {
       tagsForDisplay = tagsForDisplay.join(', ');
     }
-    setTimeout(
-      () =>
-        showPublishInfo(
-          container.querySelector('.workspace-container'),
-          ideaData.publishInfo?.permalink,
-          tagsForDisplay,
-          ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
-          ideaData
-        ),
-      200
+    // ensure any previously scheduled showPublishInfo is cleared to avoid stale re-renders
+    try {
+      if (container && container.__cp_showPublishInfoTimeout) {
+        clearTimeout(container.__cp_showPublishInfoTimeout);
+        container.__cp_showPublishInfoTimeout = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    
+    // Call showPublishInfo synchronously to prevent UI blinking/disappearing
+    showPublishInfo(
+      container.querySelector('.workspace-container'),
+      ideaData.publishInfo?.permalink,
+      tagsForDisplay,
+      ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
+      ideaData
     );
   }
 }
@@ -3189,7 +3500,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
           if (response && response.success) {
             showToast('✅ 스크랩이 삭제되었습니다.');
             // 스크랩 리스트 새로고침
-            chrome.storage.local.get('activeChannelId', (res) => {
+            getActiveChannelId((res) => {
               chrome.runtime.sendMessage(
                 { action: 'get_all_scraps', channelId: res.activeChannelId },
                 (r) => {
@@ -3238,7 +3549,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
 
   // 연결된 스크랩 목록 초기 렌더링
   if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
-    chrome.storage.local.get('activeChannelId', (res) => {
+    getActiveChannelId((res) => {
       chrome.runtime.sendMessage(
         { action: 'get_all_scraps', channelId: res.activeChannelId },
         (r) => {
@@ -3579,83 +3890,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     });
   });
 
-  // 제목 저장 기능
-  const titleInput = workspaceEl.querySelector('#workspace-title-input');
-  const saveTitleBtn = workspaceEl.querySelector('#save-title-btn');
-  if (titleInput && saveTitleBtn) {
-    let titleChanged = false;
-
-    titleInput.addEventListener('input', () => {
-      titleChanged = true;
-      saveTitleBtn.style.display = 'inline-block';
-    });
-
-    titleInput.addEventListener('blur', () => {
-      if (titleChanged) {
-        const newTitle = titleInput.value.trim();
-        if (newTitle && newTitle !== ideaData.title) {
-          chrome.runtime.sendMessage(
-            {
-              action: 'update_kanban_card',
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || 'ideas',
-                updates: {
-                  title: newTitle,
-                },
-              },
-            },
-            (response) => {
-              if (response && response.success) {
-                ideaData.title = newTitle;
-                saveTitleBtn.style.display = 'none';
-                titleChanged = false;
-                showToast('✅ 제목이 저장되었습니다.');
-              } else {
-                console.error('[Workspace] 제목 저장 실패:', response);
-                showToast('❌ 제목 저장에 실패했습니다.');
-              }
-            }
-          );
-        } else {
-          saveTitleBtn.style.display = 'none';
-          titleChanged = false;
-        }
-      }
-    });
-
-    saveTitleBtn.addEventListener('click', () => {
-      const newTitle = titleInput.value.trim();
-      if (newTitle && newTitle !== ideaData.title) {
-        chrome.runtime.sendMessage(
-          {
-            action: 'update_kanban_card',
-            data: {
-              cardId: ideaData.id,
-              status: ideaData.status || 'ideas',
-              updates: {
-                title: newTitle,
-              },
-            },
-          },
-          (response) => {
-            if (response && response.success) {
-              ideaData.title = newTitle;
-              saveTitleBtn.style.display = 'none';
-              titleChanged = false;
-              showToast('✅ 제목이 저장되었습니다.');
-            } else {
-              console.error('[Workspace] 제목 저장 실패:', response);
-              showToast('❌ 제목 저장에 실패했습니다.');
-            }
-          }
-        );
-      } else {
-        saveTitleBtn.style.display = 'none';
-        titleChanged = false;
-      }
-    });
-  }
+  
 
   // 에디터 iframe에서 온 메시지 처리
   const editorMessageListener = (event) => {

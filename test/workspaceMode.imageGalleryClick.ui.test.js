@@ -13,7 +13,7 @@ describe('Workspace image gallery click', () => {
 
   test('clicking gallery image triggers single insert (no duplicate listeners)', async () => {
     // Mock get_all_scraps response
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           cb({

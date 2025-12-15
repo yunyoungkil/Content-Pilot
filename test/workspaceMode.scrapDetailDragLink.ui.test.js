@@ -21,7 +21,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
 
   test('dragging a scrap detail image and dropping into linked list links the scrap', async () => {
     let linkedCall = null;
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           setTimeout(() =>

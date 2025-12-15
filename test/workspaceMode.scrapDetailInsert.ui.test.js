@@ -20,7 +20,7 @@ describe('Workspace scrap detail insert image', () => {
 
   test('clicking insert on scrap detail image posts insert-image to editor iframe', async () => {
     // mock get_all_scraps
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           cb({ success: true, scraps: [{ id: 's1', url: 'https://example.test/page', text: '스크랩 내용', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] }] });

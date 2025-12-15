@@ -56,6 +56,11 @@ describe('Workspace UI - publish info SEO title', () => {
     const seoInput = await waitForValue('#seo-title-input', 'SEO Title from PublishInfo', 3000);
     expect(seoInput).toBeTruthy();
     expect(seoInput.value).toBe('SEO Title from PublishInfo');
+    // Ensure requested style removals are effective
+    const panel = container.querySelector('.publish-info-panel');
+    expect(panel).toBeTruthy();
+    expect(panel.getAttribute('style')).not.toContain('align-items: flex-start');
+
     container.remove();
   });
 });

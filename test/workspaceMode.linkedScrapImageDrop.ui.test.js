@@ -23,7 +23,7 @@ describe('Workspace drop image into already linked scrap', () => {
     let linkedCall = null;
     let addImageCall = null;
     let updateCardCall = null;
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           setTimeout(() => cb({

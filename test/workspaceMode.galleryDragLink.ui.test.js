@@ -20,9 +20,14 @@ describe('Workspace gallery image drag/drop linking', () => {
     // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
+  beforeEach(() => {
+    // reduce noisy debug output in this file which can overwhelm test runner
+    jest.spyOn(console, 'debug').mockImplementation(() => {});
+  });
+
   test('dragging a gallery image for a scrap and dropping into linked list links the scrap', async () => {
     let linkedCall = null;
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           setTimeout(() =>
