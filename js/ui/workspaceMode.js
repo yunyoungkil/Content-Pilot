@@ -1668,9 +1668,12 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 4px;">📝 발행 정보</div>
       <div style="display: flex; flex-direction: column; gap: 10px;">
         <div>
-          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
-          <input type="text" id="idea-title-input" value="${safeIdeaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
-        </div>
+            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" id="idea-title-input" value="${safeIdeaTitle}" readonly style="flex:1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+              <button id="save-idea-title-btn" style="margin-left: 8px; padding: 6px 10px; display: none; border-radius: 4px; border: 1px solid rgb(218, 220, 224); background: rgb(255, 255, 255); cursor: pointer; font-size: 12px;">저장</button>
+            </div>
+          </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
           <input type="text" id="seo-title-input" value="${safeSeoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
@@ -1735,14 +1738,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       // Allow editing in publish panel
       ideaInput.removeAttribute('readonly');
 
-      // Add a small save button next to the input
-      const saveIdeaBtn = document.createElement('button');
-      saveIdeaBtn.id = 'save-idea-title-btn';
-      saveIdeaBtn.textContent = '저장';
-      saveIdeaBtn.style.cssText = 'margin-left:8px; padding:6px 10px; display:none; border-radius:4px; border:1px solid #dadce0; background:#fff; cursor:pointer; font-size:12px;';
-      ideaInput.parentElement.style.display = 'flex';
-      ideaInput.parentElement.style.alignItems = 'center';
-      ideaInput.parentElement.appendChild(saveIdeaBtn);
+      // Use the save button included in the publish-info DOM
+      const saveIdeaBtn = publishInfoPanel.querySelector('#save-idea-title-btn');
 
       let titleChanged = false;
 
