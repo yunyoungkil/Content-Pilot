@@ -1711,6 +1711,19 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
     const publishInfoArea = workspaceEl.querySelector('#publish-info-content');
     if (publishInfoArea) {
+      // preserve any in-progress (unsaved) title edits across re-renders
+      try {
+        const existingInput = publishInfoArea.querySelector('#idea-title-input');
+        console.debug('[DIAG showPublishInfo preserve] existingInput present:', !!existingInput, 'existing _titleChanged:', !!publishInfoArea._titleChanged, 'pending:', publishInfoArea._pendingTitle, 'value:', existingInput ? existingInput.value : null);
+        if (publishInfoArea._titleChanged) {
+          const newInput = publishInfoPanel.querySelector('#idea-title-input');
+          if (newInput) {
+            newInput.value = publishInfoArea._pendingTitle !== undefined && publishInfoArea._pendingTitle !== null ? publishInfoArea._pendingTitle : (existingInput ? existingInput.value : newInput.value);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
       publishInfoArea.innerHTML = '';
       console.debug('[DIAG showPublishInfo] appending publish-info-panel to #publish-info-content');
       publishInfoArea.appendChild(publishInfoPanel);
@@ -1741,56 +1754,173 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       // Use the save button included in the publish-info DOM
       const saveIdeaBtn = publishInfoPanel.querySelector('#save-idea-title-btn');
 
-      let titleChanged = false;
-
       // keep save button visible; manage enabled/disabled state instead of hiding
       if (saveIdeaBtn) saveIdeaBtn.disabled = true;
 
-      const doSaveTitle = () => {
-        const newTitle = ideaInput.value.trim();
-        if (newTitle && newTitle !== ideaData.title) {
-          chrome.runtime.sendMessage(
-            {
-              action: 'update_kanban_card',
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || 'ideas',
-                updates: {
-                  title: newTitle,
-                },
+      // Internal save impl that updates local UI state
+      const doSaveTitleImpl = (newTitle) => {
+        console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: {
+                title: newTitle,
               },
             },
-            (response) => {
-              if (response && response.success) {
-                ideaData.title = newTitle;
-                // update header display text
-                const headerDisplay = workspaceEl.querySelector('#workspace-title-display');
-                if (headerDisplay) headerDisplay.textContent = newTitle;
-                if (saveIdeaBtn) saveIdeaBtn.disabled = true;
-                titleChanged = false;
-                showToast('✅ 제목이 저장되었습니다.');
-              } else {
-                console.error('[Workspace] 제목 저장 실패:', response);
-                showToast('❌ 제목 저장에 실패했습니다.');
+          },
+          (response) => {
+            if (response && response.success) {
+              ideaData.title = newTitle;
+              // update header display text
+              const headerDisplay = workspaceEl.querySelector('#workspace-title-display');
+              if (headerDisplay) headerDisplay.textContent = newTitle;
+
+              // update Kanban card(s)
+              const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${ideaData.id}"]`);
+              if (kanbanCard) {
+                kanbanCard.dataset.title = newTitle;
+                const kTitle = kanbanCard.querySelector('.kanban-card-title');
+                if (kTitle) kTitle.textContent = newTitle;
               }
+
+              // update dashboard or other card lists that carry data-idea-id
+              document.querySelectorAll(`[data-idea-id="${ideaData.id}"]`).forEach((el) => {
+                const cardTitle = el.querySelector('.card-title') || el.querySelector('.kanban-card-title') || el.querySelector('.card-title');
+                if (cardTitle) cardTitle.textContent = newTitle;
+                if (el.dataset.ideaTitle !== undefined) el.dataset.ideaTitle = newTitle;
+              });
+
+              if (saveIdeaBtn) saveIdeaBtn.disabled = true;
+              // clear pending flag on the publish area
+              try {
+                publishInfoArea._titleChanged = false;
+              } catch (e) {
+                // ignore
+              }
+              showToast('✅ 제목이 저장되었습니다.');
+            } else {
+              console.error('[Workspace] 제목 저장 실패:', response);
+              showToast('❌ 제목 저장에 실패했습니다.');
             }
-          );
-        } else {
-          if (saveIdeaBtn) saveIdeaBtn.disabled = true;
-          titleChanged = false;
-        }
+          }
+        );
       };
 
-      ideaInput.addEventListener('input', () => {
-        titleChanged = true;
-        if (saveIdeaBtn) saveIdeaBtn.disabled = false;
-      });
+      // wire up per-panel functions to the container so delegated handlers can call latest impl
+      try {
+        publishInfoArea._doSaveTitle = (force = false) => {
+          const el = publishInfoArea.querySelector('#idea-title-input');
+          if (!el) {
+            console.debug('[DIAG _doSaveTitle] no idea-title-input found');
+            return;
+          }
+          const newTitle = el.value.trim();
+          console.debug('[DIAG _doSaveTitle] called, force:', !!force, 'newTitle:', newTitle, 'ideaData.title:', ideaData && ideaData.title);
+          if (!newTitle) {
+            const btn = publishInfoArea.querySelector('#save-idea-title-btn');
+            if (btn) btn.disabled = true;
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            return;
+          }
+          // only save if changed or force requested
+          if (force || newTitle !== ideaData.title) {
+            const btn = publishInfoArea.querySelector('#save-idea-title-btn');
+            if (btn) btn.disabled = true;
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            console.debug('[DIAG _doSaveTitle] performing save for title:', newTitle);
+            doSaveTitleImpl(newTitle);
+          } else {
+            const btn = publishInfoArea.querySelector('#save-idea-title-btn');
+            if (btn) btn.disabled = true;
+            publishInfoArea._titleChanged = false;
+            publishInfoArea._pendingTitle = null;
+            console.debug('[DIAG _doSaveTitle] no change detected, skipping save');
+          }
+        };
+        // allow external callers to force a save using an explicit title value
+        publishInfoArea._doSaveTitleFromExternal = (externalTitle) => {
+          if (!externalTitle) return;
+          const t = String(externalTitle).trim();
+          console.debug('[DIAG _doSaveTitleFromExternal] called, title:', t, 'ideaData.title:', ideaData && ideaData.title);
+          if (t && t !== ideaData.title) {
+            doSaveTitleImpl(t);
+          } else {
+            console.debug('[DIAG _doSaveTitleFromExternal] no change or empty, skipping');
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
 
-      ideaInput.addEventListener('blur', () => {
-        if (titleChanged) doSaveTitle();
-      });
+      // expose a test-friendly global save trigger to allow forcing a save
+      try {
+        window.__cp_force_save_title = () => {
+          console.debug('[DIAG __cp_force_save_title] called');
+          // prefer the currently-visible input value to avoid stale closures
+          const cur = document.querySelector('#idea-title-input');
+          const val = cur ? String(cur.value || '').trim() : null;
+          const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
+          console.debug('[DIAG __cp_force_save_title] current input value:', val, 'pubContainer present:', !!pubContainer);
+          if (pubContainer && typeof pubContainer._doSaveTitleFromExternal === 'function') {
+            pubContainer._doSaveTitleFromExternal(val);
+            return;
+          }
+          // fallback to calling per-area _doSaveTitle(true) if available
+          if (publishInfoArea && typeof publishInfoArea._doSaveTitle === 'function') {
+            publishInfoArea._doSaveTitle(true);
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
 
-      saveIdeaBtn.addEventListener('click', () => doSaveTitle());
+      // Also attach a direct click listener to the current save button
+      // to ensure clicks trigger save even if delegated handlers miss the event.
+      try {
+        if (saveIdeaBtn && !saveIdeaBtn.__cp_click_attached) {
+          saveIdeaBtn.addEventListener('click', () => publishInfoArea._doSaveTitle(true));
+          saveIdeaBtn.__cp_click_attached = true;
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Attach delegated handlers on the publish area once so they survive panel re-renders.
+      if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
+        publishInfoArea.addEventListener('input', (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'idea-title-input') {
+            console.debug('[DIAG publishInfo input] target value:', targ.value);
+            publishInfoArea._titleChanged = true;
+            publishInfoArea._pendingTitle = targ.value;
+            const btn = publishInfoArea.querySelector('#save-idea-title-btn');
+            if (btn) btn.disabled = false;
+          }
+        });
+
+        publishInfoArea.addEventListener('blur', (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'idea-title-input' && publishInfoArea._titleChanged) {
+            publishInfoArea._doSaveTitle();
+          }
+        }, true);
+
+        publishInfoArea.addEventListener('click', (ev) => {
+          console.debug('[DIAG publishInfoArea click] target:', ev.target && ev.target.id, 'closest-save-btn:', ev.target && ev.target.closest ? !!ev.target.closest('#save-idea-title-btn') : false);
+          const btn = ev.target && ev.target.closest ? ev.target.closest('#save-idea-title-btn') : null;
+          if (btn) {
+            ev.preventDefault();
+            publishInfoArea._doSaveTitle(true);
+          }
+        }, true);
+
+        publishInfoArea.dataset.cpPublishHandlersAttached = '1';
+      }
     }
 
     // clicking the header title opens the publish-info tab for convenience
@@ -2458,6 +2588,22 @@ export function renderWorkspace(container, ideaData) {
   );
   Logger.debug('[Workspace] container:', container);
   Logger.debug('[Workspace] ideaData:', ideaData);
+
+  // If an existing workspace is present and has an unsaved title change,
+  // trigger save before rendering the new workspace so the card reflects the
+  // updated title when the user leaves the workspace.
+  try {
+    const existingWorkspace = container.querySelector('.workspace-container');
+    if (existingWorkspace) {
+      const existingSaveBtn = existingWorkspace.querySelector('#save-idea-title-btn');
+      if (existingSaveBtn && !existingSaveBtn.disabled) {
+        existingSaveBtn.click();
+        console.debug('[Workspace] Pending title change detected; triggered save before leaving workspace.');
+      }
+    }
+  } catch (e) {
+    console.warn('[Workspace] Error while attempting to flush pending title save:', e);
+  }
 
   // 방어 코드
   ideaData.workspace = ideaData.workspace || {};
@@ -3220,7 +3366,16 @@ export function renderWorkspace(container, ideaData) {
     if (Array.isArray(tagsForDisplay)) {
       tagsForDisplay = tagsForDisplay.join(', ');
     }
-    setTimeout(
+    // ensure any previously scheduled showPublishInfo is cleared to avoid stale re-renders
+    try {
+      if (container && container.__cp_showPublishInfoTimeout) {
+        clearTimeout(container.__cp_showPublishInfoTimeout);
+        container.__cp_showPublishInfoTimeout = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    container.__cp_showPublishInfoTimeout = setTimeout(
       () =>
         showPublishInfo(
           container.querySelector('.workspace-container'),
