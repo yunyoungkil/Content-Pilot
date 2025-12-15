@@ -30,6 +30,41 @@ global.chrome = {
   },
 };
 
+// Global cleanup after each test to avoid order-dependent leakage
+afterEach(() => {
+  try {
+    jest.useRealTimers();
+  } catch (e) {
+    // ignore if timers already real
+  }
+
+  // Clear DOM
+  try { document.body.innerHTML = ''; } catch (e) {}
+
+  // Reset workspace globals
+  try {
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    if (window.__cp_tui_shadow_listener_attached) window.__cp_tui_shadow_listener_attached = false;
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
+    window.__cp_force_save_title = undefined;
+  } catch (e) {
+    // ignore
+  }
+
+  // Clear any window event listeners we tracked
+  try { _clearTrackedWindowListeners(); } catch (e) {}
+
+  // Reset chrome runtime helpers to defaults to avoid mocks leaking between tests
+  try {
+    chrome.runtime.sendMessage = jest.fn();
+    chrome.runtime.onMessage = { addListener: jest.fn() };
+    // Remove any helper trigger function that mockChromeRuntime may have attached
+    try { delete chrome.runtime.triggerMessage; } catch (e) {}
+  } catch (e) {}
+});
+
 // Fetch API 모킹
 global.fetch = jest.fn();
 
@@ -194,8 +229,9 @@ global.testHelpers = {
   // Chrome Runtime 모킹 헬퍼
   mockChromeRuntime: () => {
     const listeners = [];
-    if (!chrome.runtime.sendMessage) chrome.runtime.sendMessage = jest.fn();
-    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+    // Always reset sendMessage to a fresh mock so individual tests can
+    // override it without leaking behavior across tests.
+    chrome.runtime.sendMessage = jest.fn((message, callback) => {
       // For image fetch, do not notify listeners to avoid side effects; just return test data
       if (message && message.action === 'fetch_image_as_base64') {
         if (callback)
@@ -213,8 +249,8 @@ global.testHelpers = {
       if (callback) callback({ success: true });
     });
 
-    if (!chrome.runtime.onMessage) chrome.runtime.onMessage = { addListener: jest.fn() };
-    if (!chrome.runtime.onMessage.addListener) chrome.runtime.onMessage.addListener = jest.fn();
+    // Reset onMessage listener registration helper
+    chrome.runtime.onMessage = { addListener: jest.fn() };
     chrome.runtime.onMessage.addListener.mockImplementation((listener) => {
       listeners.push(listener);
     });
@@ -362,6 +398,9 @@ beforeEach(() => {
   } catch (e) {
     // ignore in non-browser environments
   }
+  // Ensure a fresh chrome.runtime mock per test to avoid leakage.
+  // This provides a consistent default; individual tests may override it.
+  try { testHelpers.mockChromeRuntime(); } catch (e) {}
   // NOTE: keep mock implementations in individual tests
   // (tests can call testHelpers.mockChromeRuntime() when
   // they need runtime listener behavior).

@@ -172,8 +172,12 @@ function loadKanbanData(retryCount = 0) {
       if (Object.keys(allKanbanData).length === 0) {
         console.log('[KanbanMode] 콜백 미실행 감지, 재요청');
         if (chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-          const p = chrome.runtime.sendMessage({ action: 'get_kanban_data' });
-          if (p && typeof p.catch === 'function') p.catch(() => {});
+          chrome.runtime.sendMessage({ action: 'get_kanban_data' }, (response) => {
+            console.log('[KanbanMode] 재요청 응답 받음:', response);
+            if (response && response.success && response.data) {
+              updateKanbanUI(response.data);
+            }
+          });
         }
       }
     }, 1000);

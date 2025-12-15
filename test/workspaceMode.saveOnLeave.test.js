@@ -35,9 +35,7 @@ describe('Workspace UI - save title on leave', () => {
     await global.testHelpers.waitForMs(50);
 
     const input = container.querySelector('#idea-title-input');
-    const saveBtn = container.querySelector('#save-idea-title-btn');
     expect(input).toBeTruthy();
-    expect(saveBtn).toBeTruthy();
 
     // mock sendMessage to succeed
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => cb({ success: true }));
@@ -46,7 +44,6 @@ describe('Workspace UI - save title on leave', () => {
     input.value = 'New Title Before Leave';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(20);
-    expect(saveBtn.disabled).toBe(false);
 
     // simulate leaving workspace by rendering another idea
     const otherIdea = { id: 'other-1', title: 'Other', status: 'ideas' };
@@ -87,9 +84,7 @@ describe('Workspace UI - save title on leave', () => {
     await global.testHelpers.waitForMs(50);
 
     const input = container.querySelector('#idea-title-input');
-    const saveBtn = container.querySelector('#save-idea-title-btn');
     expect(input).toBeTruthy();
-    expect(saveBtn).toBeTruthy();
 
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => cb({ success: true }));
 
@@ -97,8 +92,7 @@ describe('Workspace UI - save title on leave', () => {
     input.value = 'First Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(10);
-    expect(saveBtn.disabled).toBe(false);
-    saveBtn.click();
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(50);
 
     const updatedCard1 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
@@ -108,8 +102,7 @@ describe('Workspace UI - save title on leave', () => {
     input.value = 'Second Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(10);
-    expect(saveBtn.disabled).toBe(false);
-    saveBtn.click();
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(50);
 
     const updatedCard2 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
@@ -146,9 +139,7 @@ describe('Workspace UI - save title on leave', () => {
     await global.testHelpers.waitForMs(50);
 
     const input = container.querySelector('#idea-title-input');
-    const saveBtn = container.querySelector('#save-idea-title-btn');
     expect(input).toBeTruthy();
-    expect(saveBtn).toBeTruthy();
 
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => cb({ success: true }));
 
@@ -156,7 +147,7 @@ describe('Workspace UI - save title on leave', () => {
     input.value = 'After R1';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(10);
-    saveBtn.click();
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(40);
     expect(document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`).dataset.title).toBe('After R1');
 
@@ -170,7 +161,6 @@ describe('Workspace UI - save title on leave', () => {
     await global.testHelpers.waitForMs(50);
 
     const newInput = container.querySelector('#idea-title-input');
-    const newSaveBtn = container.querySelector('#save-idea-title-btn');
     // debug: ensure publish areas have handlers attached
     const publishAreas = Array.from(document.querySelectorAll('#publish-info-content'));
     expect(publishAreas.length).toBeGreaterThanOrEqual(1);
@@ -178,18 +168,17 @@ describe('Workspace UI - save title on leave', () => {
       // dataset flag should be set so handlers are attached
       expect(pa.dataset.cpPublishHandlersAttached === '1' || pa._doSaveTitle).toBeTruthy();
     });
-    // the new save button should be inside one of the publish areas
-    const btnPublish = newSaveBtn.closest('#publish-info-content');
-    expect(btnPublish).toBeTruthy();
+    
     expect(newInput).toBeTruthy();
-    expect(newSaveBtn).toBeTruthy();
 
     newInput.value = 'After R2';
     newInput.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(10);
-    expect(newSaveBtn.disabled).toBe(false);
+    
     // use global save hook to avoid potential re-render races
     if (window.__cp_force_save_title) window.__cp_force_save_title();
+    else newInput.dispatchEvent(new Event('blur', { bubbles: true }));
+    
     await global.testHelpers.waitForMs(40);
 
     expect(document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`).dataset.title).toBe('After R2');

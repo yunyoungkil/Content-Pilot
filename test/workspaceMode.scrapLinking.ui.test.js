@@ -19,7 +19,7 @@ describe('Workspace scrap drag/drop linking', () => {
   test('dragging an unlinked scrap and dropping into linked list calls link_scrap_to_idea and updates DOM', async () => {
     let linkedCall = null;
     // Mock get_all_scraps and link_scrap_to_idea
-    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+    chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
         if (cb)
           cb({
@@ -52,8 +52,16 @@ describe('Workspace scrap drag/drop linking', () => {
     expect(allTabBtn).toBeTruthy();
     allTabBtn.click();
 
-    // wait for async population
-    await new Promise((r) => setTimeout(r, 50));
+    // wait for async population (be robust against timing variability)
+    async function waitForSelector(containerEl, selector, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = containerEl.querySelector(selector);
+        if (el) return el;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return null;
+    }
 
     const workspaceEl = container.querySelector('.workspace-container');
     expect(workspaceEl).toBeTruthy();
@@ -61,8 +69,8 @@ describe('Workspace scrap drag/drop linking', () => {
     const allScrapsList = workspaceEl.querySelector('.all-scraps-list');
     expect(allScrapsList).toBeTruthy();
 
-    // there should be one scrap card
-    const scrapItem = allScrapsList.querySelector('[data-scrap-id="scrap-1"]');
+    // there should be one scrap card (wait for it)
+    const scrapItem = await waitForSelector(allScrapsList, '[data-scrap-id="scrap-1"]', 1000);
     expect(scrapItem).toBeTruthy();
 
     // simulate dragstart — the app's handler will write application/json into dataTransfer
@@ -91,9 +99,11 @@ describe('Workspace scrap drag/drop linking', () => {
     dropEvt.dataTransfer = dt;
     linkedList.dispatchEvent(dropEvt);
 
-    // wait for the link_scrap_to_idea callback handling
-    await new Promise((r) => setTimeout(r, 20));
-
+    // wait for the link_scrap_to_idea callback handling (poll briefly)
+    const start = Date.now();
+    while (!linkedCall && Date.now() - start < 500) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     // ensure background API was invoked to link the scrap
     expect(linkedCall).toBeTruthy();
     expect(linkedCall.action).toBe('link_scrap_to_idea');

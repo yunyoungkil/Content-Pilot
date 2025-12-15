@@ -19,6 +19,14 @@ describe('Workspace UI - idea title escaping and save', () => {
       publishInfo: {},
     };
 
+    // create a fake kanban card in the DOM so workspace save updates can be observed
+    const fakeKanbanCard = document.createElement('div');
+    fakeKanbanCard.className = 'cp-kanban-card';
+    fakeKanbanCard.dataset.id = idea.id;
+    fakeKanbanCard.dataset.title = idea.title;
+    fakeKanbanCard.innerHTML = `<span class="kanban-card-title">${idea.title}</span>`;
+    document.body.appendChild(fakeKanbanCard);
+
     const container = document.createElement('div');
     document.body.appendChild(container);
     renderWorkspace(container, idea);
@@ -35,27 +43,26 @@ describe('Workspace UI - idea title escaping and save', () => {
     expect(input).toBeTruthy();
     expect(input.value).toBe(badTitle);
 
-    // simulate edit -> save button should appear
-    const saveBtn = container.querySelector('#save-idea-title-btn');
-    expect(saveBtn).toBeTruthy();
-
     // mock sendMessage to always succeed for this save
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => cb({ success: true }));
 
     input.value = badTitle + ' X';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(20);
-    // button is always visible but disabled/enabled based on changes
-    expect(saveBtn.disabled).toBe(false);
 
     // trigger blur to perform save and wait
     input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(50);
 
-    // header display should be updated
-    const header = container.querySelector('#workspace-title-display');
-    expect(header).toBeTruthy();
-    expect(header.textContent).toBe(badTitle + ' X');
+    // Verify underlying data and kanban card updated instead of header
+    const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+    expect(idea.title).toBe(badTitle + ' X');
+    expect(kanbanCard).toBeTruthy();
+    if (kanbanCard) {
+      expect(kanbanCard.dataset.title).toBe(badTitle + ' X');
+      const kTitle = kanbanCard.querySelector('.kanban-card-title');
+      if (kTitle) expect(kTitle.textContent).toBe(badTitle + ' X');
+    }
 
     sendSpy.mockRestore();
     container.remove();

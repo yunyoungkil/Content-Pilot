@@ -479,7 +479,7 @@
   flex-grow: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  background-color: #f1f3f5;
+  background-color: #f8f9fa;
   /* border: 1.5px solid #e9ecef; */ /* 에디터와 동일한 실선, 색상 */
   border-radius: 0 0 6px 6px; /* 아래쪽만 둥글게, 에디터와 연결된 느낌 */
   padding: 12px;
