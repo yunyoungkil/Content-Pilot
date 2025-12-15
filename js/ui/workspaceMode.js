@@ -1647,7 +1647,21 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     // [수정] 패딩을 줄여서(16px -> 10px) 내부 공간을 넓게 사용하도록 조정
     publishInfoPanel.style.cssText = `padding: 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;`;
 
+    // Escape user-provided values to avoid HTML injection or broken attributes
+    const escapeHtml = (s) =>
+      String(s === undefined || s === null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
     const ideaTitle = ideaData?.title || '';
+    const safeIdeaTitle = escapeHtml(ideaTitle);
+    const safeSeoTitle = escapeHtml(seoTitle);
+    const safePermalink = escapeHtml(permalink);
+    const safeTags = escapeHtml(tags);
+    const safeFullUrl = escapeHtml(fullUrl);
 
     // [수정] input 요소들에 box-sizing: border-box 추가하여 레이아웃 안정성 확보
     publishInfoPanel.innerHTML = `
@@ -1655,17 +1669,17 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       <div style="display: flex; flex-direction: column; gap: 10px;">
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
-          <input type="text" id="idea-title-input" value="${ideaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+          <input type="text" id="idea-title-input" value="${safeIdeaTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
-          <input type="text" id="seo-title-input" value="${seoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+          <input type="text" id="seo-title-input" value="${safeSeoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
           <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="permalink-input" value="${
-              permalink || ''
+              safePermalink || ''
             }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
             ${
               fullUrl
@@ -1675,7 +1689,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           </div>
           ${
             fullUrl
-              ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">전체 URL: <span style="color: #1a73e8;">${fullUrl}</span></div>`
+              ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">전체 URL: <span style="color: #1a73e8;">${safeFullUrl}</span></div>`
               : ''
           }
         </div>
@@ -1683,7 +1697,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">태그</label>
             <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="tags-input" value="${
-              tags || ''
+              safeTags || ''
             }" readonly style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
             <button id="copy-tags-btn" title="태그 복사" style="padding: 6px 8px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; font-size: 12px;">📋</button>
           </div>
@@ -1714,6 +1728,81 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
       'value:',
       seoInput?.value
     );
+
+    // Make idea title editable here (replacing header inline edit)
+    const ideaInput = publishInfoPanel.querySelector('#idea-title-input');
+    if (ideaInput) {
+      // Allow editing in publish panel
+      ideaInput.removeAttribute('readonly');
+
+      // Add a small save button next to the input
+      const saveIdeaBtn = document.createElement('button');
+      saveIdeaBtn.id = 'save-idea-title-btn';
+      saveIdeaBtn.textContent = '저장';
+      saveIdeaBtn.style.cssText = 'margin-left:8px; padding:6px 10px; display:none; border-radius:4px; border:1px solid #dadce0; background:#fff; cursor:pointer; font-size:12px;';
+      ideaInput.parentElement.style.display = 'flex';
+      ideaInput.parentElement.style.alignItems = 'center';
+      ideaInput.parentElement.appendChild(saveIdeaBtn);
+
+      let titleChanged = false;
+
+      const doSaveTitle = () => {
+        const newTitle = ideaInput.value.trim();
+        if (newTitle && newTitle !== ideaData.title) {
+          chrome.runtime.sendMessage(
+            {
+              action: 'update_kanban_card',
+              data: {
+                cardId: ideaData.id,
+                status: ideaData.status || 'ideas',
+                updates: {
+                  title: newTitle,
+                },
+              },
+            },
+            (response) => {
+              if (response && response.success) {
+                ideaData.title = newTitle;
+                // update header display text
+                const headerDisplay = workspaceEl.querySelector('#workspace-title-display');
+                if (headerDisplay) headerDisplay.textContent = newTitle;
+                saveIdeaBtn.style.display = 'none';
+                titleChanged = false;
+                showToast('✅ 제목이 저장되었습니다.');
+              } else {
+                console.error('[Workspace] 제목 저장 실패:', response);
+                showToast('❌ 제목 저장에 실패했습니다.');
+              }
+            }
+          );
+        } else {
+          saveIdeaBtn.style.display = 'none';
+          titleChanged = false;
+        }
+      };
+
+      ideaInput.addEventListener('input', () => {
+        titleChanged = true;
+        saveIdeaBtn.style.display = 'inline-block';
+      });
+
+      ideaInput.addEventListener('blur', () => {
+        if (titleChanged) doSaveTitle();
+      });
+
+      saveIdeaBtn.addEventListener('click', () => doSaveTitle());
+    }
+
+    // clicking the header title opens the publish-info tab for convenience
+    const headerTitle = workspaceEl.querySelector('#workspace-title-display');
+    if (headerTitle) {
+      headerTitle.style.cursor = 'pointer';
+      headerTitle.title = '발행 정보에서 제목을 편집하려면 클릭';
+      headerTitle.addEventListener('click', () => {
+        const publishTabBtn = workspaceEl.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+        if (publishTabBtn) publishTabBtn.click();
+      });
+    }
 
     // 이벤트 리스너
       // Render regenerate/thumbnail/delete buttons under the copy-html button
@@ -2754,10 +2843,9 @@ export function renderWorkspace(container, ideaData) {
     <div class="workspace-container">
       <div id="main-editor-panel" class="workspace-column" style="display:flex; flex-direction:column;">
         <div id="workspace-title-header" style="padding:12px; border-bottom:1px solid #eee; background:#f8f9fa;">
-            <input type="text" id="workspace-title-input" value="${
-              ideaData.title || '제목 없음'
-            }" style="width:100%; font-size:16px; border:none; background:transparent; font-weight:bold;">
-            <button id="save-title-btn" style="display:none;">저장</button>
+            <div id="workspace-title-display" style="width:100%; font-size:16px; font-weight:bold; color:#111; cursor:default;">
+              ${ideaData.title || '제목 없음'}
+            </div>
         </div>
         ${
           isTrackingOnly
@@ -3579,83 +3667,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     });
   });
 
-  // 제목 저장 기능
-  const titleInput = workspaceEl.querySelector('#workspace-title-input');
-  const saveTitleBtn = workspaceEl.querySelector('#save-title-btn');
-  if (titleInput && saveTitleBtn) {
-    let titleChanged = false;
-
-    titleInput.addEventListener('input', () => {
-      titleChanged = true;
-      saveTitleBtn.style.display = 'inline-block';
-    });
-
-    titleInput.addEventListener('blur', () => {
-      if (titleChanged) {
-        const newTitle = titleInput.value.trim();
-        if (newTitle && newTitle !== ideaData.title) {
-          chrome.runtime.sendMessage(
-            {
-              action: 'update_kanban_card',
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || 'ideas',
-                updates: {
-                  title: newTitle,
-                },
-              },
-            },
-            (response) => {
-              if (response && response.success) {
-                ideaData.title = newTitle;
-                saveTitleBtn.style.display = 'none';
-                titleChanged = false;
-                showToast('✅ 제목이 저장되었습니다.');
-              } else {
-                console.error('[Workspace] 제목 저장 실패:', response);
-                showToast('❌ 제목 저장에 실패했습니다.');
-              }
-            }
-          );
-        } else {
-          saveTitleBtn.style.display = 'none';
-          titleChanged = false;
-        }
-      }
-    });
-
-    saveTitleBtn.addEventListener('click', () => {
-      const newTitle = titleInput.value.trim();
-      if (newTitle && newTitle !== ideaData.title) {
-        chrome.runtime.sendMessage(
-          {
-            action: 'update_kanban_card',
-            data: {
-              cardId: ideaData.id,
-              status: ideaData.status || 'ideas',
-              updates: {
-                title: newTitle,
-              },
-            },
-          },
-          (response) => {
-            if (response && response.success) {
-              ideaData.title = newTitle;
-              saveTitleBtn.style.display = 'none';
-              titleChanged = false;
-              showToast('✅ 제목이 저장되었습니다.');
-            } else {
-              console.error('[Workspace] 제목 저장 실패:', response);
-              showToast('❌ 제목 저장에 실패했습니다.');
-            }
-          }
-        );
-      } else {
-        saveTitleBtn.style.display = 'none';
-        titleChanged = false;
-      }
-    });
-  }
+  
 
   // 에디터 iframe에서 온 메시지 처리
   const editorMessageListener = (event) => {
