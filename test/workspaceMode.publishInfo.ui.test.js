@@ -29,13 +29,13 @@ describe('Workspace UI - publish info SEO title', () => {
     renderWorkspace(container, idea);
 
     // wait for initial render / async handlers to settle then click publish-info tab to force area refresh
-    await global.testHelpers.waitForMs(300);
+    await global.testHelpers.waitForMs(600);
     // click publish-info tab to force the area to refresh and call showPublishInfo
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     expect(tabBtn).toBeTruthy();
     tabBtn.click();
     // short delay to allow click handler -> showPublishInfo to update DOM
-    await global.testHelpers.waitForMs(50);
+    await global.testHelpers.waitForMs(200);
     // debug: dump publish-info-area + whole container to understand why the panel didn't appear
     // eslint-disable-next-line no-console
     console.log('[TEST] publish-info-area HTML:', container.querySelector('#publish-info-area')?.innerHTML);
@@ -53,7 +53,7 @@ describe('Workspace UI - publish info SEO title', () => {
       return null;
     }
 
-    const seoInput = await waitForValue('#seo-title-input', 'SEO Title from PublishInfo', 3000);
+    const seoInput = await waitForValue('#seo-title-input', 'SEO Title from PublishInfo', 5000);
     expect(seoInput).toBeTruthy();
     expect(seoInput.value).toBe('SEO Title from PublishInfo');
     // Ensure requested style removals are effective

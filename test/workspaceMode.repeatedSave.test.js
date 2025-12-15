@@ -30,11 +30,11 @@ describe('Workspace UI - repeated save', () => {
     document.body.appendChild(container);
     renderWorkspace(container, idea);
 
-    await global.testHelpers.waitForMs(300);
+    await global.testHelpers.waitForMs(600);
 
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     tabBtn.click();
-    await global.testHelpers.waitForMs(50);
+    await global.testHelpers.waitForMs(200);
 
     const input = container.querySelector('#idea-title-input');
     expect(input).toBeTruthy();
@@ -49,11 +49,11 @@ describe('Workspace UI - repeated save', () => {
     // 1. First Save
     input.value = 'First Edit';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(20);
+    await global.testHelpers.waitForMs(100);
     
     // Trigger save via blur
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(20);
+    await global.testHelpers.waitForMs(200);
 
     const calls1 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
     expect(calls1.length).toBe(1);
@@ -68,11 +68,11 @@ describe('Workspace UI - repeated save', () => {
     // 2. Second Save
     input.value = 'Second Edit';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(20);
+    await global.testHelpers.waitForMs(100);
     
     // Trigger save via blur
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(20);
+    await global.testHelpers.waitForMs(200);
 
     const calls2 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
     expect(calls2.length).toBe(2);

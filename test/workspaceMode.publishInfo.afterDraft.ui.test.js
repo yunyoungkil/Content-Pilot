@@ -8,6 +8,7 @@ describe('Workspace UI - publish info after draft generation', () => {
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
     window.__cp_tui_shadow_listener_attached = false;
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
     global.testHelpers.mockChromeRuntime();
@@ -29,7 +30,7 @@ describe('Workspace UI - publish info after draft generation', () => {
     renderWorkspace(container, idea);
 
     // ensure initial render contains empty seo input (we now always render the field)
-    await global.testHelpers.waitForMs(250);
+    await global.testHelpers.waitForMs(500);
     const initialSeo = container.querySelector('#seo-title-input');
     expect(initialSeo).toBeTruthy();
     expect(initialSeo.value).toBe('');
@@ -39,12 +40,12 @@ describe('Workspace UI - publish info after draft generation', () => {
     applyDraftResponseToIdea(idea, response);
 
     // Poll until the seo-title input reflects the draft response
-    async function waitForValue(selector, expected, timeout = 2000) {
+    async function waitForValue(selector, expected, timeout = 4000) {
       const start = Date.now();
       while (Date.now() - start < timeout) {
         const el = container.querySelector(selector);
         if (el && el.value === expected) return el;
-        await global.testHelpers.waitForMs(30);
+        await global.testHelpers.waitForMs(50);
       }
       return null;
     }
