@@ -1645,7 +1645,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     const publishInfoPanel = document.createElement('div');
     publishInfoPanel.className = 'publish-info-panel';
     // [수정] 패딩을 줄여서(16px -> 10px) 내부 공간을 넓게 사용하도록 조정
-    publishInfoPanel.style.cssText = `padding: 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;`;
+    publishInfoPanel.style.cssText = `padding: 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; display: flex; align-items: flex-start; flex-direction: column; gap: 10px; box-sizing: border-box;`;
 
     // Escape user-provided values to avoid HTML injection or broken attributes
     const escapeHtml = (s) =>
