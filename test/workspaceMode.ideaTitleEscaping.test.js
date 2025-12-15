@@ -45,7 +45,8 @@ describe('Workspace UI - idea title escaping and save', () => {
     input.value = badTitle + ' X';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(20);
-    expect(saveBtn.style.display).not.toBe('none');
+    // button is always visible but disabled/enabled based on changes
+    expect(saveBtn.disabled).toBe(false);
 
     // trigger blur to perform save and wait
     input.dispatchEvent(new Event('blur', { bubbles: true }));

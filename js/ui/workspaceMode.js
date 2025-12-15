@@ -1671,7 +1671,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">아이디어 제목</label>
             <div style="display:flex; align-items:center; gap:8px;">
               <input type="text" id="idea-title-input" value="${safeIdeaTitle}" readonly style="flex:1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
-              <button id="save-idea-title-btn" style="margin-left: 8px; padding: 6px 10px; display: none; border-radius: 4px; border: 1px solid rgb(218, 220, 224); background: rgb(255, 255, 255); cursor: pointer; font-size: 12px;">저장</button>
+              <button id="save-idea-title-btn" title="저장" style="margin-left: 8px; padding: 6px 10px; border-radius: 4px; border: 1px solid rgb(218, 220, 224); background: rgb(255, 255, 255); cursor: pointer; font-size: 12px;" aria-label="제목 저장">💾</button>
             </div>
           </div>
         <div>
@@ -1743,6 +1743,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
       let titleChanged = false;
 
+      // keep save button visible; manage enabled/disabled state instead of hiding
+      if (saveIdeaBtn) saveIdeaBtn.disabled = true;
+
       const doSaveTitle = () => {
         const newTitle = ideaInput.value.trim();
         if (newTitle && newTitle !== ideaData.title) {
@@ -1763,7 +1766,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
                 // update header display text
                 const headerDisplay = workspaceEl.querySelector('#workspace-title-display');
                 if (headerDisplay) headerDisplay.textContent = newTitle;
-                saveIdeaBtn.style.display = 'none';
+                if (saveIdeaBtn) saveIdeaBtn.disabled = true;
                 titleChanged = false;
                 showToast('✅ 제목이 저장되었습니다.');
               } else {
@@ -1773,14 +1776,14 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             }
           );
         } else {
-          saveIdeaBtn.style.display = 'none';
+          if (saveIdeaBtn) saveIdeaBtn.disabled = true;
           titleChanged = false;
         }
       };
 
       ideaInput.addEventListener('input', () => {
         titleChanged = true;
-        saveIdeaBtn.style.display = 'inline-block';
+        if (saveIdeaBtn) saveIdeaBtn.disabled = false;
       });
 
       ideaInput.addEventListener('blur', () => {
