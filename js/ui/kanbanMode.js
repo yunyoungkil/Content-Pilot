@@ -1161,7 +1161,7 @@ function createKanbanCard(id, data, status) {
     <div class="kanban-card-body">
       <span class="kanban-card-title">${data.title || '제목 없음'}</span>
       ${seoTitleHtml}
-      <div class="card-top-tags">${topTagsHtml}</div>
+      <div class="card-top-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">${topTagsHtml}</div>
     </div>
     <div class="kanban-card-footer">
       <div class="kanban-card-meta">${metaInfoHtml}</div>
