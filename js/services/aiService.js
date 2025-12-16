@@ -11,7 +11,7 @@ import {
 import { ref, update, get, serverTimestamp } from './firebaseService.js';
 // 순수 데이터 분석 함수만 import (순환 참조 방지)
 // analyzePerformanceData previously used to fetch performance data for prompts, no longer needed
-import { Logger } from '../utils.js';
+import { Logger, normalizeSeoTitle } from '../utils.js';
 import {
   sanitizeHtmlInOffscreen,
   cropImageInOffscreen,
@@ -2097,6 +2097,11 @@ ${defaultDescription}
       // seoTitle이 여전히 없으면 기본 title 사용
       if (!seoTitle) {
         seoTitle = title;
+      }
+
+      // [Fix] Normalize SEO Title to prevent duplication (e.g. "Title - Title")
+      if (seoTitle && title) {
+        seoTitle = normalizeSeoTitle(seoTitle, title);
       }
 
       // [버그 수정] 제목에 중복 년도 제거

@@ -1,4 +1,4 @@
-import { shortenLink, showToast, showConfirmationToast, Logger } from '../utils.js';
+import { shortenLink, showToast, showConfirmationToast, Logger, normalizeSeoTitle } from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
@@ -48,22 +48,6 @@ export function isMeaningfulDraft(d) {
 }
 
 // Normalize SEO title to avoid simple duplicated forms like "T T" or "T - T".
-export function normalizeSeoTitle(seo, title) {
-  if (!seo) return '';
-  const s = String(seo).trim();
-  if (!title) return s;
-  const t = String(title).trim();
-  const dupPatterns = [' ', ' - ', ' | ', ': ', ' : '];
-  for (const sep of dupPatterns) {
-    const dup = `${t}${sep}${t}`;
-    if (s === dup) return t;
-  }
-  // Collapse exact duplicated contiguous tokens: 'T T' or 'T    T'
-  const esc = (str) => str.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
-  const collapsed = s.replace(new RegExp(`^(${esc(t)})\\s+\\1$`), '$1');
-  if (collapsed !== s) return collapsed;
-  return s;
-}
 
 // Helper: attach a single delegated click listener on an image gallery grid.
 // This makes it safe to re-render the grid from multiple code paths.

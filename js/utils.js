@@ -439,3 +439,27 @@ export function showConfirmationToast(message, onConfirm) {
     cancelBtn.onclick = closeToast;
   }
 }
+
+/**
+ * SEO 제목 정규화 함수
+ * 중복된 패턴(예: "제목 - 제목")을 감지하여 단일 제목으로 정리합니다.
+ * @param {string} seo - 정규화할 SEO 제목
+ * @param {string} title - 원본 아이디어 제목 (비교용)
+ * @returns {string} 정규화된 SEO 제목
+ */
+export function normalizeSeoTitle(seo, title) {
+  if (!seo) return '';
+  const s = String(seo).trim();
+  if (!title) return s;
+  const t = String(title).trim();
+  const dupPatterns = [' ', ' - ', ' | ', ': ', ' : '];
+  for (const sep of dupPatterns) {
+    const dup = `${t}${sep}${t}`;
+    if (s === dup) return t;
+  }
+  // Collapse exact duplicated contiguous tokens: 'T T' or 'T    T'
+  const esc = (str) => str.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+  const collapsed = s.replace(new RegExp(`^(${esc(t)})\\s+\\1$`), '$1');
+  if (collapsed !== s) return collapsed;
+  return s;
+}

@@ -1,6 +1,7 @@
 
 import { jest } from '@jest/globals';
-import { normalizeSeoTitle, applyDraftResponseToIdea } from '../js/ui/workspaceMode.js';
+import { applyDraftResponseToIdea } from '../js/ui/workspaceMode.js';
+import { normalizeSeoTitle } from '../js/utils.js';
 
 // Mock Logger
 global.Logger = {

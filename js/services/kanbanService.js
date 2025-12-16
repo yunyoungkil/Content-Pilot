@@ -418,7 +418,7 @@ export async function addIdeaToKanban(
     const newCard = {
       title: ideaData.title,
       description: ideaData.description || '',
-      seoTitle: ideaData.seoTitle || ideaData.title || '',
+      seoTitle: ideaData.seoTitle || '', // [Fix] 초기 생성 시에는 SEO 제목을 비워둠 (초안 생성 시 자동 입력)
       createdAt: ideaData.createdAt || Date.now(),
       channelId: channelId,
       tags: tags,
