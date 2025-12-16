@@ -435,9 +435,31 @@ async function updateColumnIncremental(
   const added = Object.keys(currentFiltered).filter((id) => !previousFiltered[id]);
   const removed = Object.keys(previousFiltered).filter((id) => !currentFiltered[id]);
   const updated = Object.keys(currentFiltered).filter(
-    (id) =>
-      previousFiltered[id] &&
-      JSON.stringify(currentFiltered[id]) !== JSON.stringify(previousFiltered[id])
+    (id) => {
+      const isDiff = previousFiltered[id] && JSON.stringify(currentFiltered[id]) !== JSON.stringify(previousFiltered[id]);
+      
+      // [DEBUG] 브리핑 관련 카드 상태 상세 로깅
+      if (previousFiltered[id]) {
+        const prev = previousFiltered[id];
+        const curr = currentFiltered[id];
+        const prevStatus = prev.briefingStatus || prev.workspace?.draft?.briefingStatus;
+        const currStatus = curr.briefingStatus || curr.workspace?.draft?.briefingStatus;
+        
+        if (prevStatus === 'processing' || currStatus === 'processing' || prevStatus === 'done' || currStatus === 'done') {
+           console.log(`[KanbanMode DEBUG] Card ${id} diff check:`, {
+             isDiff,
+             prevStatus,
+             currStatus,
+             prevTagsLen: prev.tags?.length,
+             currTagsLen: curr.tags?.length,
+             prevOutlineLen: prev.outline?.length,
+             currOutlineLen: curr.outline?.length,
+             briefingMetaChanged: hasBriefingMetaChanged(prev, curr)
+           });
+        }
+      }
+      return isDiff;
+    }
   );
 
   // Also include cards where briefing meta changed even if full-JSON comparison failed

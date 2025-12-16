@@ -3091,9 +3091,31 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           Logger.debug(`[generateIdeaBriefing] Fetched card data after update:`, {
             id: cardId,
             status: fetchedCard?.briefingStatus,
-            tagsCount: fetchedCard?.tags?.length
+            tagsCount: fetchedCard?.tags?.length,
+            outlineCount: fetchedCard?.outline?.length,
+            fullCard: fetchedCard
           });
-        } catch (e) {}
+          
+          // [Safety Check] If fetched data is stale (still processing), wait and retry once
+          if (fetchedCard && fetchedCard.briefingStatus === 'processing') {
+             Logger.warn('[generateIdeaBriefing] Stale data detected (still processing). Retrying fetch...');
+             await new Promise(r => setTimeout(r, 2000)); // Wait 2 more seconds
+             const retrySnap = await get(kanbanRef);
+             const retryData = retrySnap?.val() || {};
+             const retryCard = retryData[status]?.[cardId];
+             Logger.debug(`[generateIdeaBriefing] Retry fetch result:`, {
+                status: retryCard?.briefingStatus,
+                tagsCount: retryCard?.tags?.length
+             });
+             // Use retried data if available
+             if (retryData) {
+                 // Update local variable to send correct data
+                 Object.assign(kanbanData, retryData);
+             }
+          }
+        } catch (e) {
+            Logger.warn('[generateIdeaBriefing] Debug/Retry logic failed:', e);
+        }
 
         // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송 (chrome.runtime.sendMessage)
         chrome.runtime
