@@ -458,10 +458,12 @@ async function updateColumnIncremental(
     added: added.length,
     removed: removed.length,
     updated: updated.length,
+    briefingOnlyUpdated: briefingOnlyUpdated.length,
+    finalUpdated: finalUpdated.length
   });
 
   // [최적화] 변경된 카드만 DOM 조작
-  if (added.length === 0 && removed.length === 0 && updated.length === 0) {
+  if (added.length === 0 && removed.length === 0 && finalUpdated.length === 0) {
     // 변경사항 없음 - 정렬만 확인
     const needsResort = checkIfNeedsResort(currentFiltered, columnEl);
     if (needsResort) {
