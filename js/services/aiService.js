@@ -3058,6 +3058,12 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           });
         } catch (nestedErr) {}
 
+        // [Fix] Broadcast 100% progress to trigger UI refresh on client side
+        // This acts as a reliable signal for the UI to fetch the final data
+        try {
+           await persistProgress(100);
+        } catch (e) {}
+
         Logger.biz(
           `✅ [generateIdeaBriefing] 브리핑 생성 완료 - cardId: ${cardId}, status: ${status}, 업데이트 항목: ${Object.keys(
             updates

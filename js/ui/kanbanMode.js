@@ -199,10 +199,23 @@ function addRealtimeUpdateListener() {
       // Lightweight update for progress bars
       if (msg.cardId && typeof msg.progress === 'number') {
         console.log(`[KanbanMode] Updating progress for card ${msg.cardId} to ${msg.progress}%`);
-        updateCardBadgesInPlace(msg.cardId, {
-          briefingStatus: 'processing',
-          briefingProgress: msg.progress
-        });
+        
+        // [Fix] If progress is 100%, trigger a full data reload to ensure final state (tags, outline) is rendered
+        if (msg.progress >= 100) {
+           console.log('[KanbanMode] Progress 100% detected. Triggering full data reload to fetch final state.');
+           // Update badge immediately to show 100% while loading
+           updateCardBadgesInPlace(msg.cardId, {
+             briefingStatus: 'processing',
+             briefingProgress: 100
+           });
+           // Fetch fresh data with a small delay to ensure DB consistency
+           setTimeout(() => loadKanbanData(), 1500);
+        } else {
+           updateCardBadgesInPlace(msg.cardId, {
+             briefingStatus: 'processing',
+             briefingProgress: msg.progress
+           });
+        }
       }
       return;
     }
