@@ -118,8 +118,12 @@ async function dbRequest(method, path, data = null) {
     }
 
     let url = getDbUrl(path);
+    // [Fix] Add cache busting to prevent stale reads
+    const separator = url.includes('?') ? '&' : '?';
+    url += `${separator}_t=${Date.now()}`;
+
     if (token) {
-      url += `?access_token=${encodeURIComponent(token)}`;
+      url += `&access_token=${encodeURIComponent(token)}`;
     }
 
     const options = {
