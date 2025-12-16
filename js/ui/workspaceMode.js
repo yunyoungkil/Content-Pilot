@@ -1,4 +1,4 @@
-import { shortenLink, showToast, showConfirmationToast, Logger } from '../utils.js';
+import { shortenLink, showToast, showConfirmationToast, Logger, normalizeSeoTitle } from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
@@ -46,6 +46,8 @@ export function isMeaningfulDraft(d) {
 
   return false;
 }
+
+// Normalize SEO title to avoid simple duplicated forms like "T T" or "T - T".
 
 // Helper: attach a single delegated click listener on an image gallery grid.
 // This makes it safe to re-render the grid from multiple code paths.
@@ -764,10 +766,11 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
 
   // ensure seoTitle is stored both top-level and inside publishInfo
   if (response.seoTitle) {
-    ideaData.seoTitle = response.seoTitle;
+    const safeSeo = normalizeSeoTitle(response.seoTitle, ideaData?.title);
+    ideaData.seoTitle = safeSeo;
     if (!ideaData.publishInfo) ideaData.publishInfo = {};
-    ideaData.publishInfo.seoTitle = response.seoTitle;
-    console.debug('[DIAG applyDraftResponseToIdea] seoTitle set:', response.seoTitle);
+    ideaData.publishInfo.seoTitle = safeSeo;
+    console.debug('[DIAG applyDraftResponseToIdea] seoTitle set:', safeSeo);
   }
 
   // If this idea is currently open in the workspace UI, refresh the publish-info panel
@@ -1551,6 +1554,13 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   // prefer that value so the UI shows the stored publishInfo title.
   if (!seoTitle && ideaData?.publishInfo?.seoTitle) {
     seoTitle = ideaData.publishInfo.seoTitle;
+  }
+
+  // Normalize to avoid accidental duplication (e.g., 'T - T' or 'T T')
+  try {
+    seoTitle = normalizeSeoTitle(seoTitle, ideaData?.title);
+  } catch (e) {
+    void 0;
   }
 
   console.debug('[DIAG showPublishInfo] final seoTitle for UI:', seoTitle);
