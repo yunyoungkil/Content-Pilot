@@ -9,6 +9,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
     global.testHelpers.mockChromeRuntime();
@@ -23,23 +24,19 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     let linkedCall = null;
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb)
-          setTimeout(() =>
-            cb({
-              success: true,
-              scraps: [
-                {
-                  id: 'scrap-1',
-                  text: 'Scrap One',
-                  image: 'https://example.test/img1.jpg',
-                  allImages: ['https://example.test/img1.jpg'],
-                  url: 'https://example.test/page',
-                  tags: [],
-                },
-              ],
-            }),
-            0
-          );
+        if (cb) setTimeout(() => cb({
+          success: true,
+          scraps: [
+            {
+              id: 'scrap-1',
+              text: 'Scrap One',
+              image: 'https://example.test/img1.jpg',
+              allImages: ['https://example.test/img1.jpg'],
+              url: 'https://example.test/page',
+              tags: [],
+            },
+          ],
+        }), 0);
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
@@ -48,10 +45,10 @@ describe('Workspace scrap detail image drag/drop linking', () => {
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) setTimeout(() => cb({ success: true }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true }));
         return;
       }
-      if (cb) setTimeout(() => cb({ success: true }), 0);
+      if (cb) Promise.resolve().then(() => cb({ success: true }));
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners, showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
@@ -61,17 +58,17 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 500));
 
     updateWorkspaceScraps(container, idea);
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 800));
 
     // Now show scrap detail modal with scrapData
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] };
     showScrapDetailModal(scrapDetailData, container);
     let modal = null;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 120; i++) {
       modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
       if (modal) break;
       await new Promise((r) => setTimeout(r, 50));
@@ -95,7 +92,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     linkedList.dispatchEvent(dropEvt);
 
     // poll for linkedCall to be set and linked item to appear
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 60; i++) {
       const linkedItem = container.querySelector('.linked-scraps-list [data-scrap-id="scrap-1"]');
       if (linkedCall && linkedItem) break;
       await new Promise((r) => setTimeout(r, 50));

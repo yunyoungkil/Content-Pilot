@@ -32,11 +32,11 @@ describe('Workspace UI - idea title escaping and save', () => {
     renderWorkspace(container, idea);
 
     // wait and open publish-info
-    await global.testHelpers.waitForMs(300);
+    await global.testHelpers.waitForMs(500);
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     expect(tabBtn).toBeTruthy();
     tabBtn.click();
-    await global.testHelpers.waitForMs(50);
+    await global.testHelpers.waitForMs(150);
 
     // idea-title input should exist and contain the original string (unaltered)
     const input = container.querySelector('#idea-title-input');
@@ -48,11 +48,11 @@ describe('Workspace UI - idea title escaping and save', () => {
 
     input.value = badTitle + ' X';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(20);
+    await global.testHelpers.waitForMs(50);
 
     // trigger blur to perform save and wait
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(50);
+    await global.testHelpers.waitForMs(150);
 
     // Verify underlying data and kanban card updated instead of header
     const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);

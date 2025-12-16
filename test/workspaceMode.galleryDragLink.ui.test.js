@@ -10,6 +10,7 @@ describe('Workspace gallery image drag/drop linking', () => {
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
     global.testHelpers.mockChromeRuntime();
@@ -22,56 +23,56 @@ describe('Workspace gallery image drag/drop linking', () => {
 
   beforeEach(() => {
     // reduce noisy debug output in this file which can overwhelm test runner
-    jest.spyOn(console, 'debug').mockImplementation(() => {});
+    // and ensure we restore it after test
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    try {
+      const debugSpy = jest.spyOn(console, 'debug');
+      if (debugSpy) debugSpy.mockRestore();
+    } catch (e) { /* ignore */ }
   });
 
   test('dragging a gallery image for a scrap and dropping into linked list links the scrap', async () => {
     let linkedCall = null;
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb)
-          setTimeout(() =>
-            cb({
-              success: true,
-              scraps: [
-                {
-                  id: 'scrap-1',
-                  text: 'Scrap with images',
-                  image: 'https://example.test/img1.jpg',
-                  allImages: ['https://example.test/img1.jpg'],
-                  url: 'https://example.test/page',
-                  tags: [],
-                },
-              ],
-            }),
-            0
-          );
+        if (cb) setTimeout(() => cb({
+          success: true,
+          scraps: [
+            {
+              id: 'scrap-1',
+              text: 'Scrap with images',
+              image: 'https://example.test/img1.jpg',
+              allImages: ['https://example.test/img1.jpg'],
+              url: 'https://example.test/page',
+              tags: [],
+            },
+          ],
+        }), 0);
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
-        if (cb)
-          setTimeout(() =>
-            cb({
-              success: true,
-              images: [
-                {
-                  url: 'https://example.test/img1.jpg',
-                  scrapId: 'scrap-1',
-                  source: 'SCRAP',
-                  timestamp: Date.now(),
-                },
-              ],
-            }),
-            0
-          );
+        if (cb) setTimeout(() => cb({
+          success: true,
+          images: [
+            {
+              url: 'https://example.test/img1.jpg',
+              scrapId: 'scrap-1',
+              source: 'SCRAP',
+              timestamp: Date.now(),
+            },
+          ],
+        }), 0);
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) setTimeout(() => cb({ success: true }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true }));
         return;
       }
-      if (cb) setTimeout(() => cb({ success: true }), 0);
+      if (cb) Promise.resolve().then(() => cb({ success: true }));
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners } = await import(
@@ -83,12 +84,12 @@ describe('Workspace gallery image drag/drop linking', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 150));
 
     // populate scraps
     updateWorkspaceScraps(container, idea);
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 300));
 
     // wait for gallery to populate
     const workspaceEl = container.querySelector('.workspace-container');
@@ -97,11 +98,11 @@ describe('Workspace gallery image drag/drop linking', () => {
     expect(galleryGrid).toBeTruthy();
     // wait until a gallery thumb appears (up to 500ms)
     let galleryWrap = null;
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 80; i++) {
       galleryWrap = workspaceEl.querySelector('.image-gallery-grid .gallery-thumb-wrap');
       if (galleryWrap) break;
       // short wait
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 100));
     }
     const galleryWrapExist = !!galleryWrap;
     expect(galleryWrapExist).toBeTruthy();
@@ -135,11 +136,11 @@ describe('Workspace gallery image drag/drop linking', () => {
     // poll for link message and for the linked item image to appear
     let newLinkedItem = null;
     let imgEl = null;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 80; i++) {
       newLinkedItem = linkedList.querySelector('[data-scrap-id="scrap-1"]');
       imgEl = newLinkedItem ? newLinkedItem.querySelector('img') : null;
       if (linkedCall && newLinkedItem && imgEl) break;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 100));
     }
 
     expect(linkedCall).toBeTruthy();

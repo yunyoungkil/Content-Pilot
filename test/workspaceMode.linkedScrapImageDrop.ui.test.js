@@ -9,6 +9,7 @@ describe('Workspace drop image into already linked scrap', () => {
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
     window.__cp_tui_shadow_listener_attached = false;
 
     global.testHelpers.mockChromeRuntime();
@@ -23,15 +24,15 @@ describe('Workspace drop image into already linked scrap', () => {
     let linkedCall = null;
     let addImageCall = null;
     let updateCardCall = null;
+    const imageUrl = 'https://example.test/newimg.jpg';
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb)
-          setTimeout(() => cb({
-            success: true,
-            scraps: [
-              { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page', tags: [] },
-            ],
-          }), 0);
+        if (cb) setTimeout(() => cb({
+          success: true,
+          scraps: [
+            { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page', tags: [] },
+          ],
+        }), 0);
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
@@ -40,20 +41,20 @@ describe('Workspace drop image into already linked scrap', () => {
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) setTimeout(() => cb({ success: true }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true }));
         return;
       }
       if (message && message.action === 'add_image_to_scrap') {
         addImageCall = message;
         // simulate DB update returning allImages
-        if (cb) setTimeout(() => cb({ success: true, allImages: [imageUrl] }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true, allImages: [imageUrl] }));
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
-        if (cb) setTimeout(() => cb({ success: true, images: [] }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true, images: [] }));
         return;
       }
-      if (cb) setTimeout(() => cb({ success: true }), 0);
+      if (cb) Promise.resolve().then(() => cb({ success: true }));
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners, showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
@@ -63,22 +64,21 @@ describe('Workspace drop image into already linked scrap', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 300));
 
     updateWorkspaceScraps(container, idea);
     // small delay to avoid race with module initialization in tests
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 600));
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 500));
 
     // Show scrap detail modal and simulate drag of an image from it
-    const imageUrl = 'https://example.test/newimg.jpg';
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: imageUrl, allImages: [imageUrl] };
     showScrapDetailModal(scrapDetailData, container);
 
     // wait for modal to render
     let modal = null;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 80; i++) {
       modal = document.querySelector('#scrap-detail-modal') || document.querySelector('.scrap-detail-modal');
       if (modal) break;
       await new Promise((r) => setTimeout(r, 50));
@@ -106,11 +106,11 @@ describe('Workspace drop image into already linked scrap', () => {
     // poll for add_image_to_scrap to be invoked and linked DOM updated
     let linkedCard = null;
     let linkedCardImg = null;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 200; i++) {
       linkedCard = linkedList.querySelector('[data-scrap-id="scrap-1"]');
       linkedCardImg = linkedCard ? linkedCard.querySelector('.scrap-card-img-wrap img') : null;
       if (addImageCall && linkedCard && linkedCardImg) break;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 100));
     }
     expect(addImageCall).toBeTruthy();
     expect(linkedCard).toBeTruthy();

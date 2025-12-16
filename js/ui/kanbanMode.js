@@ -32,6 +32,8 @@ export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMod
  */
 function renderKanban(container) {
   kanbanContainer = container;
+  // Ensure clean state for retry logic and fresh render
+  allKanbanData = {};
 
   // [체크리스트 3-4] 입력창 닫기: 열려있던 카드 추가 입력창이나 상세 메뉴 닫기
   const existingInputs = container.querySelectorAll(
@@ -88,54 +90,6 @@ function renderKanban(container) {
     addRealtimeUpdateListener();
     window.kanbanListenersAttached = true;
   }
-
-  // 칸반 데이터 업데이트 메시지 리스너 (콜백이 실행되지 않는 경우 대비)
-  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
-    if (msg.action === 'kanban_data_updated') {
-      console.log(
-        '[KanbanMode] 칸반 데이터 업데이트 메시지 수신:',
-        Object.keys(msg.data || {}).length,
-        '개 카드'
-      );
-
-      // container가 유효한지 확인 (다른 모드로 전환된 경우 대비)
-      if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) {
-        console.log('[KanbanMode] 칸반 모드가 아닌 상태에서 메시지 수신, 무시');
-        return false;
-      }
-
-      if (msg.data) {
-        // Do NOT assign to module-scoped allKanbanData here — updateKanbanUI
-        // expects to compute previousData from the current module value so
-        // we must pass the incoming data directly. Assigning here would
-        // make previousData === current and the incremental diff would
-        // miss changes.
-        console.log('[KanbanMode] updateKanbanUI 호출 시작 (message handler)');
-        updateKanbanUI(msg.data);
-        console.log('[KanbanMode] updateKanbanUI 호출 완료 (message handler)');
-      }
-    }
-    return false;
-  });
-
-  // 인증 상태 변경 감지하여 데이터 재로드
-  chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.googleUserEmail) {
-      const newValue = changes.googleUserEmail.newValue;
-      const oldValue = changes.googleUserEmail.oldValue;
-
-      if (newValue && !oldValue) {
-        // 로그인: 새로 로그인한 경우 데이터 로드
-        console.log('[KanbanMode] 로그인 감지, 데이터 재로드');
-        loadKanbanData();
-      } else if (!newValue && oldValue) {
-        // 로그아웃: 로그아웃한 경우 데이터 초기화
-        console.log('[KanbanMode] 로그아웃 감지, 데이터 초기화');
-        allKanbanData = {};
-        updateKanbanUI({});
-      }
-    }
-  });
 }
 
 // 칸반 데이터 로드 함수 (인증 상태 확인 후 실행)
@@ -236,6 +190,25 @@ function addRealtimeUpdateListener() {
             renderWorkspace(kanbanContainer, ideaDataForWorkspace); // 수정된 객체 전달
           }
         }
+      }
+    }
+  });
+
+  // 인증 상태 변경 감지하여 데이터 재로드
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local' && changes.googleUserEmail) {
+      const newValue = changes.googleUserEmail.newValue;
+      const oldValue = changes.googleUserEmail.oldValue;
+
+      if (newValue && !oldValue) {
+        // 로그인: 새로 로그인한 경우 데이터 로드
+        console.log('[KanbanMode] 로그인 감지, 데이터 재로드');
+        loadKanbanData();
+      } else if (!newValue && oldValue) {
+        // 로그아웃: 로그아웃한 경우 데이터 초기화
+        console.log('[KanbanMode] 로그아웃 감지, 데이터 초기화');
+        allKanbanData = {};
+        updateKanbanUI({});
       }
     }
   });

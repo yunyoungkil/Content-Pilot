@@ -30,6 +30,18 @@ global.chrome = {
   },
 };
 
+// Ensure workspace globals are clean before each test to avoid initialization pollution
+beforeEach(() => {
+  try {
+    window.__cp_workspace_idea_id = undefined;
+    window.__cp_workspace_idea_data = undefined;
+    window.__cp_force_save_title = undefined;
+    if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
+    if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
+    if (window.__cp_tui_shadow_listener_attached) window.__cp_tui_shadow_listener_attached = false;
+  } catch (e) {}
+});
+
 // Global cleanup after each test to avoid order-dependent leakage
 afterEach(() => {
   try {
@@ -56,10 +68,13 @@ afterEach(() => {
   // Clear any window event listeners we tracked
   try { _clearTrackedWindowListeners(); } catch (e) {}
 
-  // Reset chrome runtime helpers to defaults to avoid mocks leaking between tests
+  // Reset chrome runtime/helpers to defaults to avoid mocks leaking between tests
   try {
     chrome.runtime.sendMessage = jest.fn();
     chrome.runtime.onMessage = { addListener: jest.fn() };
+    // Reset storage helpers
+    chrome.storage.local.get = jest.fn();
+    chrome.storage.local.set = jest.fn();
     // Remove any helper trigger function that mockChromeRuntime may have attached
     try { delete chrome.runtime.triggerMessage; } catch (e) {}
   } catch (e) {}

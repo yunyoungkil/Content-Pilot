@@ -232,7 +232,7 @@ async function initGlobalChannelSelector(shadowRoot) {
   // 2. 채널 목록 가져오기
   chrome.runtime.sendMessage({ action: 'get_channels_and_key' }, (response) => {
     if (response && response.success) {
-      const myBlogs = response.data.myChannels?.blogs || [];
+      const myBlogs = response?.data?.myChannels?.blogs || [];
 
       // 옵션 초기화
       selector.innerHTML = '';
