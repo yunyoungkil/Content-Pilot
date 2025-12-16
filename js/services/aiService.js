@@ -21,6 +21,8 @@ import {
 import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
+// [추가] 성능 최적화 서비스 임포트 (캐시 무효화용)
+import { performanceOptimizer } from './performanceOptimizer.js';
 
 // [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수
 function removeDuplicateYears(title) {
@@ -3057,6 +3059,14 @@ export async function generateIdeaBriefing(cardId, title, description, options =
             briefingProgress: 100,
           });
         } catch (nestedErr) {}
+
+        // [Fix] Invalidate cache to ensure UI fetches fresh data
+        try {
+          await performanceOptimizer.invalidateCache('kanban');
+          Logger.debug('[generateIdeaBriefing] Cache invalidated for kanban data');
+        } catch (e) {
+          Logger.warn('[generateIdeaBriefing] Cache invalidation failed:', e);
+        }
 
         // [Fix] Broadcast 100% progress to trigger UI refresh on client side
         // This acts as a reliable signal for the UI to fetch the final data
