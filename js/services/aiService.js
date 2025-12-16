@@ -3078,9 +3078,22 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
       // REST API 모드에서는 실시간 리스너가 작동하지 않으므로, UI 갱신을 위해 최신 데이터를 가져와서 메시지 전송
       try {
+        // [Fix] Give a small buffer for DB consistency before reading back
+        await new Promise(r => setTimeout(r, 1000));
+
         const kanbanRef = ref(getDb(), `kanban/${userId}`);
         const kanbanSnap = await get(kanbanRef);
         const kanbanData = kanbanSnap?.val() || {};
+
+        // [DEBUG] Verify if the card is actually updated in the fetched data
+        try {
+          const fetchedCard = kanbanData[status]?.[cardId];
+          Logger.debug(`[generateIdeaBriefing] Fetched card data after update:`, {
+            id: cardId,
+            status: fetchedCard?.briefingStatus,
+            tagsCount: fetchedCard?.tags?.length
+          });
+        } catch (e) {}
 
         // 1. 확장 프로그램 UI(사이드 패널/팝업)에 메시지 전송 (chrome.runtime.sendMessage)
         chrome.runtime
