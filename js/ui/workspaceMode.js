@@ -53,7 +53,7 @@ export function normalizeSeoTitle(seo, title) {
   const s = String(seo).trim();
   if (!title) return s;
   const t = String(title).trim();
-  const dupPatterns = [' ', ' - ', ' | ', ': '];
+  const dupPatterns = [' ', ' - ', ' | ', ': ', ' : '];
   for (const sep of dupPatterns) {
     const dup = `${t}${sep}${t}`;
     if (s === dup) return t;
