@@ -182,12 +182,23 @@ function loadKanbanData(retryCount = 0) {
  * background.js로부터 실시간 업데이트를 받아 UI를 갱신하는 리스너
  */
 function addRealtimeUpdateListener() {
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) return;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // [DEBUG] 메시지 수신 로그 추가
+    if (msg.action === 'kanban_card_progress_updated' || msg.action === 'kanban_data_updated') {
+      console.log('[KanbanMode] Realtime message received:', msg.action, msg);
+    }
+
+    if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) {
+      if (msg.action === 'kanban_card_progress_updated') {
+        console.warn('[KanbanMode] Message received but container not ready');
+      }
+      return;
+    }
 
     if (msg.action === 'kanban_card_progress_updated') {
       // Lightweight update for progress bars
       if (msg.cardId && typeof msg.progress === 'number') {
+        console.log(`[KanbanMode] Updating progress for card ${msg.cardId} to ${msg.progress}%`);
         updateCardBadgesInPlace(msg.cardId, {
           briefingStatus: 'processing',
           briefingProgress: msg.progress

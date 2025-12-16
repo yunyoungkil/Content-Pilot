@@ -2620,7 +2620,17 @@ export async function generateIdeaBriefing(cardId, title, description, options =
                   action: 'kanban_card_progress_updated',
                   cardId: cardId,
                   progress: value
-                }).catch(() => {});
+                })
+                .then(() => {
+                  // Success (optional debug log)
+                  // Logger.debug(`[aiService] Progress sent to tab ${tab.id}`);
+                })
+                .catch((err) => {
+                  // Ignore "Receiving end does not exist" errors for inactive tabs
+                  if (err.message && !err.message.includes('Receiving end does not exist') && !err.message.includes('closed before a response')) {
+                     Logger.debug(`[aiService] Failed to send progress to tab ${tab.id}: ${err.message}`);
+                  }
+                });
               }
             });
           });
