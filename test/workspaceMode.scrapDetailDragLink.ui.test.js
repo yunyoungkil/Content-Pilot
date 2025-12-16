@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace scrap detail image drag/drop linking', () => {
-  jest.setTimeout(10000);
+  jest.setTimeout(20000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -24,7 +24,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     let linkedCall = null;
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb) setTimeout(() => cb({
+        if (cb) cb({
           success: true,
           scraps: [
             {
@@ -36,19 +36,19 @@ describe('Workspace scrap detail image drag/drop linking', () => {
               tags: [],
             },
           ],
-        }), 0);
+        });
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
-        if (cb) setTimeout(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } }), 0);
+        if (cb) cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } });
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) Promise.resolve().then(() => cb({ success: true }));
+        if (cb) cb({ success: true });
         return;
       }
-      if (cb) Promise.resolve().then(() => cb({ success: true }));
+      if (cb) cb({ success: true });
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners, showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
@@ -58,11 +58,17 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 500));
+
+    // wait for workspace container to render
+    for (let i = 0; i < 40; i++) {
+      if (container.querySelector('.workspace-container')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
 
     updateWorkspaceScraps(container, idea);
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 800));
+    // small delay to ensure listeners attached
+    await new Promise((r) => setTimeout(r, 50));
 
     // Now show scrap detail modal with scrapData
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] };

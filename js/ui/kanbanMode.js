@@ -26,7 +26,47 @@ function destroyKanbanMode() {
   // 등록된 이벤트 리스너는 DOM이 제거되면 자동으로 정리됨
 }
 
-export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMode };
+/**
+ * Updates the badges of a specific card in-place without full re-render.
+ * Useful for real-time updates like briefing status changes.
+ * @param {string} cardId
+ * @param {object} newBadges - Object containing new badge data (e.g. { briefingStatus: 'generating', briefingProgress: 0 })
+ */
+function updateCardBadgesInPlace(cardId, newBadges) {
+  if (!kanbanContainer) return;
+  const card = kanbanContainer.querySelector(`.cp-kanban-card[data-id="${cardId}"]`);
+  if (!card) return;
+
+  // Merge new badge data into a temporary card data object
+  // We don't have the full card data here easily, but getBriefingBadgeHtml only needs specific fields
+  const tempCardData = { ...newBadges };
+
+  // We need to know the status to pass to getBriefingBadgeHtml, but it might not be critical for the badge itself
+  // or we can derive it from the column
+  const col = card.closest('.cp-kanban-col');
+  const status = col ? col.dataset.status : '';
+
+  const newBadgeHtml = getBriefingBadgeHtml(tempCardData, cardId, status);
+  
+  const metaWrapper = card.querySelector('.kanban-card-meta');
+  if (metaWrapper) {
+    // Remove existing briefing tag and retry button
+    const oldTag = metaWrapper.querySelector('.briefing-status-tag');
+    const oldRetry = metaWrapper.querySelector('.briefing-retry-btn');
+    if (oldTag) oldTag.remove();
+    if (oldRetry) oldRetry.remove();
+
+    if (newBadgeHtml && newBadgeHtml.trim()) {
+      const temp = document.createElement('div');
+      temp.innerHTML = newBadgeHtml;
+      while (temp.firstChild) {
+        metaWrapper.appendChild(temp.firstChild);
+      }
+    }
+  }
+}
+
+export { renderKanban, updateKanbanUI, addKanbanEventListeners, destroyKanbanMode, updateCardBadgesInPlace };
 /**
  * 칸반 보드 UI의 기본 골격을 렌더링하는 함수
  */
@@ -144,6 +184,17 @@ function loadKanbanData(retryCount = 0) {
 function addRealtimeUpdateListener() {
   chrome.runtime.onMessage.addListener((msg) => {
     if (!kanbanContainer || !kanbanContainer.querySelector('#cp-kanban-board-root')) return;
+
+    if (msg.action === 'kanban_card_progress_updated') {
+      // Lightweight update for progress bars
+      if (msg.cardId && typeof msg.progress === 'number') {
+        updateCardBadgesInPlace(msg.cardId, {
+          briefingStatus: 'processing',
+          briefingProgress: msg.progress
+        });
+      }
+      return;
+    }
 
     if (msg.action === 'kanban_data_updated') {
       // Avoid setting allKanbanData before calling updateKanbanUI — that
@@ -378,6 +429,20 @@ async function updateColumnIncremental(
       JSON.stringify(currentFiltered[id]) !== JSON.stringify(previousFiltered[id])
   );
 
+  // Also include cards where briefing meta changed even if full-JSON comparison failed
+  const briefingOnlyUpdated = Object.keys(currentFiltered).filter((id) => {
+    if (!previousFiltered[id]) return false;
+    // If briefing metadata changed, include it
+    if (hasBriefingMetaChanged(previousFiltered[id], currentFiltered[id])) {
+      return true;
+    }
+    return false;
+  });
+
+  // Merge updated lists (ensure uniqueness)
+  const mergedUpdatedSet = new Set([...updated, ...briefingOnlyUpdated]);
+  const finalUpdated = Array.from(mergedUpdatedSet);
+
   console.log(`[KanbanMode] ${status} 컬럼 증분 업데이트:`, {
     added: added.length,
     removed: removed.length,
@@ -403,7 +468,7 @@ async function updateColumnIncremental(
   });
 
   // 추가/업데이트된 카드 처리
-  const cardsToRender = [...added, ...updated];
+  const cardsToRender = [...added, ...finalUpdated];
   if (cardsToRender.length > 0) {
     // 기존 카드들을 Map으로 저장
     const existingCards = new Map();
@@ -417,9 +482,42 @@ async function updateColumnIncremental(
       const existingCard = existingCards.get(cardId);
 
       if (existingCard) {
-        // 업데이트: 기존 카드 교체
-        const newCard = createKanbanCard(cardId, cardData, status);
-        existingCard.replaceWith(newCard);
+        // If only briefing meta changed, update the badge element in-place to avoid full replace
+        const prevCardData = previousFiltered[cardId];
+        const onlyBriefingChanged =
+          hasBriefingMetaChanged(prevCardData, cardData) &&
+          JSON.stringify({ ...prevCardData, briefingStatus: undefined, briefingProgress: undefined, briefingError: undefined }) ===
+            JSON.stringify({ ...cardData, briefingStatus: undefined, briefingProgress: undefined, briefingError: undefined });
+
+        if (onlyBriefingChanged) {
+          // update briefing badge only
+          try {
+            const newBadgeHtml = getBriefingBadgeHtml(cardData, cardId, status);
+            // find existing badge container
+            const metaWrapper = existingCard.querySelector('.kanban-card-meta');
+            if (metaWrapper) {
+              // remove existing briefing tag and retry button if present
+              const oldTag = metaWrapper.querySelector('.briefing-status-tag');
+              const oldRetry = metaWrapper.querySelector('.briefing-retry-btn');
+              if (oldTag) oldTag.remove();
+              if (oldRetry) oldRetry.remove();
+              if (newBadgeHtml && newBadgeHtml.trim()) {
+                // insert new nodes at end of metaWrapper
+                const temp = document.createElement('div');
+                temp.innerHTML = newBadgeHtml;
+                while (temp.firstChild) metaWrapper.appendChild(temp.firstChild);
+              }
+            }
+          } catch (e) {
+            // Fallback to full replace on any error
+            const newCard = createKanbanCard(cardId, cardData, status);
+            existingCard.replaceWith(newCard);
+          }
+        } else {
+          // Fallback: full replacement
+          const newCard = createKanbanCard(cardId, cardData, status);
+          existingCard.replaceWith(newCard);
+        }
       } else {
         // 추가: 새로운 카드 삽입
         const newCard = createKanbanCard(cardId, cardData, status);
@@ -543,6 +641,61 @@ function renderCardsInColumn(columnEl, status, cards) {
 
   // 한 번에 DOM에 추가하여 리플로우/리페인트 최소화
   columnEl.appendChild(fragment);
+}
+
+/**
+ * Check whether briefing-related metadata changed between two card objects
+ * Compares top-level briefingStatus/briefingProgress/briefingError and nested workspace.draft equivalents
+ */
+function hasBriefingMetaChanged(prevCard = {}, currCard = {}) {
+  const getMeta = (c) => ({
+    status: c.briefingStatus ?? c.workspace?.draft?.briefingStatus ?? null,
+    progress:
+      typeof c.briefingProgress === 'number'
+        ? c.briefingProgress
+        : c.workspace?.draft?.briefingProgress ?? null,
+    error: c.briefingError ?? c.workspace?.draft?.briefingError ?? null,
+  });
+  const a = getMeta(prevCard);
+  const b = getMeta(currCard);
+  return a.status !== b.status || a.progress !== b.progress || a.error !== b.error;
+}
+
+/**
+ * Generate HTML snippet for briefing badge based on card data
+ */
+function getBriefingBadgeHtml(cardData = {}, id = '', status = '') {
+  const draftObj = cardData.workspace?.draft || cardData.draft || null;
+  const cardLevelStatus = cardData.briefingStatus ?? null;
+  const cardLevelProgress = typeof cardData.briefingProgress === 'number' ? cardData.briefingProgress : null;
+  const bs = cardLevelStatus ?? (draftObj && draftObj.briefingStatus);
+  const progressValue = cardLevelProgress ?? (draftObj && draftObj.briefingProgress);
+  const progressNumeric = typeof progressValue === 'number' && !Number.isNaN(progressValue) ? Math.max(0, Math.min(100, Math.round(progressValue))) : null;
+  if (!bs) return '';
+  let bsHtml = '';
+  let bsTitle = '';
+  switch (bs) {
+    case 'queued':
+      bsHtml = `<span class="kanban-card-meta briefing-status-tag queued" title="AI 브리핑 대기 중">⏳ 브리핑 대기</span>`;
+      break;
+    case 'processing':
+      if (progressNumeric !== null) {
+        bsHtml = `\n              <span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중 - ${progressNumeric}%">\n                <span class="briefing-spinner">🔄</span>\n                <span class="briefing-progress-label">브리핑 생성 중 (${progressNumeric}%)</span>\n                <div class="briefing-progress-wrap"><div class="briefing-progress-bar" style="width: ${progressNumeric}%"></div></div>\n              </span>`;
+      } else {
+        bsHtml = `<span class="kanban-card-meta briefing-status-tag processing" title="AI 브리핑 생성 중">🔄 브리핑 생성 중...</span>`;
+      }
+      break;
+    case 'done':
+      bsHtml = `<span class="kanban-card-meta briefing-status-tag done" title="AI 브리핑 완료">✅ 브리핑 완료</span>`;
+      break;
+    case 'failed':
+      bsTitle = draftObj?.briefingError || '브리핑 실패';
+      bsHtml = `\n            <span class="kanban-card-meta briefing-status-tag failed" title="${bsTitle}">❌ 브리핑 실패</span>\n            <button class="briefing-retry-btn" data-card-id="${id}" data-status="${status}" title="브리핑 다시 시도">↻ 재시도</button>`;
+      break;
+    default:
+      break;
+  }
+  return bsHtml;
 }
 
 function createKanbanCard(id, data, status) {
@@ -1134,6 +1287,8 @@ function addKanbanEventListeners(container) {
         (response) => {
           if (response && response.success) {
             showToast('🔁 브리핑 재시도 요청이 큐에 추가되었습니다.');
+            // Optimistically update the Kanban card badge
+            updateCardBadgesInPlace(cardId, { briefingStatus: 'processing', briefingProgress: 0 });
           } else {
             showToast('❌ 브리핑 재시도 실패: ' + (response?.error || '알 수 없는 오류'));
           }

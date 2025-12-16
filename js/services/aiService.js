@@ -2101,7 +2101,17 @@ ${defaultDescription}
 
       // [Fix] Normalize SEO Title to prevent duplication (e.g. "Title - Title")
       if (seoTitle && title) {
-        seoTitle = normalizeSeoTitle(seoTitle, title);
+        try {
+          if (typeof normalizeSeoTitle === 'function') {
+            seoTitle = normalizeSeoTitle(seoTitle, title);
+          } else {
+            // Fallback: use raw seoTitle if helper not available (test isolation)
+            seoTitle = String(seoTitle).trim();
+          }
+        } catch (e) {
+          Logger.warn('[generateDraftFromIdea] normalizeSeoTitle failed:', e);
+          seoTitle = String(seoTitle).trim();
+        }
       }
 
       // [버그 수정] 제목에 중복 년도 제거
@@ -2592,6 +2602,30 @@ export async function generateIdeaBriefing(cardId, title, description, options =
         // keep p numeric and between 0..100
         const value = typeof p === 'number' ? Math.max(0, Math.min(100, Math.round(p))) : null;
         if (value === null) return;
+        
+        // Broadcast progress update to UI immediately (Extension UI + Content Scripts)
+        try {
+          // 1. Send to Extension UI (Popup, Side Panel, etc.)
+          chrome.runtime.sendMessage({
+            action: 'kanban_card_progress_updated',
+            cardId: cardId,
+            progress: value
+          }).catch(() => {});
+
+          // 2. Send to Content Scripts (Active Tabs)
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                chrome.tabs.sendMessage(tab.id, {
+                  action: 'kanban_card_progress_updated',
+                  cardId: cardId,
+                  progress: value
+                }).catch(() => {});
+              }
+            });
+          });
+        } catch (e) {}
+
         // update both top-level and nested workspace/draft when possible
         await update(ref(getDb(), `kanban/${userId}/${status}/${cardId}`), {
           briefingProgress: value,

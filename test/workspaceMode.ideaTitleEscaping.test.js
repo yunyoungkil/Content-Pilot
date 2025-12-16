@@ -5,6 +5,8 @@ describe('Workspace UI - idea title escaping and save', () => {
     jest.resetModules();
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
     global.testHelpers.mockChromeRuntime();
+    // Ensure DOM is clean between tests
+    document.body.innerHTML = '';
   });
 
   test('idea title with quotes does not break publish-info DOM and can be edited/saved', async () => {
@@ -31,9 +33,13 @@ describe('Workspace UI - idea title escaping and save', () => {
     document.body.appendChild(container);
     renderWorkspace(container, idea);
 
-    // wait and open publish-info
-    await global.testHelpers.waitForMs(500);
-    const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+    // wait and open publish-info (poll for availability to avoid timing issues)
+    let tabBtn = null;
+    for (let i = 0; i < 40; i++) {
+      tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+      if (tabBtn) break;
+      await global.testHelpers.waitForMs(25);
+    }
     expect(tabBtn).toBeTruthy();
     tabBtn.click();
     await global.testHelpers.waitForMs(150);
@@ -50,15 +56,25 @@ describe('Workspace UI - idea title escaping and save', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(50);
 
-    // trigger blur to perform save and wait
+    // trigger blur to perform save and poll until the underlying data/kanban card is updated
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(150);
+
+    let kanbanCard = null;
+    for (let i = 0; i < 40; i++) {
+      if (idea.title === badTitle + ' X') break;
+      await global.testHelpers.waitForMs(25);
+    }
 
     // Verify underlying data and kanban card updated instead of header
-    const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+    kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
     expect(idea.title).toBe(badTitle + ' X');
     expect(kanbanCard).toBeTruthy();
     if (kanbanCard) {
+      // poll for dataset/title text update too
+      for (let i = 0; i < 40; i++) {
+        if (kanbanCard.dataset.title === badTitle + ' X') break;
+        await global.testHelpers.waitForMs(25);
+      }
       expect(kanbanCard.dataset.title).toBe(badTitle + ' X');
       const kTitle = kanbanCard.querySelector('.kanban-card-title');
       if (kTitle) expect(kTitle.textContent).toBe(badTitle + ' X');

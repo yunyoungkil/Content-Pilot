@@ -26,15 +26,28 @@ jest.mock('../js/services/firebaseService.js', () => ({
   push: jest.fn(),
 }));
 
-jest.mock('../js/utils.js', () => ({
-  Logger: {
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    biz: jest.fn(),
-  },
-}));
+jest.mock('../js/utils.js', () => {
+  const actual = jest.requireActual('../js/utils.js');
+  return {
+    ...actual,
+    Logger: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      biz: jest.fn(),
+    },
+    // provide a safe stub for normalizeSeoTitle to avoid test order coupling
+    normalizeSeoTitle: (seo = '', title = '') => {
+      if (!seo) return '';
+      if (!title) return String(seo).trim();
+      const s = String(seo).trim();
+      const t = String(title).trim();
+      if (s === `${t} - ${t}`) return t;
+      return s;
+    },
+  };
+});
 
 import { removeScrapImage } from '../js/services/scrapService.js';
 

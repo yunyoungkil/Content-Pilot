@@ -169,4 +169,49 @@ describe('Kanban UI - briefing status badges', () => {
     const badge = container.querySelector('[data-id="card-status-only"] .draft-status-count');
     expect(badge).toBeFalsy();
   });
+
+  test('updates briefing badge when only briefing meta changes (queued -> processing)', async () => {
+    const { renderKanban, updateKanbanUI } = await import('../js/ui/kanbanMode.js');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderKanban(container);
+
+    const initial = {
+      ideas: {
+        'card-1': {
+          title: 'Card 1',
+          workspace: { draft: { briefingStatus: 'queued', briefingQueuedAt: Date.now() } },
+        },
+      },
+      'in-progress': {},
+      done: {},
+    };
+
+    await updateKanbanUI(initial);
+
+    const queuedEl = container.querySelector('[data-id="card-1"] .briefing-status-tag.queued');
+    expect(queuedEl).toBeTruthy();
+
+    // Now update only briefing meta to processing with progress
+    const updated = {
+      ideas: {
+        'card-1': {
+          title: 'Card 1',
+          workspace: { draft: { briefingStatus: 'processing', briefingProgress: 55 } },
+        },
+      },
+      'in-progress': {},
+      done: {},
+    };
+
+    await updateKanbanUI(updated);
+
+    // queued badge should be gone, processing badge should appear
+    const procEl = container.querySelector('[data-id="card-1"] .briefing-status-tag.processing');
+    expect(procEl).toBeTruthy();
+    const procBar = container.querySelector('[data-id="card-1"] .briefing-progress-bar');
+    expect(procBar).toBeTruthy();
+    expect(procBar.style.width).toContain('55%');
+  });
 });

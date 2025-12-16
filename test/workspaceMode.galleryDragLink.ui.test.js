@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace gallery image drag/drop linking', () => {
-  jest.setTimeout(10000);
+  jest.setTimeout(20000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();

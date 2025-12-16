@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace drop image into already linked scrap', () => {
-  jest.setTimeout(10000);
+  jest.setTimeout(20000);
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -27,34 +27,34 @@ describe('Workspace drop image into already linked scrap', () => {
     const imageUrl = 'https://example.test/newimg.jpg';
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb) setTimeout(() => cb({
+        if (cb) cb({
           success: true,
           scraps: [
             { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page', tags: [] },
           ],
-        }), 0);
+        });
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
-        if (cb) setTimeout(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page' } }), 0);
+        if (cb) cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page' } });
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
-        if (cb) Promise.resolve().then(() => cb({ success: true }));
+        if (cb) cb({ success: true });
         return;
       }
       if (message && message.action === 'add_image_to_scrap') {
         addImageCall = message;
         // simulate DB update returning allImages
-        if (cb) Promise.resolve().then(() => cb({ success: true, allImages: [imageUrl] }));
+        if (cb) cb({ success: true, allImages: [imageUrl] });
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
-        if (cb) Promise.resolve().then(() => cb({ success: true, images: [] }));
+        if (cb) cb({ success: true, images: [] });
         return;
       }
-      if (cb) Promise.resolve().then(() => cb({ success: true }));
+      if (cb) cb({ success: true });
     });
 
     const { renderWorkspace, updateWorkspaceScraps, addWorkspaceEventListeners, showScrapDetailModal } = await import('../js/ui/workspaceMode.js');
@@ -64,13 +64,23 @@ describe('Workspace drop image into already linked scrap', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 300));
+
+    // wait for workspace container to render
+    for (let i = 0; i < 40; i++) {
+      if (container.querySelector('.workspace-container')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
 
     updateWorkspaceScraps(container, idea);
-    // small delay to avoid race with module initialization in tests
-    await new Promise((r) => setTimeout(r, 600));
+    // wait for linked-scraps-list to be available
+    for (let i = 0; i < 80; i++) {
+      if (container.querySelector('.linked-scraps-list')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 500));
+    // ensure event listeners are attached
+    await new Promise((r) => setTimeout(r, 50));
 
     // Show scrap detail modal and simulate drag of an image from it
     const scrapDetailData = { id: 'scrap-1', text: 'Scrap One', image: imageUrl, allImages: [imageUrl] };

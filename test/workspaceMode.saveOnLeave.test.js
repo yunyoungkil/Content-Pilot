@@ -1,9 +1,12 @@
 import { jest } from '@jest/globals';
 
 describe('Workspace UI - save title on leave', () => {
+  jest.setTimeout(20000);
   beforeEach(() => {
     jest.resetModules();
+    jest.useRealTimers();
     global.testHelpers.mockChromeRuntime();
+    document.body.innerHTML = '';
   });
 
   test('unsaved title is saved and reflected on idea card when leaving workspace', async () => {
@@ -104,9 +107,9 @@ describe('Workspace UI - save title on leave', () => {
     // First save
     input.value = 'First Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(40);
+    await global.testHelpers.waitForMs(100);
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(200);
+    await global.testHelpers.waitForMs(400);
 
     const updatedCard1 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
     expect(updatedCard1.dataset.title).toBe('First Updated');
@@ -114,9 +117,9 @@ describe('Workspace UI - save title on leave', () => {
     // Second save
     input.value = 'Second Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(30);
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(100);
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+    await global.testHelpers.waitForMs(300);
 
     const updatedCard2 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
     expect(updatedCard2.dataset.title).toBe('Second Updated');

@@ -6,6 +6,8 @@ describe('Workspace UI - publish info SEO title', () => {
     chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
     // Ensure runtime sendMessage callbacks are handled by tests
     global.testHelpers.mockChromeRuntime();
+    // Ensure DOM is clean between tests to avoid leaked state
+    document.body.innerHTML = '';
   });
 
   test('renders SEO title from publishInfo when top-level seoTitle is missing', async () => {

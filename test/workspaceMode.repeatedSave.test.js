@@ -4,12 +4,21 @@ import { jest } from '@jest/globals';
 describe('Workspace UI - repeated save', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.useRealTimers();
     global.testHelpers.mockChromeRuntime();
     document.body.innerHTML = '';
+    // Ensure storage is predictable for workspace rendering
+    chrome.storage.local.get.mockResolvedValue({ activeChannelId: 'channel-1' });
   });
 
   test('can save title multiple times', async () => {
-    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+    let renderWorkspace;
+    try {
+      ({ renderWorkspace } = await import('../js/ui/workspaceMode.js'));
+    } catch (e) {
+      console.error('[TEST] import/render workspace failed:', e);
+      throw e;
+    }
 
     const idea = {
       id: 'card-repeated-save',
@@ -28,11 +37,21 @@ describe('Workspace UI - repeated save', () => {
 
     const container = document.createElement('div');
     document.body.appendChild(container);
-    renderWorkspace(container, idea);
+    try {
+      renderWorkspace(container, idea);
+    } catch (e) {
+      console.error('[TEST] renderWorkspace threw:', e, 'container:', container.innerHTML.slice(0,200));
+      throw e;
+    }
 
-    await global.testHelpers.waitForMs(600);
-
-    const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+    // wait for publish-info tab to be available
+    let tabBtn = null;
+    for (let i = 0; i < 40; i++) {
+      tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+      if (tabBtn) break;
+      await global.testHelpers.waitForMs(25);
+    }
+    expect(tabBtn).toBeTruthy();
     tabBtn.click();
     await global.testHelpers.waitForMs(200);
 
@@ -51,11 +70,14 @@ describe('Workspace UI - repeated save', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(100);
     
-    // Trigger save via blur
+    // Trigger save via blur and wait (poll) for the sendMessage call to happen
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(200);
-
-    const calls1 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
+    let calls1 = [];
+    for (let i = 0; i < 40; i++) {
+      calls1 = sendSpy.mock.calls.filter(args => args[0] && args[0].action === 'update_kanban_card');
+      if (calls1.length >= 1) break;
+      await global.testHelpers.waitForMs(25);
+    }
     expect(calls1.length).toBe(1);
     expect(calls1[0][0]).toEqual(
       expect.objectContaining({
@@ -70,11 +92,14 @@ describe('Workspace UI - repeated save', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await global.testHelpers.waitForMs(100);
     
-    // Trigger save via blur
+    // Trigger save via blur and wait (poll) for the second sendMessage call
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(200);
-
-    const calls2 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
+    let calls2 = [];
+    for (let i = 0; i < 40; i++) {
+      calls2 = sendSpy.mock.calls.filter(args => args[0] && args[0].action === 'update_kanban_card');
+      if (calls2.length >= 2) break;
+      await global.testHelpers.waitForMs(25);
+    }
     expect(calls2.length).toBe(2);
     expect(calls2[1][0]).toEqual(
       expect.objectContaining({

@@ -2,6 +2,8 @@ import { shortenLink, showToast, showConfirmationToast, Logger, normalizeSeoTitl
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
+import { updateCardBadgesInPlace } from './kanbanMode.js';
+
 export function isMeaningfulDraft(d) {
   if (!d) return false;
 
@@ -2845,6 +2847,10 @@ export function renderWorkspace(container, ideaData) {
     (!ideaData.tags || ideaData.tags.length <= 1)
   ) {
     Logger.debug(`[Workspace] 브리핑 요청 - cardId: ${ideaData.id}, title: ${ideaData.title}`);
+    
+    // Optimistically update the Kanban card badge
+    updateCardBadgesInPlace(ideaData.id, { briefingStatus: 'processing', briefingProgress: 0 });
+
     try {
       const _sm = chrome.runtime.sendMessage({
         action: 'generate_idea_briefing',
@@ -3692,6 +3698,41 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
     });
   }
 
+  // 연결된 스크랩 아이템에 이벤트 리스너 설정 (중복 방지)
+  const linkedScrapItems = new WeakSet();
+  function setupLinkedScrapItem(item) {
+    if (!item || linkedScrapItems.has(item)) return;
+    try {
+      console.debug(
+        '[Workspace] setupLinkedScrapItem - attaching listeners for item:',
+        item?.dataset?.scrapId
+      );
+    } catch (e) {
+      console.warn('[Workspace] setupLinkedScrapItem debug failed:', e);
+    }
+    linkedScrapItems.add(item);
+
+    // 드래그 시작 이벤트
+    item.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData(
+        'application/json',
+        JSON.stringify({
+          id: item.dataset.scrapId,
+          text: item.dataset.text,
+          isLinked: true,
+        })
+      );
+      item.style.opacity = '0.5';
+    });
+
+    // 드래그 종료 이벤트
+    item.addEventListener('dragend', (e) => {
+      item.style.opacity = '1';
+      // 드롭이 linked-scraps-list 외부에서 발생했는지 확인
+    });
+  }
+
   // 연결된 스크랩 목록 초기 렌더링
   if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
     getActiveChannelId((res) => {
@@ -3757,6 +3798,8 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         (res) => {
           if (res && res.success) {
             showToast('🔁 브리핑 재시도 요청이 큐에 추가되었습니다.');
+            // Optimistically update the Kanban card badge
+            updateCardBadgesInPlace(cardId, { briefingStatus: 'processing', briefingProgress: 0 });
           } else {
             showToast('❌ 브리핑 재시도 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
           }
@@ -5087,7 +5130,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
   });
 
   // 연결된 스크랩 아이템에 이벤트 리스너 설정 (중복 방지)
-  const linkedScrapItems = new WeakSet();
+  // linkedScrapItems declared above
   function setupLinkedScrapItem(item) {
     if (!item || linkedScrapItems.has(item)) return;
     try {
