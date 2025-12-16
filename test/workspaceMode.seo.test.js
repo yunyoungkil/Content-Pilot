@@ -23,4 +23,22 @@ describe('workspaceMode.applyDraftResponseToIdea', () => {
     expect(updated.publishInfo.jsonLdSchema).toEqual(resp.jsonLdSchema);
     expect(updated.publishInfo.thumbnailUrls).toEqual(resp.thumbnailUrls);
   });
+
+  test('normalizes duplicated seoTitle that repeats the idea title', () => {
+    const idea = { id: 'card-2', title: 'Idea Title', publishInfo: {} };
+    const resp = { seoTitle: 'Idea Title Idea Title', draft: '# Draft' };
+
+    const updated = applyDraftResponseToIdea(idea, resp);
+    expect(updated.seoTitle).toBe('Idea Title');
+    expect(updated.publishInfo.seoTitle).toBe('Idea Title');
+  });
+
+  test('normalizes duplicated seoTitle with separator', () => {
+    const idea = { id: 'card-3', title: 'Cool Idea', publishInfo: {} };
+    const resp = { seoTitle: 'Cool Idea - Cool Idea', draft: '# Draft' };
+
+    const updated = applyDraftResponseToIdea(idea, resp);
+    expect(updated.seoTitle).toBe('Cool Idea');
+    expect(updated.publishInfo.seoTitle).toBe('Cool Idea');
+  });
 });
