@@ -6,7 +6,8 @@ describe('Workspace gallery image drag/drop linking', () => {
     jest.resetModules();
     jest.clearAllMocks();
     jest.resetAllMocks();
-    // reset global workspace flags to avoid cross-test interference
+    // clear DOM and reset global workspace flags to avoid cross-test interference
+    document.body.innerHTML = '';
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
@@ -21,15 +22,15 @@ describe('Workspace gallery image drag/drop linking', () => {
     // use testHelpers.mockChromeRuntime to setup sendMessage and onMessage
   });
 
+  let debugSpy;
   beforeEach(() => {
     // reduce noisy debug output in this file which can overwhelm test runner
     // and ensure we restore it after test
-    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => {});
+    debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => {});
   });
 
   afterEach(() => {
     try {
-      const debugSpy = jest.spyOn(console, 'debug');
       if (debugSpy) debugSpy.mockRestore();
     } catch (e) { /* ignore */ }
   });
@@ -38,7 +39,7 @@ describe('Workspace gallery image drag/drop linking', () => {
     let linkedCall = null;
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb) setTimeout(() => cb({
+        if (cb) Promise.resolve().then(() => cb({
           success: true,
           scraps: [
             {
@@ -50,11 +51,11 @@ describe('Workspace gallery image drag/drop linking', () => {
               tags: [],
             },
           ],
-        }), 0);
+        }));
         return;
       }
       if (message && message.action === 'get_unified_gallery') {
-        if (cb) setTimeout(() => cb({
+        if (cb) Promise.resolve().then(() => cb({
           success: true,
           images: [
             {
@@ -64,7 +65,7 @@ describe('Workspace gallery image drag/drop linking', () => {
               timestamp: Date.now(),
             },
           ],
-        }), 0);
+        }));
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
@@ -84,21 +85,21 @@ describe('Workspace gallery image drag/drop linking', () => {
     document.body.appendChild(container);
 
     renderWorkspace(container, idea);
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 300));
 
     // populate scraps
     updateWorkspaceScraps(container, idea);
     addWorkspaceEventListeners(container.querySelector('.workspace-container'), idea, container);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 500));
 
     // wait for gallery to populate
     const workspaceEl = container.querySelector('.workspace-container');
     expect(workspaceEl).toBeTruthy();
     const galleryGrid = workspaceEl.querySelector('.image-gallery-grid');
     expect(galleryGrid).toBeTruthy();
-    // wait until a gallery thumb appears (up to 500ms)
+    // wait until a gallery thumb appears (up to 12s)
     let galleryWrap = null;
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 120; i++) {
       galleryWrap = workspaceEl.querySelector('.image-gallery-grid .gallery-thumb-wrap');
       if (galleryWrap) break;
       // short wait

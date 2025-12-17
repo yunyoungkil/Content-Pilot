@@ -751,6 +751,7 @@ const quillEditor = {
   root: { 
     get innerHTML() { return tiptapEditor ? tiptapEditor.getHTML() : ''; } 
   },
+  focus: () => { if (tiptapEditor) try { tiptapEditor.commands.focus(); } catch (e) {} },
   getText: (index, length) => {
     if (!tiptapEditor) return '';
     if (typeof index === 'undefined') return tiptapEditor.getText();

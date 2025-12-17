@@ -2157,7 +2157,16 @@ ${defaultDescription}
 
       // [Fix] Normalize SEO Title to prevent duplication (e.g. "Title - Title")
       if (seoTitle && title) {
-        seoTitle = normalizeSeoTitle(seoTitle, title);
+        try {
+          if (typeof normalizeSeoTitle === 'function') {
+            seoTitle = normalizeSeoTitle(seoTitle, title);
+          } else {
+            // Fallback: if helper unavailable, keep seoTitle as-is
+            Logger.warn('[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization');
+          }
+        } catch (e) {
+          Logger.warn('[generateDraftFromIdea] normalizeSeoTitle failed, skipping:', e);
+        }
       }
 
       // [버그 수정] 제목에 중복 년도 제거

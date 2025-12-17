@@ -119,7 +119,7 @@ describe('AI Service', () => {
       },
     }));
 
-    // Logger 모킹
+    // Logger and helper functions 모킹
     jest.doMock('../js/utils.js', () => ({
       Logger: {
         debug: jest.fn(),
@@ -128,6 +128,8 @@ describe('AI Service', () => {
         info: jest.fn(),
         biz: jest.fn(),
       },
+      normalizeSeoTitle: jest.fn((seoTitle, title) => seoTitle),
+      // include other helpers if needed
     }));
   });
 
@@ -960,6 +962,8 @@ describe('AI Service', () => {
         generateThumbnail: false,
       });
       global.fetch = originalFetch;
+
+      console.log('[TEST DEBUG] generateDraftFromIdea res:', res);
 
       expect(res).toBeDefined();
       expect(res.success).toBe(true);

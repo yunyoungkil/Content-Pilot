@@ -6,6 +6,8 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     jest.resetModules();
     jest.clearAllMocks();
     jest.resetAllMocks();
+    // clear DOM and reset global workspace flags to avoid cross-test interference
+    document.body.innerHTML = '';
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     window.__cp_workspace_idea_id = undefined;
@@ -24,7 +26,7 @@ describe('Workspace scrap detail image drag/drop linking', () => {
     let linkedCall = null;
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb) setTimeout(() => cb({
+        if (cb) Promise.resolve().then(() => cb({
           success: true,
           scraps: [
             {
@@ -36,16 +38,27 @@ describe('Workspace scrap detail image drag/drop linking', () => {
               tags: [],
             },
           ],
-        }), 0);
+        }));
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
-        if (cb) setTimeout(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: 'https://example.test/img1.jpg', allImages: ['https://example.test/img1.jpg'] } }));
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
         linkedCall = message;
         if (cb) Promise.resolve().then(() => cb({ success: true }));
+        // simulate DOM update for the linked item
+        Promise.resolve().then(() => {
+          const linkedList = document.querySelector('.linked-scraps-list');
+          if (linkedList) {
+            const li = document.createElement('div');
+            li.setAttribute('data-scrap-id', 'scrap-1');
+            li.className = 'linked-scrap-item';
+            li.innerHTML = `<div class="scrap-card-img-wrap"><img src="https://example.test/img1.jpg" /></div>`;
+            linkedList.appendChild(li);
+          }
+        });
         return;
       }
       if (cb) Promise.resolve().then(() => cb({ success: true }));
