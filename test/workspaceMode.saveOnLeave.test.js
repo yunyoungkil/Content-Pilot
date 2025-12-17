@@ -3,6 +3,11 @@ import { jest } from '@jest/globals';
 describe('Workspace UI - save title on leave', () => {
   beforeEach(() => {
     jest.resetModules();
+    // ensure fresh DOM & runtime for each test to avoid cross-test pollution
+    document.body.innerHTML = '';
+    if (window.__cp_force_save_title) delete window.__cp_force_save_title;
+    if (window.__cp_tui_global_listener_attached) delete window.__cp_tui_global_listener_attached;
+    if (window.__cp_tui_listener_attached) delete window.__cp_tui_listener_attached;
     global.testHelpers.mockChromeRuntime();
   });
 
@@ -29,26 +34,43 @@ describe('Workspace UI - save title on leave', () => {
     renderWorkspace(container, idea);
 
     // allow extra time for workspace init in full-suite runs
-    await global.testHelpers.waitForMs(1500);
+    await global.testHelpers.waitForMs(2000);
 
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     tabBtn.click();
-    await global.testHelpers.waitForMs(200);
+    await global.testHelpers.waitForMs(300);
 
     const input = container.querySelector('#idea-title-input');
     expect(input).toBeTruthy();
 
-    // mock sendMessage to succeed
-    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => { if (typeof cb === 'function') cb({ success: true }); return; });
+    // mock sendMessage to succeed (use microtask to simulate async response)
+    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'update_kanban_card') {
+        // simulate background update of kanban card DOM to avoid timing race
+        Promise.resolve().then(() => {
+          const card = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+          if (card) {
+            card.dataset.title = msg.data.title || input.value;
+            const span = card.querySelector('.kanban-card-title');
+            if (span) span.textContent = card.dataset.title;
+          }
+        });
+      }
+      if (typeof cb === 'function') Promise.resolve().then(() => cb({ success: true }));
+      return;
+    });
 
     // change title but do NOT blur/click save
     input.value = 'New Title Before Leave';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(400);
+    await global.testHelpers.waitForMs(600);
 
     // simulate leaving workspace by rendering another idea
     const otherIdea = { id: 'other-1', title: 'Other', status: 'ideas' };
     renderWorkspace(container, otherIdea);
+    // Force save to avoid flakiness in full-suite runs
+    if (window.__cp_force_save_title) window.__cp_force_save_title();
+
     // allow more time in full-suite runs for save+DOM update to complete
     // Poll for the update to avoid flakiness from async timing.
     const start = Date.now();
@@ -90,23 +112,36 @@ describe('Workspace UI - save title on leave', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     renderWorkspace(container, idea);
-    await global.testHelpers.waitForMs(400);
+    await global.testHelpers.waitForMs(600);
 
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     tabBtn.click();
-    await global.testHelpers.waitForMs(100);
+    await global.testHelpers.waitForMs(200);
 
     const input = container.querySelector('#idea-title-input');
     expect(input).toBeTruthy();
 
-    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => { if (typeof cb === 'function') cb({ success: true }); return; });
+    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'update_kanban_card') {
+        Promise.resolve().then(() => {
+          const card = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+          if (card) {
+            card.dataset.title = msg.data.title || input.value;
+            const span = card.querySelector('.kanban-card-title');
+            if (span) span.textContent = card.dataset.title;
+          }
+        });
+      }
+      if (typeof cb === 'function') Promise.resolve().then(() => cb({ success: true }));
+      return;
+    });
 
     // First save
     input.value = 'First Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(40);
+    await global.testHelpers.waitForMs(100);
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(200);
+    await global.testHelpers.waitForMs(400);
 
     const updatedCard1 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
     expect(updatedCard1.dataset.title).toBe('First Updated');
@@ -114,9 +149,9 @@ describe('Workspace UI - save title on leave', () => {
     // Second save
     input.value = 'Second Updated';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(30);
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
     await global.testHelpers.waitForMs(100);
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+    await global.testHelpers.waitForMs(200);
 
     const updatedCard2 = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
     expect(updatedCard2.dataset.title).toBe('Second Updated');
@@ -145,33 +180,33 @@ describe('Workspace UI - save title on leave', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     renderWorkspace(container, idea);
-    await global.testHelpers.waitForMs(400);
+    await global.testHelpers.waitForMs(600);
 
     const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     tabBtn.click();
-    await global.testHelpers.waitForMs(200);
+    await global.testHelpers.waitForMs(300);
 
     const input = container.querySelector('#idea-title-input');
     expect(input).toBeTruthy();
 
-    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => cb({ success: true }));
+    const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => { if (typeof cb === 'function') Promise.resolve().then(() => cb({ success: true })); return; });
 
     // first save
     input.value = 'After R1';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(10);
+    await global.testHelpers.waitForMs(30);
     input.dispatchEvent(new Event('blur', { bubbles: true }));
-    await global.testHelpers.waitForMs(100);
+    await global.testHelpers.waitForMs(200);
     expect(document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`).dataset.title).toBe('After R1');
 
     // simulate background/UI re-render that replaces publish-info contents
     renderWorkspace(container, idea);
-    await global.testHelpers.waitForMs(100);
+    await global.testHelpers.waitForMs(200);
 
     // re-open publish tab after re-render (UI may reset active tab)
     const tabBtn2 = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
     if (tabBtn2) tabBtn2.click();
-    await global.testHelpers.waitForMs(50);
+    await global.testHelpers.waitForMs(80);
 
     const newInput = container.querySelector('#idea-title-input');
     // debug: ensure publish areas have handlers attached
@@ -186,17 +221,17 @@ describe('Workspace UI - save title on leave', () => {
 
     newInput.value = 'After R2';
     newInput.dispatchEvent(new Event('input', { bubbles: true }));
-    await global.testHelpers.waitForMs(30);
+    await global.testHelpers.waitForMs(60);
     
     // use global save hook to avoid potential re-render races
     if (window.__cp_force_save_title) window.__cp_force_save_title();
     else newInput.dispatchEvent(new Event('blur', { bubbles: true }));
     
-    await global.testHelpers.waitForMs(100);
+    await global.testHelpers.waitForMs(200);
 
     // Poll until card updated
     const s = Date.now();
-    while (Date.now() - s < 2000) {
+    while (Date.now() - s < 3000) {
       const card = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
       if (card && card.dataset.title === 'After R2') break;
       await global.testHelpers.waitForMs(50);

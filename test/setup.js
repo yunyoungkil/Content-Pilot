@@ -249,19 +249,18 @@ global.testHelpers = {
     chrome.runtime.sendMessage = jest.fn((message, callback) => {
       // For image fetch, do not notify listeners to avoid side effects; just return test data
       if (message && message.action === 'fetch_image_as_base64') {
-        if (callback)
-          callback({ success: true, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA' });
+        if (callback) Promise.resolve().then(() => callback({ success: true, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA' }));
         return;
       }
       // For other messages, broadcast to listeners
       listeners.forEach((listener) => {
         try {
-          listener(message, {}, () => {});
+          Promise.resolve().then(() => listener(message, {}, () => {}));
         } catch (e) {
           // ignore
         }
       });
-      if (callback) callback({ success: true });
+      if (callback) Promise.resolve().then(() => callback({ success: true }));
     });
 
     // Reset onMessage listener registration helper

@@ -1708,6 +1708,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
   const ideaTitle = ideaData?.title || '';
   const safeIdeaTitle = escapeHtml(ideaTitle);
+  const description = ideaData?.publishInfo?.description || ideaData?.description || '';
+  const safeDescription = escapeHtml(description);
   const safeSeoTitle = escapeHtml(seoTitle);
   const safePermalink = escapeHtml(permalink);
   const safeTags = escapeHtml(tags);
@@ -1734,6 +1736,10 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">SEO 최적화 제목</label>
           <input type="text" id="seo-title-input" value="${safeSeoTitle}" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">메타 디스크립션 (SEO 설명)</label>
+          <textarea id="seo-description-input" readonly style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fff; box-sizing: border-box; resize: vertical; min-height: 60px; font-family: inherit;">${safeDescription}</textarea>
         </div>
         <div>
           <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">퍼머링크</label>
@@ -1779,6 +1785,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     };
     updateInput('#idea-title-input', safeIdeaTitle);
     updateInput('#seo-title-input', safeSeoTitle);
+    updateInput('#seo-description-input', safeDescription);
     updateInput('#permalink-input', safePermalink);
     updateInput('#tags-input', safeTags);
   }
@@ -2001,6 +2008,97 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         }, true);
 
         publishInfoArea.dataset.cpPublishHandlersAttached = '1';
+      }
+    }
+
+    // Make SEO description editable
+    const seoDescInput = publishInfoPanel.querySelector('#seo-description-input');
+    if (seoDescInput) {
+      seoDescInput.removeAttribute('readonly');
+
+      const doSaveDescriptionImpl = (newDesc) => {
+        if (publishInfoArea._isSavingDesc) return;
+        publishInfoArea._isSavingDesc = true;
+
+        console.debug('[Workspace] Saving SEO description:', newDesc);
+        
+        // Prepare updates
+        const currentPublishInfo = ideaData.publishInfo || {};
+        let updatedJsonLdSchema = null;
+
+        // Handle jsonLdSchema (object or string)
+        if (currentPublishInfo.jsonLdSchema) {
+          try {
+            if (typeof currentPublishInfo.jsonLdSchema === 'string') {
+              updatedJsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
+            } else {
+              updatedJsonLdSchema = JSON.parse(JSON.stringify(currentPublishInfo.jsonLdSchema));
+            }
+          } catch (e) {
+            console.warn('[Workspace] Failed to parse jsonLdSchema:', e);
+          }
+        }
+
+        // If jsonLdSchema exists, update its description too
+        if (updatedJsonLdSchema && typeof updatedJsonLdSchema === 'object') {
+          updatedJsonLdSchema.description = newDesc;
+        }
+
+        const updates = {
+          description: newDesc,
+          publishInfo: {
+            ...currentPublishInfo,
+            description: newDesc,
+            ...(updatedJsonLdSchema ? { jsonLdSchema: updatedJsonLdSchema } : {}),
+            updatedAt: Date.now()
+          }
+        };
+
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: 'update_kanban_card',
+              data: {
+                cardId: ideaData.id,
+                status: ideaData.status || 'ideas',
+                updates: updates,
+              },
+            },
+            (response) => {
+              publishInfoArea._isSavingDesc = false;
+              if (response && response.success) {
+                // Update local data
+                if (!ideaData.publishInfo) ideaData.publishInfo = {};
+                ideaData.publishInfo.description = newDesc;
+                ideaData.description = newDesc;
+                if (updatedJsonLdSchema) {
+                  ideaData.publishInfo.jsonLdSchema = updatedJsonLdSchema;
+                }
+                showToast('✅ SEO 설명이 저장되었습니다.');
+              } else {
+                showToast('❌ SEO 설명 저장 실패');
+              }
+            }
+          );
+        } catch (e) {
+          publishInfoArea._isSavingDesc = false;
+          console.error('[Workspace] Save description error:', e);
+        }
+      };
+
+      // Attach listeners if not already attached
+      if (!publishInfoArea.dataset.cpPublishDescHandlersAttached) {
+        publishInfoArea.addEventListener('blur', (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'seo-description-input') {
+             const val = targ.value.trim();
+             const currentDesc = ideaData.publishInfo?.description || ideaData.description || '';
+             if (val !== currentDesc) {
+               doSaveDescriptionImpl(val);
+             }
+          }
+        }, true);
+        publishInfoArea.dataset.cpPublishDescHandlersAttached = '1';
       }
     }
 
@@ -2316,8 +2414,18 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           const currentPublishInfo = currentIdeaData?.publishInfo;
 
           if (currentPublishInfo && currentPublishInfo.jsonLdSchema) {
-            jsonLdSchema = currentPublishInfo.jsonLdSchema;
-          } else {
+            try {
+              if (typeof currentPublishInfo.jsonLdSchema === 'string') {
+                jsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
+              } else {
+                jsonLdSchema = currentPublishInfo.jsonLdSchema;
+              }
+            } catch (e) {
+              console.warn('[Workspace] Failed to parse jsonLdSchema:', e);
+            }
+          }
+
+          if (!jsonLdSchema) {
             // Fallback: 저장된 JSON-LD가 없으면 기본값 생성
             console.log('[Workspace] JSON-LD가 없어 기본 스키마를 생성합니다.');
             const today = new Date().toISOString().split('T')[0];
@@ -2353,7 +2461,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               '@context': 'https://schema.org',
               '@type': 'BlogPosting',
               headline: currentIdeaData.seoTitle || currentIdeaData.title || '제목 없음',
-              description: currentIdeaData.description || '콘텐츠 설명이 없습니다.',
+              description: currentIdeaData.publishInfo?.description || currentIdeaData.description || '콘텐츠 설명이 없습니다.',
               author: {
                 '@type': 'Person',
                 name: publisherName,
@@ -2391,6 +2499,13 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             currentIdeaData?.seoTitle ||
             currentIdeaData?.title ||
             '';
+
+          // [Fix] Ensure JSON-LD description matches the UI input (publishInfo.description)
+          // 사용자가 입력한 최신 SEO 설명이 JSON-LD에도 반영되도록 강제 업데이트
+          const currentDescription = currentPublishInfo?.description || currentIdeaData?.description || '';
+          if (jsonLdSchema && currentDescription) {
+             jsonLdSchema.description = currentDescription;
+          }
 
           // 완전한 HTML 생성
           const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, currentSeoTitle);
@@ -2448,36 +2563,55 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
   let jsonLdScript = '';
   if (jsonLdSchema) {
     try {
-      // JSON-LD 스키마에 필수 필드 업데이트 (없으면 추가)
-      const schema = JSON.parse(JSON.stringify(jsonLdSchema)); // 깊은 복사
-
-      // headline이 없으면 title 사용
-      if (!schema.headline && title) {
-        schema.headline = title;
+      // Handle string input
+      let schemaObj = jsonLdSchema;
+      if (typeof schemaObj === 'string') {
+        try {
+          schemaObj = JSON.parse(schemaObj);
+        } catch (e) {
+          console.warn('[Workspace] generateCompleteHtml received invalid JSON string', e);
+          schemaObj = null;
+        }
       }
 
-      // datePublished가 없으면 현재 날짜 사용
-      if (!schema.datePublished) {
-        const now = new Date();
-        schema.datePublished = now.toISOString().split('T')[0]; // YYYY-MM-DD 형식
-      }
+      if (schemaObj) {
+        // JSON-LD 스키마에 필수 필드 업데이트 (없으면 추가)
+        const schema = JSON.parse(JSON.stringify(schemaObj)); // 깊은 복사
 
-      // author가 없으면 기본값 추가
-      if (!schema.author) {
-        schema.author = {
-          '@type': 'Person',
-          name: 'Content Pilot',
-        };
-      }
+        // headline이 없으면 title 사용
+        if (!schema.headline && title) {
+          schema.headline = title;
+        }
 
-      jsonLdScript = `\n<script type="application/ld+json">\n${JSON.stringify(
-        schema,
-        null,
-        2
-      )}\n</script>`;
+        // datePublished가 없으면 현재 날짜 사용
+        if (!schema.datePublished) {
+          const now = new Date();
+          schema.datePublished = now.toISOString().split('T')[0]; // YYYY-MM-DD 형식
+        }
+
+        // author가 없으면 기본값 추가
+        if (!schema.author) {
+          schema.author = {
+            '@type': 'Person',
+            name: 'Content Pilot',
+          };
+        }
+
+        jsonLdScript = `\n<script type="application/ld+json">\n${JSON.stringify(
+          schema,
+          null,
+          2
+        )}\n</script>`;
+      }
     } catch (error) {
       console.error('[Workspace] JSON-LD 스키마 처리 실패:', error);
     }
+  }
+
+  // 메타 디스크립션 태그 생성
+  let descriptionMeta = '';
+  if (jsonLdSchema && jsonLdSchema.description) {
+    descriptionMeta = `\n  <meta name="description" content="${String(jsonLdSchema.description).replace(/"/g, '&quot;')}">`;
   }
 
   // 완전한 HTML 문서 생성
@@ -2486,7 +2620,7 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title || '제목 없음'}</title>${jsonLdScript}
+  <title>${title || '제목 없음'}</title>${descriptionMeta}${jsonLdScript}
 </head>
 <body>
 ${contentHtml}
@@ -6477,6 +6611,8 @@ async function handleGenerateAction(btn, options) {
             options: secondStepOptions,
           },
           (thumbResponse) => {
+            // Debug: log thumb response to validate callback execution in tests
+            console.debug('[Workspace] thumbResponse received:', thumbResponse);
             btn.disabled = false;
             btn.innerHTML = originalText;
 
@@ -6493,15 +6629,11 @@ async function handleGenerateAction(btn, options) {
                   ideaData.publishInfo.thumbnailUrls = thumbResponse.thumbnailUrls;
                 }
 
-                // 저장
-                chrome.runtime.sendMessage({
-                  action: 'update_kanban_card',
-                  data: {
-                    cardId: ideaData.id,
-                    status: ideaData.status,
-                    updates: { publishInfo: ideaData.publishInfo },
-                  },
-                });
+                // Persist JSON-LD if provided by thumbnail response
+                if (thumbResponse.jsonLdSchema) {
+                  if (!ideaData.publishInfo) ideaData.publishInfo = {};
+                  ideaData.publishInfo.jsonLdSchema = thumbResponse.jsonLdSchema;
+                }
 
                 // 버튼 UI 갱신
                 const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;

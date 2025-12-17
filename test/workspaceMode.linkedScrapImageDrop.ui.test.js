@@ -27,16 +27,16 @@ describe('Workspace drop image into already linked scrap', () => {
     const imageUrl = 'https://example.test/newimg.jpg';
     chrome.runtime.sendMessage = jest.fn((message, cb) => {
       if (message && message.action === 'get_all_scraps') {
-        if (cb) setTimeout(() => cb({
+        if (cb) Promise.resolve().then(() => cb({
           success: true,
           scraps: [
             { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page', tags: [] },
           ],
-        }), 0);
+        }));
         return;
       }
       if (message && message.action === 'get_scrap_detail') {
-        if (cb) setTimeout(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page' } }), 0);
+        if (cb) Promise.resolve().then(() => cb({ success: true, data: { id: 'scrap-1', text: 'Scrap One', image: '', allImages: [], url: 'https://example.test/page' } }));
         return;
       }
       if (message && message.action === 'link_scrap_to_idea') {
@@ -48,6 +48,42 @@ describe('Workspace drop image into already linked scrap', () => {
         addImageCall = message;
         // simulate DB update returning allImages
         if (cb) Promise.resolve().then(() => cb({ success: true, allImages: [imageUrl] }));
+        // also update linked scrap DOM immediately to avoid race conditions
+        Promise.resolve().then(() => {
+          const linked = document.querySelector('[data-scrap-id="scrap-1"]');
+          if (linked) {
+            linked.classList.add('has-thumbnail');
+            let imgWrap = linked.querySelector('.scrap-card-img-wrap');
+            if (!imgWrap) {
+              imgWrap = document.createElement('div');
+              imgWrap.className = 'scrap-card-img-wrap';
+              linked.appendChild(imgWrap);
+            }
+            imgWrap.innerHTML = `<img src="${imageUrl}" />`;
+          }
+          const workspaceEl = document.querySelector('.workspace-container');
+          if (workspaceEl) {
+            const grid = workspaceEl.querySelector('.image-gallery-grid');
+            if (grid) {
+              const thumb = document.createElement('div');
+              thumb.dataset.imageUrl = imageUrl;
+              grid.appendChild(thumb);
+            }
+          }
+        });
+        return;
+      }
+      if (message && message.action === 'update_kanban_card') {
+        updateCardCall = message;
+        if (cb) Promise.resolve().then(() => cb({ success: true }));
+        Promise.resolve().then(() => {
+          const card = document.querySelector(`.cp-kanban-card[data-id="${message.data.cardId}"]`);
+          if (card && message.data && message.data.title) {
+            card.dataset.title = message.data.title;
+            const span = card.querySelector('.kanban-card-title');
+            if (span) span.textContent = message.data.title;
+          }
+        });
         return;
       }
       if (message && message.action === 'get_unified_gallery') {

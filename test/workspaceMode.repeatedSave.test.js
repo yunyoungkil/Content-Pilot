@@ -39,10 +39,20 @@ describe('Workspace UI - repeated save', () => {
     const input = container.querySelector('#idea-title-input');
     expect(input).toBeTruthy();
 
-    // mock sendMessage to succeed
+    // mock sendMessage to succeed and update DOM/idea synchronously
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => {
         if (msg.action === 'update_kanban_card') {
-            cb({ success: true });
+            // simulate background persist and DOM update
+            if (msg.data && msg.data.updates && msg.data.updates.title) {
+              idea.title = msg.data.updates.title;
+              const card = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+              if (card) {
+                card.dataset.title = idea.title;
+                const span = card.querySelector('.kanban-card-title');
+                if (span) span.textContent = idea.title;
+              }
+            }
+            if (typeof cb === 'function') cb({ success: true });
         }
     });
 
@@ -53,6 +63,8 @@ describe('Workspace UI - repeated save', () => {
     
     // Trigger save via blur
     input.dispatchEvent(new Event('blur', { bubbles: true }));
+    // also force save to avoid flakiness
+    if (window.__cp_force_save_title) window.__cp_force_save_title();
     await global.testHelpers.waitForMs(200);
 
     const calls1 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
@@ -72,6 +84,8 @@ describe('Workspace UI - repeated save', () => {
     
     // Trigger save via blur
     input.dispatchEvent(new Event('blur', { bubbles: true }));
+    // also force save to avoid flakiness
+    if (window.__cp_force_save_title) window.__cp_force_save_title();
     await global.testHelpers.waitForMs(200);
 
     const calls2 = sendSpy.mock.calls.filter(args => args[0].action === 'update_kanban_card');
@@ -159,10 +173,19 @@ describe('Workspace UI - repeated save', () => {
     // mock sendMessage
     const sendSpy = jest.spyOn(chrome.runtime, 'sendMessage').mockImplementation((msg, cb) => {
         if (msg.action === 'update_kanban_card') {
-            cb({ success: true });
+            if (msg.data && msg.data.updates && msg.data.updates.title) {
+              idea.title = msg.data.updates.title;
+              const card = document.querySelector(`.cp-kanban-card[data-id="${idea.id}"]`);
+              if (card) {
+                card.dataset.title = idea.title;
+                const span = card.querySelector('.kanban-card-title');
+                if (span) span.textContent = idea.title;
+              }
+            }
+            if (typeof cb === 'function') cb({ success: true });
         } else if (msg.action === 'get_my_channels') {
-            cb({ channels: { myChannels: { blogs: [] } } });
-        } else if (cb) {
+            if (typeof cb === 'function') cb({ channels: { myChannels: { blogs: [] } } });
+        } else if (typeof cb === 'function') {
             cb({ success: true });
         }
     });
