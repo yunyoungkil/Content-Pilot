@@ -91,6 +91,8 @@ if (typeof window !== 'undefined' && typeof window.__cp_force_save_title !== 'fu
 
 // --- Lazy loader using IntersectionObserver for gallery images ---
 let galleryImageObserver = null;
+// Keep last pending title info so a force-save can still find it after a re-render
+let __lastPendingTitle = null;
 // Track whether we've attached a single runtime.onMessage listener for gallery updates
 let galleryRuntimeMessageHandlerAttached = false;
 function ensureGalleryImageObserver() {
@@ -1527,6 +1529,9 @@ function extractPermalinkFromUrl(publishedUrl) {
 
 function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   console.log('[DEBUG showPublishInfo] called - seoTitle:', seoTitle, 'ideaId:', ideaData?.id);
+  // Clear any recorded pending title when opening a new publish-info panel to avoid
+  // accidentally saving stale values recorded during previous renders/tests.
+  __lastPendingTitle = null;
   // Debugging: capture incoming param types and publishInfo snapshot
   try {
     console.debug('[DIAG showPublishInfo] params:', { permalink, tags, seoTitle });
@@ -1873,6 +1878,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               publishInfoArea._isSaving = false;
 
               if (response && response.success) {
+                // Clear any recorded pending title now that save succeeded
+                __lastPendingTitle = null;
                 ideaData.title = newTitle;
               // update header display text
               // header element removed — rely on publish panel and kanban card updates
@@ -2090,13 +2097,78 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           const val = cur ? String(cur.value || '').trim() : null;
           const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
           console.debug('[DIAG __cp_force_save_title] current input value:', val, 'pubContainer present:', !!pubContainer);
+
+          // If the currently visible publish area matches the targeted one, save using its external hook
           if (pubContainer && typeof pubContainer._doSaveTitleFromExternal === 'function') {
             pubContainer._doSaveTitleFromExternal(val);
             return;
           }
-          // fallback to calling per-area _doSaveTitle(true) if available
-          if (publishInfoArea && typeof publishInfoArea._doSaveTitle === 'function') {
-            publishInfoArea._doSaveTitle(true);
+
+          // If we don't have the current input (eg. we've already switched to another idea), try to save
+          // any pending title on the previously-rendered publishInfoArea. Prefer its pending value if present.
+          try {
+            // If we recorded a last-pending title (typing happened, then the area was re-rendered),
+            // try saving it. Prefer calling into a live publish area if available; otherwise,
+            // fall back to a best-effort background save via chrome.runtime.sendMessage.
+            if (__lastPendingTitle) {
+              try {
+                // Attempt to find a live publish area that matches the recorded idea id
+                const possible = Array.from(document.querySelectorAll('#publish-info-content')).find((el) => el && (el._doSaveTitleFromExternal || el._doSaveTitle) && (el._pendingTitle || (el.querySelector && el.querySelector('#idea-title-input') && el.querySelector('#idea-title-input').value)));
+                if (possible) {
+                  const pending = __lastPendingTitle.pending || possible._pendingTitle || (possible.querySelector && possible.querySelector('#idea-title-input') && String(possible.querySelector('#idea-title-input').value || '').trim());
+                  if (pending && typeof possible._doSaveTitleFromExternal === 'function') {
+                    possible._doSaveTitleFromExternal(pending);
+                    __lastPendingTitle = null;
+                    return;
+                  }
+                  if ((possible._titleChanged || pending) && typeof possible._doSaveTitle === 'function') {
+                    possible._doSaveTitle(true);
+                    __lastPendingTitle = null;
+                    return;
+                  }
+                }
+
+                // No live area found; attempt best-effort background save using stored id/status
+                if (__lastPendingTitle.id && __lastPendingTitle.pending) {
+                  try {
+                    chrome.runtime.sendMessage({
+                      action: 'update_kanban_card',
+                      data: { cardId: __lastPendingTitle.id, status: __lastPendingTitle.status || 'ideas', updates: { title: __lastPendingTitle.pending } },
+                    }, () => {
+                      __lastPendingTitle = null;
+                    });
+                    return;
+                  } catch (e) {
+                    // ignore and fallthrough
+                  }
+                }
+              } catch (err) {
+                // ignore and continue
+              }
+            }
+
+            // Try all existing publish-info contents for any pending title changes (covers case where
+            // the user typed into one publish area, then the workspace re-rendered and replaced the
+            // publish area DOM with a new one). This scans the DOM to find any element that has
+            // handlers attached and a pending title to save.
+            const publishAreas = document.querySelectorAll('#publish-info-content');
+            for (const pa of publishAreas) {
+              try {
+                const pending = pa._pendingTitle || (pa.querySelector && pa.querySelector('#idea-title-input') && String(pa.querySelector('#idea-title-input').value || '').trim());
+                if (pending && typeof pa._doSaveTitleFromExternal === 'function') {
+                  pa._doSaveTitleFromExternal(pending);
+                  return;
+                }
+                if ((pa._titleChanged || pending) && typeof pa._doSaveTitle === 'function') {
+                  pa._doSaveTitle(true);
+                  return;
+                }
+              } catch (err) {
+                // ignore and continue to next
+              }
+            }
+          } catch (e) {
+            console.debug && console.debug('[Workspace] __cp_force_save_title fallback failed:', e);
           }
         };
 
@@ -2132,6 +2204,11 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             console.debug('[DIAG publishInfo input] idea title target value:', targ.value);
             publishInfoArea._titleChanged = true;
             publishInfoArea._pendingTitle = targ.value;
+            try {
+              __lastPendingTitle = { id: ideaData && ideaData.id, pending: String(targ.value || '').trim(), status: ideaData && (ideaData.status || 'ideas') };
+            } catch (e) {
+              __lastPendingTitle = null;
+            }
             return;
           }
 

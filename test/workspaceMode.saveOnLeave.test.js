@@ -68,8 +68,9 @@ describe('Workspace UI - save title on leave', () => {
     // simulate leaving workspace by rendering another idea
     const otherIdea = { id: 'other-1', title: 'Other', status: 'ideas' };
     renderWorkspace(container, otherIdea);
-    // Force save to avoid flakiness in full-suite runs
+    // Force save to avoid flakiness in full-suite runs (fallback to blur if helper not present)
     if (window.__cp_force_save_title) window.__cp_force_save_title();
+    else input.dispatchEvent(new Event('blur', { bubbles: true }));
 
     // allow more time in full-suite runs for save+DOM update to complete
     // Poll for the update to avoid flakiness from async timing.
