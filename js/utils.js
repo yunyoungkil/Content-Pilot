@@ -461,5 +461,14 @@ export function normalizeSeoTitle(seo, title) {
   const esc = (str) => str.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
   const collapsed = s.replace(new RegExp(`^(${esc(t)})\\s+\\1$`), '$1');
   if (collapsed !== s) return collapsed;
+  // Collapse repeated year tokens (e.g., '2025 2025' or ' - 2025 - 2025') into a single year
+  // This avoids titles like 'My Title 2025 2025' or 'My Title - 2025 - 2025'
+  const yearRepeatRegex = /(?:(^|\b|\s|[-:\|])((?:19|20)\d{2})(?:\s|\s*[-:\|]\s*))+\2(?=($|\b|\s|[-:\|]))/g;
+  if (yearRepeatRegex.test(s)) {
+    // Replace consecutive repeats of same year with a single occurrence, keeping surrounding separator before first occurrence
+    // We'll perform a simpler collapse: find sequences of the same year repeated and replace with single year
+    const simpleCollapse = s.replace(/((?:19|20)\d{2})(?:[\s\-:\|\.]+\1)+/g, '$1');
+    if (simpleCollapse !== s) return simpleCollapse;
+  }
   return s;
 }
