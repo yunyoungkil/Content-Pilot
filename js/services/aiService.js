@@ -1249,6 +1249,46 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 // 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
 
 /**
+ * [내부 헬퍼] 초안 중간 저장 함수
+ * AI 생성 과정 중 데이터 유실 방지를 위해 중간 결과를 Firebase에 저장합니다.
+ */
+async function saveIntermediateDraft(ideaId, draftContent) {
+  if (!ideaId || !draftContent) return;
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId) return;
+
+    const snap = await get(ref(getDb(), `kanban/${userId}`));
+    const allCards = snap?.val() || {};
+    let foundStatus = null;
+    let cardData = null;
+
+    // 카드 위치 찾기
+    for (const status in allCards) {
+      if (allCards[status] && allCards[status][ideaId]) {
+        foundStatus = status;
+        cardData = allCards[status][ideaId];
+        break;
+      }
+    }
+
+    if (foundStatus && cardData) {
+      await update(ref(getDb(), `kanban/${userId}/${foundStatus}/${ideaId}`), {
+        draftContent: draftContent,
+        workspace: {
+          ...(cardData.workspace || {}),
+          draft: draftContent,
+        },
+        updatedAt: serverTimestamp(),
+      });
+      Logger.info(`[saveIntermediateDraft] 초안 중간 저장 완료 (${foundStatus})`);
+    }
+  } catch (e) {
+    Logger.warn('[saveIntermediateDraft] 저장 실패:', e);
+  }
+}
+
+/**
  * 아이디어 데이터를 기반으로 AI 초안을 생성합니다.
  * @param {Object} ideaData - 초안 생성에 필요한 데이터
  * @param {string} ideaData.title - 콘텐츠 제목
@@ -1989,6 +2029,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
         rawDraft = await callDraftAPI(prompt);
+        console.log('[generateDraftFromIdea] checkpoint: rawDraft length:', rawDraft ? String(rawDraft).length : 0);
       } catch (apiError) {
         // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
         throw apiError;
@@ -2029,6 +2070,8 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
+      console.log('[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:', processed.cleanedDraft ? String(processed.cleanedDraft).length : 0);
+      console.log('[generateDraftFromIdea] checkpoint: thumbnailCandidates length:', processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0);
       try {
         if (typeof options.onProgress === 'function')
           options.onProgress({
@@ -2057,7 +2100,20 @@ ${defaultDescription}
         throw new Error('보안 검사 중 오류가 발생했습니다. 다시 시도해주세요.');
       }
 
+      // [신규] 1차 저장: 텍스트 초안 저장 (썸네일 생성 전)
+      // 사용자가 썸네일 생성 중 이탈하더라도 텍스트는 보존되도록 함
+      console.log('[generateDraftFromIdea] checkpoint: after sanitizeHtmlInOffscreen');
+      if (ideaData.id && formattedDraft) {
+        try {
+          await saveIntermediateDraft(ideaData.id, formattedDraft);
+          console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (1st)');
+        } catch (e) {
+          console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):', e && e.message ? e.message : e);
+        }
+      }
+
       // 3. SEO 최적화된 제목 추출 (h1 태그에서)
+      console.log('[generateDraftFromIdea] checkpoint: before SEO title extraction');
       // DOMPurify 후에는 확실한 HTML이므로 정규식이 더 잘 동작함
       // NOTE: previously 'let seoTitle = null' shadowed outer variable — use outer 'seoTitle'
       seoTitle = null;
@@ -2349,6 +2405,16 @@ ${defaultDescription}
         thumbnailUrls = enhanced.thumbnailUrls;
         thumbnailGenerationPartialFailure = enhanced.thumbnailGenerationPartialFailure;
         jsonLdSchema = enhanced.jsonLdSchema;
+
+        // [신규] 2차 저장: 썸네일 포함 초안 저장
+        if (ideaData.id && formattedDraft) {
+          try {
+            await saveIntermediateDraft(ideaData.id, formattedDraft);
+            console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)');
+          } catch (e) {
+            console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):', e && e.message ? e.message : e);
+          }
+        }
       } catch (error) {
         Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
         Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
@@ -2419,6 +2485,7 @@ ${defaultDescription}
         const txt = formattedDraft.replace(/<[^>]+>/g, ' ');
         metaDescription = txt.replace(/\s+/g, ' ').trim().substring(0, 200);
       }
+      console.log('[generateDraftFromIdea] checkpoint: metaDescription prepared');
     } catch (e) {
       Logger.warn('[generateDraftFromIdea] metaDescription 생성 실패:', e);
     }
@@ -2498,11 +2565,13 @@ ${defaultDescription}
           ideaData?.title ||
           '';
       }
+      console.log('[generateDraftFromIdea] checkpoint: seoTitle set:', seoTitle);
     } catch (e) {
       // non-fatal — fallback will be empty string
       seoTitle = seoTitle || '';
     }
 
+    console.log('[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:', !!thumbnailUrls);
     const finalResponse = {
       success: true,
       draft: formattedDraft,
@@ -2524,8 +2593,25 @@ ${defaultDescription}
     });
     return finalResponse;
   } catch (e) {
-    Logger.error('[generateDraftFromIdea] 오류:', e);
-    return { success: false, error: e.message };
+    // If an error occurs late in the pipeline but we already have a formattedDraft,
+    // return a best-effort successful response to avoid losing the generated content.
+    Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
+    if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
+      Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      return {
+        success: true,
+        draft: formattedDraft,
+        permalink: permalink || null,
+        tags: tagsForPublish || [],
+        seoTitle: seoTitle || '',
+        thumbnailInfo: thumbnailCandidates || [],
+        thumbnailUrls: thumbnailUrls || null,
+        thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
+        jsonLdSchema: jsonLdSchema || null,
+        metaDescription: metaDescription || '',
+      };
+    }
+    return { success: false, error: e && e.message ? e.message : String(e) };
   }
 }
 
