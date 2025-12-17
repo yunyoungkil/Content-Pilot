@@ -2029,6 +2029,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
         rawDraft = await callDraftAPI(prompt);
+        console.log('[generateDraftFromIdea] checkpoint: rawDraft length:', rawDraft ? String(rawDraft).length : 0);
       } catch (apiError) {
         // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
         throw apiError;
@@ -2069,6 +2070,8 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
+      console.log('[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:', processed.cleanedDraft ? String(processed.cleanedDraft).length : 0);
+      console.log('[generateDraftFromIdea] checkpoint: thumbnailCandidates length:', processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0);
       try {
         if (typeof options.onProgress === 'function')
           options.onProgress({
@@ -2590,7 +2593,24 @@ ${defaultDescription}
     });
     return finalResponse;
   } catch (e) {
+    // If an error occurs late in the pipeline but we already have a formattedDraft,
+    // return a best-effort successful response to avoid losing the generated content.
     Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
+    if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
+      Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      return {
+        success: true,
+        draft: formattedDraft,
+        permalink: permalink || null,
+        tags: tagsForPublish || [],
+        seoTitle: seoTitle || '',
+        thumbnailInfo: thumbnailCandidates || [],
+        thumbnailUrls: thumbnailUrls || null,
+        thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
+        jsonLdSchema: jsonLdSchema || null,
+        metaDescription: metaDescription || '',
+      };
+    }
     return { success: false, error: e && e.message ? e.message : String(e) };
   }
 }
