@@ -534,14 +534,73 @@ describe('AI Service', () => {
       expect(/[\p{L}\p{N}]/u.test(result)).toBe(true);
     });
 
+    test('computeThumbnailTextForCompose returns sanitized fallback when thumbnailText empty', () => {
+      const svc = require('../js/services/aiService.js');
+      const selected = { thumbnailText: '' };
+      const title = 'This is a Very Long Title!!! With Punctuation & Extra Parts';
+      const result = svc.computeThumbnailTextForCompose(selected, '', { title });
+      const fallback = ('' || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+      const expected = svc.sanitizeThumbnailText('', fallback);
+      expect(result).toBe(expected);
+    });
+
+
+
     test('calls generateThumbnailTexts when generating thumbnails', async () => {
       const thumbnailSvc = require('../js/services/thumbnailService.js');
-      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['슬로건D'] });
+      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['슬로건D', '슬로건E', '슬로건F'] });
       const svc = require('../js/services/aiService.js');
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
       // Call generateDraftFromIdea with generateThumbnail true (and skip full draft generation)
-      await svc.generateDraftFromIdea(idea, { generateDraft: false, generateThumbnail: true, composeThumbnailText: true });
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: false, generateThumbnail: true, composeThumbnailText: true });
       expect(thumbnailSvc.generateThumbnailTexts).toHaveBeenCalled();
+      // thumbnailInfo should prefer generated slogans over the raw title
+      expect(res.thumbnailInfo && res.thumbnailInfo[0] && res.thumbnailInfo[0].thumbnailText).toBeTruthy();
+      expect(res.thumbnailInfo[0].thumbnailText).toBe('슬로건D');
+    });
+
+    test('selectSloganIfTitleFallback picks slogan when thumbnailText empty', async () => {
+      const thumbnailSvc = require('../js/services/thumbnailService.js');
+      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['AutoSlogan'] });
+      const svc = require('../js/services/aiService.js');
+
+      const selected = { thumbnailText: '' };
+      const candidates = [selected];
+      const idea = { title: 'Long Title That Would Be Used As Fallback', outline: ['a'], currentDraft: '' };
+
+      await svc.selectSloganIfTitleFallback(selected, candidates, '', idea, '<h1>Draft</h1><p>Body</p>');
+
+      expect(selected.thumbnailText).toBe('AutoSlogan');
+      expect(candidates[0].thumbnailText).toBe('AutoSlogan');
+    });
+
+    test('selectSloganIfTitleFallback replaces when thumbnailText equals title', async () => {
+      const thumbnailSvc = require('../js/services/thumbnailService.js');
+      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['ReplacementSlogan'] });
+      const svc = require('../js/services/aiService.js');
+
+      const title = 'Full Article Title That Should Not Be Used As Overlay';
+      const selected = { thumbnailText: title };
+      const candidates = [selected];
+      const idea = { title, outline: ['a'], currentDraft: '' };
+
+      await svc.selectSloganIfTitleFallback(selected, candidates, '', idea, '<h1>Draft</h1><p>Body</p>');
+
+      const expected = svc.sanitizeThumbnailText('ReplacementSlogan', ('' || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12));
+      expect(selected.thumbnailText).toBe(expected);
+      expect(candidates[0].thumbnailText).toBe(expected);
+    });
+
+    test('generateThumbnailImages delegates to enhanceDraftWithFeatures and returns thumbnails', async () => {
+      const svc = require('../js/services/aiService.js');
+      jest.spyOn(svc, 'enhanceDraftWithFeatures').mockResolvedValue({ formattedDraft: '<p>draft</p>', thumbnailUrls: { url_16x9: 'http://img/16x9.png' }, thumbnailGenerationPartialFailure: false, jsonLdSchema: {} });
+
+      const params = { thumbnailCandidates: [{ type: 'curiosity', thumbnailText: 'A' }], permalink: 'p', composeThumbnailText: false, seoTitle: 'title', ideaData: { title: 't' }, formattedDraft: '<p>draft</p>' };
+      const res = await svc.generateThumbnailImages(params);
+
+      expect(svc.enhanceDraftWithFeatures).toHaveBeenCalled();
+      expect(res.success).toBe(true);
+      expect(res.thumbnailUrls.url_16x9).toBe('http://img/16x9.png');
     });
 
     test('should fallback to source image when compose fails and still upload thumbnails', async () => {

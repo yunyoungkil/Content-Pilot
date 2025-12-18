@@ -42,20 +42,21 @@ describe('Workspace JSON-LD persistence in two-step flow', () => {
       sentMessages.push(msg);
 
       if (msg && msg.action === 'generate_draft_from_idea') {
-        // Distinguish by options.generateThumbnail
-        if (msg.options && msg.options.generateThumbnail) {
-          // Thumbnail response includes jsonLdSchema (call callback synchronously for test simplicity)
-          if (cb) cb({
+        // First draft: no jsonLdSchema
+        if (cb) cb({ success: true, draft: '<p>Draft</p>', seoTitle: 'SEO' });
+        return;
+      }
+
+      if (msg && msg.action === 'generate_thumbnail_images') {
+        // Thumbnail response includes jsonLdSchema (call callback synchronously for test simplicity)
+        if (cb)
+          cb({
             success: true,
             thumbnailInfo: { selected: 0 },
             thumbnailUrls: { url_16x9: 'https://img.test/16x9.png' },
             jsonLdSchema: { headline: 'Thumb H', description: 'Thumb D' },
-            draft: '<p>Updated with thumbnail</p>'
+            draft: '<p>Updated with thumbnail</p>',
           });
-        } else {
-          // First draft: no jsonLdSchema
-          if (cb) cb({ success: true, draft: '<p>Draft</p>', seoTitle: 'SEO' });
-        }
         return;
       }
 

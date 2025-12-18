@@ -63,6 +63,41 @@ function sanitizeThumbnailText(candidate, fallback) {
   }
 } 
 
+// Compute thumbnail text for overlay composition (testable helper)
+function computeThumbnailTextForCompose(selectedThumbnail = {}, seoTitle = '', ideaData = {}) {
+  const fallback = (seoTitle || ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+  return sanitizeThumbnailText(selectedThumbnail.thumbnailText || '', fallback);
+}
+
+// Try to replace title-like fallback with an AI generated slogan (async helper)
+async function selectSloganIfTitleFallback(selectedThumbnail = {}, thumbnailCandidates = [], seoTitle = '', ideaData = {}, formattedDraft = '') {
+  try {
+    const currentText = String(selectedThumbnail.thumbnailText || '').trim();
+    const titleFallback = (seoTitle || ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+    const normalizedTitle = (ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim();
+    const looksLikeTitleFallback =
+      !currentText ||
+      currentText === titleFallback ||
+      (currentText && currentText === sanitizeThumbnailText('', titleFallback)) ||
+      currentText === (ideaData.title || '') ||
+      (ideaData.title && ideaData.title.includes(currentText)) ||
+      (currentText && currentText.includes(normalizedTitle.substring(0, Math.min(12, normalizedTitle.length))));
+    if (!looksLikeTitleFallback) return selectedThumbnail;
+
+    const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+    if (Array.isArray(slogans) && slogans.length > 0) {
+      const suggested = slogans[0] || '';
+      const newText = sanitizeThumbnailText(suggested, titleFallback);
+      selectedThumbnail.thumbnailText = newText;
+      if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) thumbnailCandidates[0] = selectedThumbnail;
+      Logger.info('[selectSloganIfTitleFallback] Using generated slogan for overlay:', selectedThumbnail.thumbnailText);
+    }
+  } catch (e) {
+    Logger.debug('[selectSloganIfTitleFallback] error:', e && e.message);
+  }
+  return selectedThumbnail;
+}
+
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
   try {
@@ -730,9 +765,11 @@ export async function enhanceDraftWithFeatures({
     // Compose text overlay if requested
     let composedDataUrl = sourceImageUrl;
     if (composeThumbnailText) {
-      const thumbnailText =
-        selectedThumbnail.thumbnailText ||
-        (ideaData.title.length > 10 ? ideaData.title.substring(0, 8) + '...' : ideaData.title);
+      // Try to prefer a generated slogan when current thumbnailText looks like title fallback
+      await selectSloganIfTitleFallback(selectedThumbnail, thumbnailCandidates, seoTitle, ideaData, formattedDraft);
+
+      // Prefer user-provided or AI-generated thumbnail text; otherwise use a cleaned, truncated title as fallback.
+      const thumbnailText = computeThumbnailTextForCompose(selectedThumbnail, seoTitle, ideaData);
       const textPosition = selectedThumbnail.textPosition || 'bottom';
       // safety: protect offscreen operations with a timeout to avoid indefinite hangs in tests or runtime
       try {
@@ -1124,7 +1161,7 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
   }
 }
 export { getRelevantAffiliateLinks };
-export { sanitizeThumbnailText };
+export { sanitizeThumbnailText, computeThumbnailTextForCompose, selectSloganIfTitleFallback };
 
 /**
  * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
@@ -2451,87 +2488,22 @@ ${defaultDescription}
       }));
     }
 
-    if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
-      Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
-      try {
-        const enhanced = await enhanceDraftWithFeatures({
-          thumbnailCandidates,
-          affiliateLinks,
-          permalink,
-          composeThumbnailText,
-          seoTitle,
-          ideaData,
-          jsonLdSchema,
-          formattedDraft,
-          onProgress: options.onProgress,
-        });
+    // NOTE: Thumbnail IMAGE creation (AI image generation, composition, and upload)
+    // has been intentionally removed from the draft generation flow. Generating
+    // actual thumbnail images is a separate operation and must be invoked via
+    // the dedicated `generate_thumbnail_images` action (see `generateThumbnailImages`).
+    // This keeps text/draft generation fast and prevents unexpected side-effects
+    // (storage writes / image uploads) when only working with text drafts.
+    //
+    // The pipeline still prepares `thumbnailCandidates` (thumbnailInfo) and short
+    // slogans above, but leaves image creation to the explicit image-generation flow.
 
-        // merge results back into local variables
-        formattedDraft = enhanced.formattedDraft;
-        thumbnailUrls = enhanced.thumbnailUrls;
-        thumbnailGenerationPartialFailure = enhanced.thumbnailGenerationPartialFailure;
-        jsonLdSchema = enhanced.jsonLdSchema;
+    // (Thumbnail generation moved to `generateThumbnailImages`)
 
-        // [신규] 2차 저장: 썸네일 포함 초안 저장
-        if (ideaData.id && formattedDraft) {
-          try {
-            await saveIntermediateDraft(ideaData.id, formattedDraft);
-            console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)');
-          } catch (e) {
-            console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):', e && e.message ? e.message : e);
-          }
-        }
-      } catch (error) {
-        Logger.error('[generateDraftFromIdea] 썸네일 자동 생성 실패 (계속 진행):', error);
-        Logger.error('[generateDraftFromIdea] 썸네일 생성 실패 상세:', {
-          errorMessage: error.message,
-          errorStack: error.stack,
-          permalink: permalink?.substring(0, 30),
-          hasThumbnailCandidates: thumbnailCandidates.length > 0,
-        });
-      }
-    } else if (!generateThumbnail) {
-      Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 스킵, 기존 값 사용');
-    }
 
-    // [신규] HTML 본문에 대표 이미지 삽입 및 alt 속성 추가
-    if (thumbnailUrls && thumbnailUrls.url_16x9) {
-      // Ensure formattedDraft is at least an empty string to avoid accidental undefined/null
-      if (typeof formattedDraft !== 'string' || !formattedDraft) formattedDraft = '';
-      try {
-        // 본문의 첫 번째 이미지 태그를 찾아서 교체하거나, 없으면 삽입
-        const imgTagRegex = /<img[^>]*>/i;
-        const firstImgMatch = formattedDraft.match(imgTagRegex);
-
-        if (firstImgMatch) {
-          // 첫 번째 이미지 태그를 교체
-          const newImgTag = `<img src="${thumbnailUrls.url_16x9}" alt="${
-            thumbnailUrls.altText || seoTitle || ideaData.title
-          }" style="max-width: 100%; height: auto; display: block;">`;
-          formattedDraft = formattedDraft.replace(imgTagRegex, newImgTag);
-        } else {
-          // 이미지 태그가 없으면 제목 바로 아래에 삽입
-          const h1Match = formattedDraft.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-          if (h1Match) {
-            const h1EndIndex = formattedDraft.indexOf('</h1>') + 5;
-            const imgTag = `\n<img src="${thumbnailUrls.url_16x9}" alt="${
-              thumbnailUrls.altText || seoTitle || ideaData.title
-            }" style="max-width: 100%; height: auto; display: block;">\n`;
-            formattedDraft =
-              formattedDraft.slice(0, h1EndIndex) + imgTag + formattedDraft.slice(h1EndIndex);
-          }
-        }
-
-        Logger.info('[generateDraftFromIdea] HTML 본문에 썸네일 이미지 삽입 완료');
-      } catch (error) {
-        Logger.warn('[generateDraftFromIdea] HTML 본문 이미지 삽입 실패:', error);
-      }
-    }
-
-    // Ensure thumbnail altText exists for accessibility/SEO
+    // Ensure thumbnail altText exists for accessibility/SEO (set a sanitized fallback when necessary)
     if (thumbnailUrls) {
       try {
-        // Ensure altText is meaningful; sanitize and fallback to title when it's only punctuation
         thumbnailUrls.altText = sanitizeAltText(
           thumbnailUrls.altText,
           `${(seoTitle || ideaData.title || '').slice(0, 150)} 썸네일 이미지`
@@ -2582,6 +2554,7 @@ ${defaultDescription}
       formattedDraft?.length || 0,
       '문자'
     );
+
     Logger.debug(
       '[generateDraftFromIdea] draft 내용 미리보기:',
       formattedDraft?.substring(0, 200) + '...'
@@ -2678,6 +2651,33 @@ ${defaultDescription}
         metaDescription: metaDescription || '',
       };
     }
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+/**
+ * Generate thumbnail images (AI generation/composition/upload) from prepared
+ * thumbnail candidates and context. This was intentionally split out of
+ * `generateDraftFromIdea` to avoid side-effects during draft generation.
+ * @param {Object} params - see enhanceDraftWithFeatures params
+ * @returns {Promise<Object>} - { success, thumbnailUrls?, thumbnailInfo?, formattedDraft?, jsonLdSchema?, thumbnailGenerationPartialFailure?, error? }
+ */
+export async function generateThumbnailImages(params = {}) {
+  try {
+    // Use dynamic import to call the exported enhanceDraftWithFeatures so that
+    // tests can spy/mock the exported function reliably.
+    const mod = await import('./aiService.js');
+    const enhanced = await mod.enhanceDraftWithFeatures(params);
+    return {
+      success: true,
+      thumbnailUrls: enhanced.thumbnailUrls || null,
+      thumbnailInfo: params.thumbnailCandidates || [],
+      formattedDraft: enhanced.formattedDraft || params.formattedDraft || '',
+      jsonLdSchema: enhanced.jsonLdSchema || params.jsonLdSchema || null,
+      thumbnailGenerationPartialFailure: !!enhanced.thumbnailGenerationPartialFailure,
+    };
+  } catch (e) {
+    Logger.error('[generateThumbnailImages] error:', e && e.message ? e.message : e);
     return { success: false, error: e && e.message ? e.message : String(e) };
   }
 }

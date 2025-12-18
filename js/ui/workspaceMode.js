@@ -6711,6 +6711,44 @@ async function handleGenerateAction(btn, options) {
       ? { ...options, generateThumbnail: false }
       : options;
 
+    // If user requested thumbnail-only (regenerate thumbnail button), call
+    // the dedicated thumbnail image generation action and return early.
+    if (!options.generateDraft && options.generateThumbnail) {
+      console.log('[Workspace] 🎨 썸네일(단독) 생성 요청 전송...');
+      btn.innerHTML = '🎨 썸네일 생성 중...';
+      chrome.runtime.sendMessage(
+        {
+          action: 'generate_thumbnail_images',
+          data: baseDraftData,
+          options: { composeThumbnailText: options.composeThumbnailText },
+        },
+        (thumbResponse) => {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+
+          if (!thumbResponse || !thumbResponse.success) {
+            alert(`썸네일 생성 실패: ${thumbResponse?.error || '응답이 없습니다.'}`);
+            return;
+          }
+
+          // merge thumbnail info back into ideaData
+          if (thumbResponse.thumbnailInfo) ideaData.publishInfo = ideaData.publishInfo || {};
+          if (thumbResponse.thumbnailInfo) ideaData.publishInfo.thumbnailInfo = thumbResponse.thumbnailInfo;
+          if (thumbResponse.thumbnailUrls) ideaData.publishInfo.thumbnailUrls = thumbResponse.thumbnailUrls;
+          if (thumbResponse.jsonLdSchema) ideaData.jsonLdSchema = thumbResponse.jsonLdSchema;
+
+          const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;
+          if (workspaceEl && typeof renderThumbnailButton === 'function') {
+            renderThumbnailButton(workspaceEl, ideaData);
+          }
+
+          import('../utils.js').then((utils) => utils.showToast('✅ 썸네일 생성 완료!'));
+        }
+      );
+
+      return;
+    }
+
     console.log('[Workspace] 📡 1단계 AI 요청 전송...');
 
     // 6. AI 요청 (1단계)
@@ -6834,9 +6872,9 @@ async function handleGenerateAction(btn, options) {
 
         chrome.runtime.sendMessage(
           {
-            action: 'generate_draft_from_idea',
+            action: 'generate_thumbnail_images',
             data: secondStepData,
-            options: secondStepOptions,
+            options: { composeThumbnailText: secondStepOptions.composeThumbnailText },
           },
           (thumbResponse) => {
             // Debug: log thumb response to validate callback execution in tests

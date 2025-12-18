@@ -113,6 +113,7 @@ import {
   generateContentIdeas,
   generateAndSendKeywords,
   analyzeVideoComments,
+  generateThumbnailImages,
 } from './js/services/aiService.js';
 
 import {
@@ -2742,6 +2743,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const outlines = msg.data.outlines;
         const draft = msg.data.draft || '';
         return await generateThumbnailTexts(outlines, draft);
+      })()
+    );
+  }
+
+  // === [Thumbnail IMAGE Generation] 실제 이미지 생성/합성/업로드 ===
+  if (msg.action === 'generate_thumbnail_images') {
+    return handleAsync(
+      (async () => {
+        const data = msg.data || msg;
+        // basic validation (permalink not strictly required but recommended)
+        try {
+          const res = await generateThumbnailImages({
+            thumbnailCandidates: data.thumbnailCandidates || [],
+            affiliateLinks: data.affiliateLinks || [],
+            permalink: data.permalink || (data.publishInfo && data.publishInfo.permalink) || null,
+            composeThumbnailText: data.composeThumbnailText,
+            seoTitle: data.seoTitle || (data.publishInfo && data.publishInfo.seoTitle) || data.title || '',
+            ideaData: data,
+            jsonLdSchema: data.jsonLdSchema || null,
+            formattedDraft: data.currentDraft || data.formattedDraft || '',
+            onProgress: null,
+          });
+          return res;
+        } catch (e) {
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
       })()
     );
   }

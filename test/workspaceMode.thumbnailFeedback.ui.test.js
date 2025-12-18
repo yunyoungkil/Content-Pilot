@@ -21,7 +21,7 @@ describe('Workspace regenerate-thumbnail feedback', () => {
 
     // make runtime message call async to allow checking intermediate UI
     chrome.runtime.sendMessage = jest.fn((msg, cb) => {
-      if (msg && msg.action === 'generate_draft_from_idea') {
+      if (msg && msg.action === 'generate_thumbnail_images') {
         setTimeout(() => cb({ success: true, thumbnailUrls: ['http://img.test/1.jpg'] }), 40);
       }
     });
@@ -51,7 +51,7 @@ describe('Workspace regenerate-thumbnail feedback', () => {
     // transient text may vary slightly; assert the button shows thumbnail-related feedback
     // Ensure runtime message was sent
     expect(chrome.runtime.sendMessage.mock.calls.length).toBeGreaterThan(0);
-    const hadGenerateCall = chrome.runtime.sendMessage.mock.calls.some((c) => c[0] && c[0].action === 'generate_draft_from_idea');
+    const hadGenerateCall = chrome.runtime.sendMessage.mock.calls.some((c) => c[0] && c[0].action === 'generate_thumbnail_images');
     expect(hadGenerateCall).toBeTruthy();
 
     // The transient button text may vary due to intermediate states.
