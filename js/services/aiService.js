@@ -19,6 +19,7 @@ import {
 } from './offscreenService.js'; // [추가]
 // [추가] PromptService 임포트
 import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
+import { generateThumbnailTexts } from './thumbnailService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
@@ -29,6 +30,38 @@ function removeDuplicateYears(title) {
   // 예: "2024년 2024년 최고의" -> "2024년 최고의"
   return title.replace(/(\d{4}년)(\s+\1)+/g, '$1');
 }
+
+// [신규] 이미지 alt 텍스트 유효성 검사 및 정리
+function sanitizeAltText(candidate, fallback) {
+  try {
+    const s = candidate ? String(candidate).trim() : '';
+    // Accept alt text only if it contains at least one letter or number (Unicode-aware)
+    if (s && /[\p{L}\p{N}]/u.test(s)) return s;
+  } catch (e) {
+    // ignore and fall back
+  }
+  return String(fallback || 'Thumbnail image');
+}
+
+// sanitize thumbnail overlay text: ensure it's not punctuation-only and is reasonably short
+function sanitizeThumbnailText(candidate, fallback) {
+  try {
+    const s = candidate ? String(candidate).trim() : '';
+    if (s && /[\p{L}\p{N}]/u.test(s)) {
+      // strip leading/trailing punctuation and collapse whitespace
+      const cleaned = s.replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').trim();
+      if (cleaned && /[\p{L}\p{N}]/u.test(cleaned)) {
+        return cleaned.length > 12 ? cleaned.substring(0, 12).trim() : cleaned;
+      }
+    }
+  } catch (e) {}
+  try {
+    const fb = String(fallback || '').replace(/[\p{P}\p{S}]+/gu, '').trim();
+    return fb ? (fb.length > 12 ? fb.substring(0, 12).trim() : fb) : '썸네일';
+  } catch (e) {
+    return '썸네일';
+  }
+} 
 
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
@@ -883,7 +916,7 @@ export async function enhanceDraftWithFeatures({
       url_1x1,
       url_4x3,
       url_16x9,
-      altText: selectedThumbnail.altText || `${seoTitle || ideaData.title} 썸네일 이미지`,
+      altText: sanitizeAltText(selectedThumbnail.altText, `${seoTitle || ideaData.title} 썸네일 이미지`),
     };
     try {
       if (typeof onProgress === 'function')
@@ -1091,6 +1124,7 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
   }
 }
 export { getRelevantAffiliateLinks };
+export { sanitizeThumbnailText };
 
 /**
  * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
@@ -2372,9 +2406,9 @@ ${defaultDescription}
       thumbnailCandidates = [
         {
           type: 'curiosity',
-          thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+          thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
           thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-          thumbnailText: '이거 실화냐?',
+          thumbnailText: '',
         },
         {
           type: 'informative',
@@ -2393,6 +2427,29 @@ ${defaultDescription}
 
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
+
+    // Try to generate short thumbnail slogans dynamically using outlines/draft
+    try {
+      const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+      if (Array.isArray(slogans) && slogans.length > 0) {
+        thumbnailCandidates = thumbnailCandidates.map((c, i) => {
+          const suggested = slogans[i] || slogans[i % slogans.length] || '';
+          const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+          return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
+        });
+      } else {
+        thumbnailCandidates = thumbnailCandidates.map((c) => ({
+          ...c,
+          thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+        }));
+      }
+    } catch (e) {
+      Logger.warn('[generateDraftFromIdea] generateThumbnailTexts failed:', e);
+      thumbnailCandidates = thumbnailCandidates.map((c) => ({
+        ...c,
+        thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+      }));
+    }
 
     if (generateThumbnail && thumbnailCandidates.length > 0 && permalink) {
       Logger.info('[generateDraftFromIdea] 🎨 썸네일 생성 시작');
@@ -2474,10 +2531,11 @@ ${defaultDescription}
     // Ensure thumbnail altText exists for accessibility/SEO
     if (thumbnailUrls) {
       try {
-        if (!thumbnailUrls.altText) {
-          thumbnailUrls.altText =
-            (seoTitle || ideaData.title || '').slice(0, 150) || 'Thumbnail image';
-        }
+        // Ensure altText is meaningful; sanitize and fallback to title when it's only punctuation
+        thumbnailUrls.altText = sanitizeAltText(
+          thumbnailUrls.altText,
+          `${(seoTitle || ideaData.title || '').slice(0, 150)} 썸네일 이미지`
+        );
       } catch (e) {
         Logger.warn('[generateDraftFromIdea] 썸네일 altText 설정 실패:', e);
       }

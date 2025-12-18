@@ -518,6 +518,32 @@ describe('AI Service', () => {
       expect(res.thumbnailUrls.url_16x9 || res.thumbnailUrls.url_1x1).toBeTruthy();
     });
 
+    test('curiosity template no longer contains question mark', async () => {
+      const cfg = require('../js/services/aiServiceConfig.js').THUMBNAIL_CONFIG;
+      expect(cfg.DEFAULT_CANDIDATES[0].thumbnailPromptEn).not.toMatch(/question mark/);
+      expect(cfg.DEFAULT_CANDIDATES[0].thumbnailText).toBe('');
+    });
+
+    test('sanitizes punctuation-only thumbnailText into a fallback', async () => {
+      const svc = require('../js/services/aiService.js');
+      const sanitize = svc.sanitizeThumbnailText;
+      const fallback = 'My Test';
+      const result = sanitize('???', fallback);
+      expect(result).toBeTruthy();
+      expect(result).not.toMatch(/^[^\p{L}\p{N}]+$/u);
+      expect(/[\p{L}\p{N}]/u.test(result)).toBe(true);
+    });
+
+    test('calls generateThumbnailTexts when generating thumbnails', async () => {
+      const thumbnailSvc = require('../js/services/thumbnailService.js');
+      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['슬로건D'] });
+      const svc = require('../js/services/aiService.js');
+      const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
+      // Call generateDraftFromIdea with generateThumbnail true (and skip full draft generation)
+      await svc.generateDraftFromIdea(idea, { generateDraft: false, generateThumbnail: true, composeThumbnailText: true });
+      expect(thumbnailSvc.generateThumbnailTexts).toHaveBeenCalled();
+    });
+
     test('should fallback to source image when compose fails and still upload thumbnails', async () => {
       jest.resetModules();
 

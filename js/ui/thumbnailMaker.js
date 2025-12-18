@@ -58,9 +58,9 @@ export function openThumbnailMaker(
     thumbnailCandidates = [
       {
         type: 'curiosity',
-        thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+        thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
         thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-        thumbnailText: '이거 실화냐?',
+        thumbnailText: '',
         fontFamily: "'Pretendard', sans-serif",
         textColor: 'auto',
         ratio: '16:9',

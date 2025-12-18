@@ -58,9 +58,9 @@ CRITICAL INSTRUCTION: THE FINAL IMAGE MUST NOT CONTAIN ANY WRITTEN TEXT, LETTERS
   DEFAULT_CANDIDATES: [
     {
       type: 'curiosity',
-      thumbnailPromptEn: `High-quality, dramatic thumbnail for "${'${title}'}", mysterious atmosphere, question mark, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+      thumbnailPromptEn: `High-quality, dramatic thumbnail for "${'${title}'}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
       thumbnailPromptKo: `"${'${title}'}"에 대한 호기심 자극형 썸네일`,
-      thumbnailText: '이거 실화냐?',
+      thumbnailText: '',
     },
     {
       type: 'informative',
