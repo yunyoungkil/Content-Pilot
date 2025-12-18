@@ -56,12 +56,14 @@ function sanitizeThumbnailText(candidate, fallback) {
     }
   } catch (e) {}
   try {
-    const fb = String(fallback || '').replace(/[\p{P}\p{S}]+/gu, '').trim();
+    const fb = String(fallback || '')
+      .replace(/[\p{P}\p{S}]+/gu, '')
+      .trim();
     return fb ? (fb.length > 12 ? fb.substring(0, 12).trim() : fb) : '썸네일';
   } catch (e) {
     return '썸네일';
   }
-} 
+}
 
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
@@ -916,7 +918,10 @@ export async function enhanceDraftWithFeatures({
       url_1x1,
       url_4x3,
       url_16x9,
-      altText: sanitizeAltText(selectedThumbnail.altText, `${seoTitle || ideaData.title} 썸네일 이미지`),
+      altText: sanitizeAltText(
+        selectedThumbnail.altText,
+        `${seoTitle || ideaData.title} 썸네일 이미지`
+      ),
     };
     try {
       if (typeof onProgress === 'function')
@@ -2065,7 +2070,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
         rawDraft = await callDraftAPI(prompt);
-        console.log('[generateDraftFromIdea] checkpoint: rawDraft length:', rawDraft ? String(rawDraft).length : 0);
+        console.log(
+          '[generateDraftFromIdea] checkpoint: rawDraft length:',
+          rawDraft ? String(rawDraft).length : 0
+        );
       } catch (apiError) {
         // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
         throw apiError;
@@ -2106,8 +2114,14 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
-      console.log('[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:', processed.cleanedDraft ? String(processed.cleanedDraft).length : 0);
-      console.log('[generateDraftFromIdea] checkpoint: thumbnailCandidates length:', processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0);
+      console.log(
+        '[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:',
+        processed.cleanedDraft ? String(processed.cleanedDraft).length : 0
+      );
+      console.log(
+        '[generateDraftFromIdea] checkpoint: thumbnailCandidates length:',
+        processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0
+      );
       try {
         if (typeof options.onProgress === 'function')
           options.onProgress({
@@ -2144,7 +2158,10 @@ ${defaultDescription}
           await saveIntermediateDraft(ideaData.id, formattedDraft);
           console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (1st)');
         } catch (e) {
-          console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):', e && e.message ? e.message : e);
+          console.warn(
+            '[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):',
+            e && e.message ? e.message : e
+          );
         }
       }
 
@@ -2198,7 +2215,9 @@ ${defaultDescription}
             seoTitle = normalizeSeoTitle(seoTitle, title);
           } else {
             // Fallback: if helper unavailable, keep seoTitle as-is
-            Logger.warn('[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization');
+            Logger.warn(
+              '[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization'
+            );
           }
         } catch (e) {
           Logger.warn('[generateDraftFromIdea] normalizeSeoTitle failed, skipping:', e);
@@ -2432,24 +2451,45 @@ ${defaultDescription}
 
     // Try to generate short thumbnail slogans dynamically using outlines/draft
     try {
-      const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+      const { slogans } = await generateThumbnailTexts(
+        ideaData.outline || [],
+        formattedDraft || ''
+      );
       if (Array.isArray(slogans) && slogans.length > 0) {
         thumbnailCandidates = thumbnailCandidates.map((c, i) => {
           const suggested = slogans[i] || slogans[i % slogans.length] || '';
-          const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
-          return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
+          const fallbackText = (seoTitle || title || '')
+            .replace(/[^\p{L}\p{N}\s]+/gu, '')
+            .trim()
+            .substring(0, 12);
+          return {
+            ...c,
+            thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText),
+          };
         });
       } else {
         thumbnailCandidates = thumbnailCandidates.map((c) => ({
           ...c,
-          thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+          thumbnailText: sanitizeThumbnailText(
+            c.thumbnailText || '',
+            (seoTitle || title || '')
+              .replace(/[^\p{L}\p{N}\s]+/gu, '')
+              .trim()
+              .substring(0, 12)
+          ),
         }));
       }
     } catch (e) {
       Logger.warn('[generateDraftFromIdea] generateThumbnailTexts failed:', e);
       thumbnailCandidates = thumbnailCandidates.map((c) => ({
         ...c,
-        thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+        thumbnailText: sanitizeThumbnailText(
+          c.thumbnailText || '',
+          (seoTitle || title || '')
+            .replace(/[^\p{L}\p{N}\s]+/gu, '')
+            .trim()
+            .substring(0, 12)
+        ),
       }));
     }
 
@@ -2478,9 +2518,14 @@ ${defaultDescription}
         if (ideaData.id && formattedDraft) {
           try {
             await saveIntermediateDraft(ideaData.id, formattedDraft);
-            console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)');
+            console.log(
+              '[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)'
+            );
           } catch (e) {
-            console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):', e && e.message ? e.message : e);
+            console.warn(
+              '[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):',
+              e && e.message ? e.message : e
+            );
           }
         }
       } catch (error) {
@@ -2640,7 +2685,10 @@ ${defaultDescription}
       seoTitle = seoTitle || '';
     }
 
-    console.log('[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:', !!thumbnailUrls);
+    console.log(
+      '[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:',
+      !!thumbnailUrls
+    );
     const finalResponse = {
       success: true,
       draft: formattedDraft,
@@ -2666,7 +2714,9 @@ ${defaultDescription}
     // return a best-effort successful response to avoid losing the generated content.
     Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
     if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
-      Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      Logger.warn(
+        '[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환'
+      );
       return {
         success: true,
         draft: formattedDraft,
