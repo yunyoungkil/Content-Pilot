@@ -56,12 +56,14 @@ function sanitizeThumbnailText(candidate, fallback) {
     }
   } catch (e) {}
   try {
-    const fb = String(fallback || '').replace(/[\p{P}\p{S}]+/gu, '').trim();
+    const fb = String(fallback || '')
+      .replace(/[\p{P}\p{S}]+/gu, '')
+      .trim();
     return fb ? (fb.length > 12 ? fb.substring(0, 12).trim() : fb) : '썸네일';
   } catch (e) {
     return '썸네일';
   }
-} 
+}
 
 // [신규] 이미지 URL을 Base64 문자열로 변환하는 헬퍼 함수
 async function fetchImageAsBase64(url) {
@@ -916,7 +918,10 @@ export async function enhanceDraftWithFeatures({
       url_1x1,
       url_4x3,
       url_16x9,
-      altText: sanitizeAltText(selectedThumbnail.altText, `${seoTitle || ideaData.title} 썸네일 이미지`),
+      altText: sanitizeAltText(
+        selectedThumbnail.altText,
+        `${seoTitle || ideaData.title} 썸네일 이미지`
+      ),
     };
     try {
       if (typeof onProgress === 'function')
@@ -1997,12 +2002,14 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               - **썸네일 문구 작성 요령 (매우 중요)**: 
                 * 심플하지만 호기심을 유발하는 문구로 작성해주세요.
                 * 단순한 키워드 나열(예: "스마트홈 컨트롤")이 아니라, 독자의 호기심을 자극하는 문구여야 합니다.
+                * **절대 금지: 제목을 그대로 사용하거나 구두점만 있는 텍스트(예: "?", "!!", "...")는 절대 사용하지 마세요**
                 * 예시:
-                  - 나쁜 예: "스마트홈 컨트롤", "갤럭시 탭", "제품 소개"
+                  - 나쁜 예: "스마트홈 컨트롤", "갤럭시 탭", "제품 소개", "?", "!!", "이거 실화냐?"
                   - 좋은 예: "집 전체를 손끝으로", "미래가 온다", "이것만 있으면 끝", "당신의 집이 스마트해진다", "한 번의 터치로 모든 것 제어"
                 * 핵심 키워드를 포함하되, 그것을 감싸는 매력적인 표현으로 작성해주세요.
                 * 12자 이내로 제한되지만, 그 안에서 최대한 임팩트 있게 작성해주세요.
                 * 질문 형식, 감탄 형식, 혜택 강조 형식 등을 활용할 수 있습니다.
+                * 각 thumbnailText는 반드시 한글, 영문, 또는 숫자를 최소 1개 이상 포함해야 합니다.
               - **썸네일 이미지 프롬프트 작성 요령**: 
                 * 커버 이미지는 글의 첫인상을 결정하는 만큼 눈에 확 들어오는 핵심 이미지를 사용해야 합니다.
                 * **제휴 상품이 있다면 해당 상품이 주인공이 되도록 묘사해주세요.** (추가됨)
@@ -2063,7 +2070,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
         rawDraft = await callDraftAPI(prompt);
-        console.log('[generateDraftFromIdea] checkpoint: rawDraft length:', rawDraft ? String(rawDraft).length : 0);
+        console.log(
+          '[generateDraftFromIdea] checkpoint: rawDraft length:',
+          rawDraft ? String(rawDraft).length : 0
+        );
       } catch (apiError) {
         // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
         throw apiError;
@@ -2104,8 +2114,14 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
-      console.log('[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:', processed.cleanedDraft ? String(processed.cleanedDraft).length : 0);
-      console.log('[generateDraftFromIdea] checkpoint: thumbnailCandidates length:', processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0);
+      console.log(
+        '[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:',
+        processed.cleanedDraft ? String(processed.cleanedDraft).length : 0
+      );
+      console.log(
+        '[generateDraftFromIdea] checkpoint: thumbnailCandidates length:',
+        processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0
+      );
       try {
         if (typeof options.onProgress === 'function')
           options.onProgress({
@@ -2142,7 +2158,10 @@ ${defaultDescription}
           await saveIntermediateDraft(ideaData.id, formattedDraft);
           console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (1st)');
         } catch (e) {
-          console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):', e && e.message ? e.message : e);
+          console.warn(
+            '[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):',
+            e && e.message ? e.message : e
+          );
         }
       }
 
@@ -2196,7 +2215,9 @@ ${defaultDescription}
             seoTitle = normalizeSeoTitle(seoTitle, title);
           } else {
             // Fallback: if helper unavailable, keep seoTitle as-is
-            Logger.warn('[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization');
+            Logger.warn(
+              '[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization'
+            );
           }
         } catch (e) {
           Logger.warn('[generateDraftFromIdea] normalizeSeoTitle failed, skipping:', e);
@@ -2430,24 +2451,45 @@ ${defaultDescription}
 
     // Try to generate short thumbnail slogans dynamically using outlines/draft
     try {
-      const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+      const { slogans } = await generateThumbnailTexts(
+        ideaData.outline || [],
+        formattedDraft || ''
+      );
       if (Array.isArray(slogans) && slogans.length > 0) {
         thumbnailCandidates = thumbnailCandidates.map((c, i) => {
           const suggested = slogans[i] || slogans[i % slogans.length] || '';
-          const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
-          return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
+          const fallbackText = (seoTitle || title || '')
+            .replace(/[^\p{L}\p{N}\s]+/gu, '')
+            .trim()
+            .substring(0, 12);
+          return {
+            ...c,
+            thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText),
+          };
         });
       } else {
         thumbnailCandidates = thumbnailCandidates.map((c) => ({
           ...c,
-          thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+          thumbnailText: sanitizeThumbnailText(
+            c.thumbnailText || '',
+            (seoTitle || title || '')
+              .replace(/[^\p{L}\p{N}\s]+/gu, '')
+              .trim()
+              .substring(0, 12)
+          ),
         }));
       }
     } catch (e) {
       Logger.warn('[generateDraftFromIdea] generateThumbnailTexts failed:', e);
       thumbnailCandidates = thumbnailCandidates.map((c) => ({
         ...c,
-        thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+        thumbnailText: sanitizeThumbnailText(
+          c.thumbnailText || '',
+          (seoTitle || title || '')
+            .replace(/[^\p{L}\p{N}\s]+/gu, '')
+            .trim()
+            .substring(0, 12)
+        ),
       }));
     }
 
@@ -2476,9 +2518,14 @@ ${defaultDescription}
         if (ideaData.id && formattedDraft) {
           try {
             await saveIntermediateDraft(ideaData.id, formattedDraft);
-            console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)');
+            console.log(
+              '[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (2nd)'
+            );
           } catch (e) {
-            console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):', e && e.message ? e.message : e);
+            console.warn(
+              '[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (2nd):',
+              e && e.message ? e.message : e
+            );
           }
         }
       } catch (error) {
@@ -2638,7 +2685,10 @@ ${defaultDescription}
       seoTitle = seoTitle || '';
     }
 
-    console.log('[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:', !!thumbnailUrls);
+    console.log(
+      '[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:',
+      !!thumbnailUrls
+    );
     const finalResponse = {
       success: true,
       draft: formattedDraft,
@@ -2664,7 +2714,9 @@ ${defaultDescription}
     // return a best-effort successful response to avoid losing the generated content.
     Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
     if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
-      Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      Logger.warn(
+        '[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환'
+      );
       return {
         success: true,
         draft: formattedDraft,
