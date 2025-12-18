@@ -36,9 +36,19 @@ beforeEach(() => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_workspace_idea_data = undefined;
     window.__cp_force_save_title = undefined;
+    // Also clear SEO force-save helper for isolation
+    window.__cp_force_save_seo_title = undefined;
     if (window.__cp_tui_global_listener_attached) window.__cp_tui_global_listener_attached = false;
     if (window.__cp_tui_listener_attached) window.__cp_tui_listener_attached = false;
     if (window.__cp_tui_shadow_listener_attached) window.__cp_tui_shadow_listener_attached = false;
+  } catch (e) {}
+});
+
+// Reload workspace module between tests to avoid module-level state leakage
+beforeEach(() => {
+  try {
+    const wsPath = require.resolve('../js/ui/workspaceMode.js');
+    if (require.cache[wsPath]) delete require.cache[wsPath];
   } catch (e) {}
 });
 
@@ -61,6 +71,7 @@ afterEach(() => {
     window.__cp_workspace_idea_id = undefined;
     window.__cp_workspace_idea_data = undefined;
     window.__cp_force_save_title = undefined;
+    window.__cp_force_save_seo_title = undefined;
   } catch (e) {
     // ignore
   }
