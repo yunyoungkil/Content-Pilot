@@ -1,5 +1,7 @@
 // content.js (수정 완료된 최종 버전)
 
+
+
 // [CSP Fix] webpack publicPath를 Chrome Extension URL로 설정
 // 동적 import로 생성된 청크 파일이 올바른 경로에서 로드되도록 함
 // webpack이 이 변수를 인식하도록 파일 최상단에 배치

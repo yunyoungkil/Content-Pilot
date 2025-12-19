@@ -615,10 +615,86 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === 'ai_generate_images') {
     return handleAsync(
-      generateAiImage(msg.data.prompt, msg.data.count).then((images) => ({
-        success: true,
-        images,
-      }))
+      (async () => {
+        console.error('[Background] ai_generate_images HANDLER START');
+        console.error('[Background] Payload:', JSON.stringify(msg.data, null, 2));
+
+        const prompt = msg.data.prompt;
+        const count = msg.data.count || 1;
+        // references: optional array of URLs
+        let refImages = null;
+        let inputUrls = [];
+        let successEntries = [];
+        let failedUrls = [];
+
+        try {
+          if (Array.isArray(msg.data.references) && msg.data.references.length > 0) {
+            inputUrls = msg.data.references;
+            console.error('[Background] Processing references:', inputUrls.length);
+
+            // fetch each reference asynchronously as base64 objects
+            const fetchPromises = msg.data.references.map((url) => fetchImageAsBase64(url).catch((err) => ({ success: false, error: err.message })));
+            const fetchedRaw = await Promise.all(fetchPromises);
+
+            // [DEBUG] Log raw fetch results
+            try {
+              const debugResults = fetchedRaw.map((r, i) => ({
+                url: inputUrls[i],
+                success: !!(r && r.success),
+                dataUrlLen: r && r.dataUrl ? r.dataUrl.length : 0,
+                error: r && r.error ? r.error : (r && !r.success ? 'Unknown failure' : null)
+              }));
+              console.error('[Background] Reference fetch results:', JSON.stringify(debugResults, null, 2));
+            } catch (e) { void 0; }
+
+            // [FIX] collectorService.js returns { success: true, dataUrl: ... }, but we need { mimeType, data }
+            const fetchedConverted = fetchedRaw.map((item, idx) => {
+                if (!item || !item.success || !item.dataUrl) {
+                    return null;
+                }
+                // Relaxed regex to handle empty mimeType or whitespace
+                const matches = item.dataUrl.match(/^data:(.*?);base64,(.*)$/);
+                if (matches) {
+                    return { mimeType: matches[1] || 'image/png', data: matches[2] };
+                }
+                console.error(`[Background] Regex mismatch for item ${idx}:`, item.dataUrl.substring(0, 50));
+                return null;
+            });
+
+            refImages = fetchedConverted.filter(Boolean);
+
+            // [DEBUG] 참조 이미지 변환 결과 (스타일 적용)
+            console.error('[Background] Reference fetch summary:', {
+              inputCount: inputUrls.length,
+              successCount: refImages.length,
+              failedCount: inputUrls.length - refImages.length,
+            });
+          } else {
+             console.error('[Background] No references provided or empty array');
+          }
+        } catch (e) {
+          console.error('[Background] Reference fetch CRITICAL FAILURE:', e);
+        }
+
+        console.error('[Background] Calling generateAiImage with refImages count:', refImages ? refImages.length : 0);
+        const images = await generateAiImage(prompt, count, refImages);
+        return { 
+          success: true, 
+          images, 
+          diagnostics: { 
+            inputCount: inputUrls.length, 
+            converted: successEntries.length, 
+            failed: failedUrls, 
+            convertedSample: successEntries.slice(0,3).map(s => ({ 
+              url: s.url, 
+              mimeType: s.mimeType, 
+              dataPreview: s.dataPreview,
+              dataFullUrl: s.dataFullUrl,
+              dataKb: Math.round((s.dataLength || 0) / 1024)
+            })) 
+          } 
+        };
+      })()
     );
   }
   if (msg.action === 'analyze_image_for_template')

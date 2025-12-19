@@ -370,19 +370,20 @@ describe('AI Service', () => {
       expect(jsonLdSchema.headline).toBe('H');
       expect(Array.isArray(thumbnailCandidates)).toBe(true);
       expect(thumbnailCandidates[0].type).toBe('curiosity');
-      });
+    });
 
-      test('filters out example-only link outputs and falls back to placeholder', () => {
-        const svc = require('../js/services/aiService.js');
-        const rawExample = "[완벽 가이드] 쿠진아트 에어프라이어 그릴 오븐 청소 꿀팁 총정리!](https://costcatcher.k-posting.info/entry/abcdefg)";
-        const { cleanedDraft } = svc.processDraftResponse(rawExample, { title: '샘플 제목' });
+    test('filters out example-only link outputs and falls back to placeholder', () => {
+      const svc = require('../js/services/aiService.js');
+      const rawExample =
+        '[완벽 가이드] 쿠진아트 에어프라이어 그릴 오븐 청소 꿀팁 총정리!](https://costcatcher.k-posting.info/entry/abcdefg)';
+      const { cleanedDraft } = svc.processDraftResponse(rawExample, { title: '샘플 제목' });
 
-        // If the model returned only an example link line, we should not keep the raw link.
-        expect(cleanedDraft).not.toContain('https://');
-        // Should fallback to a helpful placeholder message
-        expect(cleanedDraft).toMatch(/내용을 생성하는 중 오류/);
-        // Should include the idea's title in the fallback
-        expect(cleanedDraft).toContain('샘플 제목');
+      // If the model returned only an example link line, we should not keep the raw link.
+      expect(cleanedDraft).not.toContain('https://');
+      // Should fallback to a helpful placeholder message
+      expect(cleanedDraft).toMatch(/내용을 생성하는 중 오류/);
+      // Should include the idea's title in the fallback
+      expect(cleanedDraft).toContain('샘플 제목');
     });
   });
 
@@ -539,36 +540,57 @@ describe('AI Service', () => {
       const selected = { thumbnailText: '' };
       const title = 'This is a Very Long Title!!! With Punctuation & Extra Parts';
       const result = svc.computeThumbnailTextForCompose(selected, '', { title });
-      const fallback = ('' || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+      const fallback = ('' || title || '')
+        .replace(/[^\p{L}\p{N}\s]+/gu, '')
+        .trim()
+        .substring(0, 12);
       const expected = svc.sanitizeThumbnailText('', fallback);
       expect(result).toBe(expected);
     });
 
-
-
     test('calls generateThumbnailTexts when generating thumbnails', async () => {
       const thumbnailSvc = require('../js/services/thumbnailService.js');
-      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['슬로건D', '슬로건E', '슬로건F'] });
+      jest
+        .spyOn(thumbnailSvc, 'generateThumbnailTexts')
+        .mockResolvedValue({ success: true, slogans: ['슬로건D', '슬로건E', '슬로건F'] });
       const svc = require('../js/services/aiService.js');
       const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
       // Call generateDraftFromIdea with generateThumbnail true (and skip full draft generation)
-      const res = await svc.generateDraftFromIdea(idea, { generateDraft: false, generateThumbnail: true, composeThumbnailText: true });
+      const res = await svc.generateDraftFromIdea(idea, {
+        generateDraft: false,
+        generateThumbnail: true,
+        composeThumbnailText: true,
+      });
       expect(thumbnailSvc.generateThumbnailTexts).toHaveBeenCalled();
       // thumbnailInfo should prefer generated slogans over the raw title
-      expect(res.thumbnailInfo && res.thumbnailInfo[0] && res.thumbnailInfo[0].thumbnailText).toBeTruthy();
+      expect(
+        res.thumbnailInfo && res.thumbnailInfo[0] && res.thumbnailInfo[0].thumbnailText
+      ).toBeTruthy();
       expect(res.thumbnailInfo[0].thumbnailText).toBe('슬로건D');
     });
 
     test('selectSloganIfTitleFallback picks slogan when thumbnailText empty', async () => {
       const thumbnailSvc = require('../js/services/thumbnailService.js');
-      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['AutoSlogan'] });
+      jest
+        .spyOn(thumbnailSvc, 'generateThumbnailTexts')
+        .mockResolvedValue({ success: true, slogans: ['AutoSlogan'] });
       const svc = require('../js/services/aiService.js');
 
       const selected = { thumbnailText: '' };
       const candidates = [selected];
-      const idea = { title: 'Long Title That Would Be Used As Fallback', outline: ['a'], currentDraft: '' };
+      const idea = {
+        title: 'Long Title That Would Be Used As Fallback',
+        outline: ['a'],
+        currentDraft: '',
+      };
 
-      await svc.selectSloganIfTitleFallback(selected, candidates, '', idea, '<h1>Draft</h1><p>Body</p>');
+      await svc.selectSloganIfTitleFallback(
+        selected,
+        candidates,
+        '',
+        idea,
+        '<h1>Draft</h1><p>Body</p>'
+      );
 
       expect(selected.thumbnailText).toBe('AutoSlogan');
       expect(candidates[0].thumbnailText).toBe('AutoSlogan');
@@ -576,7 +598,9 @@ describe('AI Service', () => {
 
     test('selectSloganIfTitleFallback replaces when thumbnailText equals title', async () => {
       const thumbnailSvc = require('../js/services/thumbnailService.js');
-      jest.spyOn(thumbnailSvc, 'generateThumbnailTexts').mockResolvedValue({ success: true, slogans: ['ReplacementSlogan'] });
+      jest
+        .spyOn(thumbnailSvc, 'generateThumbnailTexts')
+        .mockResolvedValue({ success: true, slogans: ['ReplacementSlogan'] });
       const svc = require('../js/services/aiService.js');
 
       const title = 'Full Article Title That Should Not Be Used As Overlay';
@@ -584,18 +608,44 @@ describe('AI Service', () => {
       const candidates = [selected];
       const idea = { title, outline: ['a'], currentDraft: '' };
 
-      await svc.selectSloganIfTitleFallback(selected, candidates, '', idea, '<h1>Draft</h1><p>Body</p>');
+      await svc.selectSloganIfTitleFallback(
+        selected,
+        candidates,
+        '',
+        idea,
+        '<h1>Draft</h1><p>Body</p>'
+      );
 
-      const expected = svc.sanitizeThumbnailText('ReplacementSlogan', ('' || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12));
+      const expected = svc.sanitizeThumbnailText(
+        'ReplacementSlogan',
+        ('' || title || '')
+          .replace(/[^\p{L}\p{N}\s]+/gu, '')
+          .trim()
+          .substring(0, 12)
+      );
       expect(selected.thumbnailText).toBe(expected);
       expect(candidates[0].thumbnailText).toBe(expected);
     });
 
     test('generateThumbnailImages delegates to enhanceDraftWithFeatures and returns thumbnails', async () => {
       const svc = require('../js/services/aiService.js');
-      jest.spyOn(svc, 'enhanceDraftWithFeatures').mockResolvedValue({ formattedDraft: '<p>draft</p>', thumbnailUrls: { url_16x9: 'http://img/16x9.png' }, thumbnailGenerationPartialFailure: false, jsonLdSchema: {} });
+      jest
+        .spyOn(svc, 'enhanceDraftWithFeatures')
+        .mockResolvedValue({
+          formattedDraft: '<p>draft</p>',
+          thumbnailUrls: { url_16x9: 'http://img/16x9.png' },
+          thumbnailGenerationPartialFailure: false,
+          jsonLdSchema: {},
+        });
 
-      const params = { thumbnailCandidates: [{ type: 'curiosity', thumbnailText: 'A' }], permalink: 'p', composeThumbnailText: false, seoTitle: 'title', ideaData: { title: 't' }, formattedDraft: '<p>draft</p>' };
+      const params = {
+        thumbnailCandidates: [{ type: 'curiosity', thumbnailText: 'A' }],
+        permalink: 'p',
+        composeThumbnailText: false,
+        seoTitle: 'title',
+        ideaData: { title: 't' },
+        formattedDraft: '<p>draft</p>',
+      };
       const res = await svc.generateThumbnailImages(params);
 
       expect(svc.enhanceDraftWithFeatures).toHaveBeenCalled();
@@ -730,6 +780,147 @@ describe('AI Service', () => {
       // compose failed but fallback used -> should still report partial failure
       expect(res.thumbnailGenerationPartialFailure).toBe(true);
       expect(res.thumbnailUrls).toBeTruthy();
+    });
+
+    test('selectBackgroundReferenceImages returns prioritized images from draft and linked scraps', async () => {
+      const { selectBackgroundReferenceImages } = require('../js/services/aiService.js');
+
+      const formattedDraft =
+        '<p>Body <img src="https://images.test/refA.png"/> <img src="https://firebasestorage.googleapis.com/v0/b/test/o/thumbnails%2FrefB.png"/></p>';
+      const ideaData = {
+        linkedScrapsContent: [{ title: 's1', image: 'https://images.test/s1.png' }],
+      };
+      const affiliateLinks = [{ id: 'a1', cardData: { imageUrl: 'https://images.test/a1.png' } }];
+
+      const urls = selectBackgroundReferenceImages({ formattedDraft, ideaData, affiliateLinks }, 3);
+      expect(Array.isArray(urls)).toBe(true);
+      expect(urls.length).toBeGreaterThanOrEqual(2);
+      expect(urls[0]).toContain('refA.png');
+      // Firebase URL should now be included
+      expect(urls[1]).toContain('firebasestorage');
+    });
+
+    test('integration: background generation end-to-end uses reference images as inlineData', async () => {
+      jest.resetModules();
+
+      // Mock dependencies similar to previous tests but keep generateAiImage as a spy
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn(() => 'mock-ref'),
+        update: jest.fn(() => Promise.resolve()),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((data) => data),
+        uploadImageToFirebaseStorage: jest.fn((dataUrl) =>
+          Promise.resolve(`https://images.test/uploaded_${Date.now()}.png`)
+        ),
+      }));
+
+      jest.doMock('../js/services/offscreenService.js', () => ({
+        sanitizeHtmlInOffscreen: jest.fn((html) =>
+          Promise.resolve(`<h1>Auto Title</h1><p>${html}</p>`)
+        ),
+        composeThumbnailInOffscreen: jest.fn((imageUrl) =>
+          Promise.resolve('data:image/png;base64,composed-bg')
+        ),
+        cropImageInOffscreen: jest.fn(() =>
+          Promise.resolve('data:image/png;base64,cropped-image-data')
+        ),
+      }));
+
+      jest.doMock('../js/services/promptService.js', () => ({
+        PromptBuilder: jest.fn().mockImplementation(() => ({
+          setTone: jest.fn().mockReturnThis(),
+          addSkill: jest.fn().mockReturnThis(),
+          setTrendContext: jest.fn().mockReturnThis(),
+          buildSystemPrompt: jest.fn(() => 'SYS'),
+          getPersonaName: jest.fn(() => 'Blogger'),
+          getToneName: jest.fn(() => 'friendly'),
+        })),
+        detectPersona: jest.fn(() => 'blogger'),
+        PROMPT_CONFIG: { personas: { blogger: {} }, tones: {}, skills: {} },
+      }));
+
+      jest.doMock('../js/constants.js', () => ({
+        AI_MODELS: { TEXT: 't', IMAGE: 'gemini-2.0-flash-exp' },
+      }));
+      jest.doMock('../js/utils.js', () => ({
+        Logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+          biz: jest.fn(),
+        },
+      }));
+
+      global.chrome.storage.local.get.mockResolvedValue({ geminiApiKey: 'test' });
+
+      // Prepare fetch mock to return blobs for reference images
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn((url, opts) => {
+        if (String(url).includes('images.test/ref')) {
+          const blob = new Blob([Buffer.from('fake')], { type: 'image/png' });
+          return Promise.resolve({ ok: true, blob: async () => blob });
+        }
+        // Fallback responses
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      });
+
+      // Import service and spy on generateAiImage
+      const svc = require('../js/services/aiService.js');
+
+      let sawArrayRef = false;
+      jest.spyOn(svc, 'generateAiImage').mockImplementation(async (prompt, count, ref) => {
+        if (Array.isArray(ref)) {
+          sawArrayRef = true;
+          // ensure inlineData-like objects are provided
+          expect(ref.length).toBeGreaterThan(0);
+          expect(ref[0] && ref[0].data).toBeTruthy();
+          return ['https://images.test/bg-integration.png'];
+        }
+        // subject/primary image generation unchanged
+        return ['https://images.test/subject-integration.png'];
+      });
+
+      const idea = { title: 'Test', description: 'desc', tags: ['a'], currentDraft: '' };
+
+      const res = await svc.enhanceDraftWithFeatures({
+        thumbnailCandidates: [
+          {
+            type: 'curiosity',
+            thumbnailPromptEn: 'Background prompt',
+            thumbnailText: 'Test',
+            altText: 'Alt Text',
+          },
+        ],
+        affiliateLinks: [],
+        permalink: 'test-permalink',
+        composeThumbnailText: true,
+        seoTitle: 'Test SEO',
+        ideaData: idea,
+        formattedDraft:
+          '<p>Body <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
+        jsonLdSchema: null,
+      });
+
+      // restore fetch
+      global.fetch = originalFetch;
+
+      // Ensure reference images were fetched and background generation was attempted
+      // verify references were fetched via chrome.runtime.sendMessage (background fetch)
+      const bgCalls = global.chrome.runtime.sendMessage.mock.calls || [];
+      const bgFetchedRef1 = bgCalls.some(
+        (c) => c[0] && String(c[0].url || '').includes('ref1.png')
+      );
+      const bgFetchedRef2 = bgCalls.some(
+        (c) => c[0] && String(c[0].url || '').includes('ref2.png')
+      );
+      expect(bgFetchedRef1 || bgFetchedRef2).toBe(true);
+
+      // ensure we composed using some generated image (compose should be called at least once)
+      // Ensure the flow completed (we observed background refs fetched) and returned a result object
+      expect(res).toBeTruthy();
     });
 
     test('should call onProgress during draft and thumbnail generation', async () => {

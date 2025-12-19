@@ -125,7 +125,7 @@ async function fetchImageAsBase64(url) {
         // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
         if (responseMsg && responseMsg.success) {
           try {
-            console.log('[fetchImageAsBase64 DEBUG] background fetch succeeded for URL', url);
+            console.log('%c[AI 썸네일 메이커 디버깅][fetchImage success]', 'color:#9E9E9E', { url });
           } catch (e) {
             void 0;
           }
@@ -141,10 +141,7 @@ async function fetchImageAsBase64(url) {
       } catch (e) {
         Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
         try {
-          console.log(
-            '[fetchImageAsBase64 DEBUG] background fetch failed, falling back to fetch for URL',
-            url
-          );
+          console.log('%c[AI 썸네일 메이커 디버깅][fetchImage bg-failed]', 'color:#9E9E9E', { url });
         } catch (e) {
           void 0;
         }
@@ -153,14 +150,14 @@ async function fetchImageAsBase64(url) {
 
     Logger.debug('[fetchImageAsBase64] Falling back to fetch for URL:', url);
     try {
-      console.log('[fetchImageAsBase64 DEBUG] falling back to fetch for URL', url);
+      console.log('%c[AI 썸네일 메이커 디버깅][fetchImage fetch]', 'color:#9E9E9E', { url });
     } catch (e) {
       void 0;
     }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
     try {
-      console.log('[fetchImageAsBase64 DEBUG] fetch succeeded for URL', url);
+      console.log('%c[AI 썸네일 메이커 디버깅][fetchImage fetch-success]', 'color:#9E9E9E', { url });
     } catch (e) {
       void 0;
     }
@@ -205,6 +202,73 @@ async function analyzeScrapImage(imageUrl) {
     Logger.warn('[analyzeScrapImage] 분석 실패:', e);
     return null;
   }
+}
+
+// Select multiple reference images for background generation (prioritized)
+// Returns array of URLs (maxCount default 3)
+export function selectBackgroundReferenceImages({ formattedDraft, ideaData = {}, affiliateLinks = [] }, maxCount = 3) {
+  const urls = [];
+  
+  console.log('[DEBUG_REF] selectBackgroundReferenceImages input:', {
+    draftLength: (formattedDraft || '').length,
+    linkedScrapsCount: ideaData.linkedScrapsContent?.length || 0,
+    affiliateLinksCount: affiliateLinks?.length || 0
+  });
+
+  // 1) images from formattedDraft (editor), exclude firebase thumbnail paths
+  if (formattedDraft) {
+    try {
+      const imgTagRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+      let match;
+      while ((match = imgTagRegex.exec(formattedDraft)) !== null) {
+        const url = match[1];
+        // [변경] 에디터에 있는 이미지는 출처(Firebase 등)와 상관없이 모두 참고 이미지 후보로 허용
+        // 사용자가 에디터에 포함시킨 이미지는 의도적인 콘텐츠로 간주함
+        if (url) {
+          if (!urls.includes(url)) {
+            urls.push(url);
+            console.log('[DEBUG_REF] Found editor image:', url);
+          }
+          if (urls.length >= maxCount) return urls;
+        }
+      }
+    } catch (e) {
+      console.error('[DEBUG_REF] editor image extraction failed:', e);
+    }
+  }
+
+  // 2) linked scraps images
+  if (ideaData.linkedScrapsContent && Array.isArray(ideaData.linkedScrapsContent)) {
+    console.log('[DEBUG_REF] Checking linked scraps:', ideaData.linkedScrapsContent.length);
+    for (const scrap of ideaData.linkedScrapsContent) {
+      // scrap.image might be in scrap.originData.image or scrap.imageUrl or scrap.image
+      // Normalize scrap image access
+      const candidate = scrap.image || scrap.imageUrl || scrap.originData?.image || scrap.originData?.thumbnail;
+      
+      if (candidate) {
+        if (!urls.includes(candidate)) {
+          urls.push(candidate);
+          console.log('[DEBUG_REF] Found linked scrap image:', candidate);
+        }
+        if (urls.length >= maxCount) return urls;
+      } else {
+        console.log('[DEBUG_REF] Scrap has no image:', scrap.id || 'unknown');
+      }
+    }
+  }
+
+  // 3) affiliate links
+  if (Array.isArray(affiliateLinks)) {
+    for (const l of affiliateLinks) {
+      const img = l?.cardData?.imageUrl;
+      if (img && !urls.includes(img)) {
+        urls.push(img);
+        if (urls.length >= maxCount) return urls;
+      }
+    }
+  }
+
+  return urls;
 }
 
 // [삭제] PERSONA_TEMPLATES 상수 삭제 (PromptService로 이관됨)
@@ -759,11 +823,41 @@ export async function enhanceDraftWithFeatures({
       Logger.info('[enhanceDraftWithFeatures] AI generate images count:', generatedImages.length);
     }
 
+    // 선택된 생성 이미지 중 첫 번째를 기본 소스 이미지로 사용
     const sourceImageUrl = generatedImages[0];
     Logger.info('[enhanceDraftWithFeatures] sourceImageUrl chosen:', sourceImageUrl);
 
+    // --- Background generation using multiple reference images (EXPANDED MODE) ---
+    let backgroundImageUrl = null;
+    try {
+      const referenceUrls = selectBackgroundReferenceImages({ formattedDraft, ideaData, affiliateLinks }, 3);
+      if (referenceUrls && referenceUrls.length > 0) {
+        Logger.info('[enhanceDraftWithFeatures] background reference URLs:', referenceUrls.map((u) => u.substring(0, 80)));
+        const refBase64s = await Promise.all(
+          referenceUrls.map((u) => fetchImageAsBase64(u).catch(() => null))
+        );
+        const refImages = refBase64s.filter(Boolean);
+        if (refImages.length > 0) {
+          const bgPrompt =
+            selectedThumbnail.thumbnailPromptEn +
+            ' . Use the provided reference images as the background inspiration: prioritize texture, color palette, and atmosphere. CRITICAL: Do NOT render any text, letters, or typography in this image. Keep composition clean for overlaying text.';
+          try {
+            const bgRes = await generateAiImage(bgPrompt, 1, refImages);
+            if (Array.isArray(bgRes) && bgRes[0]) {
+              backgroundImageUrl = bgRes[0];
+              Logger.info('[enhanceDraftWithFeatures] background generated:', backgroundImageUrl);
+            }
+          } catch (bgErr) {
+            Logger.warn('[enhanceDraftWithFeatures] background generation failed:', bgErr && bgErr.message ? bgErr.message : bgErr);
+          }
+        }
+      }
+    } catch (err) {
+      Logger.warn('[enhanceDraftWithFeatures] background reference processing failed:', err && err.message ? err.message : err);
+    }
+
     // Compose text overlay if requested
-    let composedDataUrl = sourceImageUrl;
+    let composedDataUrl = backgroundImageUrl || sourceImageUrl;
     if (composeThumbnailText) {
       // Try to prefer a generated slogan when current thumbnailText looks like title fallback
       await selectSloganIfTitleFallback(selectedThumbnail, thumbnailCandidates, seoTitle, ideaData, formattedDraft);
@@ -783,7 +877,7 @@ export async function enhanceDraftWithFeatures({
         }
         const COMPOSE_TIMEOUT_MS = 8000;
         const composePromise = composeThumbnailInOffscreen(
-          sourceImageUrl,
+          composedDataUrl,
           thumbnailText,
           textPosition
         );
@@ -2488,6 +2582,48 @@ ${defaultDescription}
       }));
     }
 
+    // --- 폴백: 썸네일 후보가 3개 미만인 경우 자동 보완 ---
+    try {
+      if (!Array.isArray(thumbnailCandidates)) thumbnailCandidates = [];
+      if (thumbnailCandidates.length < 3) {
+        Logger.warn('[generateDraftFromIdea] 썸네일 후보 부족: 현재 개수=', thumbnailCandidates.length);
+        const baseTitle = seoTitle || title || '콘텐츠';
+        const neededTypes = ['curiosity', 'informative', 'emotional'];
+        const existingTypes = new Set(thumbnailCandidates.map((c) => c.type));
+        for (const t of neededTypes) {
+          if (thumbnailCandidates.length >= 3) break;
+          if (existingTypes.has(t)) continue;
+          const newCandidate = (function () {
+            if (t === 'curiosity')
+              return {
+                type: 'curiosity',
+                thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
+                thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
+                thumbnailText: '',
+              };
+            if (t === 'informative')
+              return {
+                type: 'informative',
+                thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
+                thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
+                thumbnailText: '완벽 정리',
+              };
+            return {
+              type: 'emotional',
+              thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
+              thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
+              thumbnailText: '당신을 위한',
+            };
+          })();
+          thumbnailCandidates.push(newCandidate);
+          existingTypes.add(t);
+        }
+        Logger.debug('[generateDraftFromIdea] 폴백으로 보완한 썸네일 후보 개수:', thumbnailCandidates.length);
+      }
+    } catch (e) {
+      Logger.warn('[generateDraftFromIdea] 썸네일 후보 폴백 중 예외:', e && e.message);
+    }
+
     // NOTE: Thumbnail IMAGE creation (AI image generation, composition, and upload)
     // has been intentionally removed from the draft generation flow. Generating
     // actual thumbnail images is a separate operation and must be invoked via
@@ -3306,16 +3442,48 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       const parts = [{ text: imageGenerationPrompt }];
 
-      // 참조 이미지(제품)가 있는 경우 추가
-      if (referenceImage && referenceImage.data) {
-        parts.push({
-          inlineData: {
-            mimeType: referenceImage.mimeType,
-            data: referenceImage.data,
-          },
-        });
-        Logger.debug('[generateAiImage] 🖼️ 참조 이미지(제품)를 포함하여 요청합니다.');
+      // [DEBUG] generateAiImage에 전달된 referenceImage 요약
+      try {
+        const refsSummary = Array.isArray(referenceImage)
+          ? referenceImage.map((r) => ({ mimeType: r?.mimeType, hasData: !!r?.data, dataLen: r?.data ? r.data.length : 0 }))
+          : referenceImage
+          ? [{ mimeType: referenceImage.mimeType, hasData: !!referenceImage.data, dataLen: referenceImage.data ? referenceImage.data.length : 0 }]
+          : [];
+        console.log('%c[AI 썸네일 메이커 디버깅][generateAiImage input summary]', 'color:#9E9E9E', { refsSummary });
+      } catch (e) {
+        void 0;
       }
+
+      // 참조 이미지(s)가 있는 경우 추가 (단일 오브젝트 또는 배열 허용)
+      if (referenceImage) {
+        const refs = Array.isArray(referenceImage) ? referenceImage : [referenceImage];
+        const inlineCount = refs.filter((r) => r && r.data).length;
+        if (inlineCount > 0) {
+          for (const [i, r] of refs.entries()) {
+            if (r && r.data) {
+              // 데이터 길이 로그
+              try {
+                console.log('%c[AI 썸네일 메이커 디버깅][inlineData add]', 'color:#9E9E9E', { index: i, mimeType: r.mimeType, dataLen: r.data.length });
+              } catch (e) {
+                void 0;
+              }
+              parts.push({
+                inlineData: {
+                  mimeType: r.mimeType || 'image/png',
+                  data: r.data,
+                },
+              });
+            }
+          }
+          Logger.debug(`[generateAiImage] 🖼️ 참조 이미지 ${inlineCount}개를 포함하여 요청합니다.`);
+        }
+      }
+
+      // [DEBUG] 최종 요청 데이터 확인
+      console.log('%c[AI 썸네일 메이커 디버깅][API Request]', 'color:#9E9E9E', {
+        textPart: parts.find(p => p.text)?.text,
+        imagePartsCount: parts.filter(p => p.inlineData).length
+      });
 
       const res = await fetch(API_URL, {
         method: 'POST',

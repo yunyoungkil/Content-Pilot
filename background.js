@@ -730,10 +730,134 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === 'ai_generate_images') {
     return handleAsync(
-      generateAiImage(msg.data.prompt, msg.data.count).then((images) => ({
-        success: true,
-        images,
-      }))
+      (async () => {
+        console.error('[Background] ai_generate_images REQUEST RECEIVED:', JSON.stringify(msg.data, null, 2));
+
+        const prompt = msg.data.prompt;
+        const count = msg.data.count || 1;
+        // references: optional array of URLs
+        let refImages = null;
+        let inputUrls = [];
+        let successEntries = [];
+        let failedUrls = [];
+
+        try {
+          if (Array.isArray(msg.data.references) && msg.data.references.length > 0) {
+            inputUrls = msg.data.references;
+            console.error('[Background] Fetching references count:', inputUrls.length);
+
+            // fetch each reference asynchronously as base64 objects
+            const fetchPromises = msg.data.references.map((url) => fetchImageAsBase64(url).catch((err) => ({ success: false, error: err.message })));
+            const fetchedRaw = await Promise.all(fetchPromises);
+
+            // [DEBUG] Log raw fetch results with console.error to ensure visibility
+            try {
+              const debugResults = fetchedRaw.map((r, i) => ({
+                url: inputUrls[i],
+                success: !!(r && r.success),
+                dataUrlLen: r && r.dataUrl ? r.dataUrl.length : 0,
+                error: r && r.error ? r.error : (r && !r.success ? 'Unknown failure' : null)
+              }));
+              console.error('[Background] Reference fetch results:', JSON.stringify(debugResults, null, 2));
+            } catch (e) { void 0; }
+
+            // [FIX] collectorService.js returns { success: true, dataUrl: ... }, but we need { mimeType, data }
+            const fetchedConverted = fetchedRaw.map((item, idx) => {
+                if (!item || !item.success || !item.dataUrl) {
+                    return null;
+                }
+                // Relaxed regex to handle empty mimeType or whitespace
+                const matches = item.dataUrl.match(/^data:(.*?);base64,(.*)$/);
+                if (matches) {
+                    return { mimeType: matches[1] || 'image/png', data: matches[2] };
+                }
+                console.error(`[Background] Regex mismatch for item ${idx}:`, item.dataUrl.substring(0, 50));
+                return null;
+            });
+
+            refImages = fetchedConverted.filter(Boolean);
+
+            // Build success/failure lists without logging full base64 blobs
+            // Increase preview threshold to 1MB for diagnostics so we can visually confirm conversions
+            const PREVIEW_THRESHOLD = 1024 * 1024; // 1MB
+            successEntries = fetchedConverted
+              .map((item, idx) => {
+                if (!item) return null;
+                const rawItem = fetchedRaw[idx];
+                const dataStr = rawItem.dataUrl ? rawItem.dataUrl.split(',')[1] : '';
+                const preview = dataStr.length > 200 ? dataStr.substring(0, 200) + '...[truncated]' : dataStr;
+                const dataFullUrl = rawItem.dataUrl && rawItem.dataUrl.length < PREVIEW_THRESHOLD ? rawItem.dataUrl : undefined;
+                return {
+                  url: inputUrls[idx],
+                  mimeType: item.mimeType || 'unknown',
+                  dataLength: dataStr.length,
+                  dataPreview: preview,
+                  dataFullUrl, // include full dataUrl when small enough for preview
+                };
+              })
+              .filter(Boolean);
+            
+            failedUrls = inputUrls.map((u, i) => {
+                const res = fetchedRaw[i];
+                if (!fetchedConverted[i]) {
+                    return { url: u, error: res ? res.error : 'Unknown error' };
+                }
+                return null;
+            }).filter(Boolean);
+
+            // [DEBUG] 참조 이미지 변환 결과 (스타일 적용)
+            console.log('%c[AI 썸네일 메이커 디버깅][Reference fetch]', 'color:#9E9E9E', {
+              inputCount: inputUrls.length,
+              successCount: successEntries.length,
+              successes: successEntries.map(s => ({ url: s.url, mimeType: s.mimeType, dataLength: s.dataLength })),
+              failedUrls: failedUrls,
+            });
+
+            // [DEBUG] 변환된 실제 값(미리보기, 앞 200자):
+            console.log('%c[AI 썸네일 메이커 디버깅][Reference convert values]', 'color:#9E9E9E', successEntries.map(s => ({ url: s.url, mimeType: s.mimeType, dataPreview: s.dataPreview })) );
+
+            // [DEBUG] 변환 완료 요약 (간단 문구)
+            console.log('%c[AI 썸네일 메이커 디버깅][Reference convert complete]', 'color:#9E9E9E', {
+              convertedCount: successEntries.length,
+              convertedSample: successEntries.slice(0, 3).map((s) => ({ url: s.url, mimeType: s.mimeType, dataKb: Math.round((s.dataLength || 0) / 1024) })),
+              failedCount: failedUrls.length,
+            });
+          }
+        } catch (e) {
+          console.warn('%c[AI 썸네일 메이커 디버깅][Reference fetch failed]', 'color:#9E9E9E', e);
+        }
+
+        // [DEBUG] generateAiImage에 넘기는 refImages 요약
+        try {
+          console.log('%c[AI 썸네일 메이커 디버깅][generateAiImage input]', 'color:#9E9E9E', {
+            refImagesCount: Array.isArray(refImages) ? refImages.length : 0,
+            refSample: Array.isArray(refImages) && refImages.length > 0 ? refImages.slice(0,3).map(r => ({ mimeType: r.mimeType, dataLen: r.data ? r.data.length : 0 })) : []
+          });
+          if (Array.isArray(msg.data.references) && Array.isArray(refImages) && refImages.length !== msg.data.references.length) {
+            console.warn('%c[AI 썸네일 메이커 디버깅][Reference mismatch] 입력 URL 수와 변환된 이미지 수가 다릅니다.', 'color:#9E9E9E', { inputUrlsLength: msg.data.references.length, convertedLength: refImages.length });
+          }
+        } catch (e) {
+          void 0;
+        }
+
+        const images = await generateAiImage(prompt, count, refImages);
+        return { 
+          success: true, 
+          images, 
+          diagnostics: { 
+            inputCount: inputUrls.length, 
+            converted: successEntries.length, 
+            failed: failedUrls, 
+            convertedSample: successEntries.slice(0,3).map(s => ({ 
+              url: s.url, 
+              mimeType: s.mimeType, 
+              dataPreview: s.dataPreview,
+              dataFullUrl: s.dataFullUrl,
+              dataKb: Math.round((s.dataLength || 0) / 1024)
+            })) 
+          } 
+        };
+      })()
     );
   }
   if (msg.action === 'analyze_image_for_template')

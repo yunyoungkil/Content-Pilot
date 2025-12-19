@@ -1,7 +1,14 @@
-import { shortenLink, showToast, showConfirmationToast, Logger, normalizeSeoTitle } from '../utils.js';
+import {
+  shortenLink,
+  showToast,
+  showConfirmationToast,
+  Logger,
+  normalizeSeoTitle,
+} from '../utils.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
+import { selectBackgroundReferenceImages } from '../services/aiService.js';
 export function isMeaningfulDraft(d) {
   if (!d) return false;
 
@@ -863,21 +870,28 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   const existingBtn = workspaceEl.querySelector('#btn-create-thumbnail');
   if (existingBtn) {
     const composeControls = workspaceEl.querySelector('.compose-thumbnail-controls');
-    console.debug('[DIAG renderThumbnailButton] existingBtn found. composeControls:', !!composeControls);
-    
-    if (composeControls && (existingBtn.previousElementSibling !== composeControls || existingBtn.parentNode !== composeControls.parentNode)) {
+    console.debug(
+      '[DIAG renderThumbnailButton] existingBtn found. composeControls:',
+      !!composeControls
+    );
+
+    if (
+      composeControls &&
+      (existingBtn.previousElementSibling !== composeControls ||
+        existingBtn.parentNode !== composeControls.parentNode)
+    ) {
       console.debug(
         '[DIAG renderThumbnailButton] moving existing button after compose-thumbnail-controls',
         {
-            btnParent: existingBtn.parentNode?.id || existingBtn.parentNode?.className,
-            controlsParent: composeControls.parentNode?.id || composeControls.parentNode?.className
+          btnParent: existingBtn.parentNode?.id || existingBtn.parentNode?.className,
+          controlsParent: composeControls.parentNode?.id || composeControls.parentNode?.className,
         }
       );
-      
+
       // 스타일 조정 (사이드바에 들어갈 경우)
       if (composeControls.parentNode.id === 'publish-info-actions') {
-          existingBtn.style.width = '100%';
-          existingBtn.style.marginLeft = '0';
+        existingBtn.style.width = '100%';
+        existingBtn.style.marginLeft = '0';
       }
 
       if (composeControls.nextSibling) {
@@ -895,7 +909,9 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     // element; runtime code should place controls into publish-info area
     // or directly into the workspace container instead.
     buttonContainer = workspaceEl;
-    console.debug('[DIAG renderThumbnailButton] no #workspace-action-buttons found, using workspace root as fallback');
+    console.debug(
+      '[DIAG renderThumbnailButton] no #workspace-action-buttons found, using workspace root as fallback'
+    );
   }
 
   // 초안 데이터가 없으면 버튼 생성 안 함 (초안이 있어야 썸네일 추천 정보가 있음)
@@ -925,8 +941,6 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     'width: 100%; padding: 10px; background: rgb(66, 133, 244); color: rgb(255, 255, 255); border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
   thumbBtn.textContent = '🎨 썸네일 만들기';
 
-
-
   // [핵심 수정] '초안 삭제' 버튼이 있다면 그 앞에 추가 (부모 요소 기준)
   // [2025-12-14] compose-thumbnail-controls가 있다면 그 뒤로 이동
   const composeControls = workspaceEl.querySelector('.compose-thumbnail-controls');
@@ -935,8 +949,8 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   if (composeControls) {
     // 스타일 조정 (사이드바에 들어갈 경우)
     if (composeControls.parentNode.id === 'publish-info-actions') {
-        thumbBtn.style.width = '100%';
-        thumbBtn.style.marginLeft = '0';
+      thumbBtn.style.width = '100%';
+      thumbBtn.style.marginLeft = '0';
     }
 
     // composeControls 바로 뒤에 삽입 (다음 형제 요소 앞)
@@ -961,7 +975,7 @@ function renderThumbnailButton(workspaceEl, ideaData) {
   );
 
   // 이벤트 연결
-  thumbBtn.onclick = () => {
+  thumbBtn.onclick = async () => {
     console.debug(
       '[DIAG thumbnail button] clicked, composeThumbnailText checkbox:',
       !!workspaceEl.querySelector('#compose-thumbnail-text-checkbox')?.checked
@@ -970,14 +984,111 @@ function renderThumbnailButton(workspaceEl, ideaData) {
     const checkbox = workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
     const composeThumbnailText = checkbox ? checkbox.checked : false;
 
+    // [Fix] Use global data if available to ensure freshness
+    const currentIdeaData = window.__cp_workspace_idea_data || ideaData;
+
+    Logger.debug('[ThumbnailButton] Opening modal with data:', {
+      hasFormattedDraft: !!currentIdeaData.formattedDraft,
+      draftLength: (currentIdeaData.formattedDraft || '').length,
+      hasCurrentDraft: !!currentIdeaData.currentDraft,
+      currentDraftLength: (currentIdeaData.currentDraft || '').length,
+    });
+
+    // [Fix] Ensure linkedScrapsContent is populated if missing but linkedScraps exists
+    // 1. Prepare IDs from both top-level and workspace-level
+    let linkedScrapsIds = [];
+    if (Array.isArray(currentIdeaData.linkedScraps)) {
+      linkedScrapsIds = currentIdeaData.linkedScraps;
+    } else if (currentIdeaData.linkedScraps && typeof currentIdeaData.linkedScraps === 'object') {
+      linkedScrapsIds = Object.keys(currentIdeaData.linkedScraps);
+    }
+
+    if (linkedScrapsIds.length === 0 && currentIdeaData.workspace?.linkedScraps) {
+      if (Array.isArray(currentIdeaData.workspace.linkedScraps)) {
+        linkedScrapsIds = currentIdeaData.workspace.linkedScraps;
+      } else if (typeof currentIdeaData.workspace.linkedScraps === 'object') {
+        linkedScrapsIds = Object.keys(currentIdeaData.workspace.linkedScraps);
+      }
+    }
+
+    // 2. Fetch content if needed
+    let linkedScrapsContent = currentIdeaData.linkedScrapsContent || [];
+    if ((!linkedScrapsContent || linkedScrapsContent.length === 0) && linkedScrapsIds.length > 0) {
+      console.log('[ThumbnailButton] Fetching linked scraps content for IDs:', linkedScrapsIds);
+      const originalText = thumbBtn.textContent;
+      thumbBtn.textContent = '자료 불러오는 중...';
+      thumbBtn.disabled = true;
+
+      try {
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: 'get_all_scraps', channelId: activeChannelId },
+            resolve
+          );
+        });
+
+        if (response && response.success && response.scraps) {
+          linkedScrapsIds.forEach((id) => {
+            const s = response.scraps.find((item) => item.id === id);
+            if (s) {
+              linkedScrapsContent.push({
+                title: s.title || '스크랩',
+                text: s.text || '',
+                url: s.url || '',
+                image: s.image || (s.allImages && s.allImages.length > 0 ? s.allImages[0] : ''),
+                originData: s,
+              });
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('[ThumbnailButton] Failed to fetch linked scraps:', e);
+      } finally {
+        thumbBtn.textContent = originalText;
+        thumbBtn.disabled = false;
+      }
+    }
+
+    // 3. Fetch affiliate links if needed
+    let affiliateLinks = currentIdeaData.affiliateLinks || [];
+    if (!affiliateLinks || affiliateLinks.length === 0) {
+      try {
+        const links = await getAffiliateLinks();
+        if (links && Array.isArray(links)) {
+          affiliateLinks = links;
+        }
+      } catch (e) {
+        console.warn('[ThumbnailButton] Failed to fetch affiliate links:', e);
+      }
+    }
+
     const draftData = {
-      seoTitle: ideaData.seoTitle || ideaData.title,
-      thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || null,
+      seoTitle: currentIdeaData.seoTitle || currentIdeaData.title,
+      thumbnailInfo: currentIdeaData.publishInfo?.thumbnailInfo || null,
+      // Include draft fields so the thumbnail modal can show reference images immediately
+      // [Fix] Fallback to draftContent/workspace.draft if formattedDraft is not yet set (no edits yet)
+      formattedDraft:
+        currentIdeaData.formattedDraft ||
+        currentIdeaData.currentDraft ||
+        currentIdeaData.draftContent ||
+        currentIdeaData.workspace?.draft ||
+        '',
+      currentDraft: currentIdeaData.currentDraft || '',
+      linkedScrapsContent: linkedScrapsContent,
+      affiliateLinks: affiliateLinks,
       // [신규] 저장된 컨셉 선택 인덱스 포함 (publishInfo에서 직접 가져오기)
       selectedThumbnailIndex:
-        ideaData.publishInfo?.selectedThumbnailIndex ??
-        (Array.isArray(ideaData.publishInfo?.thumbnailInfo) ? 0 : undefined),
+        currentIdeaData.publishInfo?.selectedThumbnailIndex ??
+        (Array.isArray(currentIdeaData.publishInfo?.thumbnailInfo) ? 0 : undefined),
     };
+
+    console.log('[DEBUG_REF] ThumbnailButton clicked. draftData prepared:', {
+      formattedDraftLength: draftData.formattedDraft.length,
+      hasLinkedScraps: draftData.linkedScrapsContent.length > 0,
+      linkedScrapsCount: draftData.linkedScrapsContent.length,
+      hasAffiliateLinks: draftData.affiliateLinks.length > 0,
+    });
 
     // 공통 콜백 함수들
     const onInsert = (dataUrl, altText) => {
@@ -1107,7 +1218,9 @@ function renderThumbnailButton(workspaceEl, ideaData) {
                     latestThumbnailInfo
                   );
 
-                  // 모달이 열려있고 업데이트 가능하면 업데이트 (선택적)
+                  // If the modal is open, update the reference images in-place
+                  updateThumbnailModalReferences(cardData);
+
                   // 모달은 이미 열렸으므로 추가 작업 불필요
                 }
               }
@@ -1699,7 +1812,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     }
   }
 
-  let publishInfoPanel = publishInfoArea ? publishInfoArea.querySelector('.publish-info-panel') : null;
+  let publishInfoPanel = publishInfoArea
+    ? publishInfoArea.querySelector('.publish-info-panel')
+    : null;
   const isUpdate = !!publishInfoPanel;
 
   // Escape user-provided values to avoid HTML injection or broken attributes
@@ -1795,97 +1910,99 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     updateInput('#tags-input', safeTags);
   }
 
-    // Now request channel info to compute full permalink URL and update
-    // the UI when it arrives. This keeps the UI responsive even if the
-    // background doesn't call back immediately.
-    try {
-      chrome.runtime.sendMessage({ action: 'get_my_channels' }, (channelsResponse) => {
-        const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
-        const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
-        const channelUrl = firstChannel?.inputUrl || '';
+  // Now request channel info to compute full permalink URL and update
+  // the UI when it arrives. This keeps the UI responsive even if the
+  // background doesn't call back immediately.
+  try {
+    chrome.runtime.sendMessage({ action: 'get_my_channels' }, (channelsResponse) => {
+      const myChannels = channelsResponse?.channels?.myChannels?.blogs || [];
+      const firstChannel = myChannels.length > 0 ? myChannels[0] : null;
+      const channelUrl = firstChannel?.inputUrl || '';
 
-        const isTistory = channelUrl.includes('tistory.com');
-        fullUrl = buildPermalinkUrl(channelUrl, permalink, isTistory);
-        safeFullUrl = escapeHtml(fullUrl || '');
+      const isTistory = channelUrl.includes('tistory.com');
+      fullUrl = buildPermalinkUrl(channelUrl, permalink, isTistory);
+      safeFullUrl = escapeHtml(fullUrl || '');
 
-        const permalinkInput = publishInfoPanel.querySelector('#permalink-input');
-        if (permalinkInput) {
-          // If fullUrl is available, use it. Otherwise fallback to the raw permalink slug.
-          // This prevents the field from blanking out if channel info is missing.
-          permalinkInput.value = fullUrl || permalink || '';
-        }
-        // update any full-url displays if present
-        const fullUrlSpan = publishInfoPanel.querySelector('.publish-full-url');
-        if (fullUrlSpan) fullUrlSpan.textContent = fullUrl || '';
-      });
-    } catch (e) {
-      // ignore if sendMessage is not available or behaves differently in tests
-    }
+      const permalinkInput = publishInfoPanel.querySelector('#permalink-input');
+      if (permalinkInput) {
+        // If fullUrl is available, use it. Otherwise fallback to the raw permalink slug.
+        // This prevents the field from blanking out if channel info is missing.
+        permalinkInput.value = fullUrl || permalink || '';
+      }
+      // update any full-url displays if present
+      const fullUrlSpan = publishInfoPanel.querySelector('.publish-full-url');
+      if (fullUrlSpan) fullUrlSpan.textContent = fullUrl || '';
+    });
+  } catch (e) {
+    // ignore if sendMessage is not available or behaves differently in tests
+  }
 
-    // Diagnostic: check if seo-title-input is present in DOM after rendering
-    const seoInput = publishInfoPanel.querySelector('#seo-title-input');
-    console.debug(
-      '[DIAG showPublishInfo] seo-title-input in DOM:',
-      !!seoInput,
-      'value:',
-      seoInput?.value
-    );
+  // Diagnostic: check if seo-title-input is present in DOM after rendering
+  const seoInput = publishInfoPanel.querySelector('#seo-title-input');
+  console.debug(
+    '[DIAG showPublishInfo] seo-title-input in DOM:',
+    !!seoInput,
+    'value:',
+    seoInput?.value
+  );
 
-    // Make idea title editable here (replacing header inline edit)
-    const ideaInput = publishInfoPanel.querySelector('#idea-title-input');
-    if (ideaInput) {
-      // Allow editing in publish panel
-      ideaInput.removeAttribute('readonly');
+  // Make idea title editable here (replacing header inline edit)
+  const ideaInput = publishInfoPanel.querySelector('#idea-title-input');
+  if (ideaInput) {
+    // Allow editing in publish panel
+    ideaInput.removeAttribute('readonly');
 
-      // Internal save impl that updates local UI state
-      const doSaveTitleImpl = (newTitle) => {
+    // Internal save impl that updates local UI state
+    const doSaveTitleImpl = (newTitle) => {
+      if (publishInfoArea._isSaving) {
+        console.debug('[Workspace] Save already in progress, skipping duplicate save');
+        return;
+      }
+      publishInfoArea._isSaving = true;
+
+      // Safety timeout to reset flag if callback never runs (e.g. background script error or timeout)
+      setTimeout(() => {
         if (publishInfoArea._isSaving) {
-          console.debug('[Workspace] Save already in progress, skipping duplicate save');
-          return;
-        }
-        publishInfoArea._isSaving = true;
+          console.warn('[Workspace] Save timeout - resetting _isSaving flag');
+          publishInfoArea._isSaving = false;
 
-        // Safety timeout to reset flag if callback never runs (e.g. background script error or timeout)
-        setTimeout(() => {
-          if (publishInfoArea._isSaving) {
-            console.warn('[Workspace] Save timeout - resetting _isSaving flag');
-            publishInfoArea._isSaving = false;
-            
-            // Check if content is still dirty
-            const input = publishInfoArea.querySelector('#idea-title-input');
-            const currentVal = input ? input.value.trim() : '';
-            
-            if (currentVal && currentVal !== ideaData.title) {
-              publishInfoArea._titleChanged = true;
-            }
+          // Check if content is still dirty
+          const input = publishInfoArea.querySelector('#idea-title-input');
+          const currentVal = input ? input.value.trim() : '';
+
+          if (currentVal && currentVal !== ideaData.title) {
+            publishInfoArea._titleChanged = true;
           }
-        }, 5000);
+        }
+      }, 5000);
 
-        console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
-        try {
-          chrome.runtime.sendMessage(
-            {
-              action: 'update_kanban_card',
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || 'ideas',
-                updates: {
-                  title: newTitle,
-                },
+      console.debug('[DIAG doSaveTitleImpl] saving title:', newTitle, 'ideaId:', ideaData.id);
+      try {
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: {
+                title: newTitle,
               },
             },
-            (response) => {
-              publishInfoArea._isSaving = false;
+          },
+          (response) => {
+            publishInfoArea._isSaving = false;
 
-              if (response && response.success) {
-                // Clear any recorded pending title now that save succeeded
-                __lastPendingTitle = null;
-                ideaData.title = newTitle;
+            if (response && response.success) {
+              // Clear any recorded pending title now that save succeeded
+              __lastPendingTitle = null;
+              ideaData.title = newTitle;
               // update header display text
               // header element removed — rely on publish panel and kanban card updates
 
               // update Kanban card(s)
-              const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${ideaData.id}"]`);
+              const kanbanCard = document.querySelector(
+                `.cp-kanban-card[data-id="${ideaData.id}"]`
+              );
               if (kanbanCard) {
                 kanbanCard.dataset.title = newTitle;
                 const kTitle = kanbanCard.querySelector('.kanban-card-title');
@@ -1894,7 +2011,10 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
               // update dashboard or other card lists that carry data-idea-id
               document.querySelectorAll(`[data-idea-id="${ideaData.id}"]`).forEach((el) => {
-                const cardTitle = el.querySelector('.card-title') || el.querySelector('.kanban-card-title') || el.querySelector('.card-title');
+                const cardTitle =
+                  el.querySelector('.card-title') ||
+                  el.querySelector('.kanban-card-title') ||
+                  el.querySelector('.card-title');
                 if (cardTitle) cardTitle.textContent = newTitle;
                 if (el.dataset.ideaTitle !== undefined) el.dataset.ideaTitle = newTitle;
               });
@@ -1902,7 +2022,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               // Check if user has typed more since save started
               const currentInput = publishInfoArea.querySelector('#idea-title-input');
               const currentVal = currentInput ? currentInput.value.trim() : null;
-              
+
               if (currentVal !== null && currentVal !== newTitle) {
                 console.debug('[Workspace] Content changed during save, keeping dirty state');
                 publishInfoArea._titleChanged = true;
@@ -1916,311 +2036,369 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               console.error('[Workspace] 제목 저장 실패:', response);
               showToast('❌ 제목 저장에 실패했습니다.');
             }
-          });
-        } catch (e) {
-          // Defensive: if sendMessage throws (e.g., cb shape unexpected), don't block render
-          publishInfoArea._isSaving = false;
-          publishInfoArea._titleChanged = true; // mark dirty so a subsequent render triggers another save attempt
-          console.debug('[Workspace] sendMessage threw, marked title dirty for retry:', e);
+          }
+        );
+      } catch (e) {
+        // Defensive: if sendMessage throws (e.g., cb shape unexpected), don't block render
+        publishInfoArea._isSaving = false;
+        publishInfoArea._titleChanged = true; // mark dirty so a subsequent render triggers another save attempt
+        console.debug('[Workspace] sendMessage threw, marked title dirty for retry:', e);
+      }
+    };
+
+    // wire up per-panel functions to the container so delegated handlers can call latest impl
+    try {
+      publishInfoArea._doSaveTitle = (force = false) => {
+        const el = publishInfoArea.querySelector('#idea-title-input');
+        if (!el) {
+          console.debug('[DIAG _doSaveTitle] no idea-title-input found');
+          return;
+        }
+        const newTitle = el.value.trim();
+        console.debug(
+          '[DIAG _doSaveTitle] called, force:',
+          !!force,
+          'newTitle:',
+          newTitle,
+          'ideaData.title:',
+          ideaData && ideaData.title
+        );
+        if (!newTitle) {
+          publishInfoArea._titleChanged = false;
+          publishInfoArea._pendingTitle = null;
+          return;
+        }
+        // only save if changed or force requested
+        if (force || newTitle !== ideaData.title) {
+          if (publishInfoArea._isSaving) {
+            console.debug('[Workspace] Save already in progress, skipping');
+            return;
+          }
+          publishInfoArea._titleChanged = false;
+          publishInfoArea._pendingTitle = null;
+          console.debug('[DIAG _doSaveTitle] performing save for title:', newTitle);
+          doSaveTitleImpl(newTitle);
+        } else {
+          publishInfoArea._titleChanged = false;
+          publishInfoArea._pendingTitle = null;
+          console.debug('[DIAG _doSaveTitle] no change detected, skipping save');
+        }
+      };
+      // allow external callers to force a save using an explicit title value
+      publishInfoArea._doSaveTitleFromExternal = (externalTitle) => {
+        if (!externalTitle) return;
+        const t = String(externalTitle).trim();
+        console.debug(
+          '[DIAG _doSaveTitleFromExternal] called, title:',
+          t,
+          'ideaData.title:',
+          ideaData && ideaData.title
+        );
+        if (t && t !== ideaData.title) {
+          doSaveTitleImpl(t);
+        } else {
+          console.debug('[DIAG _doSaveTitleFromExternal] no change or empty, skipping');
         }
       };
 
-      // wire up per-panel functions to the container so delegated handlers can call latest impl
+      // SEO save helpers
       try {
-        publishInfoArea._doSaveTitle = (force = false) => {
-          const el = publishInfoArea.querySelector('#idea-title-input');
-          if (!el) {
-            console.debug('[DIAG _doSaveTitle] no idea-title-input found');
+        // Internal SEO save impl
+        const doSaveSeoImpl = (newSeo) => {
+          if (publishInfoArea._isSavingSeo) {
+            console.debug('[Workspace] SEO save already in progress, skipping');
             return;
           }
-          const newTitle = el.value.trim();
-          console.debug('[DIAG _doSaveTitle] called, force:', !!force, 'newTitle:', newTitle, 'ideaData.title:', ideaData && ideaData.title);
-          if (!newTitle) {
-            publishInfoArea._titleChanged = false;
-            publishInfoArea._pendingTitle = null;
-            return;
-          }
-          // only save if changed or force requested
-          if (force || newTitle !== ideaData.title) {
-            if (publishInfoArea._isSaving) {
-              console.debug('[Workspace] Save already in progress, skipping');
-              return;
+          publishInfoArea._isSavingSeo = true;
+
+          setTimeout(() => {
+            if (publishInfoArea._isSavingSeo) {
+              console.warn('[Workspace] SEO save timeout - resetting _isSavingSeo flag');
+              publishInfoArea._isSavingSeo = false;
+              const input = publishInfoArea.querySelector('#seo-title-input');
+              const currentVal = input ? input.value.trim() : '';
+              if (currentVal && currentVal !== ideaData.seoTitle)
+                publishInfoArea._seoChanged = true;
             }
-            publishInfoArea._titleChanged = false;
-            publishInfoArea._pendingTitle = null;
-            console.debug('[DIAG _doSaveTitle] performing save for title:', newTitle);
-            doSaveTitleImpl(newTitle);
-          } else {
-            publishInfoArea._titleChanged = false;
-            publishInfoArea._pendingTitle = null;
-            console.debug('[DIAG _doSaveTitle] no change detected, skipping save');
-          }
-        };
-        // allow external callers to force a save using an explicit title value
-        publishInfoArea._doSaveTitleFromExternal = (externalTitle) => {
-          if (!externalTitle) return;
-          const t = String(externalTitle).trim();
-          console.debug('[DIAG _doSaveTitleFromExternal] called, title:', t, 'ideaData.title:', ideaData && ideaData.title);
-          if (t && t !== ideaData.title) {
-            doSaveTitleImpl(t);
-          } else {
-            console.debug('[DIAG _doSaveTitleFromExternal] no change or empty, skipping');
+          }, 5000);
+
+          const currentPublishInfo = ideaData.publishInfo || {};
+          const updates = {
+            seoTitle: newSeo,
+            publishInfo: {
+              ...currentPublishInfo,
+              seoTitle: newSeo,
+              updatedAt: Date.now(),
+            },
+          };
+
+          try {
+            chrome.runtime.sendMessage(
+              {
+                action: 'update_kanban_card',
+                data: {
+                  cardId: ideaData.id,
+                  status: ideaData.status || 'ideas',
+                  updates: updates,
+                },
+              },
+              (response) => {
+                publishInfoArea._isSavingSeo = false;
+                if (response && response.success) {
+                  if (!ideaData.publishInfo) ideaData.publishInfo = {};
+                  ideaData.publishInfo.seoTitle = newSeo;
+                  ideaData.seoTitle = newSeo;
+
+                  // Update UI places
+                  const kanbanCard = document.querySelector(
+                    `.cp-kanban-card[data-id="${ideaData.id}"]`
+                  );
+                  if (kanbanCard) {
+                    const kTitle = kanbanCard.querySelector('.kanban-card-title');
+                    if (kTitle) kTitle.textContent = newSeo;
+                  }
+
+                  const currentInput = publishInfoArea.querySelector('#seo-title-input');
+                  const currentVal = currentInput ? currentInput.value.trim() : null;
+                  if (currentVal !== null && currentVal !== newSeo) {
+                    publishInfoArea._seoChanged = true;
+                  } else {
+                    publishInfoArea._seoChanged = false;
+                    publishInfoArea._pendingSeo = null;
+                  }
+
+                  showToast('✅ SEO 제목이 저장되었습니다.');
+                } else {
+                  console.error('[Workspace] SEO 제목 저장 실패:', response);
+                  showToast('❌ SEO 제목 저장에 실패했습니다.');
+                }
+              }
+            );
+          } catch (e) {
+            publishInfoArea._isSavingSeo = false;
+            publishInfoArea._seoChanged = true;
+            console.debug('[Workspace] sendMessage threw, marked seo title dirty for retry:', e);
           }
         };
 
-        // SEO save helpers
-        try {
-          // Internal SEO save impl
-          const doSaveSeoImpl = (newSeo) => {
+        publishInfoArea._doSaveSeoTitle = (force = false) => {
+          const el = publishInfoArea.querySelector('#seo-title-input');
+          if (!el) {
+            console.debug('[DIAG _doSaveSeoTitle] no seo-title-input found');
+            return;
+          }
+          const newSeo = el.value.trim();
+          if (!newSeo) {
+            publishInfoArea._seoChanged = false;
+            publishInfoArea._pendingSeo = null;
+            return;
+          }
+          if (force || newSeo !== ideaData.seoTitle) {
             if (publishInfoArea._isSavingSeo) {
               console.debug('[Workspace] SEO save already in progress, skipping');
               return;
             }
-            publishInfoArea._isSavingSeo = true;
+            publishInfoArea._seoChanged = false;
+            publishInfoArea._pendingSeo = null;
+            doSaveSeoImpl(newSeo);
+          } else {
+            publishInfoArea._seoChanged = false;
+            publishInfoArea._pendingSeo = null;
+            console.debug('[DIAG _doSaveSeoTitle] no change detected, skipping save');
+          }
+        };
 
-            setTimeout(() => {
-              if (publishInfoArea._isSavingSeo) {
-                console.warn('[Workspace] SEO save timeout - resetting _isSavingSeo flag');
-                publishInfoArea._isSavingSeo = false;
-                const input = publishInfoArea.querySelector('#seo-title-input');
-                const currentVal = input ? input.value.trim() : '';
-                if (currentVal && currentVal !== ideaData.seoTitle) publishInfoArea._seoChanged = true;
-              }
-            }, 5000);
+        publishInfoArea._doSaveSeoTitleFromExternal = (externalSeo) => {
+          if (!externalSeo) return;
+          const s = String(externalSeo).trim();
+          if (s && s !== ideaData.seoTitle) {
+            doSaveSeoImpl(s);
+          } else {
+            console.debug('[DIAG _doSaveSeoTitleFromExternal] no change or empty, skipping');
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
+    } catch (e) {
+      // ignore
+    }
 
-            const currentPublishInfo = ideaData.publishInfo || {};
-            const updates = {
-              seoTitle: newSeo,
-              publishInfo: {
-                ...currentPublishInfo,
-                seoTitle: newSeo,
-                updatedAt: Date.now(),
-              },
-            };
+    // expose a test-friendly global save trigger to allow forcing a save
+    try {
+      window.__cp_force_save_title = () => {
+        console.debug('[DIAG __cp_force_save_title] called');
+        // prefer the currently-visible input value to avoid stale closures
+        const cur = document.querySelector('#idea-title-input');
+        const val = cur ? String(cur.value || '').trim() : null;
+        const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
+        console.debug(
+          '[DIAG __cp_force_save_title] current input value:',
+          val,
+          'pubContainer present:',
+          !!pubContainer
+        );
 
+        // If the currently visible publish area matches the targeted one, save using its external hook
+        if (pubContainer && typeof pubContainer._doSaveTitleFromExternal === 'function') {
+          pubContainer._doSaveTitleFromExternal(val);
+          return;
+        }
+
+        // If we don't have the current input (eg. we've already switched to another idea), try to save
+        // any pending title on the previously-rendered publishInfoArea. Prefer its pending value if present.
+        try {
+          // If we recorded a last-pending title (typing happened, then the area was re-rendered),
+          // try saving it. Prefer calling into a live publish area if available; otherwise,
+          // fall back to a best-effort background save via chrome.runtime.sendMessage.
+          if (__lastPendingTitle) {
             try {
-              chrome.runtime.sendMessage(
-                {
-                  action: 'update_kanban_card',
-                  data: {
-                    cardId: ideaData.id,
-                    status: ideaData.status || 'ideas',
-                    updates: updates,
-                  },
-                },
-                (response) => {
-                  publishInfoArea._isSavingSeo = false;
-                  if (response && response.success) {
-                    if (!ideaData.publishInfo) ideaData.publishInfo = {};
-                    ideaData.publishInfo.seoTitle = newSeo;
-                    ideaData.seoTitle = newSeo;
-
-                    // Update UI places
-                    const kanbanCard = document.querySelector(`.cp-kanban-card[data-id="${ideaData.id}"]`);
-                    if (kanbanCard) {
-                      const kTitle = kanbanCard.querySelector('.kanban-card-title');
-                      if (kTitle) kTitle.textContent = newSeo;
-                    }
-
-                    const currentInput = publishInfoArea.querySelector('#seo-title-input');
-                    const currentVal = currentInput ? currentInput.value.trim() : null;
-                    if (currentVal !== null && currentVal !== newSeo) {
-                      publishInfoArea._seoChanged = true;
-                    } else {
-                      publishInfoArea._seoChanged = false;
-                      publishInfoArea._pendingSeo = null;
-                    }
-
-                    showToast('✅ SEO 제목이 저장되었습니다.');
-                  } else {
-                    console.error('[Workspace] SEO 제목 저장 실패:', response);
-                    showToast('❌ SEO 제목 저장에 실패했습니다.');
-                  }
-                }
+              // Attempt to find a live publish area that matches the recorded idea id
+              const possible = Array.from(document.querySelectorAll('#publish-info-content')).find(
+                (el) =>
+                  el &&
+                  (el._doSaveTitleFromExternal || el._doSaveTitle) &&
+                  (el._pendingTitle ||
+                    (el.querySelector &&
+                      el.querySelector('#idea-title-input') &&
+                      el.querySelector('#idea-title-input').value))
               );
-            } catch (e) {
-              publishInfoArea._isSavingSeo = false;
-              publishInfoArea._seoChanged = true;
-              console.debug('[Workspace] sendMessage threw, marked seo title dirty for retry:', e);
-            }
-          };
+              if (possible) {
+                const pending =
+                  __lastPendingTitle.pending ||
+                  possible._pendingTitle ||
+                  (possible.querySelector &&
+                    possible.querySelector('#idea-title-input') &&
+                    String(possible.querySelector('#idea-title-input').value || '').trim());
+                if (pending && typeof possible._doSaveTitleFromExternal === 'function') {
+                  possible._doSaveTitleFromExternal(pending);
+                  __lastPendingTitle = null;
+                  return;
+                }
+                if (
+                  (possible._titleChanged || pending) &&
+                  typeof possible._doSaveTitle === 'function'
+                ) {
+                  possible._doSaveTitle(true);
+                  __lastPendingTitle = null;
+                  return;
+                }
+              }
 
-          publishInfoArea._doSaveSeoTitle = (force = false) => {
-            const el = publishInfoArea.querySelector('#seo-title-input');
-            if (!el) {
-              console.debug('[DIAG _doSaveSeoTitle] no seo-title-input found');
-              return;
+              // No live area found; attempt best-effort background save using stored id/status
+              if (__lastPendingTitle.id && __lastPendingTitle.pending) {
+                try {
+                  chrome.runtime.sendMessage(
+                    {
+                      action: 'update_kanban_card',
+                      data: {
+                        cardId: __lastPendingTitle.id,
+                        status: __lastPendingTitle.status || 'ideas',
+                        updates: { title: __lastPendingTitle.pending },
+                      },
+                    },
+                    () => {
+                      __lastPendingTitle = null;
+                    }
+                  );
+                  return;
+                } catch (e) {
+                  // ignore and fallthrough
+                }
+              }
+            } catch (err) {
+              // ignore and continue
             }
-            const newSeo = el.value.trim();
-            if (!newSeo) {
-              publishInfoArea._seoChanged = false;
-              publishInfoArea._pendingSeo = null;
-              return;
-            }
-            if (force || newSeo !== ideaData.seoTitle) {
-              if (publishInfoArea._isSavingSeo) {
-                console.debug('[Workspace] SEO save already in progress, skipping');
+          }
+
+          // Try all existing publish-info contents for any pending title changes (covers case where
+          // the user typed into one publish area, then the workspace re-rendered and replaced the
+          // publish area DOM with a new one). This scans the DOM to find any element that has
+          // handlers attached and a pending title to save.
+          const publishAreas = document.querySelectorAll('#publish-info-content');
+          for (const pa of publishAreas) {
+            try {
+              const pending =
+                pa._pendingTitle ||
+                (pa.querySelector &&
+                  pa.querySelector('#idea-title-input') &&
+                  String(pa.querySelector('#idea-title-input').value || '').trim());
+              if (pending && typeof pa._doSaveTitleFromExternal === 'function') {
+                pa._doSaveTitleFromExternal(pending);
                 return;
               }
-              publishInfoArea._seoChanged = false;
-              publishInfoArea._pendingSeo = null;
-              doSaveSeoImpl(newSeo);
-            } else {
-              publishInfoArea._seoChanged = false;
-              publishInfoArea._pendingSeo = null;
-              console.debug('[DIAG _doSaveSeoTitle] no change detected, skipping save');
+              if ((pa._titleChanged || pending) && typeof pa._doSaveTitle === 'function') {
+                pa._doSaveTitle(true);
+                return;
+              }
+            } catch (err) {
+              // ignore and continue to next
             }
-          };
-
-          publishInfoArea._doSaveSeoTitleFromExternal = (externalSeo) => {
-            if (!externalSeo) return;
-            const s = String(externalSeo).trim();
-            if (s && s !== ideaData.seoTitle) {
-              doSaveSeoImpl(s);
-            } else {
-              console.debug('[DIAG _doSaveSeoTitleFromExternal] no change or empty, skipping');
-            }
-          };
+          }
         } catch (e) {
-          // ignore
+          console.debug && console.debug('[Workspace] __cp_force_save_title fallback failed:', e);
         }
-      } catch (e) {
-        // ignore
-      }
+      };
 
-      // expose a test-friendly global save trigger to allow forcing a save
-      try {
-        window.__cp_force_save_title = () => {
-          console.debug('[DIAG __cp_force_save_title] called');
-          // prefer the currently-visible input value to avoid stale closures
-          const cur = document.querySelector('#idea-title-input');
-          const val = cur ? String(cur.value || '').trim() : null;
-          const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
-          console.debug('[DIAG __cp_force_save_title] current input value:', val, 'pubContainer present:', !!pubContainer);
+      // Force save for SEO title as well
+      window.__cp_force_save_seo_title = () => {
+        console.debug('[DIAG __cp_force_save_seo_title] called');
+        const cur = document.querySelector('#seo-title-input');
+        const val = cur ? String(cur.value || '').trim() : null;
+        const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
+        console.debug(
+          '[DIAG __cp_force_save_seo_title] current input value:',
+          val,
+          'pubContainer present:',
+          !!pubContainer
+        );
+        if (pubContainer && typeof pubContainer._doSaveSeoTitleFromExternal === 'function') {
+          pubContainer._doSaveSeoTitleFromExternal(val);
+          return;
+        }
+        if (publishInfoArea && typeof publishInfoArea._doSaveSeoTitle === 'function') {
+          publishInfoArea._doSaveSeoTitle(true);
+        }
+      };
+    } catch (e) {
+      // ignore
+    }
 
-          // If the currently visible publish area matches the targeted one, save using its external hook
-          if (pubContainer && typeof pubContainer._doSaveTitleFromExternal === 'function') {
-            pubContainer._doSaveTitleFromExternal(val);
-            return;
-          }
+    // (Removed direct click listener on saveIdeaBtn to avoid double-firing with delegated handler)
 
-          // If we don't have the current input (eg. we've already switched to another idea), try to save
-          // any pending title on the previously-rendered publishInfoArea. Prefer its pending value if present.
+    // Attach delegated handlers on the publish area once so they survive panel re-renders.
+    if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
+      publishInfoArea.addEventListener('input', (ev) => {
+        const targ = ev.target;
+        if (!targ || !targ.id) return;
+
+        if (targ.id === 'idea-title-input') {
+          console.debug('[DIAG publishInfo input] idea title target value:', targ.value);
+          publishInfoArea._titleChanged = true;
+          publishInfoArea._pendingTitle = targ.value;
           try {
-            // If we recorded a last-pending title (typing happened, then the area was re-rendered),
-            // try saving it. Prefer calling into a live publish area if available; otherwise,
-            // fall back to a best-effort background save via chrome.runtime.sendMessage.
-            if (__lastPendingTitle) {
-              try {
-                // Attempt to find a live publish area that matches the recorded idea id
-                const possible = Array.from(document.querySelectorAll('#publish-info-content')).find((el) => el && (el._doSaveTitleFromExternal || el._doSaveTitle) && (el._pendingTitle || (el.querySelector && el.querySelector('#idea-title-input') && el.querySelector('#idea-title-input').value)));
-                if (possible) {
-                  const pending = __lastPendingTitle.pending || possible._pendingTitle || (possible.querySelector && possible.querySelector('#idea-title-input') && String(possible.querySelector('#idea-title-input').value || '').trim());
-                  if (pending && typeof possible._doSaveTitleFromExternal === 'function') {
-                    possible._doSaveTitleFromExternal(pending);
-                    __lastPendingTitle = null;
-                    return;
-                  }
-                  if ((possible._titleChanged || pending) && typeof possible._doSaveTitle === 'function') {
-                    possible._doSaveTitle(true);
-                    __lastPendingTitle = null;
-                    return;
-                  }
-                }
-
-                // No live area found; attempt best-effort background save using stored id/status
-                if (__lastPendingTitle.id && __lastPendingTitle.pending) {
-                  try {
-                    chrome.runtime.sendMessage({
-                      action: 'update_kanban_card',
-                      data: { cardId: __lastPendingTitle.id, status: __lastPendingTitle.status || 'ideas', updates: { title: __lastPendingTitle.pending } },
-                    }, () => {
-                      __lastPendingTitle = null;
-                    });
-                    return;
-                  } catch (e) {
-                    // ignore and fallthrough
-                  }
-                }
-              } catch (err) {
-                // ignore and continue
-              }
-            }
-
-            // Try all existing publish-info contents for any pending title changes (covers case where
-            // the user typed into one publish area, then the workspace re-rendered and replaced the
-            // publish area DOM with a new one). This scans the DOM to find any element that has
-            // handlers attached and a pending title to save.
-            const publishAreas = document.querySelectorAll('#publish-info-content');
-            for (const pa of publishAreas) {
-              try {
-                const pending = pa._pendingTitle || (pa.querySelector && pa.querySelector('#idea-title-input') && String(pa.querySelector('#idea-title-input').value || '').trim());
-                if (pending && typeof pa._doSaveTitleFromExternal === 'function') {
-                  pa._doSaveTitleFromExternal(pending);
-                  return;
-                }
-                if ((pa._titleChanged || pending) && typeof pa._doSaveTitle === 'function') {
-                  pa._doSaveTitle(true);
-                  return;
-                }
-              } catch (err) {
-                // ignore and continue to next
-              }
-            }
+            __lastPendingTitle = {
+              id: ideaData && ideaData.id,
+              pending: String(targ.value || '').trim(),
+              status: ideaData && (ideaData.status || 'ideas'),
+            };
           } catch (e) {
-            console.debug && console.debug('[Workspace] __cp_force_save_title fallback failed:', e);
+            __lastPendingTitle = null;
           }
-        };
+          return;
+        }
 
-        // Force save for SEO title as well
-        window.__cp_force_save_seo_title = () => {
-          console.debug('[DIAG __cp_force_save_seo_title] called');
-          const cur = document.querySelector('#seo-title-input');
-          const val = cur ? String(cur.value || '').trim() : null;
-          const pubContainer = cur ? cur.closest('#publish-info-content') : publishInfoArea;
-          console.debug('[DIAG __cp_force_save_seo_title] current input value:', val, 'pubContainer present:', !!pubContainer);
-          if (pubContainer && typeof pubContainer._doSaveSeoTitleFromExternal === 'function') {
-            pubContainer._doSaveSeoTitleFromExternal(val);
-            return;
-          }
-          if (publishInfoArea && typeof publishInfoArea._doSaveSeoTitle === 'function') {
-            publishInfoArea._doSaveSeoTitle(true);
-          }
-        };
-      } catch (e) {
-        // ignore
-      }
+        if (targ.id === 'seo-title-input') {
+          console.debug('[DIAG publishInfo input] seo title target value:', targ.value);
+          publishInfoArea._seoChanged = true;
+          publishInfoArea._pendingSeo = targ.value;
+          return;
+        }
+      });
 
-      // (Removed direct click listener on saveIdeaBtn to avoid double-firing with delegated handler)
-
-
-      // Attach delegated handlers on the publish area once so they survive panel re-renders.
-      if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
-        publishInfoArea.addEventListener('input', (ev) => {
-          const targ = ev.target;
-          if (!targ || !targ.id) return;
-
-          if (targ.id === 'idea-title-input') {
-            console.debug('[DIAG publishInfo input] idea title target value:', targ.value);
-            publishInfoArea._titleChanged = true;
-            publishInfoArea._pendingTitle = targ.value;
-            try {
-              __lastPendingTitle = { id: ideaData && ideaData.id, pending: String(targ.value || '').trim(), status: ideaData && (ideaData.status || 'ideas') };
-            } catch (e) {
-              __lastPendingTitle = null;
-            }
-            return;
-          }
-
-          if (targ.id === 'seo-title-input') {
-            console.debug('[DIAG publishInfo input] seo title target value:', targ.value);
-            publishInfoArea._seoChanged = true;
-            publishInfoArea._pendingSeo = targ.value;
-            return;
-          }
-        });
-
-        publishInfoArea.addEventListener('blur', (ev) => {
+      publishInfoArea.addEventListener(
+        'blur',
+        (ev) => {
           const targ = ev.target;
           if (!targ || !targ.id) return;
 
@@ -2233,534 +2411,562 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             publishInfoArea._doSaveSeoTitle();
             return;
           }
-        }, true);
+        },
+        true
+      );
 
-        publishInfoArea.dataset.cpPublishHandlersAttached = '1';
+      publishInfoArea.dataset.cpPublishHandlersAttached = '1';
+    }
+  }
+
+  // Make SEO description editable
+  const seoDescInput = publishInfoPanel.querySelector('#seo-description-input');
+  if (seoDescInput) {
+    seoDescInput.removeAttribute('readonly');
+
+    const doSaveDescriptionImpl = (newDesc) => {
+      if (publishInfoArea._isSavingDesc) return;
+      publishInfoArea._isSavingDesc = true;
+
+      console.debug('[Workspace] Saving SEO description:', newDesc);
+
+      // Prepare updates
+      const currentPublishInfo = ideaData.publishInfo || {};
+      let updatedJsonLdSchema = null;
+
+      // Handle jsonLdSchema (object or string)
+      if (currentPublishInfo.jsonLdSchema) {
+        try {
+          if (typeof currentPublishInfo.jsonLdSchema === 'string') {
+            updatedJsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
+          } else {
+            updatedJsonLdSchema = JSON.parse(JSON.stringify(currentPublishInfo.jsonLdSchema));
+          }
+        } catch (e) {
+          console.warn('[Workspace] Failed to parse jsonLdSchema:', e);
+        }
       }
+
+      // If jsonLdSchema exists, update its description too
+      if (updatedJsonLdSchema && typeof updatedJsonLdSchema === 'object') {
+        updatedJsonLdSchema.description = newDesc;
+      }
+
+      const updates = {
+        description: newDesc,
+        publishInfo: {
+          ...currentPublishInfo,
+          description: newDesc,
+          ...(updatedJsonLdSchema ? { jsonLdSchema: updatedJsonLdSchema } : {}),
+          updatedAt: Date.now(),
+        },
+      };
+
+      try {
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: updates,
+            },
+          },
+          (response) => {
+            publishInfoArea._isSavingDesc = false;
+            if (response && response.success) {
+              // Update local data
+              if (!ideaData.publishInfo) ideaData.publishInfo = {};
+              ideaData.publishInfo.description = newDesc;
+              ideaData.description = newDesc;
+              if (updatedJsonLdSchema) {
+                ideaData.publishInfo.jsonLdSchema = updatedJsonLdSchema;
+              }
+              showToast('✅ SEO 설명이 저장되었습니다.');
+            } else {
+              showToast('❌ SEO 설명 저장 실패');
+            }
+          }
+        );
+      } catch (e) {
+        publishInfoArea._isSavingDesc = false;
+        console.error('[Workspace] Save description error:', e);
+      }
+    };
+
+    // Attach listeners if not already attached
+    if (!publishInfoArea.dataset.cpPublishDescHandlersAttached) {
+      publishInfoArea.addEventListener(
+        'blur',
+        (ev) => {
+          const targ = ev.target;
+          if (targ && targ.id === 'seo-description-input') {
+            const val = targ.value.trim();
+            const currentDesc = ideaData.publishInfo?.description || ideaData.description || '';
+            if (val !== currentDesc) {
+              doSaveDescriptionImpl(val);
+            }
+          }
+        },
+        true
+      );
+      publishInfoArea.dataset.cpPublishDescHandlersAttached = '1';
+    }
+  }
+
+  // header title removed — publish-info panel provides title editing
+
+  // 이벤트 리스너
+  // Render regenerate/thumbnail/delete buttons under the copy-html button
+  try {
+    const actionsContainerId = 'publish-info-actions';
+    let actionsContainer = publishInfoPanel.querySelector(`#${actionsContainerId}`);
+
+    // Determine whether we have a meaningful draft before mutating buttons.
+    const hasDraft =
+      isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
+
+    if (!actionsContainer) {
+      actionsContainer = document.createElement('div');
+      actionsContainer.id = actionsContainerId;
+      actionsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+      publishInfoPanel.appendChild(actionsContainer);
     }
 
-    // Make SEO description editable
-    const seoDescInput = publishInfoPanel.querySelector('#seo-description-input');
-    if (seoDescInput) {
-      seoDescInput.removeAttribute('readonly');
+    // create buttons helper
+    const makeBtn = (id, text) => {
+      const b = document.createElement('button');
+      b.id = id;
+      b.textContent = text;
+      b.style.cssText =
+        'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
+      return b;
+    };
 
-      const doSaveDescriptionImpl = (newDesc) => {
-        if (publishInfoArea._isSavingDesc) return;
-        publishInfoArea._isSavingDesc = true;
+    // The HTML copy button only makes sense when a draft exists. Create
+    // it alongside the regenerate/delete buttons and remove it when no
+    // draft is present to avoid exposing a non-functional control.
 
-        console.debug('[Workspace] Saving SEO description:', newDesc);
-        
-        // Prepare updates
-        const currentPublishInfo = ideaData.publishInfo || {};
-        let updatedJsonLdSchema = null;
+    // Ensure regenerate/thumbnail/delete buttons exist only when we have a draft;
+    // otherwise remove them if present (keeps UI deterministic across rerenders).
+    if (hasDraft) {
+      // Ensure the HTML copy button exists in the actions container
+      if (!actionsContainer.querySelector('#copy-html-btn')) {
+        const cbtn = document.createElement('button');
+        cbtn.id = 'copy-html-btn';
+        cbtn.style.cssText =
+          'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
+        cbtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
+        actionsContainer.insertBefore(cbtn, actionsContainer.firstElementChild || null);
+      }
+      if (!actionsContainer.querySelector('#regenerate-draft-btn'))
+        actionsContainer.appendChild(makeBtn('regenerate-draft-btn', '📝 텍스트만 다시 쓰기'));
+      if (!actionsContainer.querySelector('#regenerate-thumbnail-btn'))
+        actionsContainer.appendChild(
+          makeBtn('regenerate-thumbnail-btn', '🎨 썸네일만 다시 그리기')
+        );
+      if (!actionsContainer.querySelector('#delete-draft-in-workspace'))
+        actionsContainer.appendChild(makeBtn('delete-draft-in-workspace', '❌ 초안 삭제'));
 
-        // Handle jsonLdSchema (object or string)
-        if (currentPublishInfo.jsonLdSchema) {
+      // Insert the inline compose-thumbnail-text checkbox next to the regenerate-thumbnail button
+      const regenThumbBtn = actionsContainer.querySelector('#regenerate-thumbnail-btn');
+      if (regenThumbBtn && !actionsContainer.querySelector('.compose-thumbnail-controls')) {
+        // Wrap the regenerate thumbnail button with a controls container so
+        // the checkbox sits immediately before the button (input + button).
+        const controls = document.createElement('div');
+        controls.className = 'compose-thumbnail-controls';
+        // make controls look like a single button-like block; allow it to flex
+        controls.style.cssText =
+          'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'compose-thumbnail-text-checkbox';
+        input.checked = false;
+        input.style.cssText =
+          'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+        // use native tooltip on hover to show the description
+        input.title = '썸네일 텍스트 오버레이 적용';
+
+        // initialize checked state from storage if available
+        try {
+          chrome.storage.local.get('composeThumbnailText').then((s) => {
+            input.checked = !!s.composeThumbnailText;
+          });
+        } catch (e) {
+          // ignore
+        }
+
+        input.addEventListener('change', (e) => {
+          const isChecked = e.target.checked;
+          chrome.storage.local.set({ composeThumbnailText: isChecked });
+        });
+
+        // Insert controls before the existing button, then move the button
+        // inside the controls so the DOM becomes: <div.controls><input/><button id="regenerate-thumbnail-btn">...</button></div>
+        regenThumbBtn.parentNode.insertBefore(controls, regenThumbBtn);
+        // style the button to flex and match the controls' appearance
+        regenThumbBtn.style.cssText =
+          'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+        controls.appendChild(input);
+        controls.appendChild(regenThumbBtn);
+        // Keep the text-regenerate button outside of the compose controls
+        // so it remains a separate action (visually adjacent but not nested).
+      }
+
+      // Safety: ensure regenerate thumbnail button is wrapped with compose-controls
+      // in case a previous render placed the button differently (defensive fix for tests).
+      try {
+        const pubRegenBtn = publishInfoPanel.querySelector('#regenerate-thumbnail-btn');
+        if (pubRegenBtn && !pubRegenBtn.closest('.compose-thumbnail-controls')) {
+          const fallbackControls = document.createElement('div');
+          fallbackControls.className = 'compose-thumbnail-controls';
+          fallbackControls.style.cssText =
+            'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+          // prefer reusing an existing checkbox if present (keeps event listeners intact)
+          let fallbackInput =
+            publishInfoPanel.querySelector('#compose-thumbnail-text-checkbox') ||
+            workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
+          if (!fallbackInput) {
+            fallbackInput = document.createElement('input');
+            fallbackInput.type = 'checkbox';
+            fallbackInput.id = 'compose-thumbnail-text-checkbox';
+            fallbackInput.checked = false;
+            fallbackInput.style.cssText =
+              'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+            fallbackInput.title = '썸네일 텍스트 오버레이 적용';
+            try {
+              chrome.storage.local.get('composeThumbnailText').then((s) => {
+                fallbackInput.checked = !!s.composeThumbnailText;
+              });
+            } catch (e) {}
+            fallbackInput.addEventListener('change', (e) => {
+              chrome.storage.local.set({ composeThumbnailText: e.target.checked });
+            });
+          } else {
+            // ensure title is set
+            fallbackInput.title = fallbackInput.title || '썸네일 텍스트 오버레이 적용';
+          }
+          pubRegenBtn.parentNode.insertBefore(fallbackControls, pubRegenBtn);
+          pubRegenBtn.style.cssText =
+            'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+          fallbackControls.appendChild(fallbackInput);
+          fallbackControls.appendChild(pubRegenBtn);
+        }
+      } catch (e) {
+        // defensive no-op
+      }
+    } else {
+      [
+        'regenerate-draft-btn',
+        'regenerate-thumbnail-btn',
+        'delete-draft-in-workspace',
+        'copy-html-btn',
+      ].forEach((id) => {
+        const el = actionsContainer.querySelector(`#${id}`);
+        if (el && el.parentNode) el.remove();
+      });
+    }
+
+    // Show the actions container always so the generate button/checkbox can be
+    // placed here when there is no draft.
+    actionsContainer.style.display = 'flex';
+
+    // copy buttons should be visible only when AI draft exists (appear with regenerate buttons)
+    const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
+    const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
+    if (copyHtmlBtn) copyHtmlBtn.style.display = hasDraft ? 'block' : 'none';
+    if (copyTagsBtn) copyTagsBtn.style.display = hasDraft ? 'inline-block' : 'none';
+
+    // If no draft: show generate button and ensure checkbox is placed near copy-html (publish-info)
+    if (!hasDraft) {
+      // create a compose-controls wrapper in publish-info-actions so the
+      // generate button and the compose checkbox visually match the
+      // .compose-thumbnail-controls used when a draft exists.
+      const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
+      if (pubActions) {
+        let controls = pubActions.querySelector('.compose-thumbnail-controls');
+        if (!controls) {
+          controls = document.createElement('div');
+          controls.className = 'compose-thumbnail-controls';
+          controls.style.cssText =
+            'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+
+          // checkbox
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.id = 'compose-thumbnail-text-checkbox';
+          input.checked = false;
+          input.style.cssText =
+            'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+          input.title = '썸네일 텍스트 오버레이 적용';
+          try {
+            chrome.storage.local.get('composeThumbnailText').then((s) => {
+              input.checked = !!s.composeThumbnailText;
+            });
+          } catch (e) {
+            // ignore
+          }
+          input.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            chrome.storage.local.set({ composeThumbnailText: isChecked });
+          });
+
+          // generate button (styled to flex like regenerate button)
+          const genBtn = document.createElement('button');
+          genBtn.id = 'generate-draft-btn';
+          genBtn.style.cssText =
+            'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+          genBtn.textContent = '✨ AI 초안 생성';
+
+          controls.appendChild(input);
+          controls.appendChild(genBtn);
+          pubActions.insertBefore(controls, pubActions.firstElementChild || null);
+        }
+      }
+    } else {
+      // remove any generate button from publish-info if draft exists
+      const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
+      if (pubActions) {
+        const genBtn = pubActions.querySelector('#generate-draft-btn');
+        if (genBtn && genBtn.parentNode) {
+          // remove the surrounding compose controls container if it exists
+          const controls = genBtn.closest('.compose-thumbnail-controls');
+          if (controls && controls.parentNode) controls.remove();
+          else genBtn.remove();
+        }
+      }
+    }
+  } catch (err) {
+    // ignore UI action render failures
+  }
+  const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
+  if (connectBtn && fullUrl) {
+    connectBtn.addEventListener('click', () => {
+      console.debug('[Workspace] connect-permalink-btn clicked', {
+        cardId: ideaData.id,
+        fullUrl,
+      });
+      // 현재 카드의 실제 status 가져오기
+      const currentStatus =
+        ideaData.status || window.__cp_workspace_idea_data?.status || 'in-progress';
+      chrome.runtime.sendMessage(
+        {
+          action: 'link_published_url',
+          data: {
+            cardId: ideaData.id,
+            url: fullUrl,
+            status: currentStatus,
+          },
+        },
+        (res) => {
+          console.debug('[Workspace] link_published_url response for', ideaData.id, res);
+          if (res && res.success) {
+            showToast('✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.');
+            // 로컬 데이터 업데이트
+            if (window.__cp_workspace_idea_data) {
+              window.__cp_workspace_idea_data.publishedUrl = fullUrl;
+              window.__cp_workspace_idea_data.performanceTracked = true;
+            }
+          } else {
+            showToast(`❌ 연결 실패: ${res?.error || '알 수 없는 오류'}`, 'error');
+          }
+        }
+      );
+    });
+    console.debug('[DIAG showPublishInfo] connect-permalink-btn listener attached');
+  }
+
+  const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
+  if (copyTagsBtn) {
+    copyTagsBtn.addEventListener('click', () => {
+      const tagsInput = publishInfoPanel.querySelector('#tags-input');
+      if (tagsInput && tagsInput.value) {
+        navigator.clipboard.writeText(tagsInput.value).then(() => alert('📋 태그 복사 완료'));
+      }
+    });
+  }
+
+  // HTML 복사 버튼 이벤트 리스너
+  // 주의: 이벤트 리스너 내부에서 항상 최신 데이터를 참조하도록 수정
+  const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
+  if (copyHtmlBtn) {
+    copyHtmlBtn.addEventListener('click', async () => {
+      try {
+        copyHtmlBtn.disabled = true;
+        copyHtmlBtn.textContent = '⏳ 생성 중...';
+
+        // 최신 ideaData 가져오기 (클로저 캡처 대신 런타임에 참조)
+        const currentIdeaData = window.__cp_workspace_idea_data || ideaData;
+
+        // 에디터 내용 가져오기
+        const editorIframe = workspaceEl.querySelector('#editor-iframe');
+        let editorHtml = '';
+
+        if (editorIframe && editorIframe.contentWindow) {
+          const messageId = `get-content-html-${Date.now()}`;
+          editorHtml = await new Promise((resolve) => {
+            const handler = (event) => {
+              if (event.data.action === 'content-response' && event.data.requestId === messageId) {
+                window.removeEventListener('message', handler);
+                resolve(event.data.data?.html || '');
+              }
+            };
+            window.addEventListener('message', handler);
+            editorIframe.contentWindow.postMessage(
+              { action: 'get-content', requestId: messageId },
+              '*'
+            );
+            setTimeout(() => {
+              window.removeEventListener('message', handler);
+              resolve('');
+            }, 2000);
+          });
+        }
+
+        // 에디터 내용이 없으면 최신 draftContent 사용
+        if (!editorHtml || editorHtml.trim() === '') {
+          const draftContent =
+            currentIdeaData?.workspace?.draft ||
+            currentIdeaData?.draftContent ||
+            currentIdeaData?.draft ||
+            '';
+          if (draftContent) {
+            // draftContent가 마크다운 형식일 수 있으므로 HTML로 변환
+            if (typeof marked !== 'undefined' && marked.parse) {
+              editorHtml = marked.parse(draftContent);
+            } else {
+              // marked가 없으면 그대로 사용
+              editorHtml = draftContent;
+            }
+          }
+        }
+
+        // [핵심 수정] JSON-LD 스키마 가져오기 (없으면 자동 생성)
+        let jsonLdSchema = null;
+        const currentPublishInfo = currentIdeaData?.publishInfo;
+
+        if (currentPublishInfo && currentPublishInfo.jsonLdSchema) {
           try {
             if (typeof currentPublishInfo.jsonLdSchema === 'string') {
-              updatedJsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
+              jsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
             } else {
-              updatedJsonLdSchema = JSON.parse(JSON.stringify(currentPublishInfo.jsonLdSchema));
+              jsonLdSchema = currentPublishInfo.jsonLdSchema;
             }
           } catch (e) {
             console.warn('[Workspace] Failed to parse jsonLdSchema:', e);
           }
         }
 
-        // If jsonLdSchema exists, update its description too
-        if (updatedJsonLdSchema && typeof updatedJsonLdSchema === 'object') {
-          updatedJsonLdSchema.description = newDesc;
-        }
+        if (!jsonLdSchema) {
+          // Fallback: 저장된 JSON-LD가 없으면 기본값 생성
+          console.log('[Workspace] JSON-LD가 없어 기본 스키마를 생성합니다.');
+          const today = new Date().toISOString().split('T')[0];
 
-        const updates = {
-          description: newDesc,
-          publishInfo: {
-            ...currentPublishInfo,
-            description: newDesc,
-            ...(updatedJsonLdSchema ? { jsonLdSchema: updatedJsonLdSchema } : {}),
-            updatedAt: Date.now()
-          }
-        };
-
-        try {
-          chrome.runtime.sendMessage(
-            {
-              action: 'update_kanban_card',
-              data: {
-                cardId: ideaData.id,
-                status: ideaData.status || 'ideas',
-                updates: updates,
-              },
-            },
-            (response) => {
-              publishInfoArea._isSavingDesc = false;
-              if (response && response.success) {
-                // Update local data
-                if (!ideaData.publishInfo) ideaData.publishInfo = {};
-                ideaData.publishInfo.description = newDesc;
-                ideaData.description = newDesc;
-                if (updatedJsonLdSchema) {
-                  ideaData.publishInfo.jsonLdSchema = updatedJsonLdSchema;
-                }
-                showToast('✅ SEO 설명이 저장되었습니다.');
-              } else {
-                showToast('❌ SEO 설명 저장 실패');
-              }
-            }
-          );
-        } catch (e) {
-          publishInfoArea._isSavingDesc = false;
-          console.error('[Workspace] Save description error:', e);
-        }
-      };
-
-      // Attach listeners if not already attached
-      if (!publishInfoArea.dataset.cpPublishDescHandlersAttached) {
-        publishInfoArea.addEventListener('blur', (ev) => {
-          const targ = ev.target;
-          if (targ && targ.id === 'seo-description-input') {
-             const val = targ.value.trim();
-             const currentDesc = ideaData.publishInfo?.description || ideaData.description || '';
-             if (val !== currentDesc) {
-               doSaveDescriptionImpl(val);
-             }
-          }
-        }, true);
-        publishInfoArea.dataset.cpPublishDescHandlersAttached = '1';
-      }
-    }
-
-    // header title removed — publish-info panel provides title editing
-
-    // 이벤트 리스너
-      // Render regenerate/thumbnail/delete buttons under the copy-html button
-      try {
-        const actionsContainerId = 'publish-info-actions';
-        let actionsContainer = publishInfoPanel.querySelector(`#${actionsContainerId}`);
-
-        // Determine whether we have a meaningful draft before mutating buttons.
-        const hasDraft = isMeaningfulDraft(ideaData.draftContent) || isMeaningfulDraft(ideaData.workspace?.draft);
-
-        if (!actionsContainer) {
-          actionsContainer = document.createElement('div');
-          actionsContainer.id = actionsContainerId;
-          actionsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
-          publishInfoPanel.appendChild(actionsContainer);
-        }
-
-        // create buttons helper
-        const makeBtn = (id, text) => {
-          const b = document.createElement('button');
-          b.id = id;
-          b.textContent = text;
-          b.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
-          return b;
-        };
-
-        // The HTML copy button only makes sense when a draft exists. Create
-        // it alongside the regenerate/delete buttons and remove it when no
-        // draft is present to avoid exposing a non-functional control.
-
-        // Ensure regenerate/thumbnail/delete buttons exist only when we have a draft;
-        // otherwise remove them if present (keeps UI deterministic across rerenders).
-        if (hasDraft) {
-          // Ensure the HTML copy button exists in the actions container
-          if (!actionsContainer.querySelector('#copy-html-btn')) {
-            const cbtn = document.createElement('button');
-            cbtn.id = 'copy-html-btn';
-            cbtn.style.cssText = 'width: 100%; padding: 10px; background: #4285f4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;';
-            cbtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
-            actionsContainer.insertBefore(cbtn, actionsContainer.firstElementChild || null);
-          }
-          if (!actionsContainer.querySelector('#regenerate-draft-btn')) actionsContainer.appendChild(makeBtn('regenerate-draft-btn', '📝 텍스트만 다시 쓰기'));
-          if (!actionsContainer.querySelector('#regenerate-thumbnail-btn')) actionsContainer.appendChild(makeBtn('regenerate-thumbnail-btn', '🎨 썸네일만 다시 그리기'));
-          if (!actionsContainer.querySelector('#delete-draft-in-workspace')) actionsContainer.appendChild(makeBtn('delete-draft-in-workspace', '❌ 초안 삭제'));
-
-          // Insert the inline compose-thumbnail-text checkbox next to the regenerate-thumbnail button
-          const regenThumbBtn = actionsContainer.querySelector('#regenerate-thumbnail-btn');
-          if (regenThumbBtn && !actionsContainer.querySelector('.compose-thumbnail-controls')) {
-            // Wrap the regenerate thumbnail button with a controls container so
-            // the checkbox sits immediately before the button (input + button).
-            const controls = document.createElement('div');
-            controls.className = 'compose-thumbnail-controls';
-            // make controls look like a single button-like block; allow it to flex
-            controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
-
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = 'compose-thumbnail-text-checkbox';
-            input.checked = false;
-            input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
-            // use native tooltip on hover to show the description
-            input.title = '썸네일 텍스트 오버레이 적용';
-
-            // initialize checked state from storage if available
-            try {
-              chrome.storage.local.get('composeThumbnailText').then((s) => {
-                input.checked = !!s.composeThumbnailText;
-              });
-            } catch (e) {
-              // ignore
-            }
-
-            input.addEventListener('change', (e) => {
-              const isChecked = e.target.checked;
-              chrome.storage.local.set({ composeThumbnailText: isChecked });
-            });
-
-            // Insert controls before the existing button, then move the button
-            // inside the controls so the DOM becomes: <div.controls><input/><button id="regenerate-thumbnail-btn">...</button></div>
-            regenThumbBtn.parentNode.insertBefore(controls, regenThumbBtn);
-            // style the button to flex and match the controls' appearance
-            regenThumbBtn.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
-            controls.appendChild(input);
-            controls.appendChild(regenThumbBtn);
-            // Keep the text-regenerate button outside of the compose controls
-            // so it remains a separate action (visually adjacent but not nested).
+          // 썸네일 이미지 URL들 수집
+          const imageUrls = [];
+          if (currentIdeaData?.thumbnailUrls) {
+            if (currentIdeaData.thumbnailUrls.url_1x1)
+              imageUrls.push(currentIdeaData.thumbnailUrls.url_1x1);
+            if (currentIdeaData.thumbnailUrls.url_4x3)
+              imageUrls.push(currentIdeaData.thumbnailUrls.url_4x3);
+            if (currentIdeaData.thumbnailUrls.url_16x9)
+              imageUrls.push(currentIdeaData.thumbnailUrls.url_16x9);
+          } else if (currentIdeaData?.thumbnail) {
+            imageUrls.push(currentIdeaData.thumbnail);
           }
 
-          // Safety: ensure regenerate thumbnail button is wrapped with compose-controls
-          // in case a previous render placed the button differently (defensive fix for tests).
+          // 퍼머링크 URL (전체 URL)
+          const permalinkUrl = fullUrl || '';
+
+          // Publisher 정보 (채널 URL에서 도메인 추출 또는 기본값)
+          let publisherName = 'Content Pilot';
           try {
-            const pubRegenBtn = publishInfoPanel.querySelector('#regenerate-thumbnail-btn');
-            if (pubRegenBtn && !pubRegenBtn.closest('.compose-thumbnail-controls')) {
-              const fallbackControls = document.createElement('div');
-              fallbackControls.className = 'compose-thumbnail-controls';
-              fallbackControls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
-              // prefer reusing an existing checkbox if present (keeps event listeners intact)
-              let fallbackInput = publishInfoPanel.querySelector('#compose-thumbnail-text-checkbox') || workspaceEl.querySelector('#compose-thumbnail-text-checkbox');
-              if (!fallbackInput) {
-                fallbackInput = document.createElement('input');
-                fallbackInput.type = 'checkbox';
-                fallbackInput.id = 'compose-thumbnail-text-checkbox';
-                fallbackInput.checked = false;
-                fallbackInput.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
-                fallbackInput.title = '썸네일 텍스트 오버레이 적용';
-                try {
-                  chrome.storage.local.get('composeThumbnailText').then((s) => {
-                    fallbackInput.checked = !!s.composeThumbnailText;
-                  });
-                } catch (e) {}
-                fallbackInput.addEventListener('change', (e) => {
-                  chrome.storage.local.set({ composeThumbnailText: e.target.checked });
-                });
-              } else {
-                // ensure title is set
-                fallbackInput.title = fallbackInput.title || '썸네일 텍스트 오버레이 적용';
-              }
-              pubRegenBtn.parentNode.insertBefore(fallbackControls, pubRegenBtn);
-              pubRegenBtn.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
-              fallbackControls.appendChild(fallbackInput);
-              fallbackControls.appendChild(pubRegenBtn);
+            if (channelUrl) {
+              const url = new URL(channelUrl);
+              publisherName = url.hostname;
             }
           } catch (e) {
-            // defensive no-op
+            // URL 파싱 실패 시 기본값 유지
           }
-        } else {
-          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace', 'copy-html-btn'].forEach((id) => {
-            const el = actionsContainer.querySelector(`#${id}`);
-            if (el && el.parentNode) el.remove();
+
+          jsonLdSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'BlogPosting',
+            headline: currentIdeaData.seoTitle || currentIdeaData.title || '제목 없음',
+            description:
+              currentIdeaData.publishInfo?.description ||
+              currentIdeaData.description ||
+              '콘텐츠 설명이 없습니다.',
+            author: {
+              '@type': 'Person',
+              name: publisherName,
+            },
+            datePublished: today,
+            dateModified: today,
+            image: imageUrls.length > 0 ? imageUrls : undefined,
+            mainEntityOfPage: permalinkUrl
+              ? {
+                  '@type': 'WebPage',
+                  '@id': permalinkUrl,
+                }
+              : undefined,
+            publisher: {
+              '@type': 'Organization',
+              name: publisherName,
+              logo: {
+                '@type': 'ImageObject',
+                url: 'https://via.placeholder.com/120x60',
+              },
+            },
+          };
+
+          // undefined 값 제거
+          Object.keys(jsonLdSchema).forEach((key) => {
+            if (jsonLdSchema[key] === undefined) {
+              delete jsonLdSchema[key];
+            }
           });
         }
 
-        // Show the actions container always so the generate button/checkbox can be
-        // placed here when there is no draft.
-        actionsContainer.style.display = 'flex';
+        // 최신 seoTitle 가져오기
+        const currentSeoTitle =
+          currentPublishInfo?.seoTitle || currentIdeaData?.seoTitle || currentIdeaData?.title || '';
 
-        // copy buttons should be visible only when AI draft exists (appear with regenerate buttons)
-        const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
-        const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
-        if (copyHtmlBtn) copyHtmlBtn.style.display = hasDraft ? 'block' : 'none';
-        if (copyTagsBtn) copyTagsBtn.style.display = hasDraft ? 'inline-block' : 'none';
-
-        // If no draft: show generate button and ensure checkbox is placed near copy-html (publish-info)
-        if (!hasDraft) {
-          // create a compose-controls wrapper in publish-info-actions so the
-          // generate button and the compose checkbox visually match the
-          // .compose-thumbnail-controls used when a draft exists.
-          const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
-          if (pubActions) {
-            let controls = pubActions.querySelector('.compose-thumbnail-controls');
-            if (!controls) {
-              controls = document.createElement('div');
-              controls.className = 'compose-thumbnail-controls';
-              controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
-
-              // checkbox
-              const input = document.createElement('input');
-              input.type = 'checkbox';
-              input.id = 'compose-thumbnail-text-checkbox';
-              input.checked = false;
-              input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
-              input.title = '썸네일 텍스트 오버레이 적용';
-              try {
-                chrome.storage.local.get('composeThumbnailText').then((s) => {
-                  input.checked = !!s.composeThumbnailText;
-                });
-              } catch (e) {
-                // ignore
-              }
-              input.addEventListener('change', (e) => {
-                const isChecked = e.target.checked;
-                chrome.storage.local.set({ composeThumbnailText: isChecked });
-              });
-
-              // generate button (styled to flex like regenerate button)
-              const genBtn = document.createElement('button');
-              genBtn.id = 'generate-draft-btn';
-              genBtn.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
-              genBtn.textContent = '✨ AI 초안 생성';
-
-              controls.appendChild(input);
-              controls.appendChild(genBtn);
-              pubActions.insertBefore(controls, pubActions.firstElementChild || null);
-            }
-          }
-        } else {
-          // remove any generate button from publish-info if draft exists
-          const pubActions = publishInfoPanel.querySelector('#publish-info-actions');
-          if (pubActions) {
-            const genBtn = pubActions.querySelector('#generate-draft-btn');
-            if (genBtn && genBtn.parentNode) {
-              // remove the surrounding compose controls container if it exists
-              const controls = genBtn.closest('.compose-thumbnail-controls');
-              if (controls && controls.parentNode) controls.remove();
-              else genBtn.remove();
-            }
-          }
+        // [Fix] Ensure JSON-LD description matches the UI input (publishInfo.description)
+        // 사용자가 입력한 최신 SEO 설명이 JSON-LD에도 반영되도록 강제 업데이트
+        const currentDescription =
+          currentPublishInfo?.description || currentIdeaData?.description || '';
+        if (jsonLdSchema && currentDescription) {
+          jsonLdSchema.description = currentDescription;
         }
-      } catch (err) {
-        // ignore UI action render failures
+
+        // 완전한 HTML 생성
+        const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, currentSeoTitle);
+
+        // 클립보드에 복사
+        await navigator.clipboard.writeText(fullHtml);
+        showToast('✅ HTML이 클립보드에 복사되었습니다! (JSON-LD 포함)');
+        copyHtmlBtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
+      } catch (error) {
+        console.error('[Workspace] HTML 복사 실패:', error);
+        showToast('❌ HTML 복사에 실패했습니다.', 'error');
+        copyHtmlBtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
+      } finally {
+        copyHtmlBtn.disabled = false;
       }
-    const connectBtn = publishInfoPanel.querySelector('#connect-permalink-btn');
-    if (connectBtn && fullUrl) {
-      connectBtn.addEventListener('click', () => {
-        console.debug('[Workspace] connect-permalink-btn clicked', {
-          cardId: ideaData.id,
-          fullUrl,
-        });
-        // 현재 카드의 실제 status 가져오기
-        const currentStatus =
-          ideaData.status || window.__cp_workspace_idea_data?.status || 'in-progress';
-        chrome.runtime.sendMessage(
-          {
-            action: 'link_published_url',
-            data: {
-              cardId: ideaData.id,
-              url: fullUrl,
-              status: currentStatus,
-            },
-          },
-          (res) => {
-            console.debug('[Workspace] link_published_url response for', ideaData.id, res);
-            if (res && res.success) {
-              showToast('✅ 발행 URL이 연결되었습니다. 성과 추적이 시작됩니다.');
-              // 로컬 데이터 업데이트
-              if (window.__cp_workspace_idea_data) {
-                window.__cp_workspace_idea_data.publishedUrl = fullUrl;
-                window.__cp_workspace_idea_data.performanceTracked = true;
-              }
-            } else {
-              showToast(`❌ 연결 실패: ${res?.error || '알 수 없는 오류'}`, 'error');
-            }
-          }
-        );
-      });
-      console.debug('[DIAG showPublishInfo] connect-permalink-btn listener attached');
+    });
+  }
+
+  // [추가] publish-info 패널이 렌더링된 후 썸네일 버튼을 올바른 위치에 추가
+  // showPublishInfo가 DOM을 새로 그리기 때문에 버튼이 사라질 수 있음 -> 다시 렌더링 요청
+  try {
+    if (typeof renderThumbnailButton === 'function') {
+      renderThumbnailButton(workspaceEl, ideaData);
     }
-
-    const copyTagsBtn = publishInfoPanel.querySelector('#copy-tags-btn');
-    if (copyTagsBtn) {
-      copyTagsBtn.addEventListener('click', () => {
-        const tagsInput = publishInfoPanel.querySelector('#tags-input');
-        if (tagsInput && tagsInput.value) {
-          navigator.clipboard.writeText(tagsInput.value).then(() => alert('📋 태그 복사 완료'));
-        }
-      });
-    }
-
-    // HTML 복사 버튼 이벤트 리스너
-    // 주의: 이벤트 리스너 내부에서 항상 최신 데이터를 참조하도록 수정
-    const copyHtmlBtn = publishInfoPanel.querySelector('#copy-html-btn');
-    if (copyHtmlBtn) {
-      copyHtmlBtn.addEventListener('click', async () => {
-        try {
-          copyHtmlBtn.disabled = true;
-          copyHtmlBtn.textContent = '⏳ 생성 중...';
-
-          // 최신 ideaData 가져오기 (클로저 캡처 대신 런타임에 참조)
-          const currentIdeaData = window.__cp_workspace_idea_data || ideaData;
-
-          // 에디터 내용 가져오기
-          const editorIframe = workspaceEl.querySelector('#editor-iframe');
-          let editorHtml = '';
-
-          if (editorIframe && editorIframe.contentWindow) {
-            const messageId = `get-content-html-${Date.now()}`;
-            editorHtml = await new Promise((resolve) => {
-              const handler = (event) => {
-                if (
-                  event.data.action === 'content-response' &&
-                  event.data.requestId === messageId
-                ) {
-                  window.removeEventListener('message', handler);
-                  resolve(event.data.data?.html || '');
-                }
-              };
-              window.addEventListener('message', handler);
-              editorIframe.contentWindow.postMessage(
-                { action: 'get-content', requestId: messageId },
-                '*'
-              );
-              setTimeout(() => {
-                window.removeEventListener('message', handler);
-                resolve('');
-              }, 2000);
-            });
-          }
-
-          // 에디터 내용이 없으면 최신 draftContent 사용
-          if (!editorHtml || editorHtml.trim() === '') {
-            const draftContent =
-              currentIdeaData?.workspace?.draft ||
-              currentIdeaData?.draftContent ||
-              currentIdeaData?.draft ||
-              '';
-            if (draftContent) {
-              // draftContent가 마크다운 형식일 수 있으므로 HTML로 변환
-              if (typeof marked !== 'undefined' && marked.parse) {
-                editorHtml = marked.parse(draftContent);
-              } else {
-                // marked가 없으면 그대로 사용
-                editorHtml = draftContent;
-              }
-            }
-          }
-
-          // [핵심 수정] JSON-LD 스키마 가져오기 (없으면 자동 생성)
-          let jsonLdSchema = null;
-          const currentPublishInfo = currentIdeaData?.publishInfo;
-
-          if (currentPublishInfo && currentPublishInfo.jsonLdSchema) {
-            try {
-              if (typeof currentPublishInfo.jsonLdSchema === 'string') {
-                jsonLdSchema = JSON.parse(currentPublishInfo.jsonLdSchema);
-              } else {
-                jsonLdSchema = currentPublishInfo.jsonLdSchema;
-              }
-            } catch (e) {
-              console.warn('[Workspace] Failed to parse jsonLdSchema:', e);
-            }
-          }
-
-          if (!jsonLdSchema) {
-            // Fallback: 저장된 JSON-LD가 없으면 기본값 생성
-            console.log('[Workspace] JSON-LD가 없어 기본 스키마를 생성합니다.');
-            const today = new Date().toISOString().split('T')[0];
-
-            // 썸네일 이미지 URL들 수집
-            const imageUrls = [];
-            if (currentIdeaData?.thumbnailUrls) {
-              if (currentIdeaData.thumbnailUrls.url_1x1)
-                imageUrls.push(currentIdeaData.thumbnailUrls.url_1x1);
-              if (currentIdeaData.thumbnailUrls.url_4x3)
-                imageUrls.push(currentIdeaData.thumbnailUrls.url_4x3);
-              if (currentIdeaData.thumbnailUrls.url_16x9)
-                imageUrls.push(currentIdeaData.thumbnailUrls.url_16x9);
-            } else if (currentIdeaData?.thumbnail) {
-              imageUrls.push(currentIdeaData.thumbnail);
-            }
-
-            // 퍼머링크 URL (전체 URL)
-            const permalinkUrl = fullUrl || '';
-
-            // Publisher 정보 (채널 URL에서 도메인 추출 또는 기본값)
-            let publisherName = 'Content Pilot';
-            try {
-              if (channelUrl) {
-                const url = new URL(channelUrl);
-                publisherName = url.hostname;
-              }
-            } catch (e) {
-              // URL 파싱 실패 시 기본값 유지
-            }
-
-            jsonLdSchema = {
-              '@context': 'https://schema.org',
-              '@type': 'BlogPosting',
-              headline: currentIdeaData.seoTitle || currentIdeaData.title || '제목 없음',
-              description: currentIdeaData.publishInfo?.description || currentIdeaData.description || '콘텐츠 설명이 없습니다.',
-              author: {
-                '@type': 'Person',
-                name: publisherName,
-              },
-              datePublished: today,
-              dateModified: today,
-              image: imageUrls.length > 0 ? imageUrls : undefined,
-              mainEntityOfPage: permalinkUrl
-                ? {
-                    '@type': 'WebPage',
-                    '@id': permalinkUrl,
-                  }
-                : undefined,
-              publisher: {
-                '@type': 'Organization',
-                name: publisherName,
-                logo: {
-                  '@type': 'ImageObject',
-                  url: 'https://via.placeholder.com/120x60',
-                },
-              },
-            };
-
-            // undefined 값 제거
-            Object.keys(jsonLdSchema).forEach((key) => {
-              if (jsonLdSchema[key] === undefined) {
-                delete jsonLdSchema[key];
-              }
-            });
-          }
-
-          // 최신 seoTitle 가져오기
-          const currentSeoTitle =
-            currentPublishInfo?.seoTitle ||
-            currentIdeaData?.seoTitle ||
-            currentIdeaData?.title ||
-            '';
-
-          // [Fix] Ensure JSON-LD description matches the UI input (publishInfo.description)
-          // 사용자가 입력한 최신 SEO 설명이 JSON-LD에도 반영되도록 강제 업데이트
-          const currentDescription = currentPublishInfo?.description || currentIdeaData?.description || '';
-          if (jsonLdSchema && currentDescription) {
-             jsonLdSchema.description = currentDescription;
-          }
-
-          // 완전한 HTML 생성
-          const fullHtml = generateCompleteHtml(editorHtml, jsonLdSchema, currentSeoTitle);
-
-          // 클립보드에 복사
-          await navigator.clipboard.writeText(fullHtml);
-          showToast('✅ HTML이 클립보드에 복사되었습니다! (JSON-LD 포함)');
-          copyHtmlBtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
-        } catch (error) {
-          console.error('[Workspace] HTML 복사 실패:', error);
-          showToast('❌ HTML 복사에 실패했습니다.', 'error');
-          copyHtmlBtn.textContent = '📄 HTML 복사 (JSON-LD 포함)';
-        } finally {
-          copyHtmlBtn.disabled = false;
-        }
-      });
-    }
-
-    // [추가] publish-info 패널이 렌더링된 후 썸네일 버튼을 올바른 위치에 추가
-    // showPublishInfo가 DOM을 새로 그리기 때문에 버튼이 사라질 수 있음 -> 다시 렌더링 요청
-    try {
-      if (typeof renderThumbnailButton === 'function') {
-        renderThumbnailButton(workspaceEl, ideaData);
-      }
-    } catch (e) {
-      console.warn('[Workspace] renderThumbnailButton call failed in showPublishInfo:', e);
-    }
+  } catch (e) {
+    console.warn('[Workspace] renderThumbnailButton call failed in showPublishInfo:', e);
+  }
 }
 
 // Helper to read activeChannelId from chrome.storage.local supporting
@@ -2872,7 +3078,9 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
     // Use the workspace root as a fallback target so buttons can be
     // inserted into the publish-info area or directly into the workspace.
     buttonContainer = workspaceEl;
-    console.debug('[DIAG updateWorkspaceActionButtons] no #workspace-action-buttons found, using workspace root as fallback');
+    console.debug(
+      '[DIAG updateWorkspaceActionButtons] no #workspace-action-buttons found, using workspace root as fallback'
+    );
   }
 
   // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
@@ -2917,7 +3125,13 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
           ? ideaData.publishInfo.tags.join(', ')
           : ideaData.publishInfo?.tags || '';
         if (typeof showPublishInfo === 'function') {
-          showPublishInfo(buttonContainer.closest('.workspace-container'), ideaData.publishInfo?.permalink, tagsForDisplay, ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '', ideaData);
+          showPublishInfo(
+            buttonContainer.closest('.workspace-container'),
+            ideaData.publishInfo?.permalink,
+            tagsForDisplay,
+            ideaData.seoTitle || ideaData.publishInfo?.seoTitle || '',
+            ideaData
+          );
         }
       } catch (e) {
         // non-fatal
@@ -2933,12 +3147,16 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
 
       // Also remove any moved buttons from publish-info panel
       try {
-        const pubArea = buttonContainer.closest('.workspace-container')?.querySelector('#publish-info-content');
+        const pubArea = buttonContainer
+          .closest('.workspace-container')
+          ?.querySelector('#publish-info-content');
         if (pubArea) {
-          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach((id) => {
-            const el = pubArea.querySelector(`#${id}`);
-            if (el && el.parentNode) el.remove();
-          });
+          ['regenerate-draft-btn', 'regenerate-thumbnail-btn', 'delete-draft-in-workspace'].forEach(
+            (id) => {
+              const el = pubArea.querySelector(`#${id}`);
+              if (el && el.parentNode) el.remove();
+            }
+          );
         }
       } catch (e) {
         // ignore
@@ -2948,7 +3166,8 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
       if (!hasGenerateBtn) {
         const genBtn = document.createElement('button');
         genBtn.id = 'generate-draft-btn';
-        genBtn.style.cssText = 'width: auto; padding: 10px; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+        genBtn.style.cssText =
+          'width: auto; padding: 10px; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
         genBtn.textContent = '✨ AI 초안 생성';
         // try to insert into publish-info-actions if available
         try {
@@ -2981,56 +3200,64 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
 
   // Insert the compose-thumbnail-text checkbox next to the regenerate-draft button
   try {
-    const existingCheckbox = buttonContainer.closest('.workspace-container')?.querySelector('#compose-thumbnail-text-checkbox');
+    const existingCheckbox = buttonContainer
+      .closest('.workspace-container')
+      ?.querySelector('#compose-thumbnail-text-checkbox');
     if (!existingCheckbox) {
       const regenTextBtn = buttonContainer.querySelector('#regenerate-draft-btn');
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.id = 'compose-thumbnail-text-checkbox';
       input.checked = !!composeThumbnailText;
-      input.style.cssText = 'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
+      input.style.cssText =
+        'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
       input.title = '썸네일 텍스트 오버레이 적용';
 
-// Prefer inserting into publish-info actions container when possible (near copy-html)
-        let inserted = false;
-        try {
-          const pubActions = buttonContainer
-            .closest('.workspace-container')
-            ?.querySelector('#publish-info-content')
-            ?.querySelector('#publish-info-actions');
-          if (pubActions) {
-            if (hasDraft) {
-              // For drafts, the publish panel rendering (showPublishInfo)
-              // is responsible for creating the regenerate/thumnail controls
-              // and placing the checkbox inside that wrapper. Skip inserting
-              // a duplicate input here to avoid inconsistent DOM structure.
-            } else {
-              // No draft: prefer to insert into a .compose-thumbnail-controls wrapper
-              // so the generate button and checkbox share the same visual style.
-              let controls = pubActions.querySelector('.compose-thumbnail-controls');
-              if (!controls) {
-                controls = document.createElement('div');
-                controls.className = 'compose-thumbnail-controls';
-                controls.style.cssText = 'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
+      // Prefer inserting into publish-info actions container when possible (near copy-html)
+      let inserted = false;
+      try {
+        const pubActions = buttonContainer
+          .closest('.workspace-container')
+          ?.querySelector('#publish-info-content')
+          ?.querySelector('#publish-info-actions');
+        if (pubActions) {
+          if (hasDraft) {
+            // For drafts, the publish panel rendering (showPublishInfo)
+            // is responsible for creating the regenerate/thumnail controls
+            // and placing the checkbox inside that wrapper. Skip inserting
+            // a duplicate input here to avoid inconsistent DOM structure.
+          } else {
+            // No draft: prefer to insert into a .compose-thumbnail-controls wrapper
+            // so the generate button and checkbox share the same visual style.
+            let controls = pubActions.querySelector('.compose-thumbnail-controls');
+            if (!controls) {
+              controls = document.createElement('div');
+              controls.className = 'compose-thumbnail-controls';
+              controls.style.cssText =
+                'width:auto;padding:10px;background: rgb(66, 133, 244);color: #fff;border: none;border-radius: 4px;cursor: pointer;font-size: 13px;font-weight: 500;flex: 1 1 0%;display:inline-flex;align-items:center;gap:6px;position:relative;';
 
-                const existingGen = pubActions.querySelector('#generate-draft-btn');
-                if (existingGen) {
-                  // move existing generate button into the controls wrapper
-                  existingGen.style.cssText = 'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
-                  pubActions.insertBefore(controls, existingGen);
-                  controls.appendChild(input);
-                  controls.appendChild(existingGen);
-                } else {
-                  pubActions.insertBefore(controls, pubActions.firstElementChild || null);
-                  controls.appendChild(input);
-                }
+              const existingGen = pubActions.querySelector('#generate-draft-btn');
+              if (existingGen) {
+                // move existing generate button into the controls wrapper
+                existingGen.style.cssText =
+                  'width: auto; padding: 0; background: rgb(66, 133, 244); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; flex: 1 1 0%;';
+                pubActions.insertBefore(controls, existingGen);
+                controls.appendChild(input);
+                controls.appendChild(existingGen);
               } else {
-                controls.insertBefore(input, controls.firstElementChild || null);
+                pubActions.insertBefore(controls, pubActions.firstElementChild || null);
+                controls.appendChild(input);
               }
-              inserted = true;
-              console.debug('[Workspace] compose-thumbnail-text checkbox inserted into publish-info-actions, checked:', input.checked);
+            } else {
+              controls.insertBefore(input, controls.firstElementChild || null);
             }
+            inserted = true;
+            console.debug(
+              '[Workspace] compose-thumbnail-text checkbox inserted into publish-info-actions, checked:',
+              input.checked
+            );
           }
+        }
       } catch (e) {
         // ignore
       }
@@ -3085,8 +3312,8 @@ export function renderWorkspace(container, ideaData) {
   // If an existing workspace is present and has an unsaved title change,
   // trigger save before rendering the new workspace so the card reflects the
   // updated title when the user leaves the workspace.
-      try {
-        const existingWorkspace = container.querySelector('.workspace-container');
+  try {
+    const existingWorkspace = container.querySelector('.workspace-container');
     if (existingWorkspace) {
       // Try to find the element where properties are attached (content or area)
       let publishInfoArea = existingWorkspace.querySelector('#publish-info-content');
@@ -3094,17 +3321,28 @@ export function renderWorkspace(container, ideaData) {
         publishInfoArea = existingWorkspace.querySelector('#publish-info-area');
       }
 
-          // If handlers were attached to a different element instance for
-          // some runs, try to locate any element in the workspace that
-          // exposes the save API so we can detect pending changes.
-          if (!publishInfoArea) {
-            const possible = Array.from(existingWorkspace.querySelectorAll('*')).find((el) => el && (typeof el._doSaveTitle === 'function' || typeof el._doSaveTitleFromExternal === 'function'));
-            if (possible) publishInfoArea = possible;
-          }
-      
-      if (publishInfoArea && publishInfoArea._titleChanged && typeof publishInfoArea._doSaveTitle === 'function') {
+      // If handlers were attached to a different element instance for
+      // some runs, try to locate any element in the workspace that
+      // exposes the save API so we can detect pending changes.
+      if (!publishInfoArea) {
+        const possible = Array.from(existingWorkspace.querySelectorAll('*')).find(
+          (el) =>
+            el &&
+            (typeof el._doSaveTitle === 'function' ||
+              typeof el._doSaveTitleFromExternal === 'function')
+        );
+        if (possible) publishInfoArea = possible;
+      }
+
+      if (
+        publishInfoArea &&
+        publishInfoArea._titleChanged &&
+        typeof publishInfoArea._doSaveTitle === 'function'
+      ) {
         publishInfoArea._doSaveTitle(true);
-        console.debug('[Workspace] Pending title change detected; triggered save before leaving workspace.');
+        console.debug(
+          '[Workspace] Pending title change detected; triggered save before leaving workspace.'
+        );
       }
       // Fallback: if there's a visible title input whose value differs from the
       // current idea title but the panel didn't mark _titleChanged (race in
@@ -3113,7 +3351,10 @@ export function renderWorkspace(container, ideaData) {
       try {
         const curInput = existingWorkspace.querySelector('#idea-title-input');
         // Prefer any pending value recorded by input handler to avoid races
-        const curValFromPending = publishInfoArea && publishInfoArea._pendingTitle ? String(publishInfoArea._pendingTitle).trim() : '';
+        const curValFromPending =
+          publishInfoArea && publishInfoArea._pendingTitle
+            ? String(publishInfoArea._pendingTitle).trim()
+            : '';
         const curVal = curValFromPending || (curInput ? String(curInput.value || '').trim() : '');
         // If there's an input value that's different from the current
         // idea title, force a save. This covers races where handlers
@@ -3122,13 +3363,22 @@ export function renderWorkspace(container, ideaData) {
           // Prefer the panel's internal save API if available (stronger guarantee).
           if (publishInfoArea && typeof publishInfoArea._doSaveTitle === 'function') {
             publishInfoArea._doSaveTitle(true);
-            console.debug('[Workspace] Forced save via publishInfoArea._doSaveTitle before leaving workspace.');
+            console.debug(
+              '[Workspace] Forced save via publishInfoArea._doSaveTitle before leaving workspace.'
+            );
           } else if (typeof window.__cp_force_save_title === 'function') {
             window.__cp_force_save_title();
-            console.debug('[Workspace] Fallback: forced save via __cp_force_save_title before leaving workspace.');
-          } else if (publishInfoArea && typeof publishInfoArea._doSaveTitleFromExternal === 'function') {
+            console.debug(
+              '[Workspace] Fallback: forced save via __cp_force_save_title before leaving workspace.'
+            );
+          } else if (
+            publishInfoArea &&
+            typeof publishInfoArea._doSaveTitleFromExternal === 'function'
+          ) {
             publishInfoArea._doSaveTitleFromExternal(curVal);
-            console.debug('[Workspace] Fallback: forced save via _doSaveTitleFromExternal before leaving workspace.');
+            console.debug(
+              '[Workspace] Fallback: forced save via _doSaveTitleFromExternal before leaving workspace.'
+            );
           }
         }
       } catch (e) {
@@ -3293,9 +3543,23 @@ export function renderWorkspace(container, ideaData) {
       // 텍스트 변경 자동 저장 (Debounce 1000ms)
       // editor.js sends: { action: 'content-changed', data: { html: '...', text: '...' } }
       const isContentChanged = event.data?.action === 'content-changed';
-      const contentData = isContentChanged ? (event.data.data?.html || event.data.content) : null;
+      const contentData = isContentChanged ? event.data.data?.html || event.data.content : null;
 
       if (isContentChanged && contentData) {
+        // [Fix] Update in-memory data so thumbnail maker sees it immediately
+        if (window.__cp_workspace_idea_data) {
+          Logger.debug('[Workspace] content-changed: updating in-memory draft', {
+            prevLength: (window.__cp_workspace_idea_data.formattedDraft || '').length,
+            newLength: contentData.length,
+          });
+          window.__cp_workspace_idea_data.formattedDraft = contentData;
+          window.__cp_workspace_idea_data.currentDraft = contentData;
+          // Also update draftContent if used elsewhere
+          window.__cp_workspace_idea_data.draftContent = contentData;
+        } else {
+          Logger.warn('[Workspace] content-changed: window.__cp_workspace_idea_data is missing!');
+        }
+
         if (window.__cp_autosave_timer) {
           clearTimeout(window.__cp_autosave_timer);
         }
@@ -3316,9 +3580,7 @@ export function renderWorkspace(container, ideaData) {
             window.__cp_draft_deletion_block_time &&
             now - window.__cp_draft_deletion_block_time < 5000
           ) {
-            Logger.debug(
-              `[Workspace] 초안 삭제 후 자동 저장 차단 (Auto-save skipped)`
-            );
+            Logger.debug(`[Workspace] 초안 삭제 후 자동 저장 차단 (Auto-save skipped)`);
             return;
           }
 
@@ -3341,7 +3603,7 @@ export function renderWorkspace(container, ideaData) {
               draft: content,
               ts: Date.now(),
             };
-            
+
             try {
               chrome.runtime.sendMessage(payload, (response) => {
                 if (chrome.runtime.lastError) {
@@ -3522,13 +3784,13 @@ export function renderWorkspace(container, ideaData) {
   // [최적화] 이미 워크스페이스가 렌더링되어 있고, 같은 아이디어 ID라면 전체 리렌더링을 건너뜀
   const existingWorkspace = container.querySelector('.workspace-container');
   const existingIdeaId = existingWorkspace?.querySelector('.linked-scraps-list')?.dataset?.ideaId;
-  
+
   let workspaceEl;
 
   if (existingWorkspace && existingIdeaId === ideaData.id) {
     console.debug('[Workspace] 동일한 아이디어 ID 감지, 부분 업데이트 수행:', ideaData.id);
     workspaceEl = existingWorkspace;
-    
+
     // 연결된 스크랩 목록 업데이트 (필요한 경우)
     const linkedScrapsList = workspaceEl.querySelector('.linked-scraps-list');
     if (linkedScrapsList && ideaData.linkedScraps && ideaData.linkedScraps.length > 0) {
@@ -3651,224 +3913,224 @@ export function renderWorkspace(container, ideaData) {
   `;
 
     workspaceEl = container.querySelector('.workspace-container');
-  Logger.debug('[Workspace] workspaceEl 찾기:', workspaceEl);
+    Logger.debug('[Workspace] workspaceEl 찾기:', workspaceEl);
 
-  // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
-  try {
-    const shadowWindow = container.ownerDocument?.defaultView || window;
-    if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
-      Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 중...');
-      Logger.debug('🔧 [Workspace] Shadow window:', shadowWindow);
-      Logger.debug('🔧 [Workspace] Shadow window === window:', shadowWindow === window);
+    // [중요] Shadow DOM 내부의 window에도 TUI 에디터 리스너 등록
+    try {
+      const shadowWindow = container.ownerDocument?.defaultView || window;
+      if (shadowWindow && !shadowWindow.__cp_tui_shadow_listener_attached) {
+        Logger.debug('🔧 [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 중...');
+        Logger.debug('🔧 [Workspace] Shadow window:', shadowWindow);
+        Logger.debug('🔧 [Workspace] Shadow window === window:', shadowWindow === window);
 
-      const shadowTuiEditorListener = (event) => {
-        if (event.data?.action === 'cp_open_tui_editor') {
-          console.log('🌐 [Workspace] ========================================');
-          console.log('🌐 [Workspace] 📨 Shadow DOM 리스너: cp_open_tui_editor 메시지 수신!');
-          console.log('🌐 [Workspace] ========================================');
+        const shadowTuiEditorListener = (event) => {
+          if (event.data?.action === 'cp_open_tui_editor') {
+            console.log('🌐 [Workspace] ========================================');
+            console.log('🌐 [Workspace] 📨 Shadow DOM 리스너: cp_open_tui_editor 메시지 수신!');
+            console.log('🌐 [Workspace] ========================================');
 
-          const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
-          if (!imageUrl) {
-            Logger.error('❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음');
-            return;
-          }
+            const imageUrl = event.data.imageUrl || event.data.currentImageUrl;
+            if (!imageUrl) {
+              Logger.error('❌ [Workspace] TUI 에디터 열기 실패: 이미지 URL 없음');
+              return;
+            }
 
-          // workspace 컨테이너 찾기
-          const workspaceContainer =
-            container.querySelector('.workspace-container') ||
-            document.querySelector('.workspace-container') ||
-            document.querySelector('.cp-workspace-container');
+            // workspace 컨테이너 찾기
+            const workspaceContainer =
+              container.querySelector('.workspace-container') ||
+              document.querySelector('.workspace-container') ||
+              document.querySelector('.cp-workspace-container');
 
-          if (!workspaceContainer) {
-            Logger.error('❌ [Workspace] workspace 컨테이너를 찾을 수 없습니다!');
-            return;
-          }
+            if (!workspaceContainer) {
+              Logger.error('❌ [Workspace] workspace 컨테이너를 찾을 수 없습니다!');
+              return;
+            }
 
-          Logger.debug('✅ [Workspace] workspace 컨테이너 확인 완료');
+            Logger.debug('✅ [Workspace] workspace 컨테이너 확인 완료');
 
-          // TUI 에디터 iframe 생성 또는 재사용
-          let tuiEditorIframe = document.querySelector('#tui-editor-iframe');
+            // TUI 에디터 iframe 생성 또는 재사용
+            let tuiEditorIframe = document.querySelector('#tui-editor-iframe');
 
-          if (!tuiEditorIframe) {
-            console.log('🔨 [Workspace] TUI 에디터 iframe 생성 중...');
+            if (!tuiEditorIframe) {
+              console.log('🔨 [Workspace] TUI 에디터 iframe 생성 중...');
 
-            // 기존 모달이 있으면 제거
-            const existingOverlay = document.querySelector('#tui-editor-overlay');
-            if (existingOverlay) existingOverlay.remove();
+              // 기존 모달이 있으면 제거
+              const existingOverlay = document.querySelector('#tui-editor-overlay');
+              if (existingOverlay) existingOverlay.remove();
 
-            // 배경 오버레이 생성
-            const overlay = document.createElement('div');
-            overlay.id = 'tui-editor-overlay';
-            overlay.style.cssText =
-              'position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;';
-            overlay.onclick = () => {
-              if (confirm('편집을 종료하시겠습니까?')) {
-                overlay.remove();
-                if (tuiEditorIframe) tuiEditorIframe.remove();
-              }
-            };
-            // body의 마지막에 추가하여 최상위에 위치
-            document.body.appendChild(overlay);
-
-            // 모달 컨테이너 생성
-            const modalContainer = document.createElement('div');
-            modalContainer.id = 'tui-editor-modal-container';
-            modalContainer.style.cssText =
-              'position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;';
-            overlay.appendChild(modalContainer);
-
-            // 닫기 버튼 추가
-            const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '×';
-            closeBtn.style.cssText =
-              'position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;';
-            closeBtn.onmouseover = () => (closeBtn.style.background = 'rgba(255,255,255,0.2)');
-            closeBtn.onmouseout = () => (closeBtn.style.background = 'rgba(255,255,255,0.1)');
-            closeBtn.onclick = (e) => {
-              e.stopPropagation();
-              if (confirm('편집을 종료하시겠습니까?')) {
-                overlay.remove();
-                if (tuiEditorIframe) tuiEditorIframe.remove();
-              }
-            };
-            modalContainer.appendChild(closeBtn);
-
-            // iframe 생성
-            tuiEditorIframe = document.createElement('iframe');
-            tuiEditorIframe.id = 'tui-editor-iframe';
-            tuiEditorIframe.src = chrome.runtime.getURL('tui-editor.html');
-            tuiEditorIframe.style.cssText =
-              'width:100%;height:100%;border:none;background:#282828;';
-            modalContainer.appendChild(tuiEditorIframe);
-            Logger.debug('✅ [Workspace] TUI 에디터 iframe 생성 완료');
-
-            const sourceInfo = event.data.source || 'editor';
-            console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
-            const editorIframe = workspaceContainer.querySelector('#editor-iframe');
-
-            const tuiEditorMessageHandler = function (e) {
-              if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
-                console.log('[Workspace] TUI 에디터 편집 완료, 결과 처리 중...');
-
-                if (
-                  sourceInfo === 'thumbnail_maker' ||
-                  !event.data.allDocumentImages ||
-                  event.data.allDocumentImages.length === 0
-                ) {
-                  const altText = '편집된 썸네일';
-                  if (editorIframe && editorIframe.contentWindow) {
-                    editorIframe.contentWindow.postMessage(
-                      {
-                        action: 'insert-image',
-                        data: {
-                          url: e.data.dataUrl,
-                          alt: altText,
-                        },
-                      },
-                      '*'
-                    );
-                  }
-                } else {
-                  if (editorIframe && editorIframe.contentWindow) {
-                    editorIframe.contentWindow.postMessage(
-                      {
-                        action: 'replace-edited-image',
-                        data: { dataUrl: e.data.dataUrl },
-                      },
-                      '*'
-                    );
-                  }
+              // 배경 오버레이 생성
+              const overlay = document.createElement('div');
+              overlay.id = 'tui-editor-overlay';
+              overlay.style.cssText =
+                'position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;background:rgba(0,0,0,0.7) !important;z-index:2147483647 !important;display:flex !important;align-items:center !important;justify-content:center !important;';
+              overlay.onclick = () => {
+                if (confirm('편집을 종료하시겠습니까?')) {
+                  overlay.remove();
+                  if (tuiEditorIframe) tuiEditorIframe.remove();
                 }
+              };
+              // body의 마지막에 추가하여 최상위에 위치
+              document.body.appendChild(overlay);
 
-                if (tuiEditorIframe) {
-                  tuiEditorIframe.remove();
+              // 모달 컨테이너 생성
+              const modalContainer = document.createElement('div');
+              modalContainer.id = 'tui-editor-modal-container';
+              modalContainer.style.cssText =
+                'position:relative !important;width:90vw !important;max-width:1400px !important;height:90vh !important;max-height:900px !important;background:#282828 !important;border-radius:12px !important;box-shadow:0 20px 60px rgba(0,0,0,0.5) !important;overflow:hidden !important;display:flex !important;flex-direction:column !important;z-index:2147483648 !important;';
+              overlay.appendChild(modalContainer);
+
+              // 닫기 버튼 추가
+              const closeBtn = document.createElement('button');
+              closeBtn.innerHTML = '×';
+              closeBtn.style.cssText =
+                'position:absolute !important;top:12px !important;right:12px !important;width:36px !important;height:36px !important;background:rgba(255,255,255,0.1) !important;border:none !important;border-radius:50% !important;color:#fff !important;font-size:24px !important;cursor:pointer !important;z-index:2147483649 !important;display:flex !important;align-items:center !important;justify-content:center !important;line-height:1 !important;transition:background 0.2s !important;';
+              closeBtn.onmouseover = () => (closeBtn.style.background = 'rgba(255,255,255,0.2)');
+              closeBtn.onmouseout = () => (closeBtn.style.background = 'rgba(255,255,255,0.1)');
+              closeBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (confirm('편집을 종료하시겠습니까?')) {
+                  overlay.remove();
+                  if (tuiEditorIframe) tuiEditorIframe.remove();
                 }
+              };
+              modalContainer.appendChild(closeBtn);
 
-                shadowWindow.removeEventListener('message', tuiEditorMessageHandler);
-              }
-            };
-            shadowWindow.addEventListener('message', tuiEditorMessageHandler);
+              // iframe 생성
+              tuiEditorIframe = document.createElement('iframe');
+              tuiEditorIframe.id = 'tui-editor-iframe';
+              tuiEditorIframe.src = chrome.runtime.getURL('tui-editor.html');
+              tuiEditorIframe.style.cssText =
+                'width:100%;height:100%;border:none;background:#282828;';
+              modalContainer.appendChild(tuiEditorIframe);
+              Logger.debug('✅ [Workspace] TUI 에디터 iframe 생성 완료');
 
-            tuiEditorIframe.onload = () => {
-              console.log('[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...');
-              setTimeout(() => {
-                if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
-                  tuiEditorIframe.contentWindow.postMessage(
-                    {
-                      action: 'open-tui-editor',
-                      imageUrl: imageUrl,
-                    },
-                    '*'
-                  );
+              const sourceInfo = event.data.source || 'editor';
+              console.log('🎯 [Workspace] 소스 정보:', sourceInfo);
+              const editorIframe = workspaceContainer.querySelector('#editor-iframe');
+
+              const tuiEditorMessageHandler = function (e) {
+                if (e.data?.action === 'tui-editor-result' && e.data.dataUrl) {
+                  console.log('[Workspace] TUI 에디터 편집 완료, 결과 처리 중...');
 
                   if (
-                    event.data.allDocumentImages &&
-                    Array.isArray(event.data.allDocumentImages) &&
-                    event.data.allDocumentImages.length > 0
+                    sourceInfo === 'thumbnail_maker' ||
+                    !event.data.allDocumentImages ||
+                    event.data.allDocumentImages.length === 0
                   ) {
+                    const altText = '편집된 썸네일';
+                    if (editorIframe && editorIframe.contentWindow) {
+                      editorIframe.contentWindow.postMessage(
+                        {
+                          action: 'insert-image',
+                          data: {
+                            url: e.data.dataUrl,
+                            alt: altText,
+                          },
+                        },
+                        '*'
+                      );
+                    }
+                  } else {
+                    if (editorIframe && editorIframe.contentWindow) {
+                      editorIframe.contentWindow.postMessage(
+                        {
+                          action: 'replace-edited-image',
+                          data: { dataUrl: e.data.dataUrl },
+                        },
+                        '*'
+                      );
+                    }
+                  }
+
+                  if (tuiEditorIframe) {
+                    tuiEditorIframe.remove();
+                  }
+
+                  shadowWindow.removeEventListener('message', tuiEditorMessageHandler);
+                }
+              };
+              shadowWindow.addEventListener('message', tuiEditorMessageHandler);
+
+              tuiEditorIframe.onload = () => {
+                console.log('[Workspace] TUI 에디터 iframe 로드 완료, 이미지 전달 중...');
+                setTimeout(() => {
+                  if (tuiEditorIframe && tuiEditorIframe.contentWindow) {
                     tuiEditorIframe.contentWindow.postMessage(
                       {
-                        action: 'set-document-images',
-                        images: event.data.allDocumentImages,
+                        action: 'open-tui-editor',
+                        imageUrl: imageUrl,
                       },
                       '*'
                     );
-                    console.log(
-                      '[Workspace] 문서 이미지 목록 전달 완료:',
-                      event.data.allDocumentImages.length,
-                      '개'
-                    );
+
+                    if (
+                      event.data.allDocumentImages &&
+                      Array.isArray(event.data.allDocumentImages) &&
+                      event.data.allDocumentImages.length > 0
+                    ) {
+                      tuiEditorIframe.contentWindow.postMessage(
+                        {
+                          action: 'set-document-images',
+                          images: event.data.allDocumentImages,
+                        },
+                        '*'
+                      );
+                      console.log(
+                        '[Workspace] 문서 이미지 목록 전달 완료:',
+                        event.data.allDocumentImages.length,
+                        '개'
+                      );
+                    }
+
+                    console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
                   }
-
-                  console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
-                }
-              }, 500);
-            };
-          } else {
-            console.log('[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...');
-            if (tuiEditorIframe.contentWindow) {
-              tuiEditorIframe.contentWindow.postMessage(
-                {
-                  action: 'open-tui-editor',
-                  imageUrl: imageUrl,
-                },
-                '*'
-              );
-
-              if (
-                event.data.allDocumentImages &&
-                Array.isArray(event.data.allDocumentImages) &&
-                event.data.allDocumentImages.length > 0
-              ) {
+                }, 500);
+              };
+            } else {
+              console.log('[Workspace] 기존 TUI 에디터 iframe 재사용, 이미지 전달 중...');
+              if (tuiEditorIframe.contentWindow) {
                 tuiEditorIframe.contentWindow.postMessage(
                   {
-                    action: 'set-document-images',
-                    images: event.data.allDocumentImages,
+                    action: 'open-tui-editor',
+                    imageUrl: imageUrl,
                   },
                   '*'
                 );
-                console.log(
-                  '[Workspace] 문서 이미지 목록 전달 완료:',
-                  event.data.allDocumentImages.length,
-                  '개'
-                );
-              }
 
-              console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
+                if (
+                  event.data.allDocumentImages &&
+                  Array.isArray(event.data.allDocumentImages) &&
+                  event.data.allDocumentImages.length > 0
+                ) {
+                  tuiEditorIframe.contentWindow.postMessage(
+                    {
+                      action: 'set-document-images',
+                      images: event.data.allDocumentImages,
+                    },
+                    '*'
+                  );
+                  console.log(
+                    '[Workspace] 문서 이미지 목록 전달 완료:',
+                    event.data.allDocumentImages.length,
+                    '개'
+                  );
+                }
+
+                console.log('[Workspace] TUI 에디터에 이미지 전달 완료');
+              }
             }
           }
-        }
-      };
+        };
 
-      shadowWindow.addEventListener('message', shadowTuiEditorListener);
-      shadowWindow.__cp_tui_shadow_listener_attached = true;
-      Logger.debug('✅ [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 완료');
-    } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
-      Logger.info('ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.');
+        shadowWindow.addEventListener('message', shadowTuiEditorListener);
+        shadowWindow.__cp_tui_shadow_listener_attached = true;
+        Logger.debug('✅ [Workspace] Shadow DOM 내부 window에 TUI 에디터 리스너 등록 완료');
+      } else if (shadowWindow && shadowWindow.__cp_tui_shadow_listener_attached) {
+        Logger.info('ℹ️ [Workspace] Shadow DOM 내부 window에 이미 리스너가 등록되어 있습니다.');
+      }
+    } catch (err) {
+      console.warn('⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:', err.message);
     }
-  } catch (err) {
-    console.warn('⚠️ [Workspace] Shadow DOM 내부 window 리스너 등록 실패:', err.message);
-  }
 
     addWorkspaceEventListeners(workspaceEl, ideaData, container);
   }
@@ -3890,7 +4152,11 @@ export function renderWorkspace(container, ideaData) {
 
   // Final fallback: ensure retry button is queryable from the container
   try {
-    if (briefingMetaHtml && container && !container.querySelector('.workspace-briefing-retry-btn')) {
+    if (
+      briefingMetaHtml &&
+      container &&
+      !container.querySelector('.workspace-briefing-retry-btn')
+    ) {
       const fallbackBtn = `<button class="workspace-briefing-retry-btn" style="display:none" data-card-id="${ideaData.id}" data-status="${ideaData.status || 'ideas'}">↻ 재시도</button>`;
       container.insertAdjacentHTML('beforeend', fallbackBtn);
       Logger.debug('[Workspace] inserted fallback retry into container after render');
@@ -3952,7 +4218,7 @@ export function renderWorkspace(container, ideaData) {
     } catch (e) {
       // ignore
     }
-    
+
     // Call showPublishInfo synchronously to prevent UI blinking/disappearing
     showPublishInfo(
       container.querySelector('.workspace-container'),
@@ -4414,8 +4680,6 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
       }
     });
   });
-
-  
 
   // 에디터 iframe에서 온 메시지 처리
   const editorMessageListener = (event) => {
@@ -6733,8 +6997,10 @@ async function handleGenerateAction(btn, options) {
 
           // merge thumbnail info back into ideaData
           if (thumbResponse.thumbnailInfo) ideaData.publishInfo = ideaData.publishInfo || {};
-          if (thumbResponse.thumbnailInfo) ideaData.publishInfo.thumbnailInfo = thumbResponse.thumbnailInfo;
-          if (thumbResponse.thumbnailUrls) ideaData.publishInfo.thumbnailUrls = thumbResponse.thumbnailUrls;
+          if (thumbResponse.thumbnailInfo)
+            ideaData.publishInfo.thumbnailInfo = thumbResponse.thumbnailInfo;
+          if (thumbResponse.thumbnailUrls)
+            ideaData.publishInfo.thumbnailUrls = thumbResponse.thumbnailUrls;
           if (thumbResponse.jsonLdSchema) ideaData.jsonLdSchema = thumbResponse.jsonLdSchema;
 
           const workspaceEl = btn.closest('.workspace-container') || workspaceContainer;
@@ -6931,4 +7197,59 @@ async function handleGenerateAction(btn, options) {
       }
     );
   });
+}
+
+// Exported helper: update the modal's reference images given a cardData object
+export function updateThumbnailModalReferences(cardData, maxCount = 5) {
+  const refWrapper = document.querySelector('#tm-ref-images');
+  if (!refWrapper) return;
+  refWrapper.innerHTML = '';
+  const formatted = cardData.formattedDraft || cardData.currentDraft || '';
+  const linked = cardData.linkedScrapsContent || [];
+  const aff = cardData.affiliateLinks || [];
+  const refs = selectBackgroundReferenceImages(
+    { formattedDraft: formatted, ideaData: { linkedScrapsContent: linked }, affiliateLinks: aff },
+    maxCount
+  );
+
+  if (!refs || refs.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.fontSize = '12px';
+    empty.style.color = '#777';
+    empty.textContent = '(없음)';
+    refWrapper.appendChild(empty);
+    return;
+  }
+
+  for (const url of refs) {
+    const imgWrap = document.createElement('div');
+    imgWrap.style.display = 'inline-flex';
+    imgWrap.style.flexDirection = 'column';
+    imgWrap.style.alignItems = 'center';
+    imgWrap.style.gap = '4px';
+    imgWrap.style.background = '#111';
+    imgWrap.style.padding = '6px';
+    imgWrap.style.borderRadius = '6px';
+    imgWrap.style.border = '1px solid #333';
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.width = '64px';
+    img.style.height = '64px';
+    img.style.objectFit = 'cover';
+    img.style.borderRadius = '4px';
+    imgWrap.appendChild(img);
+
+    const txt = document.createElement('div');
+    txt.style.fontSize = '10px';
+    txt.style.color = '#999';
+    txt.style.maxWidth = '120px';
+    txt.style.overflow = 'hidden';
+    txt.style.textOverflow = 'ellipsis';
+    txt.style.whiteSpace = 'nowrap';
+    txt.textContent = url;
+    imgWrap.appendChild(txt);
+
+    refWrapper.appendChild(imgWrap);
+  }
 }

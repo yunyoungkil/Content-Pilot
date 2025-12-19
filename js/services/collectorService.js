@@ -642,7 +642,12 @@ export async function parseBlogPage(url, html) {
 
     // HTML 내용이 없으면 직접 가져오기
     if (!content) {
-      const res = await fetch(url);
+      // [수정] fetch 옵션 명시 (Service Worker 환경 고려)
+      const res = await fetch(url, {
+        method: 'GET',
+        cache: 'no-cache',
+        credentials: 'omit'
+      });
       if (!res.ok) throw new Error(`Fetch Fail: ${res.status}`);
       content = await res.text();
     }
@@ -665,43 +670,72 @@ export async function parseBlogPage(url, html) {
 
 // 6. 이미지 프록시 (네이버 등 Referer 체크 우회)
 export async function fetchImageAsBase64(url) {
+  // Service Worker 환경 감지 (document 객체가 없음)
+  const isServiceWorker = typeof document === 'undefined';
+
   try {
     // 네이버 이미지인 경우 특별 처리
     if (url.includes('postfiles.pstatic.net') || url.includes('blogfiles.naver.net')) {
-      // background script를 통해 fetch (Service Worker에서는 더 나은 권한)
-      const response = await chrome.runtime.sendMessage({
-        action: 'fetch_image_as_base64',
-        url: url,
-      });
+      // Service Worker가 아닌 경우에만 메시지 전송 (무한 루프 방지)
+      if (!isServiceWorker) {
+        const response = await chrome.runtime.sendMessage({
+          action: 'fetch_image_as_base64',
+          url: url,
+        });
 
-      if (response && response.success) {
-        return { success: true, dataUrl: response.dataUrl };
+        if (response && response.success) {
+          return { success: true, dataUrl: response.dataUrl };
+        }
       }
-
-      // 폴백: img 태그를 사용한 로딩 시도
-      return await fetchImageViaImgTag(url);
+      // Service Worker이거나 메시지 실패 시 직접 fetch 시도
+      // (declarativeNetRequest 규칙이 적용되므로 fetch 성공 가능성 높음)
     }
 
-    // 일반 이미지
+    // 일반 이미지 및 네이버 이미지 (SW 환경)
+    // mode: 'cors' 제거 (Extension Host Permission 활용)
+    // credentials: 'omit' 제거 (기본값 사용)
+    // cache: 'default' 사용 (캐시 활용)
+    console.log('[collectorService] Fetching image:', url);
     const res = await fetch(url, {
-      mode: 'cors',
-      credentials: 'omit',
-      cache: 'no-cache',
+      cache: 'default',
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const errorMsg = `HTTP ${res.status} ${res.statusText}`;
+      console.error('[collectorService] Fetch failed:', errorMsg);
+      throw new Error(errorMsg);
+    }
 
     const blob = await res.blob();
-    const reader = new FileReader();
+    console.log('[collectorService] Blob received:', blob.type, blob.size);
+
+    // FileReader fallback for Service Worker (if needed, though FileReader usually works)
     return new Promise((resolve) => {
-      reader.onloadend = () => resolve({ success: true, dataUrl: reader.result });
-      reader.onerror = () => resolve({ success: false, error: 'FileReader error' });
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+            resolve({ success: true, dataUrl: reader.result });
+        } else {
+            resolve({ success: false, error: 'FileReader result empty' });
+        }
+      };
+      reader.onerror = () => {
+        console.error('[collectorService] FileReader error:', reader.error);
+        resolve({ success: false, error: 'FileReader error: ' + (reader.error ? reader.error.message : 'unknown') });
+      };
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    Logger.warn('[fetchImageAsBase64] fetch 실패, img 태그 방식 시도:', e.message);
-    // 폴백: img 태그 사용
-    return await fetchImageViaImgTag(url);
+    console.error('[collectorService] fetchImageAsBase64 exception:', e);
+    Logger.warn('[fetchImageAsBase64] fetch 실패:', e.message);
+    
+    // 폴백: img 태그 사용 (Service Worker에서는 불가)
+    if (!isServiceWorker) {
+      Logger.info('[fetchImageAsBase64] img 태그 방식 시도');
+      return await fetchImageViaImgTag(url);
+    }
+    
+    return { success: false, error: e.message };
   }
 }
 
