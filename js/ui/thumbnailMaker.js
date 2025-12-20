@@ -1391,6 +1391,7 @@ export function openThumbnailMaker(
                 count: 1,
                 aspect: '16:9',
                 references: refImagesToSend,
+                permalink: draftPermalink || null,
               },
             },
             60000

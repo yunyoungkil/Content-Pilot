@@ -223,6 +223,9 @@ describe('ThumbnailMaker UI - reference images', () => {
     const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'ai_generate_images');
     expect(aiCalls.length).toBeGreaterThanOrEqual(2);
 
+    // Ensure retry call included the draft permalink so uploaded image metadata will be persisted against the draft
+    expect(aiCalls[1][0].data.permalink).toBe('post-xyz');
+
     // AI uploaded image should appear in the ai wrapper at some point (allow transient refresh timing)
     const aiWrapper = document.querySelector('#tm-ref-images-below');
     expect(aiWrapper).toBeTruthy();
