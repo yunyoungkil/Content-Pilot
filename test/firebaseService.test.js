@@ -57,4 +57,56 @@ describe('Firebase Service - getUnifiedGalleryImages', () => {
 
     await expect(getUnifiedGalleryImages('ALL')).rejects.toThrow('Database error');
   });
+
+});
+
+// -------------------------------
+// saveUploadedImageMetadata tests
+// -------------------------------
+
+describe('saveUploadedImageMetadata retry behavior', () => {
+  let svcModule;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    // ensure we import the real module (not the top-level mock)
+    jest.unmock('../js/services/firebaseService.js');
+    svcModule = require('../js/services/firebaseService.js');
+  });
+
+  test('retries once on set failure and succeeds', async () => {
+    // First PUT (set) will fail (non-ok response), second will succeed
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'server error' })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+
+    const authSvc = require('../js/services/authService.js');
+    const tokenSpy = jest.spyOn(authSvc, 'getValidToken').mockResolvedValue('new-token');
+
+    const res = await svcModule.saveUploadedImageMetadata('thumbnail_images/test-user/1', { foo: 'bar' });
+
+    expect(res).toBe(true);
+    // fetch called twice (initial attempt + retry)
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(tokenSpy).toHaveBeenCalledWith(true);
+  });
+
+  test('returns false if both attempts fail', async () => {
+    // Both PUT attempts fail
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' });
+
+    const authSvc = require('../js/services/authService.js');
+    const tokenSpy = jest.spyOn(authSvc, 'getValidToken').mockResolvedValue('new-token');
+
+    const res = await svcModule.saveUploadedImageMetadata('thumbnail_images/test-user/2', { foo: 'baz' });
+
+    expect(res).toBe(false);
+    // fetch called twice (initial attempt + retry)
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(tokenSpy).toHaveBeenCalledWith(true);
+  });
 });

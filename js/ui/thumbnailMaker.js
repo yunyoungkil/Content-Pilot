@@ -110,6 +110,9 @@ export function openThumbnailMaker(
   // [수정 1] initialOptions에서 initialShowText 추출 (변수 선언 누락 수정)
   const initialShowText = initialOptions.showText !== undefined ? initialOptions.showText : true;
 
+  // Determine draft-level permalink once for use across handlers
+  const draftPermalink = draftData.permalink || (draftData.publishInfo && draftData.publishInfo.permalink) || null;
+
   // [수정 2] modal 변수 선언 및 엘리먼트 생성 (누락된 코드 추가)
   const modal = document.createElement('div');
   modal.id = 'cp-thumbnail-modal';
@@ -388,9 +391,36 @@ export function openThumbnailMaker(
       canvasWrapper.insertAdjacentElement('afterend', aiWrapper);
     }
 
-    // clear targets
+    // clear top content refs (always refresh content references)
     if (topWrapper) topWrapper.innerHTML = '';
-    aiWrapper.querySelectorAll('*').forEach((n) => n.remove());
+
+    // Determine permalink for current draft (enhanceDraftWithFeatures uses permalink in path)
+    const permalink = draftData.permalink || (draftData.publishInfo && draftData.publishInfo.permalink) || null;
+
+    // For AI wrapper: only refresh (clear + fetch) when we have a permalink for this draft.
+    // If no permalink is available, keep existing items to avoid flapping (preserve earlier uploaded items).
+    let shouldRefreshAiWrapper = !!permalink;
+    if (shouldRefreshAiWrapper) {
+      // Remove existing children except temporary immediate-inserted items (preserve data-ai-temp)
+      Array.from(aiWrapper.children).forEach((n) => {
+        if (!n.hasAttribute || !n.getAttribute) return;
+        if (n.getAttribute('data-ai-temp') === '1') return; // preserve temporary immediate images
+        aiWrapper.removeChild(n);
+      });
+      // ensure label is present (do not duplicate)
+      if (!aiWrapper.querySelector('.tm-ai-label')) {
+        const label = document.createElement('label');
+        label.className = 'tm-ai-label';
+        label.style.display = 'block';
+        label.style.fontSize = '11px';
+        label.style.color = '#aaa';
+        label.style.marginBottom = '6px';
+        label.textContent = 'AI 업로드 이미지';
+        aiWrapper.insertBefore(label, aiWrapper.firstChild);
+      }
+    } else {
+      // keep existing aiWrapper contents as-is (do not clear)
+    }
 
     const formattedDraft = draftData.formattedDraft || draftData.currentDraft || '';
     const idea = draftData || {};
@@ -412,20 +442,28 @@ export function openThumbnailMaker(
       const resp = await sendRuntimeMessageWithTimeout({ action: 'get_uploaded_images_log' }, 5000);
       const uploaded = (resp && Array.isArray(resp.images)) ? resp.images : [];
 
+
       // Determine permalink for current draft (enhanceDraftWithFeatures uses permalink in path)
       const permalink = draftData.permalink || (draftData.publishInfo && draftData.publishInfo.permalink) || null;
 
       if (permalink) {
         aiItems = uploaded
-          .filter((i) => i && (i.permalink === permalink || (i.path && i.path.includes(`${permalink}-`))))
+          .filter((i) => {
+            try {
+              return i && (i.permalink === permalink || (i.path && String(i.path).includes(`${permalink}-`)));
+            } catch (e) { return false; }
+          })
           .map((i) => ({ url: i.downloadURL || i.thumbnail || i.url, id: i.id, storagePath: i.storagePath || i.path, timestamp: i.timestamp, permalink: i.permalink }));
       } else {
         // If no permalink is available, do not show unrelated uploaded thumbnails to avoid cross-draft leakage
+        // but preserve previously rendered AI items
         aiItems = [];
       }
 
       // remove excluded ones
       aiItems = aiItems.filter((a) => !excludedRefImages.has(a.url));
+
+      console.log('[ThumbnailMaker] debug: fetched uploaded images count:', (uploaded && uploaded.length) || 0, 'aiItems:', aiItems.length, 'permalinkPresent:', !!permalink);
     } catch (e) {
       console.warn('[ThumbnailMaker] get_uploaded_images_log failed:', e && e.error ? e.error : e);
       aiItems = [];
@@ -503,67 +541,78 @@ export function openThumbnailMaker(
         if (renderedRefs.includes(url)) continue; // avoid duplicate display
         renderedAiUrls.push(url);
 
-        const imgWrap = document.createElement('div');
-        imgWrap.style.display = 'inline-flex';
-        imgWrap.style.alignItems = 'center';
-        imgWrap.style.gap = '6px';
-        imgWrap.style.position = 'relative';
-        imgWrap.style.marginRight = '8px';
+        // If an img with same src already exists in aiWrapper (e.g., immediate temp insert), use that wrapper and enhance it
+        const existingImg = aiWrapper.querySelector(`img[src="${url}"]`);
+        let imgWrap;
+        if (existingImg && existingImg.parentElement) {
+          imgWrap = existingImg.parentElement;
+        } else {
+          imgWrap = document.createElement('div');
+          imgWrap.style.display = 'inline-flex';
+          imgWrap.style.alignItems = 'center';
+          imgWrap.style.gap = '6px';
+          imgWrap.style.position = 'relative';
+          imgWrap.style.marginRight = '8px';
 
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = 'AI 업로드 이미지';
-        img.style.width = '64px';
-        img.style.height = '36px';
-        img.style.objectFit = 'cover';
-        img.style.borderRadius = '6px';
-        img.style.border = '1px solid #444';
-        imgWrap.appendChild(img);
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = 'AI 업로드 이미지';
+          img.style.width = '64px';
+          img.style.height = '36px';
+          img.style.objectFit = 'cover';
+          img.style.borderRadius = '6px';
+          img.style.border = '1px solid #444';
+          imgWrap.appendChild(img);
 
-        // AI badge
-        const badge = document.createElement('span');
-        badge.textContent = 'AI';
-        badge.style.position = 'absolute';
-        badge.style.left = '6px';
-        badge.style.bottom = '4px';
-        badge.style.padding = '2px 4px';
-        badge.style.fontSize = '10px';
-        badge.style.background = 'rgba(108,92,231,0.9)';
-        badge.style.color = '#fff';
-        badge.style.borderRadius = '4px';
-        badge.style.zIndex = '9';
-        imgWrap.appendChild(badge);
+          // AI badge
+          const badge = document.createElement('span');
+          badge.textContent = 'AI';
+          badge.style.position = 'absolute';
+          badge.style.left = '6px';
+          badge.style.bottom = '4px';
+          badge.style.padding = '2px 4px';
+          badge.style.fontSize = '10px';
+          badge.style.background = 'rgba(108,92,231,0.9)';
+          badge.style.color = '#fff';
+          badge.style.borderRadius = '4px';
+          badge.style.zIndex = '9';
+          imgWrap.appendChild(badge);
+
+          aiWrapper.appendChild(imgWrap);
+        }
 
         // Exclude button
-        const excludeBtn = document.createElement('button');
-        excludeBtn.innerHTML = '×';
-        excludeBtn.style.position = 'absolute';
-        excludeBtn.style.top = '-6px';
-        excludeBtn.style.right = 'calc(100% - 70px)';
-        excludeBtn.style.width = '16px';
-        excludeBtn.style.height = '16px';
-        excludeBtn.style.background = '#ff4444';
-        excludeBtn.style.color = 'white';
-        excludeBtn.style.border = 'none';
-        excludeBtn.style.borderRadius = '50%';
-        excludeBtn.style.fontSize = '12px';
-        excludeBtn.style.lineHeight = '1';
-        excludeBtn.style.cursor = 'pointer';
-        excludeBtn.style.display = 'flex';
-        excludeBtn.style.alignItems = 'center';
-        excludeBtn.style.justifyContent = 'center';
-        excludeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-        excludeBtn.style.zIndex = '10';
-        excludeBtn.title = '참고 이미지에서 제외';
-        excludeBtn.onclick = (e) => {
-          e.stopPropagation();
-          excludedRefImages.add(url);
-          renderReferenceImages();
-        };
-        imgWrap.appendChild(excludeBtn);
+        if (!imgWrap.querySelector('button[title="참고 이미지에서 제외"]')) {
+          const excludeBtn = document.createElement('button');
+          excludeBtn.innerHTML = '×';
+          excludeBtn.style.position = 'absolute';
+          excludeBtn.style.top = '-6px';
+          excludeBtn.style.right = 'calc(100% - 70px)';
+          excludeBtn.style.width = '16px';
+          excludeBtn.style.height = '16px';
+          excludeBtn.style.background = '#ff4444';
+          excludeBtn.style.color = 'white';
+          excludeBtn.style.border = 'none';
+          excludeBtn.style.borderRadius = '50%';
+          excludeBtn.style.fontSize = '12px';
+          excludeBtn.style.lineHeight = '1';
+          excludeBtn.style.cursor = 'pointer';
+          excludeBtn.style.display = 'flex';
+          excludeBtn.style.alignItems = 'center';
+          excludeBtn.style.justifyContent = 'center';
+          excludeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+          excludeBtn.style.zIndex = '10';
+          excludeBtn.title = '참고 이미지에서 제외';
+          excludeBtn.onclick = (e) => {
+            e.stopPropagation();
+            excludedRefImages.add(url);
+            renderReferenceImages();
+          };
+          imgWrap.appendChild(excludeBtn);
+        }
 
-        // permanent delete for storage-backed AI images
-        if (a.id) {
+        // permanent delete for storage-backed AI images (attach if id exists and not already present)
+        if (a.id && !imgWrap.querySelector('button[title="영구 삭제"]')) {
           const delBtn = document.createElement('button');
           delBtn.textContent = '🗑';
           delBtn.title = '영구 삭제';
@@ -603,15 +652,11 @@ export function openThumbnailMaker(
 
           imgWrap.appendChild(delBtn);
         }
-
-        aiWrapper.appendChild(imgWrap);
       }
     }
 
-    currentRefImages = renderedRefs.concat(renderedAiUrls);
-
-    // If both areas are empty, show placeholder in aiWrapper as well
-    if ((renderedRefs.length === 0) && (renderedAiUrls.length === 0)) {
+    // If no AI images rendered, show placeholder in the AI wrapper
+    if (aiWrapper && renderedAiUrls.length === 0) {
       const empty = document.createElement('div');
       empty.style.fontSize = '12px';
       empty.style.color = '#777';
@@ -619,7 +664,11 @@ export function openThumbnailMaker(
       aiWrapper.appendChild(empty);
     }
 
-    return currentRefImages;
+    // update global currentRefImages so generate button can send decoded refs
+    currentRefImages = renderedRefs.slice();
+
+    // No explicit return value needed
+    return;
   };
 
   // render initial references
@@ -670,6 +719,9 @@ export function openThumbnailMaker(
             data: {
               dataUrl: bgImageToSave,
               filename: filename,
+              meta: {
+                permalink: draftPermalink || null,
+              },
             },
           });
 
@@ -677,6 +729,14 @@ export function openThumbnailMaker(
             bgImageToSave = response.url;
             currentBgImage = response.url; // 현재 이미지도 업데이트
             console.log('[ThumbnailMaker] ✅ 자동 저장: 배경 이미지 Firebase Storage 업로드 완료');
+
+            // After a background upload, refresh the AI image list so the uploaded item appears
+            try {
+              await renderReferenceImages();
+              console.log('[ThumbnailMaker] AI 업로드 이미지 목록 갱신 완료 (자동저장 후)');
+            } catch (e) {
+              console.warn('[ThumbnailMaker] renderReferenceImages after upload failed:', e && e.message ? e.message : e);
+            }
           } else {
             console.warn(
               '[ThumbnailMaker] ⚠️ 자동 저장: Firebase Storage 업로드 실패, Base64 유지'
@@ -1314,6 +1374,7 @@ export function openThumbnailMaker(
               count: 1,
               aspect: '16:9',
               references: refImagesToSend,
+              permalink: draftPermalink || null,
             },
           },
           60000
@@ -1450,8 +1511,75 @@ export function openThumbnailMaker(
             '[ThumbnailMaker] ✅ AI 생성 배경 이미지:',
             currentBgImage.substring(0, 80) + '...'
           );
+
+          // Ensure the newly generated image is immediately visible even before refresh
+          try {
+            let aiWrapperImmediate = modal.querySelector('#tm-ref-images-below');
+
+            // ensure ai wrapper exists
+            if (!aiWrapperImmediate) {
+              const canvasWrapper = modal.querySelector('#tm-canvas-wrapper');
+              aiWrapperImmediate = document.createElement('div');
+              aiWrapperImmediate.id = 'tm-ref-images-below';
+              aiWrapperImmediate.style.marginTop = '12px';
+              aiWrapperImmediate.style.marginBottom = '10px';
+              aiWrapperImmediate.innerHTML = '<label style="display:block;font-size:11px;color:#aaa;margin-bottom:6px;">AI 업로드 이미지</label>';
+              if (canvasWrapper) canvasWrapper.insertAdjacentElement('afterend', aiWrapperImmediate);
+            }
+
+            const exists = Array.from(aiWrapperImmediate.querySelectorAll('img')).some((i) => i.src === currentBgImage);
+            if (!exists) {
+              const imgWrap = document.createElement('div');
+              imgWrap.style.display = 'inline-flex';
+              imgWrap.style.alignItems = 'center';
+              imgWrap.style.gap = '6px';
+              imgWrap.style.position = 'relative';
+              imgWrap.style.marginRight = '8px';
+
+              const img = document.createElement('img');
+              img.src = currentBgImage;
+              img.setAttribute('src', currentBgImage);
+              img.alt = 'AI 업로드 이미지';
+              img.style.width = '64px';
+              img.style.height = '36px';
+              img.style.objectFit = 'cover';
+              img.style.borderRadius = '6px';
+              img.style.border = '1px solid #444';
+              imgWrap.appendChild(img);
+
+              // mark as temporary AI-inserted so it survives immediate refreshes
+              imgWrap.setAttribute('data-ai-temp', '1');
+
+              const badge = document.createElement('span');
+              badge.textContent = 'AI';
+              badge.style.position = 'absolute';
+              badge.style.left = '6px';
+              badge.style.bottom = '4px';
+              badge.style.padding = '2px 4px';
+              badge.style.fontSize = '10px';
+              badge.style.background = 'rgba(108,92,231,0.9)';
+              badge.style.color = '#fff';
+              badge.style.borderRadius = '4px';
+              badge.style.zIndex = '9';
+              imgWrap.appendChild(badge);
+
+              aiWrapperImmediate.appendChild(imgWrap);
+              console.log('[ThumbnailMaker] immediate AI insert added (pre-refresh):', currentBgImage);
+            }
+          } catch (e) {
+            console.warn('[ThumbnailMaker] immediate AI wrapper insert failed (pre-refresh):', e && e.message ? e.message : e);
+          }
+
           await updatePreview(); // 다시 렌더링
           saveState(); // 배경 생성 후 상태 저장
+
+          // Refresh reference lists so newly uploaded AI images become visible
+          try {
+            await renderReferenceImages();
+            console.log('[ThumbnailMaker] AI 업로드 이미지 목록 갱신 완료');
+          } catch (e) {
+            console.warn('[ThumbnailMaker] renderReferenceImages after generation failed:', e && e.message ? e.message : e);
+          }
         } else {
           if (response && response.diagnostics) {
             // diagnostics already displayed above; just restore preview

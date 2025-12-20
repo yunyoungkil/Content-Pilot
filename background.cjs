@@ -676,8 +676,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           console.error('[Background] Reference fetch CRITICAL FAILURE:', e);
         }
 
-        console.error('[Background] Calling generateAiImage with refImages count:', refImages ? refImages.length : 0);
-        const images = await generateAiImage(prompt, count, refImages);
+        const requestedPermalink = (msg.data && msg.data.permalink) ? msg.data.permalink : null;
+        console.error('[Background] Calling generateAiImage with refImages count:', refImages ? refImages.length : 0, 'permalink:', requestedPermalink);
+        const images = await generateAiImage(prompt, count, refImages, requestedPermalink);
         return { 
           success: true, 
           images, 
@@ -711,10 +712,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
+        const filename = msg.data.filename || `${Date.now()}.png`;
+        const storagePath = `thumbnails/${userId}/${filename}`;
+        const meta = msg.data && msg.data.meta ? msg.data.meta : {};
         return uploadImageToFirebaseStorage(
           msg.data.dataUrl,
-          `thumbnails/${userId}/${msg.data.filename || Date.now() + '.png'}`,
-          userId
+          storagePath,
+          userId,
+          meta
         ).then((url) => ({ success: true, url }));
       })()
     );

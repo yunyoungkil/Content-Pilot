@@ -618,14 +618,26 @@ describe('AI Service', () => {
 
       const expected = svc.sanitizeThumbnailText(
         'ReplacementSlogan',
-        ('' || title || '')
-          .replace(/[^\p{L}\p{N}\s]+/gu, '')
-          .trim()
-          .substring(0, 12)
+        title
       );
       expect(selected.thumbnailText).toBe(expected);
       expect(candidates[0].thumbnailText).toBe(expected);
     });
+
+    test('generateDraftFromIdea should produce a permalink for Korean-only title', async () => {
+      const svc = require('../js/services/aiService.js');
+      const idea = { title: '한국어 제목만 있는 글', description: '내용', tags: [], currentDraft: '' };
+
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: true, generateThumbnail: false });
+
+      expect(res).toBeTruthy();
+      expect(res.permalink).toBeTruthy();
+      expect(typeof res.permalink).toBe('string');
+      // 폴백은 'post-'로 시작하는 타임스탬프 형태일 수 있음
+      expect(res.permalink.length).toBeGreaterThan(0);
+    });
+
+
 
     test('generateThumbnailImages delegates to enhanceDraftWithFeatures and returns thumbnails', async () => {
       const svc = require('../js/services/aiService.js');

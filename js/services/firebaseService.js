@@ -343,11 +343,10 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
 
     // Firebase Realtime Database에 메타데이터 저장
     const storagePath = `gs://${bucket}/${path}`;
-    try {
+    {
       const timestamp = Date.now();
       const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
-
-      await set(imageDataPath, {
+      const metadata = {
         path: path,
         storagePath: storagePath,
         downloadURL: downloadURL,
@@ -355,9 +354,12 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
         size: blob.size,
         // include optional meta (e.g., permalink)
         ...(meta && typeof meta === 'object' ? cleanDataForFirebase(meta) : {}),
-      });
-    } catch (error) {
-      Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
+      };
+
+      const saved = await saveUploadedImageMetadata(imageDataPath, metadata);
+      if (!saved) {
+        Logger.warn('[Firebase Storage] 메타데이터 저장이 실패했습니다. 이미지 업로드는 완료되었지만 DB 항목이 없습니다:', imageDataPath);
+      }
     }
 
     Logger.debug('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
@@ -366,6 +368,30 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
   } catch (error) {
     Logger.error('[Firebase Storage] 업로드 실패:', error);
     throw error;
+  }
+}
+
+/**
+ * Save metadata with a retry-on-auth-refresh fallback.
+ * Returns true on success, false on final failure.
+ */
+export async function saveUploadedImageMetadata(imageDataPath, metadata) {
+  try {
+    await set(imageDataPath, metadata);
+    Logger.info('[Firebase Storage] 메타데이터 저장 완료:', imageDataPath);
+    return true;
+  } catch (error) {
+    Logger.warn('[Firebase Storage] 메타데이터 저장 실패, 재시도 시도:', error);
+    try {
+      // Force token refresh and retry once
+      await getValidToken(true);
+      await set(imageDataPath, metadata);
+      Logger.info('[Firebase Storage] 메타데이터 저장 완료 (retry):', imageDataPath);
+      return true;
+    } catch (err2) {
+      Logger.error('[Firebase Storage] 메타데이터 저장 재시도 실패:', err2);
+      return false;
+    }
   }
 }
 

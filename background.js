@@ -854,7 +854,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           void 0;
         }
 
-        const images = await generateAiImage(prompt, count, refImages);
+        // Forward draft permalink (if present) so generated uploads are attributed to the draft
+        const images = await generateAiImage(prompt, count, refImages, msg.data && msg.data.permalink ? msg.data.permalink : null);
         return { 
           success: true, 
           images, 

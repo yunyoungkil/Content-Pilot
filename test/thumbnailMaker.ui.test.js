@@ -157,12 +157,13 @@ describe('ThumbnailMaker UI - reference images', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  test('retries on timeout and succeeds', async () => {
+  test('retries on timeout and succeeds and refreshes uploaded AI images', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     const draftData = {
       formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
       affiliateLinks: [],
+      permalink: 'post-xyz'
     };
 
     // mock canvas context as above
@@ -198,21 +199,47 @@ describe('ThumbnailMaker UI - reference images', () => {
           if (typeof cb === 'function') cb({ success: false, error: 'timeout' });
           return;
         }
-        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated_after_retry.png'] });
+        if (typeof cb === 'function') cb({ success: true, images: ['https://storage.test/generated_after_retry.png'] });
         return;
       }
+
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [
+          { id: 'G1', path: 'thumbnails/AI/post-xyz-16x9.png', downloadURL: 'https://storage.test/generated_after_retry.png', storagePath: 'thumbnails/AI/post-xyz-16x9.png', timestamp: 999, permalink: 'post-xyz' }
+        ] });
+        return;
+      }
+
       if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
     const genBtn = document.querySelector('#tm-gen-bg');
     genBtn.click();
 
-    // wait longer for retry path
-    await new Promise((r) => setTimeout(r, 700));
+    // wait longer for retry path and refresh
+    await new Promise((r) => setTimeout(r, 1200));
 
     // ensure we attempted at least twice and eventually succeeded
     const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'ai_generate_images');
     expect(aiCalls.length).toBeGreaterThanOrEqual(2);
+
+    // AI uploaded image should appear in the ai wrapper at some point (allow transient refresh timing)
+    const aiWrapper = document.querySelector('#tm-ref-images-below');
+    expect(aiWrapper).toBeTruthy();
+
+    // Poll for up to 1500ms for the image to appear (avoid flappy timing)
+    const targetUrl = 'https://storage.test/generated_after_retry.png';
+    let found = false;
+    const start = Date.now();
+    while (Date.now() - start < 1500) {
+      const imgs = Array.from(aiWrapper.querySelectorAll('img'));
+      found = imgs.some((i) => i.src === targetUrl);
+      if (found) break;
+      // small delay
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(found).toBe(true);
 
     // diagnostics or preview UI should be present without errors
     const preview = document.querySelector('#tm-preview');

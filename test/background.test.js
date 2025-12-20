@@ -202,6 +202,39 @@ describe('Background Message Handlers', () => {
 
       expect(sendResponse).toHaveBeenCalledWith({ success: true, userId: mockedUserId });
     });
+
+    test('should forward meta when uploading thumbnails to storage', async () => {
+      const mockUpload = jest.fn().mockResolvedValue('https://storage.test/uploaded.png');
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: jest.fn(),
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        uploadImageToFirebaseStorage: mockUpload,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = {
+        action: 'upload_thumbnail_to_storage',
+        data: { dataUrl: 'data:image/png;base64,AAA', filename: 'test.png', meta: { permalink: 'post-1' } },
+      };
+
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockUpload).toHaveBeenCalledWith(
+        message.data.dataUrl,
+        expect.stringContaining(`thumbnails/test-user/test.png`),
+        'test-user',
+        { permalink: 'post-1' }
+      );
+    });
   });
 
   describe('add_image_to_scrap handler', () => {

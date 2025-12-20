@@ -2507,7 +2507,12 @@ ${defaultDescription}
       }
 
       // 번역 실패 또는 타임아웃 시 기본 변환 반환
-      return defaultConversion(title);
+      const fallbackResult = defaultConversion(title);
+      if (fallbackResult && fallbackResult.length > 0) return fallbackResult;
+      // 한글 등으로 인해 ASCII 변환 결과가 빈 문자열일 경우 안전한 폴백 생성
+      const fallback = `post-${Date.now()}`;
+      Logger.warn('[generatePermalink] empty slug after conversion - using fallback:', fallback);
+      return fallback;
     };
 
     // 퍼머링크 생성 (타임아웃 보호)
@@ -3425,7 +3430,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 }
 
 // 7. 이미지 생성 (병렬 처리 적용) - Imagen 3 API 적용
-export async function generateAiImage(prompt, count = 1, referenceImage = null) {
+export async function generateAiImage(prompt, count = 1, referenceImage = null, permalink = null) {
   const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
   if (!geminiApiKey) {
     throw new Error('Gemini API 키가 없습니다.');
@@ -3545,9 +3550,10 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
         const url = await uploadImageToFirebaseStorage(
           dataUrl,
           `thumbnails/${userId}/${Date.now()}_${index}.png`,
-          userId
+          userId,
+          { permalink }
         );
-        Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료`);
+        Logger.debug(`[generateAiImage] ✅ 이미지 ${index + 1}/${count} 업로드 완료 (permalink: ${permalink || 'none'})`);
         return url;
       } else {
         // 이미지가 없고 텍스트만 온 경우 (거부 메시지 등)

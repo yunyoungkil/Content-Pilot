@@ -3339,10 +3339,20 @@ export function renderWorkspace(container, ideaData) {
         publishInfoArea._titleChanged &&
         typeof publishInfoArea._doSaveTitle === 'function'
       ) {
-        publishInfoArea._doSaveTitle(true);
-        console.debug(
-          '[Workspace] Pending title change detected; triggered save before leaving workspace.'
-        );
+        // If there is a recorded pending title, prefer the external save API
+        // so we can pass the exact pending value rather than relying on input.value
+        // which may be replaced/reset during re-render.
+        if (publishInfoArea._pendingTitle && typeof publishInfoArea._doSaveTitleFromExternal === 'function') {
+          publishInfoArea._doSaveTitleFromExternal(publishInfoArea._pendingTitle);
+          console.debug(
+            '[Workspace] Pending title change detected; triggered safe external save with pending value before leaving workspace.'
+          );
+        } else {
+          publishInfoArea._doSaveTitle(true);
+          console.debug(
+            '[Workspace] Pending title change detected; triggered save before leaving workspace.'
+          );
+        }
       }
       // Fallback: if there's a visible title input whose value differs from the
       // current idea title but the panel didn't mark _titleChanged (race in
