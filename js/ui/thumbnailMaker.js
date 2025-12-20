@@ -1,6 +1,6 @@
 // js/ui/thumbnailMaker.js
 import { renderTemplateFromData, createSmartTemplate } from './thumbnailGenerator.js';
-import { showToast, Logger, debounce } from '../utils.js';
+import { showToast, Logger, debounce, sendRuntimeMessageWithTimeout } from '../utils.js';
 // Select background references helper from aiService
 import { selectBackgroundReferenceImages } from '../services/aiService.js';
 
@@ -508,7 +508,7 @@ export function openThumbnailMaker(
           const timestamp = Date.now();
           const filename = `thumbnail-bg-${timestamp}.png`;
 
-          const response = await chrome.runtime.sendMessage({
+          const response = await sendRuntimeMessageWithTimeout({
             action: 'upload_thumbnail_to_storage',
             data: {
               dataUrl: bgImageToSave,
@@ -692,7 +692,7 @@ export function openThumbnailMaker(
           console.warn('[ThumbnailMaker] DataURL이 너무 짧습니다. 원본 사용.');
         } else {
           // Offscreen에서 이미지 리사이징 (캔버스 크기에 맞춤)
-          const response = await chrome.runtime.sendMessage({
+          const response = await sendRuntimeMessageWithTimeout({
             action: 'resize_image_in_offscreen',
             data: {
               imageDataUrl: currentBgImage,
@@ -981,7 +981,7 @@ export function openThumbnailMaker(
           const timestamp = Date.now();
           const filename = `thumbnail-bg-${timestamp}.png`;
 
-          const response = await chrome.runtime.sendMessage({
+          const response = await sendRuntimeMessageWithTimeout({
             action: 'upload_thumbnail_to_storage',
             data: {
               dataUrl: base64Data,
@@ -1148,7 +1148,7 @@ export function openThumbnailMaker(
           refCount: refImagesToSend.length
         });
 
-        const response = await chrome.runtime.sendMessage({
+        const response = await sendRuntimeMessageWithTimeout({
           action: 'ai_generate_images',
           data: {
             prompt: enhancedPrompt,
@@ -1183,7 +1183,23 @@ export function openThumbnailMaker(
             const inputCount = response.diagnostics.inputCount || (refImagesToSend ? refImagesToSend.length : 0);
             const failed = response.diagnostics.failed || [];
 
-            diagEl.textContent = `참조 이미지 변환: ${converted}/${inputCount} (실패: ${failed.length || 0})`;
+            // show counts and, when failures exist, list the failed URLs (up to 5)
+            diagEl.innerHTML = `참조 이미지 변환: ${converted}/${inputCount} (실패: ${failed.length || 0})`;
+
+            if (Array.isArray(failed) && failed.length > 0) {
+              const list = document.createElement('ul');
+              list.style.margin = '6px 0 0 12px';
+              list.style.padding = '0';
+              list.style.fontSize = '12px';
+              list.style.color = '#f66';
+              failed.slice(0, 5).forEach((f) => {
+                const li = document.createElement('li');
+                li.style.listStyle = 'disc';
+                li.textContent = (f.url ? f.url : String(f)) + (f.error ? ` (${f.error})` : '');
+                list.appendChild(li);
+              });
+              diagEl.appendChild(list);
+            }
 
             // 툴팁에 샘플 미리보기 추가
             const sample = response.diagnostics.convertedSample || [];
@@ -1243,13 +1259,13 @@ export function openThumbnailMaker(
             }
 
             // 간단 토스트로도 알림
-            showToast(`참조 변환: ${converted}/${inputCount} (실패: ${failed.length || 0})`);
+            showToast(`참조 변환: ${converted}/${inputCount} (실패: ${Array.isArray(failed) ? failed.length : 0})`);
           }
         } catch (e) {
           console.warn('[ThumbnailMaker] diagnostics display failed:', e);
         }
 
-        if (response && response.success && response.images.length > 0) {
+        if (response && response.success && Array.isArray(response.images) && response.images.length > 0) {
           // AI 생성 이미지는 이미 Firebase Storage URL로 반환됨
           currentBgImage = response.images[0];
           console.log(
@@ -1259,8 +1275,18 @@ export function openThumbnailMaker(
           await updatePreview(); // 다시 렌더링
           saveState(); // 배경 생성 후 상태 저장
         } else {
-          alert('이미지 생성에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
-          await updatePreview(); // 실패 시 원복
+          if (response && response.diagnostics) {
+            // diagnostics already displayed above; just restore preview
+            await updatePreview();
+          } else {
+            try {
+              alert('이미지 생성에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
+            } catch (e) {
+              // ignore alert errors in non-browser or test environments
+              Logger.warn('[ThumbnailMaker] alert failed or not available:', e && e.message ? e.message : e);
+            }
+            await updatePreview(); // 실패 시 원복
+          }
         }
       } catch (e) {
         console.error('배경 생성 오류:', e);
@@ -1481,7 +1507,7 @@ export function openThumbnailMaker(
         const seoFilename = `${safeTitle}-${Date.now()}.png`; // 중복 방지를 위해 시간 추가
 
         // 3. Firebase Storage에 업로드 (수정된 파일명 사용)
-        const response = await chrome.runtime.sendMessage({
+        const response = await sendRuntimeMessageWithTimeout({
           action: 'upload_thumbnail_to_storage',
           data: {
             dataUrl: dataUrl,

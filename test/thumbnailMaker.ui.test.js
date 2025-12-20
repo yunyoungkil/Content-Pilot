@@ -91,4 +91,66 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(Array.isArray(firstCall.data.references)).toBe(true);
     expect(firstCall.data.references.length).toBeGreaterThanOrEqual(1);
   });
+
+  test('shows failed reference URLs in diagnostics', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    // override runtime sendMessage to return diagnostics with a failed URL
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'ai_generate_images') {
+        if (typeof cb === 'function')
+          cb({ success: true, diagnostics: { inputCount: 2, converted: 1, failed: [{ url: 'https://images.test/ref2.png', error: '404' }] } });
+        return;
+      }
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    // spy on console.error to ensure no uncaught errors bubble up
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    // click generate
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    // wait for async UI update
+    await new Promise((r) => setTimeout(r, 200));
+
+    const diagEl = document.querySelector('#tm-diagnostics');
+    expect(diagEl).toBeTruthy();
+    expect(diagEl.textContent).toContain('참조 이미지 변환');
+    expect(diagEl.textContent).toContain('ref2.png');
+
+    // ensure no uncaught console errors occurred
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
 });
