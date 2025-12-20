@@ -249,10 +249,13 @@ describe('ThumbnailMaker UI - reference images', () => {
       };
     };
 
-    // Setup mock responses: get_uploaded_images_log returns an AI thumbnail
+    // Setup mock responses: get_uploaded_images_log returns an AI thumbnail for this draft permalink and another unrelated item
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'get_uploaded_images_log') {
-        if (typeof cb === 'function') cb({ success: true, images: [{ id: 'AI1', path: 'thumbnails/AI/thumbnail-bg-1.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/thumbnail-bg-1.png', timestamp: 123 }] });
+        if (typeof cb === 'function') cb({ success: true, images: [
+          { id: 'AI1', path: 'thumbnails/AI/post-123-16x9.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/post-123-16x9.png', timestamp: 123 },
+          { id: 'AI2', path: 'thumbnails/Other/thumbnail-bg-1.png', downloadURL: 'https://storage.test/other.png', storagePath: 'thumbnails/Other/thumbnail-bg-1.png', timestamp: 120 }
+        ] });
         return;
       }
 
@@ -264,6 +267,9 @@ describe('ThumbnailMaker UI - reference images', () => {
       // default response
       if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
     });
+
+    // render modal with permalink set (only matching uploaded image should appear)
+    draftData.permalink = 'post-123';
 
     // render modal
     openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);

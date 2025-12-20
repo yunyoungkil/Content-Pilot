@@ -387,14 +387,24 @@ export function openThumbnailMaker(
     let refs = selectBackgroundReferenceImages({ formattedDraft, ideaData: idea, affiliateLinks }, 5) || [];
     refs = refs.filter((url) => !excludedRefImages.has(url));
 
-    // 2) fetch uploaded images and include only AI thumbnails (thumbnails/ or thumbnail-bg-)
+    // 2) fetch uploaded images and include only AI thumbnails that belong to THIS draft
     let aiItems = [];
     try {
       const resp = await sendRuntimeMessageWithTimeout({ action: 'get_uploaded_images_log' }, 5000);
       const uploaded = (resp && Array.isArray(resp.images)) ? resp.images : [];
-      aiItems = uploaded
-        .filter((i) => i && i.path && (i.path.includes('thumbnails/') || i.path.includes('thumbnail-bg-')))
-        .map((i) => ({ url: i.downloadURL || i.thumbnail || i.url, id: i.id, storagePath: i.storagePath || i.path, timestamp: i.timestamp }));
+
+      // Determine permalink for current draft (enhanceDraftWithFeatures uses permalink in path)
+      const permalink = draftData.permalink || (draftData.publishInfo && draftData.publishInfo.permalink) || null;
+
+      if (permalink) {
+        aiItems = uploaded
+          .filter((i) => i && i.path && i.path.includes(`${permalink}-`))
+          .map((i) => ({ url: i.downloadURL || i.thumbnail || i.url, id: i.id, storagePath: i.storagePath || i.path, timestamp: i.timestamp }));
+      } else {
+        // If no permalink is available, do not show unrelated uploaded thumbnails to avoid cross-draft leakage
+        aiItems = [];
+      }
+
       // remove excluded ones
       aiItems = aiItems.filter((a) => !excludedRefImages.has(a.url));
     } catch (e) {
