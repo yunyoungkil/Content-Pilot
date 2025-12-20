@@ -66,6 +66,9 @@ describe('ThumbnailMaker UI - reference images', () => {
       document.body
     );
 
+    // wait for async reference render to complete
+    await new Promise((r) => setTimeout(r, 200));
+
     // check that tm-ref-images contains img elements
     const refWrapper = document.querySelector('#tm-ref-images');
     expect(refWrapper).toBeTruthy();
@@ -214,5 +217,87 @@ describe('ThumbnailMaker UI - reference images', () => {
     // diagnostics or preview UI should be present without errors
     const preview = document.querySelector('#tm-preview');
     expect(preview).toBeTruthy();
+  });
+
+  test('shows AI uploaded thumbnails and allows storage deletion', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> </p>',
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    // Setup mock responses: get_uploaded_images_log returns an AI thumbnail
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [{ id: 'AI1', path: 'thumbnails/AI/thumbnail-bg-1.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/thumbnail-bg-1.png', timestamp: 123 }] });
+        return;
+      }
+
+      if (msg && msg.action === 'delete_storage_image') {
+        if (typeof cb === 'function') cb({ success: true });
+        return;
+      }
+
+      // default response
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    // render modal
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    // wait for async renderReferenceImages to fetch uploaded log
+    await new Promise((r) => setTimeout(r, 200));
+
+    const refWrapper = document.querySelector('#tm-ref-images');
+    expect(refWrapper).toBeTruthy();
+
+    // there should be an image with the storage URL
+    const imgs = Array.from(refWrapper.querySelectorAll('img'));
+    const found = imgs.some((i) => i.src === 'https://storage.test/ai1.png');
+    expect(found).toBe(true);
+
+    // AI badge should exist
+    const badge = Array.from(refWrapper.querySelectorAll('span')).some((s) => s.textContent === 'AI');
+    expect(badge).toBe(true);
+
+    // delete button should be present
+    const delBtn = Array.from(refWrapper.querySelectorAll('button')).find((b) => b.title === '영구 삭제');
+    expect(delBtn).toBeTruthy();
+
+    // mock confirm to automatically accept
+    global.confirm = jest.fn(() => true);
+
+    // simulate click
+    delBtn.click();
+
+    // wait for delete handler
+    await new Promise((r) => setTimeout(r, 200));
+
+    // ensure delete_storage_image was called
+    const deleteCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'delete_storage_image');
+    expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
   });
 });
