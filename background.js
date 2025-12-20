@@ -743,13 +743,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         try {
           if (Array.isArray(msg.data.references) && msg.data.references.length > 0) {
-            inputUrls = msg.data.references;
-            console.error('[Background] Fetching references count:', inputUrls.length);
+                inputUrls = msg.data.references;
+                console.error('[Background] Fetching references count:', inputUrls.length);
 
-            // fetch each reference asynchronously as base64 objects
-            const fetchPromises = msg.data.references.map((url) => fetchImageAsBase64(url).catch((err) => ({ success: false, error: err.message })));
-            const fetchedRaw = await Promise.all(fetchPromises);
+                // fetch each reference asynchronously as base64 objects with a single retry on failure
+                const tryFetch = async (url) => {
+                  try {
+                    const first = await fetchImageAsBase64(url);
+                    if (first && first.success) return first;
+                  } catch (e) { /* fallthrough to retry */ }
+                  // Retry once after short delay
+                  try {
+                    await new Promise((r) => setTimeout(r, 100));
+                    const second = await fetchImageAsBase64(url);
+                    return second || { success: false, error: 'retry_failed' };
+                  } catch (e) {
+                    return { success: false, error: e && e.message ? e.message : String(e) };
+                  }
+                };
 
+                const fetchPromises = msg.data.references.map((url) => tryFetch(url).catch((err) => ({ success: false, error: err.message })));
+                const fetchedRaw = await Promise.all(fetchPromises);
             // [DEBUG] Log raw fetch results with console.error to ensure visibility
             try {
               const debugResults = fetchedRaw.map((r, i) => ({
