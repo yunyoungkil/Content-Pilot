@@ -69,8 +69,8 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for async reference render to complete
     await new Promise((r) => setTimeout(r, 200));
 
-    // check that tm-ref-images (or the new below wrapper) contains img elements
-    const refWrapper = document.querySelector('#tm-ref-images-below') || document.querySelector('#tm-ref-images');
+    // check that top tm-ref-images contains img elements
+    const refWrapper = document.querySelector('#tm-ref-images');
     expect(refWrapper).toBeTruthy();
     const imgs = refWrapper.querySelectorAll('img');
     expect(imgs.length).toBeGreaterThanOrEqual(1);
@@ -277,21 +277,21 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for async renderReferenceImages to fetch uploaded log
     await new Promise((r) => setTimeout(r, 200));
 
-    // the ref images are rendered below the canvas wrapper
-    const refWrapper = document.querySelector('#tm-ref-images-below') || document.querySelector('#tm-ref-images');
-    expect(refWrapper).toBeTruthy();
+    // AI uploaded images should be rendered below the canvas wrapper
+    const aiWrapper = document.querySelector('#tm-ref-images-below');
+    expect(aiWrapper).toBeTruthy();
 
-    // there should be an image with the storage URL
-    const imgs = Array.from(refWrapper.querySelectorAll('img'));
+    // there should be an image with the storage URL inside AI wrapper
+    const imgs = Array.from(aiWrapper.querySelectorAll('img'));
     const found = imgs.some((i) => i.src === 'https://storage.test/ai1.png');
     expect(found).toBe(true);
 
-    // AI badge should exist (look for span with 'AI' inside the below wrapper)
-    const badge = Array.from(refWrapper.querySelectorAll('span')).some((s) => s.textContent === 'AI');
+    // AI badge should exist (look for span with 'AI' inside the AI wrapper)
+    const badge = Array.from(aiWrapper.querySelectorAll('span')).some((s) => s.textContent === 'AI');
     expect(badge).toBe(true);
 
-    // delete button should be present
-    const delBtn = Array.from(refWrapper.querySelectorAll('button')).find((b) => b.title === '영구 삭제');
+    // delete button should be present in AI wrapper
+    const delBtn = Array.from(aiWrapper.querySelectorAll('button')).find((b) => b.title === '영구 삭제');
     expect(delBtn).toBeTruthy();
 
     // mock confirm to automatically accept

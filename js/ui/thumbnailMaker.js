@@ -370,24 +370,28 @@ export function openThumbnailMaker(
 
   // [신규] compute and render reference images for background generation
   const renderReferenceImages = async () => {
-    // Hide the original top reference list (legacy) and render below the canvas wrapper
+    // Keep the original top reference list (legacy) for content references
     const topWrapper = modal.querySelector('#tm-ref-images');
-    if (topWrapper) topWrapper.style.display = 'none';
 
     const canvasWrapper = modal.querySelector('#tm-canvas-wrapper');
     if (!canvasWrapper) return [];
 
-    let wrapper = modal.querySelector('#tm-ref-images-below');
-    if (!wrapper) {
-      wrapper = document.createElement('div');
-      wrapper.id = 'tm-ref-images-below';
-      wrapper.style.marginTop = '12px';
-      wrapper.style.marginBottom = '10px';
+    // Ensure AI uploaded images wrapper exists below the canvas
+    let aiWrapper = modal.querySelector('#tm-ref-images-below');
+    if (!aiWrapper) {
+      aiWrapper = document.createElement('div');
+      aiWrapper.id = 'tm-ref-images-below';
+      aiWrapper.style.marginTop = '12px';
+      aiWrapper.style.marginBottom = '10px';
+      aiWrapper.innerHTML = '<label style="display:block;font-size:11px;color:#aaa;margin-bottom:6px;">AI 업로드 이미지</label>';
       // Insert directly after canvas wrapper
-      canvasWrapper.insertAdjacentElement('afterend', wrapper);
+      canvasWrapper.insertAdjacentElement('afterend', aiWrapper);
     }
 
-    wrapper.innerHTML = '';
+    // clear targets
+    if (topWrapper) topWrapper.innerHTML = '';
+    aiWrapper.querySelectorAll('*').forEach((n) => n.remove());
+
     const formattedDraft = draftData.formattedDraft || draftData.currentDraft || '';
     const idea = draftData || {};
     const affiliateLinks = draftData.affiliateLinks || [];
@@ -427,55 +431,96 @@ export function openThumbnailMaker(
       aiItems = [];
     }
 
-    // merge AI items first then refs (preserve order, dedupe)
-    const merged = [];
-    const seen = new Set();
+    // Render content references into topWrapper
+    const renderedRefs = [];
+    if (topWrapper) {
+      if (!refs || refs.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.fontSize = '12px';
+        empty.style.color = '#777';
+        empty.textContent = '(없음)';
+        topWrapper.appendChild(empty);
+      } else {
+        for (const url of refs) {
+          if (!url || excludedRefImages.has(url)) continue;
+          renderedRefs.push(url);
 
-    for (const a of aiItems) {
-      if (a && a.url && !seen.has(a.url)) {
-        merged.push({ url: a.url, isAi: true, id: a.id, storagePath: a.storagePath });
-        seen.add(a.url);
+          const imgWrap = document.createElement('div');
+          imgWrap.style.display = 'inline-flex';
+          imgWrap.style.alignItems = 'center';
+          imgWrap.style.gap = '6px';
+          imgWrap.style.position = 'relative';
+          imgWrap.style.marginRight = '8px';
+
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = '참고 이미지';
+          img.style.width = '64px';
+          img.style.height = '36px';
+          img.style.objectFit = 'cover';
+          img.style.borderRadius = '6px';
+          img.style.border = '1px solid #444';
+          imgWrap.appendChild(img);
+
+          const excludeBtn = document.createElement('button');
+          excludeBtn.innerHTML = '×';
+          excludeBtn.style.position = 'absolute';
+          excludeBtn.style.top = '-6px';
+          excludeBtn.style.right = 'calc(100% - 70px)';
+          excludeBtn.style.width = '16px';
+          excludeBtn.style.height = '16px';
+          excludeBtn.style.background = '#ff4444';
+          excludeBtn.style.color = 'white';
+          excludeBtn.style.border = 'none';
+          excludeBtn.style.borderRadius = '50%';
+          excludeBtn.style.fontSize = '12px';
+          excludeBtn.style.lineHeight = '1';
+          excludeBtn.style.cursor = 'pointer';
+          excludeBtn.style.display = 'flex';
+          excludeBtn.style.alignItems = 'center';
+          excludeBtn.style.justifyContent = 'center';
+          excludeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+          excludeBtn.style.zIndex = '10';
+          excludeBtn.title = '참고 이미지에서 제외';
+          excludeBtn.onclick = (e) => {
+            e.stopPropagation();
+            excludedRefImages.add(url);
+            renderReferenceImages();
+          };
+          imgWrap.appendChild(excludeBtn);
+
+          topWrapper.appendChild(imgWrap);
+        }
       }
     }
-    for (const url of refs) {
-      if (url && !seen.has(url)) {
-        merged.push({ url, isAi: false });
-        seen.add(url);
-      }
-    }
 
-    currentRefImages = merged.map((m) => m.url);
+    // For AI uploaded images, render only those that belong to this draft and are not duplicates of content refs
+    const renderedAiUrls = [];
+    if (aiItems && aiItems.length > 0) {
+      for (const a of aiItems) {
+        const url = a.url;
+        if (!url || excludedRefImages.has(url)) continue;
+        if (renderedRefs.includes(url)) continue; // avoid duplicate display
+        renderedAiUrls.push(url);
 
-    if (!merged || merged.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.fontSize = '12px';
-      empty.style.color = '#777';
-      empty.textContent = '(없음)';
-      wrapper.appendChild(empty);
-      return merged;
-    }
+        const imgWrap = document.createElement('div');
+        imgWrap.style.display = 'inline-flex';
+        imgWrap.style.alignItems = 'center';
+        imgWrap.style.gap = '6px';
+        imgWrap.style.position = 'relative';
+        imgWrap.style.marginRight = '8px';
 
-    for (const item of merged) {
-      const url = item.url;
-      const imgWrap = document.createElement('div');
-      imgWrap.style.display = 'inline-flex';
-      imgWrap.style.alignItems = 'center';
-      imgWrap.style.gap = '6px';
-      imgWrap.style.position = 'relative'; // deletion button position
-      imgWrap.style.marginRight = '8px'; // spacing
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = 'AI 업로드 이미지';
+        img.style.width = '64px';
+        img.style.height = '36px';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '6px';
+        img.style.border = '1px solid #444';
+        imgWrap.appendChild(img);
 
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = item.isAi ? 'AI 업로드 이미지' : '참고 이미지';
-      img.style.width = '64px';
-      img.style.height = '36px';
-      img.style.objectFit = 'cover';
-      img.style.borderRadius = '6px';
-      img.style.border = '1px solid #444';
-      imgWrap.appendChild(img);
-
-      // AI badge
-      if (item.isAi) {
+        // AI badge
         const badge = document.createElement('span');
         badge.textContent = 'AI';
         badge.style.position = 'absolute';
@@ -488,87 +533,93 @@ export function openThumbnailMaker(
         badge.style.borderRadius = '4px';
         badge.style.zIndex = '9';
         imgWrap.appendChild(badge);
-      }
 
-      // Exclude button (existing behavior)
-      const excludeBtn = document.createElement('button');
-      excludeBtn.innerHTML = '×';
-      excludeBtn.style.position = 'absolute';
-      excludeBtn.style.top = '-6px';
-      excludeBtn.style.right = 'calc(100% - 70px)';
-      excludeBtn.style.width = '16px';
-      excludeBtn.style.height = '16px';
-      excludeBtn.style.background = '#ff4444';
-      excludeBtn.style.color = 'white';
-      excludeBtn.style.border = 'none';
-      excludeBtn.style.borderRadius = '50%';
-      excludeBtn.style.fontSize = '12px';
-      excludeBtn.style.lineHeight = '1';
-      excludeBtn.style.cursor = 'pointer';
-      excludeBtn.style.display = 'flex';
-      excludeBtn.style.alignItems = 'center';
-      excludeBtn.style.justifyContent = 'center';
-      excludeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-      excludeBtn.style.zIndex = '10';
-      excludeBtn.title = '참고 이미지에서 제외';
-      excludeBtn.onclick = (e) => {
-        e.stopPropagation();
-        excludedRefImages.add(url);
-        renderReferenceImages();
-      };
-      imgWrap.appendChild(excludeBtn);
-
-      // If storage-backed AI image, add permanent delete button
-      if (item.isAi && item.id) {
-        const delBtn = document.createElement('button');
-        delBtn.textContent = '🗑';
-        delBtn.title = '영구 삭제';
-        delBtn.style.position = 'absolute';
-        delBtn.style.top = '-6px';
-        delBtn.style.right = '4px';
-        delBtn.style.width = '20px';
-        delBtn.style.height = '20px';
-        delBtn.style.background = '#111';
-        delBtn.style.color = '#fff';
-        delBtn.style.border = 'none';
-        delBtn.style.borderRadius = '50%';
-        delBtn.style.fontSize = '12px';
-        delBtn.style.cursor = 'pointer';
-        delBtn.style.zIndex = '11';
-
-        delBtn.onclick = async (e) => {
+        // Exclude button
+        const excludeBtn = document.createElement('button');
+        excludeBtn.innerHTML = '×';
+        excludeBtn.style.position = 'absolute';
+        excludeBtn.style.top = '-6px';
+        excludeBtn.style.right = 'calc(100% - 70px)';
+        excludeBtn.style.width = '16px';
+        excludeBtn.style.height = '16px';
+        excludeBtn.style.background = '#ff4444';
+        excludeBtn.style.color = 'white';
+        excludeBtn.style.border = 'none';
+        excludeBtn.style.borderRadius = '50%';
+        excludeBtn.style.fontSize = '12px';
+        excludeBtn.style.lineHeight = '1';
+        excludeBtn.style.cursor = 'pointer';
+        excludeBtn.style.display = 'flex';
+        excludeBtn.style.alignItems = 'center';
+        excludeBtn.style.justifyContent = 'center';
+        excludeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+        excludeBtn.style.zIndex = '10';
+        excludeBtn.title = '참고 이미지에서 제외';
+        excludeBtn.onclick = (e) => {
           e.stopPropagation();
-          try {
-            // confirm with user
-            let ok = true;
-            try {
-              ok = confirm('이 이미지를 스토리지에서 영구 삭제하시겠습니까? (취소하면 보존됩니다)');
-            } catch (e) {
-              ok = true;
-            }
-            if (!ok) return;
-
-            const resp = await sendRuntimeMessageWithTimeout({ action: 'delete_storage_image', data: { id: item.id, storagePath: item.storagePath } }, 10000);
-            if (resp && resp.success) {
-              showToast('이미지가 삭제되었습니다.');
-              // ensure excluded set also cleans it
-              excludedRefImages.add(url);
-              await renderReferenceImages();
-            } else {
-              showToast('이미지 삭제에 실패했습니다: ' + (resp && resp.error ? resp.error : 'unknown'));
-            }
-          } catch (err) {
-            console.error('[ThumbnailMaker] delete error:', err);
-            showToast('이미지 삭제 중 오류가 발생했습니다.');
-          }
+          excludedRefImages.add(url);
+          renderReferenceImages();
         };
+        imgWrap.appendChild(excludeBtn);
 
-        imgWrap.appendChild(delBtn);
+        // permanent delete for storage-backed AI images
+        if (a.id) {
+          const delBtn = document.createElement('button');
+          delBtn.textContent = '🗑';
+          delBtn.title = '영구 삭제';
+          delBtn.style.position = 'absolute';
+          delBtn.style.top = '-6px';
+          delBtn.style.right = '4px';
+          delBtn.style.width = '20px';
+          delBtn.style.height = '20px';
+          delBtn.style.background = '#111';
+          delBtn.style.color = '#fff';
+          delBtn.style.border = 'none';
+          delBtn.style.borderRadius = '50%';
+          delBtn.style.fontSize = '12px';
+          delBtn.style.cursor = 'pointer';
+          delBtn.style.zIndex = '11';
+
+          delBtn.onclick = async (e) => {
+            e.stopPropagation();
+            try {
+              let ok = true;
+              try { ok = confirm('이 이미지를 스토리지에서 영구 삭제하시겠습니까? (취소하면 보존됩니다)'); } catch (err) { ok = true; }
+              if (!ok) return;
+
+              const resp = await sendRuntimeMessageWithTimeout({ action: 'delete_storage_image', data: { id: a.id, storagePath: a.storagePath } }, 10000);
+              if (resp && resp.success) {
+                showToast('이미지가 삭제되었습니다.');
+                excludedRefImages.add(url);
+                await renderReferenceImages();
+              } else {
+                showToast('이미지 삭제에 실패했습니다: ' + (resp && resp.error ? resp.error : 'unknown'));
+              }
+            } catch (err) {
+              console.error('[ThumbnailMaker] delete error:', err);
+              showToast('이미지 삭제 중 오류가 발생했습니다.');
+            }
+          };
+
+          imgWrap.appendChild(delBtn);
+        }
+
+        aiWrapper.appendChild(imgWrap);
       }
-
-      wrapper.appendChild(imgWrap);
     }
-    return merged;
+
+    currentRefImages = renderedRefs.concat(renderedAiUrls);
+
+    // If both areas are empty, show placeholder in aiWrapper as well
+    if ((renderedRefs.length === 0) && (renderedAiUrls.length === 0)) {
+      const empty = document.createElement('div');
+      empty.style.fontSize = '12px';
+      empty.style.color = '#777';
+      empty.textContent = '(없음)';
+      aiWrapper.appendChild(empty);
+    }
+
+    return currentRefImages;
   };
 
   // render initial references
