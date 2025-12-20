@@ -298,7 +298,7 @@ export function cleanDataForFirebase(data) {
 }
 
 // Storage 업로드 함수 (REST API 기반)
-export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
+export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta = {}) {
   try {
     const blob = dataURLtoBlob(dataUrl);
     let token = await getValidToken(false);
@@ -353,6 +353,8 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
         downloadURL: downloadURL,
         timestamp: timestamp,
         size: blob.size,
+        // include optional meta (e.g., permalink)
+        ...(meta && typeof meta === 'object' ? cleanDataForFirebase(meta) : {}),
       });
     } catch (error) {
       Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);

@@ -253,7 +253,7 @@ describe('ThumbnailMaker UI - reference images', () => {
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'get_uploaded_images_log') {
         if (typeof cb === 'function') cb({ success: true, images: [
-          { id: 'AI1', path: 'thumbnails/AI/post-123-16x9.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/post-123-16x9.png', timestamp: 123 },
+          { id: 'AI1', path: 'thumbnails/AI/post-123-16x9.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/post-123-16x9.png', timestamp: 123, permalink: 'post-123' },
           { id: 'AI2', path: 'thumbnails/Other/thumbnail-bg-1.png', downloadURL: 'https://storage.test/other.png', storagePath: 'thumbnails/Other/thumbnail-bg-1.png', timestamp: 120 }
         ] });
         return;

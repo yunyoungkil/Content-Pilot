@@ -1017,12 +1017,14 @@ export async function enhanceDraftWithFeatures({
       uploadImageToFirebaseStorage(
         croppedResults[0].dataUrl,
         `thumbnails/${userId}/${permalink}-1x1.png`,
-        userId
+        userId,
+        { permalink }
       ),
       uploadImageToFirebaseStorage(
         croppedResults[1].dataUrl,
         `thumbnails/${userId}/${permalink}-4x3.png`,
-        userId
+        userId,
+        { permalink }
       ),
     ];
 
@@ -1033,7 +1035,8 @@ export async function enhanceDraftWithFeatures({
       url_16x9 = await uploadImageToFirebaseStorage(
         final16x9Data,
         `thumbnails/${userId}/${permalink}-16x9.png`,
-        userId
+        userId,
+        { permalink }
       );
     } else if (final16x9Url) {
       // Base64 변환 실패 시 원본 URL 그대로 사용 (업로드 건너뜀)

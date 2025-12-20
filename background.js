@@ -888,11 +888,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
-        return uploadImageToFirebaseStorage(
-          msg.data.dataUrl,
-          `thumbnails/${userId}/${msg.data.filename || Date.now() + '.png'}`,
-          userId
-        ).then((url) => ({ success: true, url }));
+        const filename = msg.data.filename || `${Date.now()}.png`;
+        const storagePath = `thumbnails/${userId}/${filename}`;
+        const meta = msg.data && msg.data.meta ? msg.data.meta : {};
+        const url = await uploadImageToFirebaseStorage(msg.data.dataUrl, storagePath, userId, meta);
+        return { success: true, url };
       })()
     );
   }

@@ -398,8 +398,8 @@ export function openThumbnailMaker(
 
       if (permalink) {
         aiItems = uploaded
-          .filter((i) => i && i.path && i.path.includes(`${permalink}-`))
-          .map((i) => ({ url: i.downloadURL || i.thumbnail || i.url, id: i.id, storagePath: i.storagePath || i.path, timestamp: i.timestamp }));
+          .filter((i) => i && (i.permalink === permalink || (i.path && i.path.includes(`${permalink}-`))))
+          .map((i) => ({ url: i.downloadURL || i.thumbnail || i.url, id: i.id, storagePath: i.storagePath || i.path, timestamp: i.timestamp, permalink: i.permalink }));
       } else {
         // If no permalink is available, do not show unrelated uploaded thumbnails to avoid cross-draft leakage
         aiItems = [];
