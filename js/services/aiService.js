@@ -875,7 +875,7 @@ export async function enhanceDraftWithFeatures({
         } catch (e) {
           void 0;
         }
-        const COMPOSE_TIMEOUT_MS = 8000;
+        const COMPOSE_TIMEOUT_MS = 15000; // Increased timeout to avoid premature compose timeouts
         const composePromise = composeThumbnailInOffscreen(
           composedDataUrl,
           thumbnailText,

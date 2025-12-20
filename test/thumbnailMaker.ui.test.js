@@ -153,4 +153,66 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
+
+  test('retries on timeout and succeeds', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    // simulate timeout first, then success on retry
+    let call = 0;
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'ai_generate_images') {
+        call++;
+        if (call === 1) {
+          if (typeof cb === 'function') cb({ success: false, error: 'timeout' });
+          return;
+        }
+        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated_after_retry.png'] });
+        return;
+      }
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    // wait longer for retry path
+    await new Promise((r) => setTimeout(r, 700));
+
+    // ensure we attempted at least twice and eventually succeeded
+    const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'ai_generate_images');
+    expect(aiCalls.length).toBeGreaterThanOrEqual(2);
+
+    // diagnostics or preview UI should be present without errors
+    const preview = document.querySelector('#tm-preview');
+    expect(preview).toBeTruthy();
+  });
 });

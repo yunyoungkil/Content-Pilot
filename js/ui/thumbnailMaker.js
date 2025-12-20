@@ -1148,15 +1148,36 @@ export function openThumbnailMaker(
           refCount: refImagesToSend.length
         });
 
-        const response = await sendRuntimeMessageWithTimeout({
-          action: 'ai_generate_images',
-          data: {
-            prompt: enhancedPrompt,
-            count: 1,
-            aspect: '16:9',
-            references: refImagesToSend,
+        // Try with extended timeout (60s) and perform a single automatic retry on timeout
+        let response = await sendRuntimeMessageWithTimeout(
+          {
+            action: 'ai_generate_images',
+            data: {
+              prompt: enhancedPrompt,
+              count: 1,
+              aspect: '16:9',
+              references: refImagesToSend,
+            },
           },
-        });
+          60000
+        );
+
+        if (response && response.error === 'timeout') {
+          // Inform user and retry once
+          showToast('이미지 생성이 지연되어 재시도합니다...');
+          response = await sendRuntimeMessageWithTimeout(
+            {
+              action: 'ai_generate_images',
+              data: {
+                prompt: enhancedPrompt,
+                count: 1,
+                aspect: '16:9',
+                references: refImagesToSend,
+              },
+            },
+            60000
+          );
+        }
 
         // 응답 진단 정보가 있으면 UI에 표시
         try {
