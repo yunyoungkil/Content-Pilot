@@ -370,8 +370,23 @@ export function openThumbnailMaker(
 
   // [신규] compute and render reference images for background generation
   const renderReferenceImages = async () => {
-    const wrapper = modal.querySelector('#tm-ref-images');
-    if (!wrapper) return [];
+    // Hide the original top reference list (legacy) and render below the canvas wrapper
+    const topWrapper = modal.querySelector('#tm-ref-images');
+    if (topWrapper) topWrapper.style.display = 'none';
+
+    const canvasWrapper = modal.querySelector('#tm-canvas-wrapper');
+    if (!canvasWrapper) return [];
+
+    let wrapper = modal.querySelector('#tm-ref-images-below');
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.id = 'tm-ref-images-below';
+      wrapper.style.marginTop = '12px';
+      wrapper.style.marginBottom = '10px';
+      // Insert directly after canvas wrapper
+      canvasWrapper.insertAdjacentElement('afterend', wrapper);
+    }
+
     wrapper.innerHTML = '';
     const formattedDraft = draftData.formattedDraft || draftData.currentDraft || '';
     const idea = draftData || {};

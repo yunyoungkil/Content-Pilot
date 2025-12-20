@@ -69,8 +69,8 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for async reference render to complete
     await new Promise((r) => setTimeout(r, 200));
 
-    // check that tm-ref-images contains img elements
-    const refWrapper = document.querySelector('#tm-ref-images');
+    // check that tm-ref-images (or the new below wrapper) contains img elements
+    const refWrapper = document.querySelector('#tm-ref-images-below') || document.querySelector('#tm-ref-images');
     expect(refWrapper).toBeTruthy();
     const imgs = refWrapper.querySelectorAll('img');
     expect(imgs.length).toBeGreaterThanOrEqual(1);
@@ -277,7 +277,8 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for async renderReferenceImages to fetch uploaded log
     await new Promise((r) => setTimeout(r, 200));
 
-    const refWrapper = document.querySelector('#tm-ref-images');
+    // the ref images are rendered below the canvas wrapper
+    const refWrapper = document.querySelector('#tm-ref-images-below') || document.querySelector('#tm-ref-images');
     expect(refWrapper).toBeTruthy();
 
     // there should be an image with the storage URL
@@ -285,7 +286,7 @@ describe('ThumbnailMaker UI - reference images', () => {
     const found = imgs.some((i) => i.src === 'https://storage.test/ai1.png');
     expect(found).toBe(true);
 
-    // AI badge should exist
+    // AI badge should exist (look for span with 'AI' inside the below wrapper)
     const badge = Array.from(refWrapper.querySelectorAll('span')).some((s) => s.textContent === 'AI');
     expect(badge).toBe(true);
 
