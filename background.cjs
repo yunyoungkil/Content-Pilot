@@ -2145,41 +2145,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const requestId = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const tabId = sender && sender.tab && sender.tab.id;
 
-    // If the message came from a page/tab, send an immediate ACK synchronously
-    if (tabId) {
+    // Send an immediate ACK synchronously to ALL callers to prevent port closing
+    try {
+      sendResponse({ success: 'accepted', requestId });
+    } catch (e) {
+      Logger.warn('[delete_storage_image] failed to send immediate ACK:', e && e.message);
+    }
+
+    (async () => {
+      const userId = await getCurrentUserId();
+      let result = { success: true };
+
       try {
-        sendResponse({ success: 'accepted', requestId });
+        Logger.info('[delete_storage_image] calling deleteImageFromStorage for id:', id, 'path:', storagePath);
+        await deleteImageFromStorage(storagePath);
+        Logger.info('[delete_storage_image] deleteImageFromStorage succeeded for id:', id);
       } catch (e) {
-        Logger.warn('[delete_storage_image] failed to send immediate ACK:', e && e.message);
+        Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
+        result = { success: false, error: e && e.message ? e.message : String(e) };
       }
 
-      (async () => {
-        const userId = await getCurrentUserId();
-        let result = { success: true };
-
+      if (result.success) {
         try {
-          Logger.info('[delete_storage_image] calling deleteImageFromStorage for id:', id, 'path:', storagePath);
-          await deleteImageFromStorage(storagePath);
-          Logger.info('[delete_storage_image] deleteImageFromStorage succeeded for id:', id);
+          Logger.info('[delete_storage_image] removing DB metadata for id:', id);
+          await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+          Logger.info('[delete_storage_image] DB metadata removal succeeded for id:', id);
         } catch (e) {
-          Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
+          Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
           result = { success: false, error: e && e.message ? e.message : String(e) };
         }
+      }
 
-        if (result.success) {
-          try {
-            Logger.info('[delete_storage_image] removing DB metadata for id:', id);
-            await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
-            Logger.info('[delete_storage_image] DB metadata removal succeeded for id:', id);
-          } catch (e) {
-            Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
-            result = { success: false, error: e && e.message ? e.message : String(e) };
-          }
-        }
+      Logger.info('[delete_storage_image] operation completed for id:', id, 'result:', result);
 
-        Logger.info('[delete_storage_image] operation completed for id:', id, 'result:', result);
-
-        // Notify the originating tab with the final result
+      // Notify the originating tab with the final result
+      if (tabId) {
         try {
           if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
             chrome.tabs.sendMessage(tabId, { action: 'delete_storage_image_result', requestId, id, ...result }, () => {});
@@ -2187,34 +2187,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } catch (e) {
           Logger.warn('[delete_storage_image] failed to notify tab with result:', e && e.message);
         }
-      })();
-
-      return false;
-    }
-
-    return handleAsync(
-      (async () => {
-        const userId = await getCurrentUserId();
-
-        // 1. 스토리지 원본 삭제
+      } else {
+        // If no tabId (e.g. from popup or background console), broadcast the result
         try {
-          await deleteImageFromStorage(storagePath);
+           if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+             chrome.runtime.sendMessage({ action: 'delete_storage_image_result', requestId, id, ...result }).catch(() => {});
+           }
         } catch (e) {
-          Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
-          return { success: false, error: e && e.message ? e.message : String(e) };
+           Logger.warn('[delete_storage_image] failed to broadcast result:', e && e.message);
         }
+      }
+    })();
 
-        // 2. DB 메타데이터 삭제
-        try {
-          await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
-        } catch (e) {
-          Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
-          return { success: false, error: e && e.message ? e.message : String(e) };
-        }
-
-        return { success: true };
-      })()
-    );
+    return false; // We already sent the response
   }
 
   if (msg.action === 'delete_scrap') {
