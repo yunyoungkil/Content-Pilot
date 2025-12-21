@@ -2945,20 +2945,80 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return false;
     }
 
+    const { id, storagePath } = msg.data || {};
+
+    // Validate basic inputs early
+    if (!id) {
+      Logger.warn('[delete_storage_image] missing id in request');
+      sendResponse({ success: false, error: 'missing id' });
+      return false;
+    }
+
+    if (!storagePath) {
+      Logger.warn('[delete_storage_image] missing storagePath for id:', id);
+      sendResponse({ success: false, error: 'missing storagePath' });
+      return false;
+    }
+
+    // Generate a requestId for follow-up notification
+    const requestId = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const tabId = sender && sender.tab && sender.tab.id;
+
+    // If the message came from a page/tab, send an immediate ACK synchronously, then handle actual work and notify the tab with the final result.
+    if (tabId) {
+      try {
+        sendResponse({ success: 'accepted', requestId });
+      } catch (e) {
+        Logger.warn('[delete_storage_image] failed to send immediate ACK:', e && e.message);
+        // Fall through to async path if sendResponse failed
+      }
+
+      (async () => {
+        const userId = await getCurrentUserId();
+        let result = { success: true };
+
+        try {
+          Logger.info('[delete_storage_image] calling deleteImageFromStorage for id:', id, 'path:', storagePath);
+          await deleteImageFromStorage(storagePath);
+          Logger.info('[delete_storage_image] deleteImageFromStorage succeeded for id:', id);
+        } catch (e) {
+          Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
+          result = { success: false, error: e && e.message ? e.message : String(e) };
+        }
+
+        if (result.success) {
+          try {
+            Logger.info('[delete_storage_image] removing DB metadata for id:', id);
+            await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+            Logger.info('[delete_storage_image] DB metadata removal succeeded for id:', id);
+          } catch (e) {
+            Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
+            result = { success: false, error: e && e.message ? e.message : String(e) };
+          }
+        }
+
+        Logger.info('[delete_storage_image] operation completed for id:', id, 'result:', result);
+
+        // Notify the originating tab with the final result
+        try {
+          if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
+            chrome.tabs.sendMessage(tabId, { action: 'delete_storage_image_result', requestId, id, ...result }, () => {});
+          } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'delete_storage_image_result', requestId, id, ...result }).catch(() => {});
+          }
+        } catch (e) {
+          Logger.warn('[delete_storage_image] failed to notify tab with result:', e && e.message);
+        }
+      })();
+
+      // We already sent a synchronous ACK via sendResponse
+      return false;
+    }
+
+    // Otherwise, fallback to existing async sendResponse flow (for callers without tab context)
     return handleAsync(
       (async () => {
-        const { id, storagePath } = msg.data || {};
         const userId = await getCurrentUserId();
-
-        if (!id) {
-          Logger.warn('[delete_storage_image] missing id in request');
-          return { success: false, error: 'missing id' };
-        }
-
-        if (!storagePath) {
-          Logger.warn('[delete_storage_image] missing storagePath for id:', id);
-          return { success: false, error: 'missing storagePath' };
-        }
 
         // 1. 스토리지 원본 삭제
         try {
