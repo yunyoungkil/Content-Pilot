@@ -244,6 +244,9 @@
   min-height: 0;
 }
 .publish-info-area {
+  /* Fill available space so internal overflow can scroll */
+  flex: 1;
+  min-height: 0; /* ensure flex child can shrink properly */
   overflow-y: auto;
   overflow-x: hidden;
 }
