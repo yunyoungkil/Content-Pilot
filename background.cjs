@@ -2148,6 +2148,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Send an immediate ACK synchronously to ALL callers to prevent port closing
     try {
       sendResponse({ success: 'accepted', requestId });
+      Logger.info('[delete_storage_image] immediate ACK sent', { requestId });
     } catch (e) {
       Logger.warn('[delete_storage_image] failed to send immediate ACK:', e && e.message);
     }
