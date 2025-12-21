@@ -1622,11 +1622,15 @@ export function openThumbnailMaker(
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">${res.images
                 .map((it) => `
-                  <div class="tm-my-img-item" data-url="${it.downloadURL}" style="cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+                  <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+                    <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
                     <img src="${it.downloadURL}" style="width:100%;height:100%;object-fit:cover;display:block;">
                   </div>
                 `)
                 .join('')}
+              </div>
+              <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+                <button id="tm-my-images-delete" disabled style="padding:8px 12px; border-radius:6px; border:1px solid #ea4335; background:#fff; color:#ea4335; cursor:pointer; font-weight:600;">🗑️ 선택 삭제</button>
               </div>
             </div>
           `;
@@ -1634,8 +1638,17 @@ export function openThumbnailMaker(
           // 닫기 핸들러
           gm.querySelector('#tm-my-images-close').onclick = () => gm.remove();
 
-          // 이미지 클릭 핸들러 (위임)
+          // 이미지 클릭 핸들러 (위임) 및 체크박스 토글 처리
+          const deleteBtn = gm.querySelector('#tm-my-images-delete');
           gm.addEventListener('click', (e) => {
+            // 체크박스를 직접 클릭한 경우: 선택 토글
+            if (e.target && e.target.classList && e.target.classList.contains('tm-my-img-checkbox')) {
+              const selected = Array.from(gm.querySelectorAll('.tm-my-img-checkbox')).filter((cb) => cb.checked);
+              if (deleteBtn) deleteBtn.disabled = selected.length === 0;
+              e.stopPropagation();
+              return;
+            }
+
             const item = e.target && e.target.closest ? e.target.closest('.tm-my-img-item') : null;
             if (!item) return;
             const url = item.dataset.url;
@@ -1646,6 +1659,41 @@ export function openThumbnailMaker(
             showToast('✅ 선택한 이미지가 배경으로 적용되었습니다.');
             gm.remove();
           });
+
+          // 삭제 버튼 핸들러
+          if (deleteBtn) {
+            deleteBtn.onclick = () => {
+              const selected = Array.from(gm.querySelectorAll('.tm-my-img-checkbox'))
+                .filter((cb) => cb.checked)
+                .map((cb) => ({ id: cb.dataset.id, storagePath: cb.dataset.path }));
+              if (selected.length === 0) return;
+              if (!confirm(`선택한 ${selected.length}개의 이미지를 삭제하시겠습니까? (복구 불가)`)) return;
+
+              // 낙관적 UI 업데이트
+              selected.forEach((s) => {
+                const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
+                if (el) el.style.opacity = '0.5';
+              });
+
+              chrome.runtime.sendMessage({ action: 'delete_storage_images', data: { items: selected } }, (res) => {
+                if (res && res.success) {
+                  selected.forEach((s) => {
+                    const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
+                    if (el) el.remove();
+                  });
+                  showToast(`✅ ${selected.length}개의 이미지가 삭제되었습니다.`);
+                  if (deleteBtn) deleteBtn.disabled = true;
+                } else {
+                  // rollback visual
+                  selected.forEach((s) => {
+                    const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
+                    if (el) el.style.opacity = '1';
+                  });
+                  showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                }
+              });
+            };
+          }
 
           // append to container (shadow-aware)
           const appendTarget = container && container.appendChild ? container : document.body;
