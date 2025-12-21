@@ -104,6 +104,7 @@ function loadStorageImages(container) {
         .map(
           (img) => `
         <div class="storage-item" id="storage-${img.id}" data-id="${img.id}" data-path="${(img.originData && img.originData.storagePath) || img.storagePath || ''}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
+          ${(img.published === true) || (img.originData && img.originData.published === true) || (img.publishInfo && img.publishInfo.publishedUrl) ? `<div class="storage-published-badge" title="발행됨" style="position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:10px;background:#28a745;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,0.2);">✓</div>` : ''}
           <input type="checkbox" class="storage-select-checkbox" data-id="${img.id}" data-path="${(img.originData && img.originData.storagePath) || img.storagePath || ''}" 
             style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px;"> 
           <img src="${img.url}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">

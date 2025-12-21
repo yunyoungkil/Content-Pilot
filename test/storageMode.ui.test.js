@@ -17,9 +17,9 @@ describe('Storage Mode - multi-select delete', () => {
     // mock runtime responses
     global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
       if (msg && msg.action === 'get_unified_gallery') {
-        // return two storage images only
+        // return two storage images only (mark first as published)
         if (typeof cb === 'function') cb({ success: true, images: [
-          { id: 's1', url: 'https://images.test/u1.png', timestamp: 1, originData: { storagePath: 'gs://bucket/u1.png' } },
+          { id: 's1', url: 'https://images.test/u1.png', timestamp: 1, originData: { storagePath: 'gs://bucket/u1.png' }, published: true },
           { id: 's2', url: 'https://images.test/u2.png', timestamp: 2, originData: { storagePath: 'gs://bucket/u2.png' } }
         ]});
         return;
@@ -49,6 +49,12 @@ describe('Storage Mode - multi-select delete', () => {
     // ensure items rendered
     expect(document.querySelector('#storage-s1')).toBeTruthy();
     expect(document.querySelector('#storage-s2')).toBeTruthy();
+
+    // published badge should exist for s1
+    const badge = document.querySelector('#storage-s1 .storage-published-badge');
+    expect(badge).toBeTruthy();
+    expect(badge.title).toBe('발행됨');
+
 
     // select both checkboxes
     const cb1 = document.querySelector('#storage-s1 .storage-select-checkbox') || document.querySelector('#storage-s1 input.storage-select-checkbox');

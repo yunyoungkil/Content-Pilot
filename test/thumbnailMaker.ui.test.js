@@ -66,6 +66,30 @@ describe('ThumbnailMaker UI - reference images', () => {
       document.body
     );
 
+    // also test that published badge renders when image item contains published flag
+    // simulate response that includes published metadata for one of the images
+    const uploadedStub = [{ id: 'u1', downloadURL: 'https://images.test/u1.png', originData: { storagePath: 'gs://b/u1.png' }, published: true }];
+    // open my images modal via internal button flow
+    const myImagesBtn = document.querySelector('#tm-my-images');
+    if (myImagesBtn) {
+      // stub runtime for get_uploaded_images_log
+      global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+        if (msg && msg.action === 'get_uploaded_images_log') {
+          if (typeof cb === 'function') cb({ success: true, images: uploadedStub });
+          return;
+        }
+        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+      });
+
+      myImagesBtn.click();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // published badge should be present in modal item
+      const badge = document.querySelector('.tm-my-img-item .tm-published-badge');
+      expect(badge).toBeTruthy();
+      expect(badge.title).toBe('발행됨');
+    }
+
     // check that tm-ref-images contains img elements
     const refWrapper = document.querySelector('#tm-ref-images');
     expect(refWrapper).toBeTruthy();
