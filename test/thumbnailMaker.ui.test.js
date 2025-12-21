@@ -215,4 +215,65 @@ describe('ThumbnailMaker UI - reference images', () => {
     const preview = document.querySelector('#tm-preview');
     expect(preview).toBeTruthy();
   });
+
+  test('shows my uploaded images modal and applies selection', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = { formattedDraft: '<p>Hi</p>' };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    // mock get_uploaded_images_log response
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }] });
+        return;
+      }
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    const myBtn = document.querySelector('#tm-my-images');
+    expect(myBtn).toBeTruthy();
+
+    myBtn.click();
+
+    // wait for async handler
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({ action: 'get_uploaded_images_log' }, expect.any(Function));
+
+    const gallery = document.querySelector('#tm-my-images-modal');
+    expect(gallery).toBeTruthy();
+    const img = gallery.querySelector('img');
+    expect(img.src).toBe('https://images.test/u1.png');
+
+    // simulate clicking the image to apply it
+    const item = gallery.querySelector('.tm-my-img-item');
+    item.click();
+
+    // after selection, gallery should be removed
+    expect(document.querySelector('#tm-my-images-modal')).toBeFalsy();
+  });
 });

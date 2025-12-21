@@ -318,6 +318,9 @@ export function openThumbnailMaker(
         <button id="tm-edit-tui" style="padding:10px 16px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
           🛠️ 정밀 편집
         </button>
+        <button id="tm-my-images" style="padding:10px 14px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+          🖼️ 내가 만든 이미지
+        </button>
         <button id="tm-insert" style="padding:10px 20px;background:#0984e3;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 4px 12px rgba(9, 132, 227, 0.3);white-space:nowrap;">
           본문에 삽입
         </button>
@@ -1588,6 +1591,71 @@ export function openThumbnailMaker(
       } catch (error) {
         console.error('[ThumbnailMaker] 정밀 편집 오류:', error);
         alert('❌ 정밀 편집 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      }
+    };
+
+  // 내가 만든 이미지 보기 버튼
+  const myImagesBtn = modal.querySelector('#tm-my-images');
+  if (myImagesBtn)
+    myImagesBtn.onclick = async () => {
+      const originalText = myImagesBtn.textContent;
+      myImagesBtn.disabled = true;
+      myImagesBtn.textContent = '⏳ 불러오는 중...';
+      try {
+        chrome.runtime.sendMessage({ action: 'get_uploaded_images_log' }, (res) => {
+          myImagesBtn.disabled = false;
+          myImagesBtn.textContent = originalText;
+          if (!res || !res.success || !Array.isArray(res.images) || res.images.length === 0) {
+            showToast('저장된 이미지가 없습니다.', 'warning');
+            return;
+          }
+
+          // 모달 생성
+          const gm = document.createElement('div');
+          gm.id = 'tm-my-images-modal';
+          gm.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:2147483648;padding:20px;';
+          gm.innerHTML = `
+            <div style="max-width:900px;width:100%;max-height:90vh;background:#fff;border-radius:12px;padding:16px;overflow:auto;box-sizing:border-box;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h4 style="margin:0;font-size:16px;color:#222;">🖼️ 내가 만든 이미지</h4>
+                <button id="tm-my-images-close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">${res.images
+                .map((it) => `
+                  <div class="tm-my-img-item" data-url="${it.downloadURL}" style="cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+                    <img src="${it.downloadURL}" style="width:100%;height:100%;object-fit:cover;display:block;">
+                  </div>
+                `)
+                .join('')}
+              </div>
+            </div>
+          `;
+
+          // 닫기 핸들러
+          gm.querySelector('#tm-my-images-close').onclick = () => gm.remove();
+
+          // 이미지 클릭 핸들러 (위임)
+          gm.addEventListener('click', (e) => {
+            const item = e.target && e.target.closest ? e.target.closest('.tm-my-img-item') : null;
+            if (!item) return;
+            const url = item.dataset.url;
+            if (!url) return;
+            currentBgImage = url; // 배경으로 설정
+            updatePreview();
+            saveState();
+            showToast('✅ 선택한 이미지가 배경으로 적용되었습니다.');
+            gm.remove();
+          });
+
+          // append to container (shadow-aware)
+          const appendTarget = container && container.appendChild ? container : document.body;
+          appendTarget.appendChild(gm);
+        });
+      } catch (err) {
+        console.error('[ThumbnailMaker] get_uploaded_images_log 오류:', err);
+        myImagesBtn.disabled = false;
+        myImagesBtn.textContent = originalText;
+        showToast('저장된 이미지 조회 중 오류가 발생했습니다.', 'error');
       }
     };
 

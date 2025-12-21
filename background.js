@@ -2911,6 +2911,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // Batch delete storage images (delete file in Firebase Storage + DB metadata entry)
+  if (msg.action === 'delete_storage_images') {
+    return handleAsync(
+      (async () => {
+        const items = Array.isArray(msg.data && msg.data.items) ? msg.data.items : [];
+        const userId = await getCurrentUserId();
+        const results = [];
+
+        for (const it of items) {
+          try {
+            if (it && it.storagePath) {
+              await deleteImageFromStorage(it.storagePath);
+            }
+            if (it && it.id) {
+              await remove(ref(getDb(), `thumbnail_images/${userId}/${it.id}`));
+            }
+            results.push({ id: it && it.id, success: true });
+          } catch (e) {
+            Logger.warn('[delete_storage_images] item delete failed:', it && it.id, e && e.message);
+            results.push({ id: it && it.id, success: false, error: e && e.message });
+          }
+        }
+
+        const failed = results.filter((r) => !r.success);
+        if (failed.length > 0) {
+          return { success: false, results };
+        }
+
+        return { success: true, results };
+      })()
+    );
+  }
+
   // === [Alarm Management] 알람 관리 ===
   if (msg.action === 'register_alarms') {
     return handleAsync(

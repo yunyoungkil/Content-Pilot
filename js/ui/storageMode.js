@@ -34,14 +34,17 @@ export function renderDraftMode(container) {
   content.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">로딩 중...</div>';
   root.appendChild(content);
 
-  // 푸터 (업로드 버튼)
+  // 푸터 (업로드 버튼 + 선택 삭제 버튼)
   const footer = document.createElement('div');
-  footer.style.cssText = 'padding: 12px; border-top: 1px solid #eee; background: #fff;';
+  footer.style.cssText = 'padding: 12px; border-top: 1px solid #eee; background: #fff; display:flex; gap:8px; align-items:center;';
   footer.innerHTML = `
-    <label style="display:block; width:100%; padding:10px; background:#4285f4; color:white; text-align:center; border-radius:6px; cursor:pointer; font-weight:500; transition:background 0.2s;">
+    <label style="flex:1; display:block; width:100%; padding:10px; background:#4285f4; color:white; text-align:center; border-radius:6px; cursor:pointer; font-weight:500; transition:background 0.2s;">
       + 이미지 업로드
       <input type="file" id="storage-upload-input" accept="image/*" style="display:none;">
     </label>
+    <button id="storage-delete-selected-btn" style="padding:10px 12px;border:1px solid #ea4335;background:#fff;color:#ea4335;border-radius:6px;cursor:pointer;font-weight:600;" disabled>
+      🗑️ 선택 삭제
+    </button>
   `;
   root.appendChild(footer);
 
@@ -100,7 +103,9 @@ function loadStorageImages(container) {
       ${res.images
         .map(
           (img) => `
-        <div class="storage-item" id="storage-${img.id}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
+        <div class="storage-item" id="storage-${img.id}" data-id="${img.id}" data-path="${img.originData.storagePath}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
+          <input type="checkbox" class="storage-select-checkbox" data-id="${img.id}" data-path="${img.originData.storagePath}" 
+            style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px;"> 
           <img src="${img.url}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
           <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.5); color:white; font-size:10px; padding:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
             ${new Date(img.timestamp).toLocaleDateString()}
@@ -145,5 +150,52 @@ function loadStorageImages(container) {
         });
       };
     });
+
+    // 체크박스 선택 로직
+    const checkboxes = container.querySelectorAll('.storage-select-checkbox');
+    const deleteSelectedBtn = document.getElementById('storage-delete-selected-btn');
+    const getSelected = () => Array.from(container.querySelectorAll('.storage-select-checkbox'))
+      .filter((cb) => cb.checked)
+      .map((cb) => ({ id: cb.dataset.id, storagePath: cb.dataset.path }));
+
+    checkboxes.forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const selected = getSelected();
+        deleteSelectedBtn.disabled = selected.length === 0;
+      });
+    });
+
+    // 다중 삭제 버튼 핸들러
+    deleteSelectedBtn.onclick = () => {
+      const selected = getSelected();
+      if (!selected || selected.length === 0) return;
+      if (!confirm(`선택한 ${selected.length}개의 이미지를 삭제하시겠습니까? (복구 불가)`)) return;
+
+      // 낙관적 업데이트: 미리 opacity 처리
+      selected.forEach((s) => {
+        const el = document.getElementById(`storage-${s.id}`);
+        if (el) el.style.opacity = '0.5';
+      });
+
+      chrome.runtime.sendMessage({ action: 'delete_storage_images', data: { items: selected } }, (res) => {
+        if (res && res.success) {
+          // remove items from DOM
+          selected.forEach((s) => {
+            const el = document.getElementById(`storage-${s.id}`);
+            if (el) el.remove();
+          });
+          showToast(`✅ ${selected.length}개의 이미지가 삭제되었습니다.`);
+          deleteSelectedBtn.disabled = true;
+        } else {
+          // rollback visual
+          selected.forEach((s) => {
+            const el = document.getElementById(`storage-${s.id}`);
+            if (el) el.style.opacity = '1';
+          });
+          showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+        }
+      });
+    };
+
   });
 }
