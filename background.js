@@ -44,6 +44,7 @@ import {
   cleanDataForFirebase,
   getCurrentUserId,
   getUnifiedGalleryImages,
+  deleteImageFromStorage,
 } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
@@ -2911,6 +2912,44 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // Single delete: delete file from Storage and remove DB metadata
+  if (msg.action === 'delete_storage_image') {
+    return handleAsync(
+      (async () => {
+        const { id, storagePath } = msg.data || {};
+        const userId = await getCurrentUserId();
+
+        if (!id) {
+          Logger.warn('[delete_storage_image] missing id in request');
+          return { success: false, error: 'missing id' };
+        }
+
+        if (!storagePath) {
+          Logger.warn('[delete_storage_image] missing storagePath for id:', id);
+          return { success: false, error: 'missing storagePath' };
+        }
+
+        // 1. 스토리지 원본 삭제
+        try {
+          await deleteImageFromStorage(storagePath);
+        } catch (e) {
+          Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+
+        // 2. DB 메타데이터 삭제
+        try {
+          await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+        } catch (e) {
+          Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+
+        return { success: true };
+      })()
+    );
+  }
+
   // Batch delete storage images (delete file in Firebase Storage + DB metadata entry)
   if (msg.action === 'delete_storage_images') {
     return handleAsync(
@@ -2921,13 +2960,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         for (const it of items) {
           try {
-            if (it && it.storagePath) {
+            if (!it || !it.id) {
+              results.push({ id: it && it.id, success: false, error: 'missing id' });
+              continue;
+            }
+
+            if (!it.storagePath) {
+              Logger.warn('[delete_storage_images] missing storagePath for id:', it.id);
+              results.push({ id: it.id, success: false, error: 'missing storagePath' });
+              continue;
+            }
+
+            try {
               await deleteImageFromStorage(it.storagePath);
+            } catch (e) {
+              Logger.warn('[delete_storage_images] storage deletion failed for id:', it.id, e && e.message);
+              results.push({ id: it.id, success: false, error: e && e.message });
+              continue;
             }
-            if (it && it.id) {
+
+            try {
               await remove(ref(getDb(), `thumbnail_images/${userId}/${it.id}`));
+            } catch (e) {
+              Logger.warn('[delete_storage_images] DB metadata removal failed for id:', it.id, e && e.message);
+              results.push({ id: it.id, success: false, error: e && e.message });
+              continue;
             }
-            results.push({ id: it && it.id, success: true });
+
+            results.push({ id: it.id, success: true });
           } catch (e) {
             Logger.warn('[delete_storage_images] item delete failed:', it && it.id, e && e.message);
             results.push({ id: it && it.id, success: false, error: e && e.message });

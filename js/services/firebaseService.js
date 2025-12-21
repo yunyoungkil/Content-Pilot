@@ -621,6 +621,10 @@ export async function getUnifiedGalleryImages(filterTag = null) {
  */
 export async function deleteImageFromStorage(storageUrl) {
   try {
+    if (!storageUrl || typeof storageUrl !== 'string' || storageUrl.trim() === '') {
+      throw new Error('storageUrl is empty or invalid');
+    }
+
     let path = storageUrl;
     const bucket = firebaseConfig.storageBucket;
 
@@ -632,23 +636,63 @@ export async function deleteImageFromStorage(storageUrl) {
     const encodedPath = encodeURIComponent(path);
     const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}`;
 
+    // Try with existing token (silent), then interactive if needed
     let token = await getValidToken(false);
     if (!token) token = await getValidToken(true);
 
     Logger.info(`[Storage] 삭제 요청: ${path}`);
 
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const doDelete = async (useToken) => {
+      try {
+        const response = await fetch(url, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${useToken}` },
+        });
 
-    if (!response.ok && response.status !== 404) {
-      throw new Error(`Storage Delete Failed: ${response.statusText}`);
+        // read body for logging (if any)
+        let bodyText = '';
+        try {
+          bodyText = await response.text();
+        } catch (e) {
+          bodyText = '';
+        }
+
+        if (!response.ok && response.status !== 404) {
+          Logger.error(`[Storage] DELETE failed status=${response.status} body=${bodyText}`);
+          const err = new Error(`Storage Delete Failed: ${response.status} - ${bodyText}`);
+          err.status = response.status;
+          err.body = bodyText;
+          throw err;
+        }
+
+        Logger.debug('[Storage] DELETE succeeded or not found:', { status: response.status });
+        return true;
+      } catch (e) {
+        throw e;
+      }
+    };
+
+    try {
+      return await doDelete(token);
+    } catch (e) {
+      // On auth errors, try an interactive token refresh once
+      if (e && (e.status === 401 || e.status === 403)) {
+        Logger.warn('[Storage] DELETE failed with auth error, attempting interactive token refresh');
+        const interactiveToken = await getValidToken(true);
+        if (interactiveToken && interactiveToken !== token) {
+          try {
+            return await doDelete(interactiveToken);
+          } catch (e2) {
+            Logger.error('[Storage] DELETE retry after interactive auth failed:', e2);
+            throw e2;
+          }
+        }
+      }
+      Logger.error('[Storage] 삭제 오류:', e);
+      throw e;
     }
-
-    return true;
   } catch (error) {
-    Logger.error('[Storage] 삭제 오류:', error);
+    Logger.error('[Storage] 삭제 오류 (입력/처리):', error);
     throw error;
   }
 }

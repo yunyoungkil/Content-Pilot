@@ -2110,14 +2110,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'delete_storage_image') {
     return handleAsync(
       (async () => {
-        const { id, storagePath } = msg.data;
+        const { id, storagePath } = msg.data || {};
         const userId = await getCurrentUserId();
 
+        if (!id) {
+          Logger.warn('[delete_storage_image] missing id in request');
+          return { success: false, error: 'missing id' };
+        }
+
+        if (!storagePath) {
+          Logger.warn('[delete_storage_image] missing storagePath for id:', id);
+          return { success: false, error: 'missing storagePath' };
+        }
+
         // 1. 스토리지 원본 삭제
-        await deleteImageFromStorage(storagePath);
+        try {
+          await deleteImageFromStorage(storagePath);
+        } catch (e) {
+          Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
 
         // 2. DB 메타데이터 삭제
-        await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+        try {
+          await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+        } catch (e) {
+          Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
 
         return { success: true };
       })()

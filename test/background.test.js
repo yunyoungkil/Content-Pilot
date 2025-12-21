@@ -155,6 +155,83 @@ describe('Background Message Handlers', () => {
 
       expect(mockSendResponse).toHaveBeenCalledWith({ success: false, error: 'Database error' });
     });
+
+    test('delete_storage_image returns error when storagePath is missing', async () => {
+      // mock deleteImageFromStorage to ensure it is not called
+      const mockDelete = jest.fn();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: jest.fn(),
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image', data: { id: 'x' } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'missing storagePath' });
+      expect(mockDelete).not.toHaveBeenCalled();
+    });
+
+    test('delete_storage_image handles deleteImageFromStorage failure gracefully', async () => {
+      const mockDelete = jest.fn().mockRejectedValue(new Error('DELETE failed'));
+      const mockRemove = jest.fn();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = { action: 'delete_storage_image', data: { id: 'x', storagePath: 'gs://bucket/x.png' } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'DELETE failed' });
+      expect(mockRemove).not.toHaveBeenCalled();
+    });
+
+    test('delete_storage_image succeeds when delete and remove succeed', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const mockRef = jest.fn().mockReturnValue('thumbnail_ref');
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+        ref: mockRef,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = { action: 'delete_storage_image', data: { id: 'x', storagePath: 'gs://bucket/x.png' } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
+      expect(mockRemove).toHaveBeenCalled();
+    });
   });
 
   describe('system handlers (ping / get_user_id)', () => {
