@@ -103,14 +103,14 @@ function loadStorageImages(container) {
       ${res.images
         .map(
           (img) => `
-        <div class="storage-item" id="storage-${img.id}" data-id="${img.id}" data-path="${img.originData.storagePath}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
-          <input type="checkbox" class="storage-select-checkbox" data-id="${img.id}" data-path="${img.originData.storagePath}" 
+        <div class="storage-item" id="storage-${img.id}" data-id="${img.id}" data-path="${(img.originData && img.originData.storagePath) || img.storagePath || ''}" style="position:relative; border:1px solid #eee; border-radius:8px; overflow:hidden; aspect-ratio:1;">
+          <input type="checkbox" class="storage-select-checkbox" data-id="${img.id}" data-path="${(img.originData && img.originData.storagePath) || img.storagePath || ''}" 
             style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px;"> 
           <img src="${img.url}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
           <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.5); color:white; font-size:10px; padding:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
             ${new Date(img.timestamp).toLocaleDateString()}
           </div>
-          <button class="delete-storage-btn" data-id="${img.id}" data-path="${img.originData.storagePath}" 
+          <button class="delete-storage-btn" data-id="${img.id}" data-path="${(img.originData && img.originData.storagePath) || img.storagePath || ''}" 
             style="position:absolute; top:4px; right:4px; width:24px; height:24px; background:rgba(255,255,255,0.9); border:none; border-radius:50%; color:#ea4335; cursor:pointer; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 1px 3px rgba(0,0,0,0.2);">
             ×
           </button>

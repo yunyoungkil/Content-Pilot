@@ -1622,9 +1622,9 @@ export function openThumbnailMaker(
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">${res.images
                 .map((it) => `
-                  <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
-                    <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
-                    <button class="tm-my-img-delete-btn" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || ''}" title="삭제" style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#ea4335; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:pointer;">×</button>
+                  <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+                    <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
+                    <button class="tm-my-img-delete-btn" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" title="삭제" style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#ea4335; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:pointer;">×</button>
                     <img src="${it.downloadURL}" style="width:100%;height:100%;object-fit:cover;display:block;">
                   </div>
                 `)
