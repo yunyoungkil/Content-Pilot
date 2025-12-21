@@ -2914,6 +2914,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // Single delete: delete file from Storage and remove DB metadata
   if (msg.action === 'delete_storage_image') {
+    // Detailed logging for debugging message payloads and sender
+    try {
+      Logger.info('[delete_storage_image] received request:', {
+        action: msg && msg.action,
+        data: msg && msg.data,
+        sender: sender && (sender.id || (sender.tab && sender.tab.id) || 'unknown'),
+      });
+    } catch (e) {
+      // Logging should never throw the handler
+      Logger.debug('[delete_storage_image] logging failed:', e && e.message);
+    }
+
+    // Synchronous guard: if there's no data payload, respond immediately so callers don't hang
+    if (!msg || !msg.data) {
+      Logger.warn('[delete_storage_image] missing message data');
+      sendResponse({ success: false, error: 'missing message data' });
+      return false;
+    }
+
     return handleAsync(
       (async () => {
         const { id, storagePath } = msg.data || {};

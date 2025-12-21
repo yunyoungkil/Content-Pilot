@@ -181,6 +181,19 @@ describe('Background Message Handlers', () => {
       expect(mockDelete).not.toHaveBeenCalled();
     });
 
+    test('delete_storage_image responds immediately when message data is missing', async () => {
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image' }; // no data
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+
+      // synchronous early-return => false and immediate response
+      expect(ret).toBe(false);
+      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'missing message data' });
+    });
+
     test('delete_storage_image handles deleteImageFromStorage failure gracefully', async () => {
       const mockDelete = jest.fn().mockRejectedValue(new Error('DELETE failed'));
       const mockRemove = jest.fn();
