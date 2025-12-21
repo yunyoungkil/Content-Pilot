@@ -72,8 +72,9 @@ describe('Background Message Handlers', () => {
       ];
       mockGetUnifiedGalleryImages.mockResolvedValue(mockImages);
 
-      // background.js 로드 (동적으로 import)
-      await import('../background.js');
+      // background.cjs 로드 (동적으로 import)
+      // background.js 대신 실제 프로덕션 소스인 background.cjs를 테스트
+      await import('../background.cjs');
 
       // background가 runtime onMessage listener를 등록했는지 확인
       expect(chrome.runtime.onMessage.addListener).toHaveBeenCalled();
