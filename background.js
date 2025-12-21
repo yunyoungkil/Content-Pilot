@@ -357,9 +357,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 비동기 응답 처리를 위한 헬퍼
   const handleAsync = (promise) => {
     promise
-      .then((data) => sendResponse(data || { success: true }))
+      .then((data) => {
+        try {
+          Logger.info(`[Router] sendResponse (success) for action=${msg.action}:`, data || { success: true });
+        } catch (e) {
+          Logger.debug('[Router] sendResponse logging failed:', e && e.message);
+        }
+        sendResponse(data || { success: true });
+      })
       .catch((err) => {
         Logger.error(`[Router Error] ${msg.action}:`, err);
+        try {
+          Logger.info(`[Router] sendResponse (error) for action=${msg.action}:`, { success: false, error: err.message });
+        } catch (e) {
+          Logger.debug('[Router] sendResponse error logging failed:', e && e.message);
+        }
         sendResponse({ success: false, error: err.message });
       });
     return true; // 비동기 응답 표시
@@ -2950,7 +2962,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // 1. 스토리지 원본 삭제
         try {
+          Logger.info('[delete_storage_image] calling deleteImageFromStorage for id:', id, 'path:', storagePath);
           await deleteImageFromStorage(storagePath);
+          Logger.info('[delete_storage_image] deleteImageFromStorage succeeded for id:', id);
         } catch (e) {
           Logger.warn('[delete_storage_image] storage deletion failed for id:', id, e && e.message);
           return { success: false, error: e && e.message ? e.message : String(e) };
@@ -2958,12 +2972,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // 2. DB 메타데이터 삭제
         try {
+          Logger.info('[delete_storage_image] removing DB metadata for id:', id);
           await remove(ref(getDb(), `thumbnail_images/${userId}/${id}`));
+          Logger.info('[delete_storage_image] DB metadata removal succeeded for id:', id);
         } catch (e) {
           Logger.warn('[delete_storage_image] DB metadata removal failed for id:', id, e && e.message);
           return { success: false, error: e && e.message ? e.message : String(e) };
         }
 
+        Logger.info('[delete_storage_image] operation completed for id:', id);
         return { success: true };
       })()
     );
