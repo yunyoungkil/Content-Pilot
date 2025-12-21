@@ -1624,6 +1624,7 @@ export function openThumbnailMaker(
                 .map((it) => `
                   <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
                     <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || ''}" style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
+                    <button class="tm-my-img-delete-btn" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || ''}" title="삭제" style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#ea4335; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:pointer;">×</button>
                     <img src="${it.downloadURL}" style="width:100%;height:100%;object-fit:cover;display:block;">
                   </div>
                 `)
@@ -1646,6 +1647,30 @@ export function openThumbnailMaker(
               const selected = Array.from(gm.querySelectorAll('.tm-my-img-checkbox')).filter((cb) => cb.checked);
               if (deleteBtn) deleteBtn.disabled = selected.length === 0;
               e.stopPropagation();
+              return;
+            }
+
+            // 개별 삭제 버튼 클릭 (위임) 처리
+            if (e.target && e.target.classList && e.target.classList.contains('tm-my-img-delete-btn')) {
+              e.stopPropagation();
+              const id = e.target.dataset.id;
+              const path = e.target.dataset.path;
+              if (!id) return;
+              if (!confirm('이 이미지를 삭제하시겠습니까? (복구 불가)')) return;
+
+              const el = gm.querySelector(`.tm-my-img-item[data-id="${id}"]`);
+              if (el) el.style.opacity = '0.5';
+
+              chrome.runtime.sendMessage({ action: 'delete_storage_image', data: { id, storagePath: path } }, (res) => {
+                if (res && res.success) {
+                  if (el) el.remove();
+                  showToast('✅ 이미지가 삭제되었습니다.');
+                } else {
+                  if (el) el.style.opacity = '1';
+                  showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                }
+              });
+
               return;
             }
 

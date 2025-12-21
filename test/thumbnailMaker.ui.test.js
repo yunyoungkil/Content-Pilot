@@ -276,4 +276,48 @@ describe('ThumbnailMaker UI - reference images', () => {
     // after selection, gallery should be removed
     expect(document.querySelector('#tm-my-images-modal')).toBeFalsy();
   });
+
+  test('allows deleting single uploaded image via X button', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    // mock get_uploaded_images_log response and delete handler
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }] });
+        return;
+      }
+      if (msg && msg.action === 'delete_storage_image') {
+        if (typeof cb === 'function') cb({ success: true });
+        return;
+      }
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    openThumbnailMaker({ formattedDraft: '<p>Hi</p>' }, () => {}, () => {}, null, { showText: true }, document.body);
+    const myBtn = document.querySelector('#tm-my-images');
+    myBtn.click();
+    // wait for modal
+    await new Promise((r) => setTimeout(r, 50));
+
+    const gallery = document.querySelector('#tm-my-images-modal');
+    expect(gallery).toBeTruthy();
+
+    const deleteBtn = gallery.querySelector('.tm-my-img-delete-btn');
+    expect(deleteBtn).toBeTruthy();
+
+    // mock confirm to avoid jsdom not implemented error and auto-confirm
+    global.confirm = jest.fn(() => true);
+
+    // simulate clicking delete
+    deleteBtn.click();
+
+    // wait for async handler
+    await new Promise((r) => setTimeout(r, 50));
+
+    // should have removed the item from DOM
+    expect(gallery.querySelector('.tm-my-img-item')).toBeFalsy();
+
+    // cleanup mock
+    global.confirm = undefined;
+  });
 });
