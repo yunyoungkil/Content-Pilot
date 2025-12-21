@@ -147,6 +147,23 @@ function loadStorageImages(container) {
               }
             }
           );
+
+          // Listen for broadcasted ACK/result to cover DevTools/page console cases
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+            chrome.runtime.onMessage.addListener((msg) => {
+              try {
+                if (!msg || !msg.action) return;
+                if (msg.action === 'delete_storage_image_ack' && msg.id === id) {
+                  if (item) item.style.opacity = '0.5';
+                }
+                if (msg.action === 'delete_storage_image_result' && msg.id === id) {
+                  if (item) item.remove();
+                  if (msg.success) showToast('✅ 이미지가 삭제되었습니다.');
+                  else showToast('삭제 실패: ' + (msg.error || '알 수 없는 오류'), 'error');
+                }
+              } catch (e) {}
+            });
+          }
         });
       };
     });

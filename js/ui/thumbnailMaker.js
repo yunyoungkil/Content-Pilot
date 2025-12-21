@@ -1742,3 +1742,25 @@ export function openThumbnailMaker(
   // 초기 상태 저장
   saveState();
 }
+
+// Global listener: handle background notifications for delete results and ACKs
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage && typeof document !== 'undefined') {
+  chrome.runtime.onMessage.addListener((msg) => {
+    try {
+      if (!msg || !msg.action) return;
+      if (msg.action === 'delete_storage_image_ack') {
+        const el = document.querySelector(`.tm-my-img-item[data-id="${msg.id}"]`);
+        if (el) el.style.opacity = '0.5';
+      }
+      if (msg.action === 'delete_storage_image_result') {
+        const { id, success, error } = msg;
+        const el = document.querySelector(`.tm-my-img-item[data-id="${id}"]`);
+        if (el) el.remove();
+        if (success) showToast('✅ 이미지가 삭제되었습니다.');
+        else showToast('삭제 실패: ' + (error || '알 수 없는 오류'), 'error');
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
+}
