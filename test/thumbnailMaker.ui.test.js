@@ -68,7 +68,14 @@ describe('ThumbnailMaker UI - reference images', () => {
 
     // also test that published badge renders when image item contains published flag
     // simulate response that includes published metadata for one of the images
-    const uploadedStub = [{ id: 'u1', downloadURL: 'https://images.test/u1.png', originData: { storagePath: 'gs://b/u1.png' }, published: true }];
+    const uploadedStub = [
+      {
+        id: 'u1',
+        downloadURL: 'https://images.test/u1.png',
+        originData: { storagePath: 'gs://b/u1.png' },
+        published: true,
+      },
+    ];
     // open my images modal via internal button flow
     const myImagesBtn = document.querySelector('#tm-my-images');
     if (myImagesBtn) {
@@ -78,7 +85,8 @@ describe('ThumbnailMaker UI - reference images', () => {
           if (typeof cb === 'function') cb({ success: true, images: uploadedStub });
           return;
         }
-        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+        if (typeof cb === 'function')
+          cb({ success: true, images: ['https://images.test/generated.png'] });
       });
 
       myImagesBtn.click();
@@ -88,6 +96,26 @@ describe('ThumbnailMaker UI - reference images', () => {
       const badge = document.querySelector('.tm-my-img-item .tm-published-badge');
       expect(badge).toBeTruthy();
       expect(badge.title).toBe('발행됨');
+
+      // published checkbox should be disabled so it cannot be selected in batch delete
+      const checkbox = document.querySelector('.tm-my-img-checkbox');
+      expect(checkbox).toBeTruthy();
+      expect(checkbox.disabled).toBe(true);
+
+      // per-item delete button should be disabled for published images
+      const deleteBtn = document.querySelector('.tm-my-img-item .tm-my-img-delete-btn');
+      expect(deleteBtn).toBeTruthy();
+      expect(deleteBtn.disabled).toBe(true);
+
+      // attempt to delete the published image: should be prevented (no delete message)
+      // clear previous sendMessage calls
+      global.chrome.runtime.sendMessage.mockClear();
+      deleteBtn.click();
+      await new Promise((r) => setTimeout(r, 50));
+      const delCalls = global.chrome.runtime.sendMessage.mock.calls.filter(
+        (c) => c[0] && c[0].action === 'delete_storage_image'
+      );
+      expect(delCalls.length).toBe(0);
     }
 
     // check that tm-ref-images contains img elements
@@ -120,7 +148,8 @@ describe('ThumbnailMaker UI - reference images', () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     const draftData = {
-      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
+      formattedDraft:
+        '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
       affiliateLinks: [],
     };
 
@@ -146,16 +175,31 @@ describe('ThumbnailMaker UI - reference images', () => {
       };
     };
 
-    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
 
     // override runtime sendMessage to return diagnostics with a failed URL
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'ai_generate_images') {
         if (typeof cb === 'function')
-          cb({ success: true, diagnostics: { inputCount: 2, converted: 1, failed: [{ url: 'https://images.test/ref2.png', error: '404' }] } });
+          cb({
+            success: true,
+            diagnostics: {
+              inputCount: 2,
+              converted: 1,
+              failed: [{ url: 'https://images.test/ref2.png', error: '404' }],
+            },
+          });
         return;
       }
-      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+      if (typeof cb === 'function')
+        cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
     // spy on console.error to ensure no uncaught errors bubble up
@@ -182,7 +226,8 @@ describe('ThumbnailMaker UI - reference images', () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     const draftData = {
-      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
+      formattedDraft:
+        '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
       affiliateLinks: [],
     };
 
@@ -208,7 +253,14 @@ describe('ThumbnailMaker UI - reference images', () => {
       };
     };
 
-    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
 
     // simulate timeout first, then success on retry
     let call = 0;
@@ -219,10 +271,12 @@ describe('ThumbnailMaker UI - reference images', () => {
           if (typeof cb === 'function') cb({ success: false, error: 'timeout' });
           return;
         }
-        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated_after_retry.png'] });
+        if (typeof cb === 'function')
+          cb({ success: true, images: ['https://images.test/generated_after_retry.png'] });
         return;
       }
-      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+      if (typeof cb === 'function')
+        cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
     const genBtn = document.querySelector('#tm-gen-bg');
@@ -232,7 +286,9 @@ describe('ThumbnailMaker UI - reference images', () => {
     await new Promise((r) => setTimeout(r, 700));
 
     // ensure we attempted at least twice and eventually succeeded
-    const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'ai_generate_images');
+    const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter(
+      (c) => c[0] && c[0].action === 'ai_generate_images'
+    );
     expect(aiCalls.length).toBeGreaterThanOrEqual(2);
 
     // diagnostics or preview UI should be present without errors
@@ -270,13 +326,25 @@ describe('ThumbnailMaker UI - reference images', () => {
     // mock get_uploaded_images_log response
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'get_uploaded_images_log') {
-        if (typeof cb === 'function') cb({ success: true, images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }] });
+        if (typeof cb === 'function')
+          cb({
+            success: true,
+            images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }],
+          });
         return;
       }
-      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+      if (typeof cb === 'function')
+        cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
-    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
 
     const myBtn = document.querySelector('#tm-my-images');
     expect(myBtn).toBeTruthy();
@@ -286,7 +354,10 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for async handler
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({ action: 'get_uploaded_images_log' }, expect.any(Function));
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      { action: 'get_uploaded_images_log' },
+      expect.any(Function)
+    );
 
     const gallery = document.querySelector('#tm-my-images-modal');
     expect(gallery).toBeTruthy();
@@ -307,17 +378,29 @@ describe('ThumbnailMaker UI - reference images', () => {
     // mock get_uploaded_images_log response and delete handler
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'get_uploaded_images_log') {
-        if (typeof cb === 'function') cb({ success: true, images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }] });
+        if (typeof cb === 'function')
+          cb({
+            success: true,
+            images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }],
+          });
         return;
       }
       if (msg && msg.action === 'delete_storage_image') {
         if (typeof cb === 'function') cb({ success: true });
         return;
       }
-      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+      if (typeof cb === 'function')
+        cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
-    openThumbnailMaker({ formattedDraft: '<p>Hi</p>' }, () => {}, () => {}, null, { showText: true }, document.body);
+    openThumbnailMaker(
+      { formattedDraft: '<p>Hi</p>' },
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
     const myBtn = document.querySelector('#tm-my-images');
     myBtn.click();
     // wait for modal
@@ -343,5 +426,89 @@ describe('ThumbnailMaker UI - reference images', () => {
 
     // cleanup mock
     global.confirm = undefined;
+  });
+
+  test('overlay slider initializes and updates visual overlay', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    // Provide a thumbnailInfo with overlayOpacity preset
+    const draftData = { formattedDraft: '<p>Hi</p>', thumbnailInfo: { overlayOpacity: 0.5 } };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // wait for initialization to finish
+    await new Promise((r) => setTimeout(r, 10));
+
+    // slider should be present and set to the preset value
+    const slider = document.querySelector('#tm-overlay-opacity');
+    const label = document.querySelector('#tm-overlay-opacity-value');
+    const visual = document.querySelector('#tm-visual-overlay');
+
+    expect(slider).toBeTruthy();
+    expect(label).toBeTruthy();
+    expect(visual).toBeTruthy();
+
+    // slider value initialized
+    const value = parseFloat(slider.value);
+    expect(value).toBeCloseTo(0.5);
+    // label should reflect slider value
+    expect(label.textContent).toBe(Math.round(value * 100) + '%');
+
+    // visual overlay should reflect initial opacity in its background style
+    expect(visual.style.background).toContain(`rgba(0,0,0,${value})`);
+
+    // change slider and verify visual updates and preview rerender attempted
+    slider.value = '0.3';
+    const inputEvent = new Event('input');
+    slider.dispatchEvent(inputEvent);
+
+    expect(label.textContent).toBe('30%');
+    expect(visual.style.background).toContain('rgba(0,0,0,0.3)');
+  });
+
+  test('uses metaDescription to generate template prompts and displays them', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const meta = 'This is a concise meta description about AI thumbnail generation and best practices.';
+    const draftData = { formattedDraft: '<p>Hi</p>', metaDescription: meta };
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    // allow async init
+    await new Promise((r) => setTimeout(r, 20));
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    // should include a snippet of metaDescription in at least one of the visible prompts
+    expect(promptDisplay.textContent).toContain('This is a concise meta');
+  });
+
+  test('gen-from-meta button regenerates prompts and updates UI', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+    const draftData = { formattedDraft: '<p>Hi</p>', metaDescription: 'Original meta' };
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+    // allow async init
+    await new Promise((r) => setTimeout(r, 20));
+
+    // simulate meta change (user updated meta elsewhere before clicking)
+    draftData.metaDescription = 'New meta description for re-gen';
+
+    const btn = document.querySelector('#tm-gen-from-meta');
+    expect(btn).toBeTruthy();
+    btn.click();
+
+    // allow regeneration handler to finish
+    await new Promise((r) => setTimeout(r, 30));
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay.textContent).toContain('New meta description');
   });
 });

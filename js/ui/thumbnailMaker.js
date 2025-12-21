@@ -35,6 +35,58 @@ export function openThumbnailMaker(
   let thumbnailCandidates = []; // 3가지 컨셉 후보 저장
   let selectedConceptIndex = 0; // 현재 선택된 컨셉 인덱스
 
+  // helper: create three meta-based prompt candidates (reusable by UI button)
+  const createMetaBasedCandidates = (baseSourceRawParam) => {
+    const stripHtml = (s) => (String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+    const baseSourceRaw =
+      baseSourceRawParam ||
+      draftData.metaDescription ||
+      draftData.description ||
+      stripHtml(draftData.formattedDraft || '') ||
+      draftData.seoTitle ||
+      '제목을 입력하세요';
+    const baseSource = baseSourceRaw.length > 200 ? baseSourceRaw.substring(0, 200).trim() + '...' : baseSourceRaw;
+
+    return [
+      {
+        type: 'curiosity',
+        thumbnailPromptEn: `High-quality, dramatic thumbnail inspired by: "${baseSource}", create a visually intriguing image with mysterious atmosphere, bold composition, and dramatic lighting — keep the image text-free and leave room for overlay`,
+        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 호기심 유발형 썸네일: "${baseSource}" — 드라마틱한 조명과 강렬한 구성, 텍스트는 이미지에 포함하지 말고 오버레이 공간을 남겨주세요.`,
+        thumbnailText: '',
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: 'auto',
+        ratio: '16:9',
+        subtitle: '',
+        bgImage: null,
+        overlayOpacity: 0.0,
+      },
+      {
+        type: 'informative',
+        thumbnailPromptEn: `Clean, professional thumbnail based on: "${baseSource}", minimal composition optimized for legibility, bright lighting, icons or numbers for emphasis, no embedded title text in the image`,
+        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 정보형 썸네일: "${baseSource}" — 가독성 좋은 미니멀 구성, 밝은 조명, 강조용 아이콘/숫자 사용. 이미지 내 텍스트는 제외해주세요.`,
+        thumbnailText: '완벽 정리',
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: 'auto',
+        ratio: '16:9',
+        subtitle: '',
+        bgImage: null,
+        overlayOpacity: 0.0,
+      },
+      {
+        type: 'emotional',
+        thumbnailPromptEn: `Warm, emotive thumbnail using: "${baseSource}", soft tones, human element or relatable scene, cozy lighting and colors that evoke empathy, leave clear space for overlay text`,
+        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 감성형 썸네일: "${baseSource}" — 부드러운 톤과 인간적 요소, 따뜻한 조명으로 공감을 유도하고 오버레이 텍스트 공간을 확보하세요.`,
+        thumbnailText: '당신을 위한',
+        fontFamily: "'Pretendard', sans-serif",
+        textColor: 'auto',
+        ratio: '16:9',
+        subtitle: '',
+        bgImage: null,
+        overlayOpacity: 0.0,
+      },
+    ];
+  }; 
+
   // thumbnailInfo가 배열인 경우
   if (Array.isArray(draftData.thumbnailInfo)) {
     thumbnailCandidates = draftData.thumbnailInfo;
@@ -54,48 +106,12 @@ export function openThumbnailMaker(
     thumbnailCandidates = [draftData.thumbnailInfo];
   }
 
-  // 썸네일 정보가 없으면 기본값 (3가지 컨셉 강제 생성)
+  // 썸네일 정보가 없으면 기본값 (3가지 대비되는 컨셉 생성 — 메타디스크립션 우선 사용)
   if (!thumbInfo || thumbnailCandidates.length === 0) {
-    const baseTitle = draftData.seoTitle || '제목을 입력하세요';
-    thumbnailCandidates = [
-      {
-        type: 'curiosity',
-        thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
-        thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-        thumbnailText: '',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        subtitle: '',
-        bgImage: null,
-      },
-      {
-        type: 'informative',
-        // Avoid explicit 'text overlay' instruction in the AI prompt; request a clean layout suitable for overlay but no text
-        thumbnailPromptEn: `Clean, professional thumbnail for "${baseTitle}", clean layout suitable for text overlay (DO NOT include any text in the image), bright lighting, organized layout, numbers or checkmarks, modern design, 16:9 aspect ratio`,
-        thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
-        thumbnailText: '완벽 정리',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        subtitle: '',
-        bgImage: null,
-      },
-      {
-        type: 'emotional',
-        thumbnailPromptEn: `Warm, cozy thumbnail for "${baseTitle}", soft lighting, human element, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio`,
-        thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
-        thumbnailText: '당신을 위한',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        subtitle: '',
-        bgImage: null,
-      },
-    ];
+    thumbnailCandidates = createMetaBasedCandidates();
     selectedConceptIndex = 0;
     thumbInfo = thumbnailCandidates[0];
-    Logger.debug('[ThumbnailMaker] 기본 컨셉 3개 생성:', thumbnailCandidates.length);
+    Logger.debug('[ThumbnailMaker] 메타 기반 기본 컨셉 3개 생성:', thumbnailCandidates.length, { baseSource: (draftData.metaDescription || draftData.description || (draftData.formattedDraft||'').replace(/<[^>]+>/g, '').trim() || draftData.seoTitle || '제목을 입력하세요') });
   }
 
   // 초기화 데이터 로깅 시 Base64 숨기기
@@ -258,6 +274,13 @@ export function openThumbnailMaker(
             <option value="nature">🌿 자연/풍경</option>
             <option value="dark">🌑 다크 모드</option>
           </select>
+
+          <label style="display:block;font-size:11px;color:#888;margin-top:8px;margin-bottom:6px;">🔲 오버레이 불투명도</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="tm-overlay-opacity" type="range" min="0" max="1" step="0.01" value="0" style="flex:1;">
+            <span id="tm-overlay-opacity-value" style="width:48px;text-align:right;font-size:12px;color:#ccc;">70%</span>
+          </div>
+          <div style="font-size:11px;color:#777;margin-top:6px;">텍스트 가독성을 위해 아래 영역의 어두운 오버레이 불투명도를 조절합니다.</div>
           <button id="tm-gen-bg" style="width:100%;padding:10px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(108, 92, 231, 0.3);transition:all 0.2s;">
             🎨 배경 생성
           </button>
@@ -293,6 +316,9 @@ export function openThumbnailMaker(
       <div id="tm-drag-overlay" style="position:absolute;inset:0;background:rgba(108, 92, 231, 0.2);display:none;align-items:center;justify-content:center;pointer-events:none;z-index:5;border-radius:12px;">
         <span style="color:#fff;font-weight:bold;font-size:16px;text-shadow:0 2px 4px rgba(0,0,0,0.5);">📂 이미지를 놓아서 배경 변경</span>
       </div>
+
+      <!-- Visual overlay for bottom gradient preview; updated by overlay slider -->
+      <div id="tm-visual-overlay" style="position:absolute;left:0;right:0;bottom:0;height:40%;border-radius:0 0 12px 12px;pointer-events:none;z-index:4;background:linear-gradient(0deg, rgba(0,0,0,0), rgba(0,0,0,0));transition:background 0.12s ease;"></div>
       
       <canvas id="tm-preview" width="1280" height="720" style="max-width:100%;max-height:calc(50vh - 40px);width:auto;height:auto;object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);"></canvas>
     </div>
@@ -314,6 +340,9 @@ export function openThumbnailMaker(
         </button>
         <button id="tm-redo" title="다시 실행 (Ctrl+Y)" style="padding:8px 12px;border:1px solid #555;background:transparent;color:#ccc;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:all 0.2s;" disabled>
           ↷ 다시 실행
+        </button>
+        <button id="tm-gen-from-meta" title="메타로 프롬프트 재생성" style="padding:8px 12px;border:1px solid #555;background:transparent;color:#ccc;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+          🔁 메타로 프롬프트 생성
         </button>
         <button id="tm-edit-tui" style="padding:10px 16px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
           🛠️ 정밀 편집
@@ -347,7 +376,11 @@ export function openThumbnailMaker(
     });
 
     // 만약 컨셉 버튼이 DOM에 없는데 후보가 여러 개라면 폴백으로 삽입
-    if (thumbnailCandidates.length > 1 && (!modal.querySelectorAll('.tm-concept-btn') || modal.querySelectorAll('.tm-concept-btn').length === 0)) {
+    if (
+      thumbnailCandidates.length > 1 &&
+      (!modal.querySelectorAll('.tm-concept-btn') ||
+        modal.querySelectorAll('.tm-concept-btn').length === 0)
+    ) {
       console.warn('[ThumbnailMaker] 컨셉 선택 UI가 누락되어 폴백으로 삽입합니다.');
       if (promptDisplayEl) {
         promptDisplayEl.insertAdjacentHTML('beforebegin', conceptSelectorHtml || '');
@@ -379,17 +412,20 @@ export function openThumbnailMaker(
     const formattedDraft = draftData.formattedDraft || draftData.currentDraft || '';
     const idea = draftData || {};
     const affiliateLinks = draftData.affiliateLinks || [];
-    
+
     console.log('%c[AI 썸네일 메이커 디버깅][참조 렌더]', 'color:#9E9E9E', {
       draftLength: formattedDraft.length,
       ideaKeys: Object.keys(idea),
-      affiliateLinksCount: affiliateLinks.length
+      affiliateLinksCount: affiliateLinks.length,
     });
 
-    let refs = selectBackgroundReferenceImages({ formattedDraft, ideaData: idea, affiliateLinks }, 5);
-    
+    let refs = selectBackgroundReferenceImages(
+      { formattedDraft, ideaData: idea, affiliateLinks },
+      5
+    );
+
     // 제외된 이미지 필터링
-    refs = refs.filter(url => !excludedRefImages.has(url));
+    refs = refs.filter((url) => !excludedRefImages.has(url));
     currentRefImages = refs; // 현재 참조 이미지 목록 업데이트
 
     console.log('%c[AI 썸네일 메이커 디버깅][참조 선택 결과]', 'color:#9E9E9E', refs);
@@ -442,7 +478,7 @@ export function openThumbnailMaker(
       removeBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
       removeBtn.style.zIndex = '10';
       removeBtn.title = '참고 이미지에서 제외';
-      
+
       removeBtn.onclick = (e) => {
         e.stopPropagation(); // 부모 클릭 방지
         excludedRefImages.add(url);
@@ -470,7 +506,6 @@ export function openThumbnailMaker(
 
   // render initial references
   renderReferenceImages();
-
 
   // [신규] 저장된 비율에 맞게 캔버스 크기 조정
   const savedRatio = thumbInfo.ratio || '16:9';
@@ -547,6 +582,8 @@ export function openThumbnailMaker(
         bgImage: bgImageToSave,
         // [신규] 선택된 컨셉 인덱스 저장 (영구 저장)
         selectedThumbnailIndex: selectedConceptIndex,
+        // [신규] 오버레이 불투명도
+        overlayOpacity: (function(){ const v = parseFloat(modal.querySelector('#tm-overlay-opacity')?.value); return Number.isFinite(v) ? v : 0.0; })(),
       };
 
       // 로깅 시 Base64 숨기기
@@ -577,6 +614,8 @@ export function openThumbnailMaker(
       bgImage: currentBgImage,
       // [추가] 텍스트 표시 여부 상태 저장
       showText: modal.querySelector('#tm-show-text')?.checked ?? true,
+      // [신규] 오버레이 불투명도 상태 저장
+      overlayOpacity: (function(){ const v = parseFloat(modal.querySelector('#tm-overlay-opacity')?.value); return Number.isFinite(v) ? v : 0.0; })(),
       timestamp: Date.now(),
     };
 
@@ -605,6 +644,11 @@ export function openThumbnailMaker(
   const restoreState = (state) => {
     isRestoring = true; // 복원 중임을 표시
 
+    // Note: slider event listeners are attached in the primary init block below.
+    // Here we avoid adding duplicate listeners to prevent races; restoreState will
+    // only set UI values (handled in the "Restore overlay opacity if present" block).
+    // No action needed here.
+
     if (modal.querySelector('#tm-template-type')) {
       modal.querySelector('#tm-template-type').value = state.templateType || 'default';
     }
@@ -615,6 +659,16 @@ export function openThumbnailMaker(
     modal.querySelector('#tm-font-family').value = state.fontFamily;
     modal.querySelector('#tm-text-color').value = state.textColor;
     modal.querySelector('#tm-ratio').value = state.ratio;
+
+    // Restore overlay opacity if present and update visual overlay
+    if (modal.querySelector('#tm-overlay-opacity')) {
+      const v = (typeof state.overlayOpacity === 'number') ? state.overlayOpacity : (state.overlayOpacity !== undefined ? parseFloat(state.overlayOpacity) : NaN);
+      const val = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.0;
+      modal.querySelector('#tm-overlay-opacity').value = val;
+      modal.querySelector('#tm-overlay-opacity-value').innerText = Math.round(val * 100) + '%';
+      const visual = modal.querySelector('#tm-visual-overlay');
+      if (visual) visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${val}), rgba(0,0,0,0))`;
+    }
 
     // [추가] 텍스트 표시 체크박스 상태 복원
     const showTextCheckbox = modal.querySelector('#tm-show-text');
@@ -688,6 +742,22 @@ export function openThumbnailMaker(
 
     // [Offscreen 가속] 배경 이미지가 있으면 offscreen에서 리사이징
     let processedBgImage = currentBgImage;
+
+    // overlay opacity: prefer UI slider value, fall back to thumbInfo.overlayOpacity or default 0.0
+    const overlayOpacity = (function () {
+      try {
+        const s = modal.querySelector('#tm-overlay-opacity');
+        if (s && s.value !== undefined) {
+          const parsed = parseFloat(s.value);
+          if (Number.isFinite(parsed)) return Math.max(0, Math.min(1, parsed));
+        }
+      } catch (e) {
+        // ignore
+      }
+      // fallback to thumbInfo value if valid number, otherwise 0.0
+      const t = (typeof thumbInfo?.overlayOpacity === 'number') ? thumbInfo.overlayOpacity : (thumbInfo?.overlayOpacity !== undefined ? parseFloat(thumbInfo.overlayOpacity) : NaN);
+      return Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0.0;
+    })();
     if (currentBgImage && currentBgImage.startsWith('data:image')) {
       try {
         // DataURL 유효성 검사
@@ -755,7 +825,7 @@ export function openThumbnailMaker(
                   y: 0.5,
                   widthRatio: 1,
                   heightRatio: 1,
-                  styles: { fill: 'rgba(0,0,0,0.4)' },
+                  styles: { fill: `rgba(0,0,0,${overlayOpacity})` },
                 },
               ]
             : []),
@@ -961,6 +1031,135 @@ export function openThumbnailMaker(
     });
   }
 
+  // [신규] '메타로 프롬프트 생성' 버튼 처리
+  const genFromMetaBtn = modal.querySelector('#tm-gen-from-meta');
+  if (genFromMetaBtn)
+    genFromMetaBtn.onclick = () => {
+      // regenerate candidates from current draft meta/description
+      thumbnailCandidates = createMetaBasedCandidates();
+      selectedConceptIndex = 0;
+      thumbInfo = thumbnailCandidates[0];
+
+      // remove existing concept selector block if present
+      const existingBtn = modal.querySelector('.tm-concept-btn');
+      if (existingBtn) {
+        const outer = existingBtn.parentElement && existingBtn.parentElement.parentElement;
+        if (outer) outer.remove();
+      }
+
+      // build new concept selector HTML and insert
+      const typeLabels = { curiosity: '🔥 호기심 자극형', informative: '📊 정보 요약형', emotional: '💝 감성/공감형' };
+      const newHtml =
+        thumbnailCandidates.length > 1
+          ? `
+      <div style="margin-bottom:16px;padding:12px;background:#2d2d2d;border-radius:8px;border:1px solid #444;">
+        <label style="display:block;font-size:12px;color:#aaa;margin-bottom:8px;font-weight:600;">🎨 썸네일 컨셉 선택 (A/B 테스팅)</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${thumbnailCandidates
+            .map((candidate, idx) => {
+              const isSelected = idx === selectedConceptIndex;
+              const label = typeLabels[candidate.type] || `컨셉 ${idx + 1}`;
+              return `
+            <button class="tm-concept-btn" data-index="${idx}" style="
+              flex:1;min-width:120px;padding:10px 12px;
+              background:${isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e'};
+              color:${isSelected ? '#fff' : '#ccc'};
+              border:1px solid ${isSelected ? '#6c5ce7' : '#444'};
+              border-radius:6px;
+              cursor:pointer;
+              font-size:12px;
+              font-weight:${isSelected ? '600' : '400'};
+              transition:all 0.2s;
+              text-align:center;
+            ">
+              ${label}${isSelected ? ' ✓' : ''}
+            </button>
+          `;
+            })
+            .join('')}
+        </div>
+        <div style="margin-top:8px;padding:8px;background:#1e1e1e;border-radius:4px;font-size:11px;color:#888;line-height:1.5;">
+          <strong style="color:#aaa;">선택된 컨셉:</strong> ${thumbInfo.thumbnailText || '없음'}<br>
+          <span style="font-size:10px;opacity:0.8;">각 컨셉을 클릭하여 프롬프트와 문구를 변경할 수 있습니다.</span>
+        </div>
+      </div>
+    `
+          : '';
+
+      const promptDisplayEl = modal.querySelector('#tm-prompt-display');
+      if (promptDisplayEl) {
+        promptDisplayEl.insertAdjacentHTML('beforebegin', newHtml);
+      } else {
+        const canvasWrapper = modal.querySelector('#tm-canvas-wrapper');
+        canvasWrapper.insertAdjacentHTML('afterend', newHtml);
+      }
+
+      // attach listeners to new buttons (same as initial setup)
+      const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
+      conceptButtons.forEach((btn, idx) => {
+        btn.addEventListener('click', () => {
+          selectedConceptIndex = idx;
+          const selectedConcept = thumbnailCandidates[idx];
+
+          conceptButtons.forEach((b, i) => {
+            const isSelected = i === idx;
+            b.style.background = isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e';
+            b.style.color = isSelected ? '#fff' : '#ccc';
+            b.style.border = `1px solid ${isSelected ? '#6c5ce7' : '#444'}`;
+            b.style.fontWeight = isSelected ? '600' : '400';
+            const label = b.textContent.replace(/\s✓$/, '');
+            b.textContent = label + (isSelected ? ' ✓' : '');
+          });
+
+          const titleInput = modal.querySelector('#tm-title');
+          if (titleInput && selectedConcept.thumbnailText) {
+            titleInput.value = selectedConcept.thumbnailText;
+          }
+
+          const promptDisplay = modal.querySelector('#tm-prompt-display');
+          if (promptDisplay) {
+            const newPromptKo = selectedConcept.thumbnailPromptKo || '자동 설정됨';
+            const newPromptEn = selectedConcept.thumbnailPromptEn || '';
+            promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n          `;
+            promptDisplay.title = newPromptEn;
+          }
+
+          const oldStyle = {
+            fontFamily: thumbInfo.fontFamily,
+            textColor: thumbInfo.textColor,
+            ratio: thumbInfo.ratio,
+            subtitle: thumbInfo.subtitle,
+            bgImage: thumbInfo.bgImage,
+            templateType: thumbInfo.templateType,
+          };
+          thumbInfo = { ...selectedConcept, ...oldStyle };
+
+          setTimeout(() => {
+            if (typeof updatePreview === 'function') {
+              updatePreview();
+            }
+          }, 100);
+
+          triggerAutoSave();
+        });
+      });
+
+      // update prompt display to new first candidate
+      const promptDisplay = modal.querySelector('#tm-prompt-display');
+      if (promptDisplay) {
+        const newPromptKo = thumbInfo.thumbnailPromptKo || '자동 설정됨';
+        const newPromptEn = thumbInfo.thumbnailPromptEn || '';
+        promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n          `;
+        promptDisplay.title = newPromptEn;
+      }
+
+      setTimeout(() => {
+        if (typeof updatePreview === 'function') updatePreview();
+      }, 100);
+
+      triggerAutoSave();
+    };
+
   // [신규] 파일 업로드 처리
   const uploadBtn = modal.querySelector('#tm-upload-btn');
   if (uploadBtn)
@@ -1078,21 +1277,29 @@ export function openThumbnailMaker(
 
         // background.js에 이미지 생성 요청 (참조 이미지도 함께 전달)
         // Decode HTML entities and ensure URLs are clean before sending to background
-        const refImagesToSend = (currentRefImages && Array.isArray(currentRefImages) ? currentRefImages : []).map((u) => {
+        const refImagesToSend = (
+          currentRefImages && Array.isArray(currentRefImages) ? currentRefImages : []
+        ).map((u) => {
           try {
             // Replace common HTML-escaped entities and trim
             // [FIX] Do NOT decodeURIComponent the entire URL as it breaks query parameters (e.g. %26 -> &)
             let s = String(u).replace(/&amp;/g, '&').trim();
             return s;
-          } catch (e) { return u; }
+          } catch (e) {
+            return u;
+          }
         });
         // Debug: show decoded refs
-        console.log('%c[AI 썸네일 메이커 디버깅][UI-Request - decoded refs]', 'color:#9E9E9E', refImagesToSend);
+        console.log(
+          '%c[AI 썸네일 메이커 디버깅][UI-Request - decoded refs]',
+          'color:#9E9E9E',
+          refImagesToSend
+        );
 
         // [DEBUG HOOK] For testing: accept test URL from multiple places (localStorage, DOM attribute, window variables)
         try {
           let testUrl = '';
-          
+
           // 0. Check localStorage (Persists across refreshes - Best for repetitive testing)
           if (!testUrl) {
             try {
@@ -1102,13 +1309,14 @@ export function openThumbnailMaker(
 
           // 1. Check DOM attribute (works across isolated worlds - best for one-off DevTools injection)
           if (!testUrl && document && document.body) {
-             testUrl = document.body.getAttribute('data-force-test-ref-url') || '';
+            testUrl = document.body.getAttribute('data-force-test-ref-url') || '';
           }
 
           // 2. Check window variables (only works if set in content script context)
           if (!testUrl) {
             try {
-              testUrl = (window && (window.__FORCE_TEST_REF_URL__ || window.FORCE_TEST_REF_URL)) || '';
+              testUrl =
+                (window && (window.__FORCE_TEST_REF_URL__ || window.FORCE_TEST_REF_URL)) || '';
             } catch (e) {
               testUrl = '';
             }
@@ -1117,12 +1325,22 @@ export function openThumbnailMaker(
           // check parent/top frames if same-origin
           if (!testUrl) {
             try {
-              if (window.parent && window.parent !== window) testUrl = window.parent.localStorage.getItem('FORCE_TEST_REF_URL') || window.parent.__FORCE_TEST_REF_URL__ || window.parent.FORCE_TEST_REF_URL || '';
+              if (window.parent && window.parent !== window)
+                testUrl =
+                  window.parent.localStorage.getItem('FORCE_TEST_REF_URL') ||
+                  window.parent.__FORCE_TEST_REF_URL__ ||
+                  window.parent.FORCE_TEST_REF_URL ||
+                  '';
             } catch (e) {}
           }
           if (!testUrl) {
             try {
-              if (window.top && window.top !== window) testUrl = window.top.localStorage.getItem('FORCE_TEST_REF_URL') || window.top.__FORCE_TEST_REF_URL__ || window.top.FORCE_TEST_REF_URL || '';
+              if (window.top && window.top !== window)
+                testUrl =
+                  window.top.localStorage.getItem('FORCE_TEST_REF_URL') ||
+                  window.top.__FORCE_TEST_REF_URL__ ||
+                  window.top.FORCE_TEST_REF_URL ||
+                  '';
             } catch (e) {}
           }
 
@@ -1134,21 +1352,34 @@ export function openThumbnailMaker(
               // indicate source when possible
               let source = 'unknown';
               if (localStorage.getItem('FORCE_TEST_REF_URL')) source = 'localStorage';
-              else if (document.body.getAttribute('data-force-test-ref-url')) source = 'DOM-attribute';
+              else if (document.body.getAttribute('data-force-test-ref-url'))
+                source = 'DOM-attribute';
               else if (window.__FORCE_TEST_REF_URL__) source = 'window-var';
-              
-              console.log('%c[AI 썸네일 메이커 디버깅][UI-Request - injected test ref]', 'color:#FF9800', testUrl, 'source:', source);
+
+              console.log(
+                '%c[AI 썸네일 메이커 디버깅][UI-Request - injected test ref]',
+                'color:#FF9800',
+                testUrl,
+                'source:',
+                source
+              );
             } else {
-              console.log('%c[AI 썸네일 메이커 디버깅][UI-Request - test ref already present]', 'color:#FF9800', testUrl);
+              console.log(
+                '%c[AI 썸네일 메이커 디버깅][UI-Request - test ref already present]',
+                'color:#FF9800',
+                testUrl
+              );
             }
           }
-        } catch (e) { /* ignore */ }
-        
-            // [DEBUG] AI 이미지 생성 요청 전송 전 데이터 확인
+        } catch (e) {
+          /* ignore */
+        }
+
+        // [DEBUG] AI 이미지 생성 요청 전송 전 데이터 확인
         console.log('%c[AI 썸네일 메이커 디버깅][UI-Request]', 'color:#9E9E9E', {
           prompt: enhancedPrompt,
           references: refImagesToSend,
-          refCount: refImagesToSend.length
+          refCount: refImagesToSend.length,
         });
 
         // Try with extended timeout (60s) and perform a single automatic retry on timeout
@@ -1185,7 +1416,11 @@ export function openThumbnailMaker(
         // 응답 진단 정보가 있으면 UI에 표시
         try {
           if (response && response.diagnostics) {
-            console.log('%c[AI 썸네일 메이커 디버깅][ai_generate_images response diagnostics]', 'color:#9E9E9E', response.diagnostics);
+            console.log(
+              '%c[AI 썸네일 메이커 디버깅][ai_generate_images response diagnostics]',
+              'color:#9E9E9E',
+              response.diagnostics
+            );
 
             // diagnostics element 생성/갱신
             let diagEl = modal.querySelector('#tm-diagnostics');
@@ -1204,7 +1439,8 @@ export function openThumbnailMaker(
             }
 
             const converted = response.diagnostics.converted || 0;
-            const inputCount = response.diagnostics.inputCount || (refImagesToSend ? refImagesToSend.length : 0);
+            const inputCount =
+              response.diagnostics.inputCount || (refImagesToSend ? refImagesToSend.length : 0);
             const failed = response.diagnostics.failed || [];
 
             // show counts and, when failures exist, list the failed URLs (up to 5)
@@ -1283,13 +1519,20 @@ export function openThumbnailMaker(
             }
 
             // 간단 토스트로도 알림
-            showToast(`참조 변환: ${converted}/${inputCount} (실패: ${Array.isArray(failed) ? failed.length : 0})`);
+            showToast(
+              `참조 변환: ${converted}/${inputCount} (실패: ${Array.isArray(failed) ? failed.length : 0})`
+            );
           }
         } catch (e) {
           console.warn('[ThumbnailMaker] diagnostics display failed:', e);
         }
 
-        if (response && response.success && Array.isArray(response.images) && response.images.length > 0) {
+        if (
+          response &&
+          response.success &&
+          Array.isArray(response.images) &&
+          response.images.length > 0
+        ) {
           // AI 생성 이미지는 이미 Firebase Storage URL로 반환됨
           currentBgImage = response.images[0];
           console.log(
@@ -1307,7 +1550,10 @@ export function openThumbnailMaker(
               alert('이미지 생성에 실패했습니다: ' + (response?.error || '알 수 없는 오류'));
             } catch (e) {
               // ignore alert errors in non-browser or test environments
-              Logger.warn('[ThumbnailMaker] alert failed or not available:', e && e.message ? e.message : e);
+              Logger.warn(
+                '[ThumbnailMaker] alert failed or not available:',
+                e && e.message ? e.message : e
+              );
             }
             await updatePreview(); // 실패 시 원복
           }
@@ -1613,7 +1859,8 @@ export function openThumbnailMaker(
           // 모달 생성
           const gm = document.createElement('div');
           gm.id = 'tm-my-images-modal';
-          gm.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:2147483648;padding:20px;';
+          gm.style.cssText =
+            'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:2147483648;padding:20px;';
           gm.innerHTML = `
             <div style="max-width:900px;width:100%;max-height:90vh;background:#fff;border-radius:12px;padding:16px;overflow:auto;box-sizing:border-box;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1621,14 +1868,16 @@ export function openThumbnailMaker(
                 <button id="tm-my-images-close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">${res.images
-                .map((it) => `
-                  <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
-                    ${((it.published === true) || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl)) ? `<div class="tm-published-badge" title="발행됨" style="position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:12px;background:#28a745;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 1px 3px rgba(0,0,0,0.2);">✓</div>` : '' }
-                    <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
-                    <button class="tm-my-img-delete-btn" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" title="삭제" style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#ea4335; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:pointer;">×</button>
+                .map(
+                  (it) => `
+                  <div class="tm-my-img-item" data-id="${it.id}" data-url="${it.downloadURL}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" data-published="${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? 'true' : 'false'}" style="position:relative;cursor:pointer;border:1px solid #eee;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#f5f5f5;display:flex;align-items:center;justify-content:center;">
+                    ${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? `<div class="tm-published-badge" title="발행됨" style="position:absolute;top:8px;right:8px;padding:4px 8px;border-radius:12px;background:#28a745;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.2);">발행</div>` : ''}
+                    <input type="checkbox" class="tm-my-img-checkbox" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" data-published="${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? 'true' : 'false'}" ${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? 'disabled title="발행된 이미지는 선택 및 삭제할 수 없습니다."' : ''} style="position:absolute; top:8px; left:8px; z-index:20; width:18px; height:18px; background:rgba(255,255,255,0.9);">
+                    <button class="tm-my-img-delete-btn" data-id="${it.id}" data-path="${(it.originData && it.originData.storagePath) || it.storagePath || ''}" data-published="${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? 'true' : 'false'}" ${it.published === true || (it.originData && it.originData.published === true) || (it.publishInfo && it.publishInfo.publishedUrl) ? 'disabled title="발행된 이미지는 삭제할 수 없습니다." style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#aaa; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:not-allowed;"' : 'title="삭제" style="position:absolute; top:8px; right:8px; z-index:20; width:26px; height:26px; border-radius:50%; border:none; background:rgba(255,255,255,0.95); color:#ea4335; display:flex; align-items:center; justify-content:center; font-weight:bold; cursor:pointer;"'}>×</button>
                     <img src="${it.downloadURL}" style="width:100%;height:100%;object-fit:cover;display:block;">
                   </div>
-                `)
+                `
+                )
                 .join('')}
               </div>
               <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
@@ -1644,15 +1893,25 @@ export function openThumbnailMaker(
           const deleteBtn = gm.querySelector('#tm-my-images-delete');
           gm.addEventListener('click', (e) => {
             // 체크박스를 직접 클릭한 경우: 선택 토글
-            if (e.target && e.target.classList && e.target.classList.contains('tm-my-img-checkbox')) {
-              const selected = Array.from(gm.querySelectorAll('.tm-my-img-checkbox')).filter((cb) => cb.checked);
+            if (
+              e.target &&
+              e.target.classList &&
+              e.target.classList.contains('tm-my-img-checkbox')
+            ) {
+              const selected = Array.from(gm.querySelectorAll('.tm-my-img-checkbox')).filter(
+                (cb) => cb.checked
+              );
               if (deleteBtn) deleteBtn.disabled = selected.length === 0;
               e.stopPropagation();
               return;
             }
 
             // 개별 삭제 버튼 클릭 (위임) 처리
-            if (e.target && e.target.classList && e.target.classList.contains('tm-my-img-delete-btn')) {
+            if (
+              e.target &&
+              e.target.classList &&
+              e.target.classList.contains('tm-my-img-delete-btn')
+            ) {
               e.stopPropagation();
               const id = e.target.dataset.id;
               const path = e.target.dataset.path;
@@ -1660,17 +1919,26 @@ export function openThumbnailMaker(
               if (!confirm('이 이미지를 삭제하시겠습니까? (복구 불가)')) return;
 
               const el = gm.querySelector(`.tm-my-img-item[data-id="${id}"]`);
+              if (el && el.dataset && el.dataset.published === 'true') {
+                if (el) el.style.opacity = '1';
+                showToast('발행된 이미지는 삭제할 수 없습니다.', 'warning');
+                return;
+              }
+
               if (el) el.style.opacity = '0.5';
 
-              chrome.runtime.sendMessage({ action: 'delete_storage_image', data: { id, storagePath: path } }, (res) => {
-                if (res && res.success) {
-                  if (el) el.remove();
-                  showToast('✅ 이미지가 삭제되었습니다.');
-                } else {
-                  if (el) el.style.opacity = '1';
-                  showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+              chrome.runtime.sendMessage(
+                { action: 'delete_storage_image', data: { id, storagePath: path } },
+                (res) => {
+                  if (res && res.success) {
+                    if (el) el.remove();
+                    showToast('✅ 이미지가 삭제되었습니다.');
+                  } else {
+                    if (el) el.style.opacity = '1';
+                    showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                  }
                 }
-              });
+              );
 
               return;
             }
@@ -1693,7 +1961,8 @@ export function openThumbnailMaker(
                 .filter((cb) => cb.checked)
                 .map((cb) => ({ id: cb.dataset.id, storagePath: cb.dataset.path }));
               if (selected.length === 0) return;
-              if (!confirm(`선택한 ${selected.length}개의 이미지를 삭제하시겠습니까? (복구 불가)`)) return;
+              if (!confirm(`선택한 ${selected.length}개의 이미지를 삭제하시겠습니까? (복구 불가)`))
+                return;
 
               // 낙관적 UI 업데이트
               selected.forEach((s) => {
@@ -1701,23 +1970,26 @@ export function openThumbnailMaker(
                 if (el) el.style.opacity = '0.5';
               });
 
-              chrome.runtime.sendMessage({ action: 'delete_storage_images', data: { items: selected } }, (res) => {
-                if (res && res.success) {
-                  selected.forEach((s) => {
-                    const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
-                    if (el) el.remove();
-                  });
-                  showToast(`✅ ${selected.length}개의 이미지가 삭제되었습니다.`);
-                  if (deleteBtn) deleteBtn.disabled = true;
-                } else {
-                  // rollback visual
-                  selected.forEach((s) => {
-                    const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
-                    if (el) el.style.opacity = '1';
-                  });
-                  showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+              chrome.runtime.sendMessage(
+                { action: 'delete_storage_images', data: { items: selected } },
+                (res) => {
+                  if (res && res.success) {
+                    selected.forEach((s) => {
+                      const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
+                      if (el) el.remove();
+                    });
+                    showToast(`✅ ${selected.length}개의 이미지가 삭제되었습니다.`);
+                    if (deleteBtn) deleteBtn.disabled = true;
+                  } else {
+                    // rollback visual
+                    selected.forEach((s) => {
+                      const el = gm.querySelector(`.tm-my-img-item[data-id="${s.id}"]`);
+                      if (el) el.style.opacity = '1';
+                    });
+                    showToast('삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                  }
                 }
-              });
+              );
             };
           }
 
@@ -1737,6 +2009,57 @@ export function openThumbnailMaker(
   const closeBtn = modal.querySelector('#tm-close');
   if (closeBtn) closeBtn.onclick = () => modal.remove();
 
+  // Initialize overlay opacity slider from thumbInfo
+  try {
+    const slider = modal.querySelector('#tm-overlay-opacity');
+    const label = modal.querySelector('#tm-overlay-opacity-value');
+    const initialOpacity =
+      typeof thumbInfo?.overlayOpacity === 'number'
+        ? thumbInfo.overlayOpacity
+        : thumbInfo?.overlayOpacity
+          ? parseFloat(thumbInfo.overlayOpacity)
+          : 0.7;
+    if (slider && label) {
+      slider.value = initialOpacity;
+      label.textContent = Math.round(initialOpacity * 100) + '%';
+      // set initial visual overlay background
+      const visual = modal.querySelector('#tm-visual-overlay');
+      if (visual)
+        visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${initialOpacity}), rgba(0,0,0,0))`;
+
+      slider.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        label.textContent = Math.round(v * 100) + '%';
+        if (visual)
+          visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${v}), rgba(0,0,0,0))`;
+        // update canvas preview as well
+        try {
+          updatePreview();
+        } catch (err) {
+          // ignore
+        }
+        saveState();
+        triggerAutoSave();
+      });
+
+      // Reconcile UI state on next tick to avoid races where other init paths
+      // might overwrite the label/visual; this ensures tests observe the final
+      // consistent state synchronously after modal open.
+      setTimeout(() => {
+        try {
+          const v = parseFloat(slider.value);
+          label.textContent = Math.round(v * 100) + '%';
+          if (visual)
+            visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${v}), rgba(0,0,0,0))`;
+        } catch (e) {
+          // ignore
+        }
+      }, 50);
+    }
+  } catch (e) {
+    // ignore
+  }
+
   // 초기 1회 렌더링 (기본 배경 + 텍스트)
   updatePreview();
 
@@ -1745,7 +2068,12 @@ export function openThumbnailMaker(
 }
 
 // Global listener: handle background notifications for delete results and ACKs
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage && typeof document !== 'undefined') {
+if (
+  typeof chrome !== 'undefined' &&
+  chrome.runtime &&
+  chrome.runtime.onMessage &&
+  typeof document !== 'undefined'
+) {
   chrome.runtime.onMessage.addListener((msg) => {
     try {
       if (!msg || !msg.action) return;
