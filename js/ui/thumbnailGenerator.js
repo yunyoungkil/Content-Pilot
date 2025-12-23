@@ -190,51 +190,30 @@ const renderHelpers = {
    * @param {Object} dynamicText - 플레이스홀더 치환 데이터
    */
   drawText: (ctx, layer, canvasWidth, canvasHeight, dynamicText) => {
-    const styles = layer.styles || {};
+    // NOTE: Template-provided style overrides are intentionally ignored.
+    // We enforce fixed typography choices and automatic color adjustment.
 
-    // 1. [PRD v3.2 FR-R1] 텍스트 내용 결정 - 플레이스홀더인 경우에만 치환
+    // 1. 텍스트 내용 결정
     let text = layer.text || '';
-
-    // 조건부 치환: 정확히 플레이스홀더와 일치할 때만 동적 텍스트로 교체
     if (text === '{{SLOGAN}}') {
       text = dynamicText.slogan || '샘플 슬로건';
     } else if (text === '{{VISUALIZATION_CUE}}') {
       text = dynamicText.visualizationCue || '샘플 문구';
     }
-    // 플레이스홀더가 아니면 원본 텍스트를 그대로 사용 (고충실도 복제)
 
     ctx.save();
 
-    // [TR-1] 공통 헬퍼를 사용한 좌표 변환
     const actualX = renderHelpers.convertCoordinate(layer.x, canvasWidth);
     const actualY = renderHelpers.convertCoordinate(layer.y, canvasHeight);
 
-    // 하위 호환성: v2.3 템플릿의 'font' 문자열 vs v2.4+ 템플릿의 fontRatio/fontWeight/fontFamily 분리
-    let actualFontSize, fontWeight, fontFamily;
-    if (styles.font) {
-      // v2.3 이하: "900 36px 'Noto Sans KR'" 형식 파싱
-      const fontMatch = styles.font.match(/^(normal|bold|\d+)\s+(\d+)px\s+(.+)$/);
-      if (fontMatch) {
-        fontWeight = fontMatch[1];
-        actualFontSize = parseInt(fontMatch[2], 10);
-        fontFamily = fontMatch[3];
-      } else {
-        fontWeight = 'normal';
-        actualFontSize = 20;
-        fontFamily = 'Arial';
-      }
-    } else {
-      // v2.4+: fontRatio를 캔버스 높이 기준으로 변환
-      actualFontSize = (styles.fontRatio || 0.05) * canvasHeight;
-      fontWeight = styles.fontWeight || 'normal';
-      fontFamily = styles.fontFamily || 'Arial';
-    }
+    // 고정 폰트 설정: 템플릿의 font 관련 속성은 무시
+    const actualFontSize = (layer.fontRatio || 0.05) * canvasHeight;
+    const fontWeight = 'normal';
+    const fontFamily = "'Pretendard', sans-serif";
 
-    // 2. [Smart Text Fitting] 텍스트 길이에 따라 폰트 크기 자동 조절
-    const maxWidth = canvasWidth * 0.9; // 캔버스 너비의 90%를 최대 너비로 설정
-    const maxHeight = canvasHeight * 0.4; // 최대 높이 설정 (여러 줄 텍스트 지원)
-
-    // fitTextToCanvas 함수로 최적 폰트 크기 계산
+    // 텍스트 크기 자동 조절
+    const maxWidth = canvasWidth * 0.9;
+    const maxHeight = canvasHeight * 0.4;
     const fitResult = fitTextToCanvas(
       ctx,
       text,
@@ -243,34 +222,22 @@ const renderHelpers = {
       fontFamily,
       fontWeight,
       actualFontSize,
-      12 // 최소 폰트 크기
+      12
     );
 
     const finalFontSize = fitResult.fontSize;
-    let textWidth = fitResult.textWidth;
+    const textWidth = fitResult.textWidth;
     const textLines = fitResult.lines;
 
-    // 최종 폰트 설정
     ctx.font = `${fontWeight} ${finalFontSize}px ${fontFamily}`;
 
-    if (finalFontSize !== actualFontSize) {
-      console.log(
-        `[Text Render] 📏 폰트 크기 조정: ${actualFontSize}px → ${finalFontSize}px (${textLines.length}줄)`
-      );
-    }
+    // 정렬/기준선은 고정 (일관된 레이아웃 유지)
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
 
-    // 3. 정렬 및 기준선 설정 (JSON의 align, baseline 완벽 적용)
-    ctx.textAlign = styles.align || 'left';
-    ctx.textBaseline = styles.baseline || 'alphabetic';
-
-    // 4. 색상 설정 (자동 색상 보정 적용)
-    // 배경 이미지가 있는 경우 텍스트 색상을 자동으로 조정
-    let textColor = styles.fill || '#000000';
-
-    // 배경 이미지가 있는 경우 색상 보정 적용
-    // (배경 레이어가 이미지 타입이고 텍스트 위치와 겹치는 경우)
+    // 색상: 템플릿 색상 무시, 자동 보정 사용
+    let textColor = '#000000';
     if (layer.autoColorAdjust !== false) {
-      // 텍스트가 그려질 영역의 배경 밝기 분석
       const adjustedColor = adjustTextColorForBackground(
         ctx,
         actualX,
@@ -278,82 +245,34 @@ const renderHelpers = {
         textWidth,
         finalFontSize
       );
-      if (adjustedColor) {
-        textColor = adjustedColor;
-        console.log(`[Text Render] 🎨 자동 색상 보정: ${textColor}`);
-      }
+      if (adjustedColor) textColor = adjustedColor;
     }
-
     ctx.fillStyle = textColor;
 
-    // 5. 그림자 설정 (PRD v2.7: 하위 호환성 처리 + 명시적 초기화)
-    if (styles.shadow) {
-      ctx.shadowColor = styles.shadow.color || 'rgba(0,0,0,0.5)';
-      const blurValue = styles.shadow.blur || 0;
-      const offsetXValue = styles.shadow.offsetX || 0;
-      const offsetYValue = styles.shadow.offsetY || 0;
-      // v2.3: 절대 픽셀(>10), v2.4+: 비율(<=10)
-      ctx.shadowBlur = blurValue > 10 ? blurValue : blurValue * canvasHeight;
-      ctx.shadowOffsetX = offsetXValue > 10 ? offsetXValue : offsetXValue * canvasWidth;
-      ctx.shadowOffsetY = offsetYValue > 10 ? offsetYValue : offsetYValue * canvasHeight;
+    // 항상 그림자 초기화 (템플릿 그림자 무시)
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
 
-      console.log(
-        `[Text Render] 그림자: blur=${ctx.shadowBlur}, offset=(${ctx.shadowOffsetX}, ${ctx.shadowOffsetY}), color=${ctx.shadowColor}`
-      );
-    } else {
-      // 그림자 없을 때 명시적 초기화 (중요: 이전 레이어의 그림자가 남지 않도록)
-      ctx.shadowColor = 'rgba(0,0,0,0)';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-    }
-
-    // 6. 스타일 적용 로그
-    console.log(
-      `[Text Render] 스타일 적용: font="${ctx.font}", align="${ctx.textAlign}", baseline="${ctx.textBaseline}", fill="${ctx.fillStyle}"`
-    );
-
-    // 7. 텍스트 그리기 (여러 줄 지원)
+    // 텍스트 렌더링
     const lineHeight = finalFontSize * 1.2;
     const totalTextHeight = textLines.length * lineHeight;
     let startY = actualY;
 
-    // baseline이 middle인 경우 수직 중앙 정렬
-    if (ctx.textBaseline === 'middle') {
-      startY = actualY - totalTextHeight / 2 + lineHeight / 2;
-    } else if (ctx.textBaseline === 'bottom') {
-      startY = actualY - totalTextHeight + lineHeight;
-    }
+    // baseline middle/bottom 절대 적용되지 않도록 고정
+    // (일관성 유지: baseline은 'alphabetic')
 
-    // 여러 줄 텍스트 렌더링
     if (textLines.length > 1) {
       textLines.forEach((line, index) => {
         const lineY = startY + index * lineHeight;
-        console.log(
-          `[Text Render] ✏️ fillText("${line}", ${actualX}, ${lineY}) [줄 ${index + 1}/${textLines.length}]`
-        );
         ctx.fillText(line, actualX, lineY);
       });
     } else {
-      console.log(`[Text Render] ✏️ fillText("${text}", ${actualX}, ${actualY})`);
       ctx.fillText(text, actualX, actualY);
     }
 
-    // 7. 외곽선 (stroke) - 자동 색상 보정 적용 (여러 줄 지원)
-    if (styles.stroke) {
-      const strokeColor = textColor || styles.strokeColor || '#000000';
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = styles.strokeWidth || 1;
-
-      if (textLines.length > 1) {
-        textLines.forEach((line, index) => {
-          const lineY = startY + index * lineHeight;
-          ctx.strokeText(line, actualX, lineY);
-        });
-      } else {
-        ctx.strokeText(text, actualX, actualY);
-      }
-    }
+    // 외곽선(stroke) 무시 - 템플릿 스타일을 따르지 않음
 
     ctx.restore();
   },

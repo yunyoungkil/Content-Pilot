@@ -428,7 +428,7 @@ describe('ThumbnailMaker UI - reference images', () => {
     global.confirm = undefined;
   });
 
-  test('overlay slider initializes and updates visual overlay', async () => {
+  test('overlay UI removed', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     // Provide a thumbnailInfo with overlayOpacity preset
@@ -446,31 +446,35 @@ describe('ThumbnailMaker UI - reference images', () => {
     // wait for initialization to finish
     await new Promise((r) => setTimeout(r, 10));
 
-    // slider should be present and set to the preset value
-    const slider = document.querySelector('#tm-overlay-opacity');
-    const label = document.querySelector('#tm-overlay-opacity-value');
-    const visual = document.querySelector('#tm-visual-overlay');
+    // overlay-related UI should be removed
+    expect(document.querySelector('#tm-overlay-opacity')).toBeFalsy();
+    expect(document.querySelector('#tm-overlay-opacity-value')).toBeFalsy();
+    expect(document.querySelector('#tm-visual-overlay')).toBeFalsy();
 
-    expect(slider).toBeTruthy();
-    expect(label).toBeTruthy();
-    expect(visual).toBeTruthy();
+    // upload UI and drag/drop overlay removed
+    expect(document.querySelector('#tm-upload-btn')).toBeFalsy();
+    expect(document.querySelector('#tm-file-input')).toBeFalsy();
+    expect(document.querySelector('#tm-drag-overlay')).toBeFalsy();
+  });
 
-    // slider value initialized
-    const value = parseFloat(slider.value);
-    expect(value).toBeCloseTo(0.5);
-    // label should reflect slider value
-    expect(label.textContent).toBe(Math.round(value * 100) + '%');
+  test('template selector removed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
-    // visual overlay should reflect initial opacity in its background style
-    expect(visual.style.background).toContain(`rgba(0,0,0,${value})`);
+    openThumbnailMaker({ formattedDraft: '<p>Hi</p>' }, () => {}, () => {}, null, { showText: true }, document.body);
 
-    // change slider and verify visual updates and preview rerender attempted
-    slider.value = '0.3';
-    const inputEvent = new Event('input');
-    slider.dispatchEvent(inputEvent);
+    await new Promise((r) => setTimeout(r, 10));
 
-    expect(label.textContent).toBe('30%');
-    expect(visual.style.background).toContain('rgba(0,0,0,0.3)');
+    expect(document.querySelector('#tm-template-type')).toBeFalsy();
+  });
+
+  test('bg style selector removed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    openThumbnailMaker({ formattedDraft: '<p>Hi</p>' }, () => {}, () => {}, null, { showText: true }, document.body);
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(document.querySelector('#tm-bg-style')).toBeFalsy();
   });
 
   test('uses metaDescription to generate template prompts and displays them', async () => {
@@ -510,5 +514,51 @@ describe('ThumbnailMaker UI - reference images', () => {
 
     const promptDisplay = document.querySelector('#tm-prompt-display');
     expect(promptDisplay.textContent).toContain('New meta description');
+  });
+
+  test('does not include subtitle input or label', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    openThumbnailMaker({}, () => {}, () => {}, null, { showText: true }, document.body);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const modal = document.querySelector('#cp-thumbnail-modal');
+    expect(modal).toBeTruthy();
+    expect(modal.querySelector('#tm-subtitle')).toBeNull();
+    expect(modal.innerHTML).not.toContain('서브 타이틀');
+
+    modal.remove();
+  });
+
+  test('does not include font family or text color inputs', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    openThumbnailMaker({}, () => {}, () => {}, null, { showText: true }, document.body);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const modal = document.querySelector('#cp-thumbnail-modal');
+    expect(modal).toBeTruthy();
+    expect(modal.querySelector('#tm-font-family')).toBeNull();
+    expect(modal.querySelector('#tm-text-color')).toBeNull();
+    expect(modal.innerHTML).not.toContain('글꼴 (Font)');
+    expect(modal.innerHTML).not.toContain('글자 색상');
+
+    modal.remove();
+  });
+
+  test('does not include main title input or show-text toggle', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    openThumbnailMaker({}, () => {}, () => {}, null, { showText: true }, document.body);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const modal = document.querySelector('#cp-thumbnail-modal');
+    expect(modal).toBeTruthy();
+    expect(modal.querySelector('#tm-title')).toBeNull();
+    expect(modal.querySelector('#tm-show-text')).toBeNull();
+    expect(modal.innerHTML).not.toContain('메인 타이틀');
+    expect(modal.innerHTML).not.toContain('텍스트 표시');
+
+    modal.remove();
   });
 });

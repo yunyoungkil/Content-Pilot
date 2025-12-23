@@ -56,7 +56,6 @@ export function openThumbnailMaker(
         fontFamily: "'Pretendard', sans-serif",
         textColor: 'auto',
         ratio: '16:9',
-        subtitle: '',
         bgImage: null,
         overlayOpacity: 0.0,
       },
@@ -68,7 +67,6 @@ export function openThumbnailMaker(
         fontFamily: "'Pretendard', sans-serif",
         textColor: 'auto',
         ratio: '16:9',
-        subtitle: '',
         bgImage: null,
         overlayOpacity: 0.0,
       },
@@ -80,7 +78,6 @@ export function openThumbnailMaker(
         fontFamily: "'Pretendard', sans-serif",
         textColor: 'auto',
         ratio: '16:9',
-        subtitle: '',
         bgImage: null,
         overlayOpacity: 0.0,
       },
@@ -134,6 +131,26 @@ export function openThumbnailMaker(
   // 기존 2147483648은 무효화되어 패널 뒤로 숨겨짐
   modal.style.cssText =
     "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:640px;min-width:320px;background:#1e1e1e;color:#fff;z-index:2147483647;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.5);border-radius:16px;font-family:'Pretendard', sans-serif;border:1px solid #333;max-height:90vh;overflow-y:auto;box-sizing:border-box;";
+
+  // Safety cleanup: remove any leftover main title UI elements or labels inserted by older builds or test helpers
+  // This ensures the modal never shows the deprecated main title input or its toggle in runtime.
+  const cleanupPotentialTitleUi = (rootEl) => {
+    try {
+      const leftoverTitle = rootEl.querySelector('#tm-title');
+      if (leftoverTitle) leftoverTitle.remove();
+      const leftoverShowText = rootEl.querySelector('#tm-show-text');
+      if (leftoverShowText) leftoverShowText.remove();
+      // Remove labels that explicitly mention 메인 타이틀 or 텍스트 표시
+      Array.from(rootEl.querySelectorAll('label')).forEach((lbl) => {
+        if (/메인\s*타이틀|텍스트\s*표시/.test((lbl.textContent || '').trim())) {
+          lbl.remove();
+        }
+      });
+    } catch (e) {
+      // ignore cleanup errors
+      console.warn('[ThumbnailMaker] cleanupPotentialTitleUi failed:', e && e.message);
+    }
+  };
 
   // 프롬프트 텍스트 이스케이프 처리
   const escapedPromptEn = (thumbInfo.thumbnailPromptEn || '')
@@ -208,92 +225,21 @@ export function openThumbnailMaker(
             <option value="9:16" ${thumbInfo.ratio === '9:16' ? 'selected' : ''}>📱 쇼츠/릴스 (9:16)</option>
             <option value="4:3" ${thumbInfo.ratio === '4:3' ? 'selected' : ''}>📄 블로그 (4:3)</option>
           </select>
+          <!-- Move Generate button next to ratio select for easier access -->
+          <button id="tm-gen-bg" style="margin-left:8px;padding:8px 10px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(108,92,231,0.18);white-space:nowrap;">🎨 배경 생성</button>
+          <button id="tm-insert" style="margin-left:8px;padding:8px 10px;background:#0984e3;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(9,132,227,0.18);white-space:nowrap;">본문에 삽입</button>
+          <button id="tm-my-images" style="margin-left:8px;padding:8px 10px;border:1px solid #555;background:transparent;color:#ccc;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap;">🖼️ 내가 만든 이미지</button>
         </div>
         
-        <div style="flex-shrink:0;">
-          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">템플릿 스타일</label>
-          <select id="tm-template-type" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
-            <option value="default" ${thumbInfo.templateType === 'default' || !thumbInfo.templateType ? 'selected' : ''}>📝 기본 (중앙 정렬)</option>
-            <option value="comparison" ${thumbInfo.templateType === 'comparison' ? 'selected' : ''}>⚖️ 비교형 (VS, Before/After)</option>
-            <option value="question" ${thumbInfo.templateType === 'question' ? 'selected' : ''}>❓ 질문형 (물음표 강조)</option>
-            <option value="list" ${thumbInfo.templateType === 'list' ? 'selected' : ''}>📋 리스트형 (번호/체크리스트)</option>
-          </select>
-        </div>
+
         
-        <div style="flex-shrink:0;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <label style="font-size:12px;color:#aaa;">메인 타이틀</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="tm-show-text" ${initialShowText ? 'checked' : ''} style="cursor:pointer;accent-color:#6c5ce7;">
-              <label for="tm-show-text" style="font-size:11px;color:#ccc;cursor:pointer;">텍스트 표시</label>
-            </div>
-          </div>
-          <input id="tm-title" type="text" value="${escapedThumbText}" placeholder="비교형: 'A VS B', 질문형: '어떻게 할까?', 리스트형: '1. 항목1, 2. 항목2'" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
-        </div>
+
         
-        <div style="flex-shrink:0;">
-          <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">서브 타이틀 (선택)</label>
-          <input id="tm-subtitle" type="text" value="${(thumbInfo.subtitle || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" placeholder="부제목을 입력하세요" style="width:100%;padding:10px;background:#2d2d2d;border:1px solid #444;color:#fff;border-radius:8px;box-sizing:border-box;font-size:14px;">
-        </div>
+
 
         <div style="display:flex;gap:10px;flex-shrink:0;flex-wrap:wrap;">
-          <div style="flex:1;min-width:150px;">
-            <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글꼴 (Font)</label>
-            <select id="tm-font-family" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
-              <option value="'Pretendard', sans-serif" ${thumbInfo.fontFamily === "'Pretendard', sans-serif" || !thumbInfo.fontFamily ? 'selected' : ''}>깔끔한 고딕 (기본)</option>
-              <option value="'Noto Serif KR', serif" ${thumbInfo.fontFamily === "'Noto Serif KR', serif" ? 'selected' : ''}>진지한 명조</option>
-              <option value="'Black Han Sans', sans-serif" ${thumbInfo.fontFamily === "'Black Han Sans', sans-serif" ? 'selected' : ''}>강력한 제목용</option>
-              <option value="'Nanum Pen Script', cursive" ${thumbInfo.fontFamily === "'Nanum Pen Script', cursive" ? 'selected' : ''}>친근한 손글씨</option>
-            </select>
-          </div>
-          <div style="flex:1;min-width:150px;">
-            <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;">글자 색상</label>
-            <select id="tm-text-color" style="width:100%;padding:10px 8px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;line-height:1.4;height:auto;">
-              <option value="auto" ${thumbInfo.textColor === 'auto' || !thumbInfo.textColor ? 'selected' : ''}>✨ 자동 (가독성)</option>
-              <option value="#FFFFFF" ${thumbInfo.textColor === '#FFFFFF' ? 'selected' : ''}>⚪ 흰색</option>
-              <option value="#000000" ${thumbInfo.textColor === '#000000' ? 'selected' : ''}>⚫ 검은색</option>
-              <option value="#FFD700" ${thumbInfo.textColor === '#FFD700' ? 'selected' : ''}>🟡 노란색 (강조)</option>
-              <option value="#FF4444" ${thumbInfo.textColor === '#FF4444' ? 'selected' : ''}>🔴 빨간색 (경고)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-      <div style="min-width:0;background:#2d2d2d;padding:12px;border-radius:8px;display:flex;flex-direction:column;gap:10px;height:fit-content;position:sticky;top:0;">
-        <label style="font-size:12px;color:#aaa;white-space:nowrap;">배경 스타일</label>
-        
-        <div style="display:flex;gap:4px;background:#1e1e1e;padding:2px;border-radius:6px;">
-          <button id="tm-bg-mode-ai" class="tm-bg-tab active" style="flex:1;padding:6px;font-size:11px;cursor:pointer;background:#444;color:white;border:none;border-radius:4px;transition:0.2s;">🤖 AI 생성</button>
-          <button id="tm-bg-mode-upload" class="tm-bg-tab" style="flex:1;padding:6px;font-size:11px;cursor:pointer;background:transparent;color:#888;border:none;border-radius:4px;transition:0.2s;">📂 업로드</button>
-        </div>
 
-        <div id="tm-bg-ai-panel">
-          <select id="tm-bg-style" style="width:100%;padding:10px 8px;background:#1e1e1e;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;line-height:1.4;height:auto;">
-            <option value="abstract">✨ 추상적/모던</option>
-            <option value="gradient">🌈 그라디언트/질감</option>
-            <option value="office">🏢 오피스/데스크</option>
-            <option value="nature">🌿 자연/풍경</option>
-            <option value="dark">🌑 다크 모드</option>
-          </select>
 
-          <label style="display:block;font-size:11px;color:#888;margin-top:8px;margin-bottom:6px;">🔲 오버레이 불투명도</label>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <input id="tm-overlay-opacity" type="range" min="0" max="1" step="0.01" value="0" style="flex:1;">
-            <span id="tm-overlay-opacity-value" style="width:48px;text-align:right;font-size:12px;color:#ccc;">70%</span>
-          </div>
-          <div style="font-size:11px;color:#777;margin-top:6px;">텍스트 가독성을 위해 아래 영역의 어두운 오버레이 불투명도를 조절합니다.</div>
-          <button id="tm-gen-bg" style="width:100%;padding:10px;background:linear-gradient(135deg, #6c5ce7, #a29bfe);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(108, 92, 231, 0.3);transition:all 0.2s;">
-            🎨 배경 생성
-          </button>
-
-          <!-- Reference images UI -->
-          <!-- Moved to before canvas wrapper -->
-        </div>
-
-        <div id="tm-bg-upload-panel" style="display:none;text-align:center;">
-          <input type="file" id="tm-file-input" accept="image/*" style="display:none;">
-          <button id="tm-upload-btn" style="width:100%;padding:20px 10px;background:#1e1e1e;color:#888;border:1px dashed #666;border-radius:6px;cursor:pointer;font-size:12px;transition:all 0.2s;">
-            클릭하여 이미지 업로드<br><span style="font-size:10px;opacity:0.7">(JPG, PNG)</span>
-          </button>
         </div>
       </div>
     </div>
@@ -313,12 +259,9 @@ export function openThumbnailMaker(
         <span style="color:#fff;font-size:14px;font-weight:500;">AI가 배경을 그리고 있습니다...</span>
       </div>
       
-      <div id="tm-drag-overlay" style="position:absolute;inset:0;background:rgba(108, 92, 231, 0.2);display:none;align-items:center;justify-content:center;pointer-events:none;z-index:5;border-radius:12px;">
-        <span style="color:#fff;font-weight:bold;font-size:16px;text-shadow:0 2px 4px rgba(0,0,0,0.5);">📂 이미지를 놓아서 배경 변경</span>
-      </div>
 
-      <!-- Visual overlay for bottom gradient preview; updated by overlay slider -->
-      <div id="tm-visual-overlay" style="position:absolute;left:0;right:0;bottom:0;height:40%;border-radius:0 0 12px 12px;pointer-events:none;z-index:4;background:linear-gradient(0deg, rgba(0,0,0,0), rgba(0,0,0,0));transition:background 0.12s ease;"></div>
+
+
       
       <canvas id="tm-preview" width="1280" height="720" style="max-width:100%;max-height:calc(50vh - 40px);width:auto;height:auto;object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);"></canvas>
     </div>
@@ -347,12 +290,7 @@ export function openThumbnailMaker(
         <button id="tm-edit-tui" style="padding:10px 16px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
           🛠️ 정밀 편집
         </button>
-        <button id="tm-my-images" style="padding:10px 14px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
-          🖼️ 내가 만든 이미지
-        </button>
-        <button id="tm-insert" style="padding:10px 20px;background:#0984e3;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 4px 12px rgba(9, 132, 227, 0.3);white-space:nowrap;">
-          본문에 삽입
-        </button>
+
       </div>
     </div>
     <style>
@@ -365,6 +303,9 @@ export function openThumbnailMaker(
   `;
   // [수정] 전달받은 container(Shadow DOM)에 추가
   container.appendChild(modal);
+
+  // Run cleanup in case older builds or test helpers injected deprecated title UI
+  cleanupPotentialTitleUi(modal);
 
   // [DEBUG] concept selector 존재 여부 확인 및 폴백
   try {
@@ -569,21 +510,17 @@ export function openThumbnailMaker(
       }
 
       const currentInfo = {
-        thumbnailText: modal.querySelector('#tm-title')?.value || '',
-        subtitle: modal.querySelector('#tm-subtitle')?.value || '',
         thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
         thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
         // 스타일 정보 저장
         templateType: modal.querySelector('#tm-template-type')?.value || 'default',
-        fontFamily: modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif",
-        textColor: modal.querySelector('#tm-text-color')?.value || 'auto',
+
         ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
         // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback)
         bgImage: bgImageToSave,
         // [신규] 선택된 컨셉 인덱스 저장 (영구 저장)
         selectedThumbnailIndex: selectedConceptIndex,
-        // [신규] 오버레이 불투명도
-        overlayOpacity: (function(){ const v = parseFloat(modal.querySelector('#tm-overlay-opacity')?.value); return Number.isFinite(v) ? v : 0.0; })(),
+
       };
 
       // 로깅 시 Base64 숨기기
@@ -606,16 +543,9 @@ export function openThumbnailMaker(
 
     const state = {
       templateType: modal.querySelector('#tm-template-type')?.value || 'default',
-      title: modal.querySelector('#tm-title').value,
-      subtitle: modal.querySelector('#tm-subtitle')?.value || '',
-      fontFamily: modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif",
-      textColor: modal.querySelector('#tm-text-color')?.value || 'auto',
       ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
       bgImage: currentBgImage,
-      // [추가] 텍스트 표시 여부 상태 저장
-      showText: modal.querySelector('#tm-show-text')?.checked ?? true,
-      // [신규] 오버레이 불투명도 상태 저장
-      overlayOpacity: (function(){ const v = parseFloat(modal.querySelector('#tm-overlay-opacity')?.value); return Number.isFinite(v) ? v : 0.0; })(),
+
       timestamp: Date.now(),
     };
 
@@ -649,46 +579,10 @@ export function openThumbnailMaker(
     // only set UI values (handled in the "Restore overlay opacity if present" block).
     // No action needed here.
 
-    if (modal.querySelector('#tm-template-type')) {
-      modal.querySelector('#tm-template-type').value = state.templateType || 'default';
-    }
-    modal.querySelector('#tm-title').value = state.title;
-    if (modal.querySelector('#tm-subtitle')) {
-      modal.querySelector('#tm-subtitle').value = state.subtitle || '';
-    }
-    modal.querySelector('#tm-font-family').value = state.fontFamily;
-    modal.querySelector('#tm-text-color').value = state.textColor;
+    // Restore persisted ratio and background image
     modal.querySelector('#tm-ratio').value = state.ratio;
 
-    // Restore overlay opacity if present and update visual overlay
-    if (modal.querySelector('#tm-overlay-opacity')) {
-      const v = (typeof state.overlayOpacity === 'number') ? state.overlayOpacity : (state.overlayOpacity !== undefined ? parseFloat(state.overlayOpacity) : NaN);
-      const val = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.0;
-      modal.querySelector('#tm-overlay-opacity').value = val;
-      modal.querySelector('#tm-overlay-opacity-value').innerText = Math.round(val * 100) + '%';
-      const visual = modal.querySelector('#tm-visual-overlay');
-      if (visual) visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${val}), rgba(0,0,0,0))`;
-    }
 
-    // [추가] 텍스트 표시 체크박스 상태 복원
-    const showTextCheckbox = modal.querySelector('#tm-show-text');
-    if (showTextCheckbox) {
-      // 저장된 상태가 있으면 그것을 따르고, 없으면(구버전 데이터) true
-      const shouldShow = state.showText !== undefined ? state.showText : true;
-      showTextCheckbox.checked = shouldShow;
-
-      // 입력창 활성화/비활성화 UI 동기화
-      const titleInput = modal.querySelector('#tm-title');
-      const subtitleInput = modal.querySelector('#tm-subtitle');
-      if (titleInput) {
-        titleInput.disabled = !shouldShow;
-        titleInput.style.opacity = shouldShow ? '1' : '0.5';
-      }
-      if (subtitleInput) {
-        subtitleInput.disabled = !shouldShow;
-        subtitleInput.style.opacity = shouldShow ? '1' : '0.5';
-      }
-    }
 
     currentBgImage = state.bgImage;
 
@@ -732,32 +626,16 @@ export function openThumbnailMaker(
   const updatePreview = async () => {
     const startTime = performance.now();
 
-    const title = modal.querySelector('#tm-title').value;
-    const subtitle = modal.querySelector('#tm-subtitle')?.value || '';
-    const templateType = modal.querySelector('#tm-template-type')?.value || 'default';
+    // Template selection removed — always use default template
+    const templateType = 'default';
 
-    // [신규] UI에서 값 가져오기
-    const fontFamily = modal.querySelector('#tm-font-family')?.value || "'Pretendard', sans-serif";
-    const textColorMode = modal.querySelector('#tm-text-color')?.value || 'auto';
+    // 고정 폰트와 자동 색상 보정을 사용합니다 (사용자 선택 비활성화)
+    const fontFamily = "'Pretendard', sans-serif";
+    const textColorMode = 'auto';
 
     // [Offscreen 가속] 배경 이미지가 있으면 offscreen에서 리사이징
     let processedBgImage = currentBgImage;
 
-    // overlay opacity: prefer UI slider value, fall back to thumbInfo.overlayOpacity or default 0.0
-    const overlayOpacity = (function () {
-      try {
-        const s = modal.querySelector('#tm-overlay-opacity');
-        if (s && s.value !== undefined) {
-          const parsed = parseFloat(s.value);
-          if (Number.isFinite(parsed)) return Math.max(0, Math.min(1, parsed));
-        }
-      } catch (e) {
-        // ignore
-      }
-      // fallback to thumbInfo value if valid number, otherwise 0.0
-      const t = (typeof thumbInfo?.overlayOpacity === 'number') ? thumbInfo.overlayOpacity : (thumbInfo?.overlayOpacity !== undefined ? parseFloat(thumbInfo.overlayOpacity) : NaN);
-      return Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0.0;
-    })();
     if (currentBgImage && currentBgImage.startsWith('data:image')) {
       try {
         // DataURL 유효성 검사
@@ -799,90 +677,21 @@ export function openThumbnailMaker(
 
     if (templateType !== 'default') {
       // 스마트 템플릿 사용 (비교형, 질문형, 리스트형)
-      templateData = createSmartTemplate(templateType, title, subtitle, background, { fontFamily });
+      templateData = createSmartTemplate(templateType, '', '', background, { fontFamily });
     } else {
-      // 기본 템플릿 (기존 로직)
-      // 텍스트 색상 결정 (Auto가 아니면 지정색 사용)
-      let textFill = '#ffffff'; // 기본값
-      let autoAdjust = true; // 자동 보정 여부
-
-      if (textColorMode !== 'auto') {
-        textFill = textColorMode;
-        autoAdjust = false; // 강제 지정 시 자동 보정 끄기
-      }
+      // 기본 템플릿 (서브타이틀 제거된 버전)
+      // 항상 자동 색상 보정을 사용하여 가독성 최적화
+      let textFill = '#ffffff';
+      let autoAdjust = true;
 
       templateData = {
         name: 'Custom Thumbnail',
         background: background,
-        layers: [
-          // 배경 이미지가 있을 때는 텍스트 가독성을 위해 어두운 오버레이 추가 (자동 모드일 때만)
-          ...(currentBgImage && autoAdjust
-            ? [
-                {
-                  type: 'shape',
-                  shape: 'rect',
-                  x: 0.5,
-                  y: 0.5,
-                  widthRatio: 1,
-                  heightRatio: 1,
-                  styles: { fill: `rgba(0,0,0,${overlayOpacity})` },
-                },
-              ]
-            : []),
-
-          // 메인 타이틀 (서브타이틀 있으면 위로 이동)
-          {
-            type: 'text',
-            text: title,
-            x: 0.5,
-            y: subtitle ? 0.45 : 0.5,
-            autoColorAdjust: autoAdjust,
-            styles: {
-              fill: textFill,
-              fontFamily: fontFamily,
-              fontRatio: calculateFontRatio(canvas.width, canvas.height, subtitle ? true : false),
-              fontWeight: 'bold',
-              align: 'center',
-              baseline: 'middle',
-              shadow: { color: 'rgba(0,0,0,0.8)', blur: 40, offsetX: 0, offsetY: 10 },
-            },
-          },
-
-          // 서브 타이틀 (조건부 렌더링)
-          ...(subtitle
-            ? [
-                {
-                  type: 'text',
-                  text: subtitle,
-                  x: 0.5,
-                  y: 0.65,
-                  autoColorAdjust: autoAdjust,
-                  styles: {
-                    fill: textFill,
-                    fontFamily: fontFamily,
-                    fontRatio: calculateFontRatio(canvas.width, canvas.height, true) * 0.5,
-                    fontWeight: 'normal',
-                    align: 'center',
-                    baseline: 'middle',
-                    shadow: { color: 'rgba(0,0,0,0.8)', blur: 20, offsetX: 0, offsetY: 5 },
-                  },
-                },
-              ]
-            : []),
-        ],
+        layers: [],
       };
     }
 
-    // [핵심 수정] 텍스트 표시가 꺼져있으면 텍스트 레이어 제거 (좀비 모달 방지)
-    const showTextCheckbox = modal.querySelector('#tm-show-text');
-    // 체크박스가 있으면 그 값을 쓰고, 없으면 초기값 사용
-    const showText = showTextCheckbox ? showTextCheckbox.checked : initialShowText;
 
-    if (!showText && templateData.layers) {
-      // type이 'text'인 모든 레이어를 필터링하여 제거
-      templateData.layers = templateData.layers.filter((layer) => layer.type !== 'text');
-      console.log('[ThumbnailMaker] 텍스트 오버레이가 비활성화되어 텍스트 레이어를 제거했습니다.');
-    }
 
     // thumbnailGenerator.js의 렌더러 호출
     await renderTemplateFromData(ctx, templateData);
@@ -971,10 +780,7 @@ export function openThumbnailMaker(
         });
 
         // 입력 필드 업데이트
-        const titleInput = modal.querySelector('#tm-title');
-        if (titleInput && selectedConcept.thumbnailText) {
-          titleInput.value = selectedConcept.thumbnailText;
-        }
+
 
         // 프롬프트 정보 업데이트 (ID로 정확히 찾기)
         const promptDisplay = modal.querySelector('#tm-prompt-display');
@@ -1000,7 +806,6 @@ export function openThumbnailMaker(
           fontFamily: thumbInfo.fontFamily,
           textColor: thumbInfo.textColor,
           ratio: thumbInfo.ratio,
-          subtitle: thumbInfo.subtitle,
           bgImage: thumbInfo.bgImage,
           templateType: thumbInfo.templateType,
         };
@@ -1111,10 +916,7 @@ export function openThumbnailMaker(
             b.textContent = label + (isSelected ? ' ✓' : '');
           });
 
-          const titleInput = modal.querySelector('#tm-title');
-          if (titleInput && selectedConcept.thumbnailText) {
-            titleInput.value = selectedConcept.thumbnailText;
-          }
+
 
           const promptDisplay = modal.querySelector('#tm-prompt-display');
           if (promptDisplay) {
@@ -1125,10 +927,7 @@ export function openThumbnailMaker(
           }
 
           const oldStyle = {
-            fontFamily: thumbInfo.fontFamily,
-            textColor: thumbInfo.textColor,
             ratio: thumbInfo.ratio,
-            subtitle: thumbInfo.subtitle,
             bgImage: thumbInfo.bgImage,
             templateType: thumbInfo.templateType,
           };
@@ -1160,64 +959,9 @@ export function openThumbnailMaker(
       triggerAutoSave();
     };
 
-  // [신규] 파일 업로드 처리
-  const uploadBtn = modal.querySelector('#tm-upload-btn');
-  if (uploadBtn)
-    uploadBtn.onclick = () => {
-      const fileInput = modal.querySelector('#tm-file-input');
-      if (fileInput) fileInput.click();
-    };
+  // File upload UI and handlers removed: uploading background images via file input is deprecated.
+  // Previously, upload button and file input change handlers uploaded images to Firebase Storage and applied them as background.
 
-  const fileInput = modal.querySelector('#tm-file-input');
-  if (fileInput)
-    fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64Data = event.target.result; // Base64 데이터
-
-        // Firebase Storage에 업로드 시도
-        try {
-          const timestamp = Date.now();
-          const filename = `thumbnail-bg-${timestamp}.png`;
-
-          const response = await sendRuntimeMessageWithTimeout({
-            action: 'upload_thumbnail_to_storage',
-            data: {
-              dataUrl: base64Data,
-              filename: filename,
-            },
-          });
-
-          if (response && response.success && response.url) {
-            // Firebase Storage URL 사용
-            currentBgImage = response.url;
-            console.log(
-              '[ThumbnailMaker] ✅ 배경 이미지 Firebase Storage 업로드 완료:',
-              response.url
-            );
-          } else {
-            // 업로드 실패 시 Base64 fallback
-            currentBgImage = base64Data;
-            console.warn('[ThumbnailMaker] ⚠️ Firebase Storage 업로드 실패, Base64 사용');
-          }
-        } catch (error) {
-          // 오류 발생 시 Base64 fallback
-          console.error('[ThumbnailMaker] 배경 이미지 업로드 오류:', error);
-          currentBgImage = base64Data;
-        }
-
-        await updatePreview(); // 캔버스 다시 그리기
-        saveState(); // 업로드 후 상태 저장 (내부에서 triggerAutoSave 호출)
-        showToast('✅ 배경 이미지가 업로드되었습니다!');
-      };
-      reader.onerror = () => {
-        showToast('❌ 이미지 로드에 실패했습니다.');
-      };
-      reader.readAsDataURL(file);
-    });
 
   // [핵심] 배경 생성 버튼 클릭 (스타일 반영)
   const genBgBtn = modal.querySelector('#tm-gen-bg');
@@ -1238,39 +982,12 @@ export function openThumbnailMaker(
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       try {
-        // 스타일에 따른 프롬프트 튜닝
-        const style = modal.querySelector('#tm-bg-style').value;
-        let promptSuffix = '';
+        // Background style selection removed — use a fixed, text-friendly prompt suffix
+        const promptSuffix = 'text-friendly background, minimal distractions';
 
-        if (style === 'abstract') {
-          promptSuffix =
-            'abstract geometric shapes, modern, minimalistic, dark theme background, text-friendly';
-        } else if (style === 'gradient') {
-          promptSuffix =
-            'smooth gradient texture, grain noise, high quality wallpaper, 4k, professional';
-        } else if (style === 'office') {
-          promptSuffix =
-            'blurred modern office background, bokeh, professional workspace, soft lighting';
-        } else if (style === 'nature') {
-          promptSuffix =
-            'scenic nature background, soft lighting, cinematic, text-friendly overlay';
-        } else if (style === 'dark') {
-          promptSuffix = 'dark mode background, minimalistic, modern, high contrast, text-friendly';
-        }
+        // 메인 타이틀 제거: 프롬프트에 타이틀 텍스트는 포함하지 않습니다.
+        const textPrompt = '';
 
-        // 메인 타이틀 가져오기
-        const titleInput = modal.querySelector('#tm-title');
-        const mainTitle = titleInput ? titleInput.value.trim() : thumbInfo.thumbnailText || '';
-
-        // Gemini API 문서 참고: 고화질 텍스트 렌더링을 위해 텍스트를 명시적으로 포함
-        // https://ai.google.dev/gemini-api/docs/image-generation?hl=ko
-        // 프롬프트에 메인 타이틀 텍스트를 포함하여 이미지에 텍스트가 렌더링되도록 함
-        let textPrompt = '';
-        if (mainTitle) {
-          // We will not include the text in the generated image. Instead, request visual metaphors or icons
-          // that represent the title. UI overlays will render the actual text separately.
-          textPrompt = `, visually representing the idea of "${mainTitle}" with icons/illustrations, DO NOT render the title as text in the image`;
-        }
 
         // 기본 프롬프트 + 스타일 프롬프트 (explicitly remove high-quality text rendering to avoid textual overlays)
         const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, 16:9 aspect ratio`;
@@ -1606,68 +1323,17 @@ export function openThumbnailMaker(
   });
 
   // [신규] 텍스트 표시 토글 이벤트
-  const showTextCheckbox = modal.querySelector('#tm-show-text');
-  if (showTextCheckbox) {
-    showTextCheckbox.addEventListener('change', () => {
-      const titleInput = modal.querySelector('#tm-title');
-      const subtitleInput = modal.querySelector('#tm-subtitle');
 
-      // 체크 해제 시 입력창 비활성화 (시각적 피드백)
-      const isChecked = showTextCheckbox.checked;
-      if (titleInput) {
-        titleInput.disabled = !isChecked;
-        titleInput.style.opacity = isChecked ? '1' : '0.5';
-      }
-      if (subtitleInput) {
-        subtitleInput.disabled = !isChecked;
-        subtitleInput.style.opacity = isChecked ? '1' : '0.5';
-      }
-
-      updatePreview();
-      saveState();
-    });
-  }
 
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
-  modal.querySelector('#tm-template-type')?.addEventListener('change', () => {
-    updatePreview();
-    saveState();
-  });
 
-  const titleInput = modal.querySelector('#tm-title');
-  if (titleInput)
-    titleInput.addEventListener(
-      'input',
-      debounce(() => {
-        updatePreview();
-        saveState(); // Undo/Redo용 상태 저장 (내부에서 triggerAutoSave 호출)
-      }, 300)
-    );
 
-  const subtitleInput = modal.querySelector('#tm-subtitle');
-  if (subtitleInput)
-    subtitleInput.addEventListener(
-      'input',
-      debounce(() => {
-        updatePreview();
-        saveState();
-      }, 300)
-    );
+
+
+
 
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
-  const fontFamilySelect = modal.querySelector('#tm-font-family');
-  if (fontFamilySelect)
-    fontFamilySelect.addEventListener('change', () => {
-      updatePreview();
-      saveState();
-    });
 
-  const textColorInput = modal.querySelector('#tm-text-color');
-  if (textColorInput)
-    textColorInput.addEventListener('change', () => {
-      updatePreview();
-      saveState();
-    });
 
   // [신규] 비율 변경 이벤트 - 상태 저장 포함
   const ratioSelect = modal.querySelector('#tm-ratio');
@@ -1693,51 +1359,8 @@ export function openThumbnailMaker(
       saveState();
     });
 
-  // [신규] 드래그 앤 드롭 이벤트
+  // Drag & drop upload handlers removed — image uploads via drag/drop are disabled to simplify the UI and avoid background uploads.
   const wrapper = modal.querySelector('#tm-canvas-wrapper');
-  const overlay = modal.querySelector('#tm-drag-overlay');
-
-  if (!wrapper || !overlay) {
-    console.warn('[ThumbnailMaker] 드래그 앤 드롭 요소를 찾을 수 없습니다.');
-  } else {
-    wrapper.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      wrapper.style.borderColor = '#6c5ce7'; // 보라색 강조
-      overlay.style.display = 'flex';
-    });
-
-    wrapper.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      wrapper.style.borderColor = '#333';
-      overlay.style.display = 'none';
-    });
-
-    wrapper.addEventListener('drop', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      wrapper.style.borderColor = '#333';
-      overlay.style.display = 'none';
-
-      const file = e.dataTransfer.files[0];
-      if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          currentBgImage = event.target.result;
-          updatePreview(); // 이미지 교체 후 렌더링
-          saveState(); // 드래그 앤 드롭 후 상태 저장
-          showToast('✅ 배경 이미지가 업로드되었습니다!');
-        };
-        reader.onerror = () => {
-          showToast('❌ 이미지 로드에 실패했습니다.');
-        };
-        reader.readAsDataURL(file);
-      } else {
-        showToast('❌ 이미지 파일만 드롭할 수 있습니다.');
-      }
-    });
-  }
 
   // 본문 삽입 버튼
   const insertBtn = modal.querySelector('#tm-insert');
@@ -1759,13 +1382,11 @@ export function openThumbnailMaker(
         const elapsed = Math.round(performance.now() - startTime);
         console.log(`⚡ [ThumbnailMaker] 최종 이미지 생성 완료 (${elapsed}ms)`);
 
-        // [SEO 핵심] 현재 입력된 제목을 Alt 텍스트로 사용
-        const altText =
-          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
+        // [SEO 핵심] 대표 텍스트로 thumbInfo.thumbnailText 또는 기본값 사용
+        const altText = thumbInfo.thumbnailText || '썸네일 이미지';
 
-        // 1. 제목 가져오기
-        const rawTitle =
-          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || 'thumbnail';
+        // 1. 제목 가져오기 (파일명 생성용) - thumbInfo.thumbnailText 또는 기본값 사용
+        const rawTitle = thumbInfo.thumbnailText || 'thumbnail';
 
         // 2. [SEO] 안전한 파일명으로 변환 (한글/영어/숫자 외 제거, 공백 -> 하이픈)
         // 예: "집 전체를 손끝으로!" -> "집-전체를-손끝으로-170..."
@@ -1799,8 +1420,7 @@ export function openThumbnailMaker(
         console.error('[ThumbnailMaker] 업로드 오류:', e);
         // [수정] 에러 발생 시에도 altText 전달
         const dataUrl = canvas.toDataURL('image/png');
-        const altText =
-          modal.querySelector('#tm-title').value || thumbInfo.thumbnailText || '썸네일 이미지';
+        const altText = thumbInfo.thumbnailText || '썸네일 이미지';
         if (onInsert) onInsert(dataUrl, altText);
         modal.remove();
       } finally {
@@ -2009,56 +1629,7 @@ export function openThumbnailMaker(
   const closeBtn = modal.querySelector('#tm-close');
   if (closeBtn) closeBtn.onclick = () => modal.remove();
 
-  // Initialize overlay opacity slider from thumbInfo
-  try {
-    const slider = modal.querySelector('#tm-overlay-opacity');
-    const label = modal.querySelector('#tm-overlay-opacity-value');
-    const initialOpacity =
-      typeof thumbInfo?.overlayOpacity === 'number'
-        ? thumbInfo.overlayOpacity
-        : thumbInfo?.overlayOpacity
-          ? parseFloat(thumbInfo.overlayOpacity)
-          : 0.7;
-    if (slider && label) {
-      slider.value = initialOpacity;
-      label.textContent = Math.round(initialOpacity * 100) + '%';
-      // set initial visual overlay background
-      const visual = modal.querySelector('#tm-visual-overlay');
-      if (visual)
-        visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${initialOpacity}), rgba(0,0,0,0))`;
 
-      slider.addEventListener('input', (e) => {
-        const v = parseFloat(e.target.value);
-        label.textContent = Math.round(v * 100) + '%';
-        if (visual)
-          visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${v}), rgba(0,0,0,0))`;
-        // update canvas preview as well
-        try {
-          updatePreview();
-        } catch (err) {
-          // ignore
-        }
-        saveState();
-        triggerAutoSave();
-      });
-
-      // Reconcile UI state on next tick to avoid races where other init paths
-      // might overwrite the label/visual; this ensures tests observe the final
-      // consistent state synchronously after modal open.
-      setTimeout(() => {
-        try {
-          const v = parseFloat(slider.value);
-          label.textContent = Math.round(v * 100) + '%';
-          if (visual)
-            visual.style.background = `linear-gradient(0deg, rgba(0,0,0,${v}), rgba(0,0,0,0))`;
-        } catch (e) {
-          // ignore
-        }
-      }, 50);
-    }
-  } catch (e) {
-    // ignore
-  }
 
   // 초기 1회 렌더링 (기본 배경 + 텍스트)
   updatePreview();
