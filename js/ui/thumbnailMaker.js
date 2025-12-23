@@ -215,7 +215,7 @@ export function openThumbnailMaker(
       <button id="tm-close" style="background:none;border:none;color:#888;cursor:pointer;font-size:24px;line-height:1;flex-shrink:0;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;">&times;</button>
     </div>
 
-    <div style="display:grid;grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap:20px; margin-bottom:20px;flex-shrink:0;align-items:start;">
+    <div style="display:grid; gap:20px; margin-bottom:20px;flex-shrink:0;align-items:start;">
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:nowrap;">
           <label style="font-size:11px;color:#888;white-space:nowrap;flex-shrink:0;">비율</label>
@@ -237,10 +237,7 @@ export function openThumbnailMaker(
         
 
 
-        <div style="display:flex;gap:10px;flex-shrink:0;flex-wrap:wrap;">
 
-
-        </div>
       </div>
     </div>
     
