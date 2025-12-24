@@ -53,6 +53,50 @@ describe('Workspace UI - publish info after draft generation', () => {
     const seoInput = await waitForValue('#seo-title-input', 'SEO From Draft', 2000);
     expect(seoInput).toBeTruthy();
     expect(seoInput.value).toBe('SEO From Draft');
+
+    // Now apply a response that includes an AI meta description suggestion
+    const meta = 'AI generated meta summary for this draft.';
+    const resp2 = { draft: '## content', metaDescription: meta };
+    applyDraftResponseToIdea(idea, resp2);
+
+    // DEBUG: dump publish area HTML (removed)
+
+    // Wait for the suggested description area to show the AI suggestion
+    async function waitForSuggestedText(expected, timeout = 2000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = container.querySelector('#ai-suggested-desc-text');
+        if (el && el.textContent && el.textContent.trim() === expected) return el;
+        await global.testHelpers.waitForMs(50);
+      }
+      return null;
+    }
+
+    const suggestedEl = await waitForSuggestedText(meta, 2000);
+    // console.log('SUGGESTED EL:', suggestedEl);
+    expect(suggestedEl).toBeTruthy();
+
+    // Click apply and assert the description is saved and UI updated
+    const applyBtn = container.querySelector('#apply-suggested-desc-btn');
+    expect(applyBtn).toBeTruthy();
+
+    // Clear previous sendMessage calls and simulate click
+    chrome.runtime.sendMessage.mockClear();
+    global.testHelpers.simulateClick(applyBtn);
+
+    // allow async save to happen
+    await global.testHelpers.waitForMs(50);
+
+    const seoDesc = container.querySelector('#seo-description-input');
+    expect(seoDesc).toBeTruthy();
+    expect(seoDesc.value.trim()).toBe(meta);
+
+    // ensure update_kanban_card was requested with the new description
+    const calls = chrome.runtime.sendMessage.mock.calls;
+    const updateCall = calls.find((c) => c && c[0] && c[0].action === 'update_kanban_card');
+    expect(updateCall).toBeTruthy();
+    expect(updateCall[0].data.updates.description).toBe(meta);
+
     container.remove();
   });
 });

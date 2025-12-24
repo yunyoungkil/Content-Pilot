@@ -782,6 +782,14 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
     console.debug('[DIAG applyDraftResponseToIdea] seoTitle set:', safeSeo);
   }
 
+  // If the AI provided a metaDescription during draft generation, store it
+  // as a non-destructive suggestion so users can choose to apply it.
+  if (response.metaDescription) {
+    if (!ideaData.publishInfo) ideaData.publishInfo = {};
+    ideaData.publishInfo.suggestedDescription = response.metaDescription;
+    console.debug('[DIAG applyDraftResponseToIdea] suggestedDescription set');
+  }
+
   // If this idea is currently open in the workspace UI, refresh the publish-info panel
   try {
     // Find the workspace container corresponding to this idea.
@@ -1908,6 +1916,36 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     updateInput('#seo-description-input', safeDescription);
     updateInput('#permalink-input', safePermalink);
     updateInput('#tags-input', safeTags);
+
+    // Update or create AI suggested description area
+    try {
+      const suggestedVal = ideaData?.publishInfo?.suggestedDescription || '';
+      let suggestedEl = publishInfoPanel.querySelector('#ai-suggested-desc-text');
+      let suggestedContainer = publishInfoPanel.querySelector('#ai-suggested-desc-container');
+      if (!suggestedContainer && suggestedVal) {
+        // create container and insert before the actions container
+        const wrapper = document.createElement('div');
+        wrapper.id = 'ai-suggested-desc-container';
+        wrapper.style.cssText = 'border-left: 3px solid #e0e0e0; padding: 8px; background: #fbfdff; border-radius: 4px;';
+        wrapper.innerHTML = `
+          <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">AI 제안 SEO 설명</label>
+          <div id="ai-suggested-desc-text" style="font-size:13px; color:#222; min-height:40px;">${escapeHtml(suggestedVal)}</div>
+          <div style="margin-top:6px;"><button id="apply-suggested-desc-btn" style="padding:6px 10px; font-size:13px; background:#1a73e8; color:#fff; border:none; border-radius:4px; cursor:pointer;">AI 제안 적용</button></div>
+        `;
+        const actions = publishInfoPanel.querySelector('#publish-info-actions');
+        const containerToInsert = publishInfoPanel.querySelector('.publish-info-panel > div') || publishInfoPanel;
+        if (actions && actions.parentNode) {
+          actions.parentNode.insertBefore(wrapper, actions);
+        } else if (containerToInsert && containerToInsert.appendChild) {
+          containerToInsert.appendChild(wrapper);
+        }
+      } else {
+        if (suggestedEl) suggestedEl.textContent = suggestedVal;
+        if (suggestedContainer) suggestedContainer.style.display = suggestedVal ? 'block' : 'none';
+      }
+    } catch (e) {
+      // non-fatal UI update failure
+    }
   }
 
   // Now request channel info to compute full permalink URL and update
@@ -2414,6 +2452,27 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         },
         true
       );
+
+      // Handle apply suggested description clicks (delegated)
+      publishInfoArea.addEventListener('click', (ev) => {
+        const targ = ev.target;
+        if (!targ || !targ.id) return;
+        if (targ.id === 'apply-suggested-desc-btn') {
+          const suggested = publishInfoPanel.querySelector('#ai-suggested-desc-text')?.textContent || '';
+          if (suggested) {
+            try {
+              const descInput = publishInfoPanel.querySelector('#seo-description-input');
+              if (descInput) {
+                descInput.value = suggested;
+                // trigger blur handler to save
+                descInput.dispatchEvent(new Event('blur', { bubbles: true }));
+              }
+            } catch (e) {
+              console.warn('[Workspace] apply suggested description failed', e);
+            }
+          }
+        }
+      });
 
       publishInfoArea.dataset.cpPublishHandlersAttached = '1';
     }
