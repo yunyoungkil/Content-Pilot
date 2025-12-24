@@ -1068,6 +1068,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     generateKeywords: true,
                     generateLongTail: true,
                     generateMainKeywords: true,
+                    // generateMetaDescription: intentionally omitted to avoid auto-generating
+                    // meta descriptions on idea creation. Users can generate via the
+                    // publish-info UI when needed.
                     originType: originType,
                     origin: ideaData.origin || null,
                   }
@@ -1232,11 +1235,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 데이터 정제 (undefined → null)
         const cleanedUpdates = cleanDataForFirebase(updates);
 
-        await update(ref(getDb(), updatePath), cleanedUpdates);
+        // Extra debug when publishInfo is present to diagnose missing DB writes
+        try {
+          Logger.debug('[update_kanban_card] about to persist cleanedUpdates:', cleanedUpdates);
+          if (cleanedUpdates && cleanedUpdates.publishInfo) {
+            Logger.debug('[update_kanban_card] publishInfo payload preview:', cleanedUpdates.publishInfo);
+          }
 
-        Logger.biz(
-          `✅ [update_kanban_card] 카드 업데이트 완료 - cardId: ${cardId}, status: ${status}`
-        );
+          try {
+            await update(ref(getDb(), updatePath), cleanedUpdates);
+            Logger.biz(`✅ [update_kanban_card] 카드 업데이트 완료 - cardId: ${cardId}, status: ${status}`);
+          } catch (dbErr) {
+            Logger.error('[update_kanban_card] DB update failed:', dbErr && (dbErr.message || dbErr));
+            // bubble up a structured error so callers can react/test accordingly
+            return { success: false, error: 'db_update_failed', detail: dbErr && dbErr.message ? dbErr.message : String(dbErr) };
+          }
+        } catch (err) {
+          Logger.error('[update_kanban_card] unexpected error preparing update:', err && (err.message || err));
+          return { success: false, error: 'internal_error', detail: err && err.message ? err.message : String(err) };
+        }
 
         // REST API 모드에서는 실시간 리스너가 작동하지 않으므로, UI 갱신을 위해 최신 데이터를 가져와서 메시지 전송
         try {
@@ -1306,6 +1323,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         Logger.debug(`[delete_kanban_card] 캐시 무효화 완료`);
 
         return result;
+      })()
+    );
+  }
+
+  // Debug helper: fetch and return a specific kanban card for debugging publishInfo issues
+  if (msg.action === 'debug_print_card') {
+    return handleAsync(
+      (async () => {
+        try {
+          const { cardId, status = 'ideas' } = msg.data || {};
+          if (!cardId) return { success: false, error: 'cardId is required' };
+          const userId = await getCurrentUserId();
+          const path = `kanban/${userId}/${status}/${cardId}`;
+          Logger.debug(`[debug_print_card] fetching path: ${path}`);
+          const snap = await get(ref(getDb(), path));
+          const val = snap?.val();
+          Logger.debug('[debug_print_card] data:', val);
+          return { success: true, data: val };
+        } catch (err) {
+          Logger.error('[debug_print_card] error:', err && err.message ? err.message : err);
+          return { success: false, error: err && err.message ? err.message : String(err) };
+        }
       })()
     );
   }

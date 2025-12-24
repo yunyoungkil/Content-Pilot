@@ -1371,6 +1371,124 @@ describe('AI Service', () => {
       // cleanup: no spy to restore in this test
     });
 
+    test('generates thumbnail prompts and stores them in publishInfo when requested', async () => {
+      jest.resetModules();
+      // ensure Gemini API key is present after module reset
+      global.chrome.storage.local.get = jest.fn().mockResolvedValue({ geminiApiKey: 'test-api-key' });
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        // return the path so tests can assert which path was updated
+        ref: jest.fn((db, path) => path),
+        update: jest.fn().mockResolvedValue(),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+        serverTimestamp: () => 'SERVER_TS',
+      }));
+
+      const svc = require('../js/services/aiService.js');
+      const mock = jest.spyOn(svc, 'callGeminiAPI').mockImplementation(async (prompt) => {
+        // keep callGeminiAPI mock for direct calls, but internal calls go through fetch
+        return '[]';
+      });
+
+      // Mock global.fetch to return different candidate content based on the prompt text
+      global.fetch = jest.fn(async (_url, opts) => {
+        try {
+          const body = JSON.parse(opts.body);
+          const textPart = (body?.contents?.[0]?.parts || []).find((p) => p.text)?.text || '';
+          if (textPart.includes('curiosity')) {
+            return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '["뭐야 이건?","알고보니…","충격적 비밀","한번 보면 못 지나가"]' }] } }] }) };
+          }
+          if (textPart.includes('inform') || textPart.includes('정보')) {
+            return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '["핵심 요약: ...","한눈에 보는 핵심","요점 정리","결론 요약"]' }] } }] }) };
+          }
+          if (textPart.includes('empathy') || textPart.includes('감성')) {
+            return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '["나도 그랬어","마음이 와닿는 이야기","함께 공감해요","위로가 되는 한마디"]' }] } }] }) };
+          }
+        } catch (e) {}
+        return { ok: true, json: async () => ({ candidates: [] }) };
+      });
+
+      await svc.generateIdeaBriefing('card-thumb', 'title', 'desc', {
+        status: 'ideas',
+        generateThumbnailPrompts: true,
+      });
+
+      const firebase = require('../js/services/firebaseService.js');
+      const updateCalls = firebase.update.mock.calls.map((c) => c[1]);
+      // find the update that contains publishInfo
+      const publishUpdate = updateCalls.find((u) => u && u.publishInfo && u.publishInfo.thumbnailPrompts);
+      expect(publishUpdate).toBeTruthy();
+      expect(publishUpdate.publishInfo.thumbnailPrompts).toBeTruthy();
+      const thumbs = publishUpdate.publishInfo.thumbnailPrompts;
+      expect(Array.isArray(thumbs.curiosity)).toBe(true);
+      expect(Array.isArray(thumbs.info)).toBe(true);
+      expect(Array.isArray(thumbs.empathy)).toBe(true);
+
+      // ensure nested workspace/draft/publishInfo was also updated
+      const fullCalls = firebase.update.mock.calls;
+      const nestedPath = `kanban/test-user-id/ideas/card-thumb/workspace/draft/publishInfo`;
+      const nestedCall = fullCalls.find((c) => c[0] === nestedPath && c[1] && c[1].thumbnailPrompts);
+      expect(nestedCall).toBeDefined();
+      expect(Array.isArray(nestedCall[1].thumbnailPrompts.curiosity)).toBe(true);
+    });
+
+    test('generateDraftFromIdea stores thumbnailPrompts in publishInfo when requested', async () => {
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getDb: jest.fn(() => 'mock-db'),
+        ref: jest.fn((db, path) => path),
+        update: jest.fn().mockResolvedValue(),
+        get: jest.fn(() => Promise.resolve({ val: () => ({}) })),
+        getCurrentUserId: jest.fn(() => 'test-user-id'),
+        cleanDataForFirebase: jest.fn((d) => d),
+        serverTimestamp: () => 'SERVER_TS',
+      }));
+
+      const svc = require('../js/services/aiService.js');
+      const idea = {
+        id: 'card-draft-thumb',
+        title: 'title',
+        description: 'desc',
+        status: 'ideas',
+      };
+
+      const mock = jest.spyOn(svc, 'callGeminiAPI').mockImplementation(async (prompt) => {
+        if (prompt.includes('curiosity') || prompt.includes('호기심')) return '["뭐야 이건?","알고보니…","충격적 비밀","한번 보면 못 지나가"]';
+        if (prompt.includes('inform') || prompt.includes('정보')) return '["핵심 요약: ...","한눈에 보는 핵심","요점 정리","결론 요약"]';
+        if (prompt.includes('empathy') || prompt.includes('감성')) return '["나도 그랬어","마음이 와닿는 이야기","함께 공감해요","위로가 되는 한마디"]';
+        return '[]';
+      });
+
+      const res = await svc.generateDraftFromIdea(idea, { generateDraft: false, generateThumbnailPrompts: true });
+
+      const firebase = require('../js/services/firebaseService.js');
+      console.log('[TEST] firebase.update.mock.calls:', JSON.stringify(firebase.update.mock.calls).slice(0,1000));
+      const updateCalls = firebase.update.mock.calls.map((c) => c[1]);
+      const pub = updateCalls.find((u) => u && u.publishInfo && u.publishInfo.thumbnailPrompts);
+      console.log('[TEST] found publishInfo update:', pub);
+      expect(pub).toBeTruthy();
+      const thumbs = pub.publishInfo.thumbnailPrompts;
+      expect(Array.isArray(thumbs.curiosity)).toBe(true);
+      expect(Array.isArray(thumbs.info)).toBe(true);
+      expect(Array.isArray(thumbs.empathy)).toBe(true);
+
+      // Ensure the service returns thumbnailPrompts in its response as well
+      expect(res).toBeDefined();
+      expect(res.thumbnailPrompts).toBeDefined();
+      expect(Array.isArray(res.thumbnailPrompts.curiosity)).toBe(true);
+      expect(Array.isArray(res.thumbnailPrompts.info)).toBe(true);
+      expect(Array.isArray(res.thumbnailPrompts.empathy)).toBe(true);
+
+      // nested check
+      const fullCalls2 = firebase.update.mock.calls;
+      const nestedPath2 = `kanban/test-user-id/ideas/card-draft-thumb/workspace/draft/publishInfo`;
+      const nestedCall2 = fullCalls2.find((c) => c[0] === nestedPath2 && c[1] && c[1].thumbnailPrompts);
+      expect(nestedCall2).toBeDefined();
+      expect(Array.isArray(nestedCall2[1].thumbnailPrompts.curiosity)).toBe(true);
+    });
+
     test('returns done + no updates when model provides empty responses', async () => {
       jest.resetModules();
       // Make firebase.update a spy to capture calls BEFORE importing aiService
@@ -1484,6 +1602,65 @@ describe('AI Service', () => {
 
     test.skip('should default to count = 1 when not specified', async () => {
       // 복잡한 함수로 인해 스킵 - 통합 테스트에서 검증
+    });
+
+    test('should broadcast debug_show_prompt messages for input and final image prompts (generateAiImage input)', async () => {
+      const svc = require('../js/services/aiService.js');
+
+      // Ensure sendMessage exists and spy on it
+      chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+        if (typeof cb === 'function') cb({ success: false });
+      });
+
+      // Mock fetch response to return a valid inline image for generateAiImage
+      global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({
+        candidates: [
+          { content: { parts: [{ inlineData: { data: 'R0FDRkE=', mimeType: 'image/png' } }] } },
+        ],
+      }) });
+
+      // Ensure uploadImageToFirebaseStorage exists on mocked firebase service
+      const firebaseMock = require('../js/services/firebaseService.js');
+      firebaseMock.uploadImageToFirebaseStorage = jest.fn(() => Promise.resolve('https://images.test/generated.png'));
+
+      // Call generateAiImage which should emit debug messages
+      await svc.generateAiImage('Debug test prompt', 1, null);
+
+      // Look for calls that match our debug action
+      const calls = chrome.runtime.sendMessage.mock.calls.map(c => c[0]);
+
+      const hasInput = calls.some(c => c && c.action === 'debug_show_prompt' && c.promptType === 'imageGeneration.input');
+
+      expect(hasInput).toBe(true);
+    });
+
+    test('should broadcast debug_show_prompt message for final prompt during thumbnail pipeline', async () => {
+      const svc = require('../js/services/aiService.js');
+
+      // Spy on sendMessage
+      chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+        if (typeof cb === 'function') cb({ success: false });
+      });
+
+      // Ensure uploadImage uploads succeed
+      const firebaseMock = require('../js/services/firebaseService.js');
+      firebaseMock.uploadImageToFirebaseStorage = jest.fn(() => Promise.resolve('https://images.test/generated.png'));
+
+      // Mock generateAiImage to return empty arrays forcing the "final" branch
+      jest.spyOn(svc, 'generateAiImage').mockResolvedValue([]);
+
+      // Call enhanceDraftWithFeatures directly with a thumbnail candidate that will trigger AI generation
+      await svc.enhanceDraftWithFeatures({
+        thumbnailCandidates: [{ thumbnailPromptEn: 'Force final prompt' }],
+        composeThumbnailText: true,
+        permalink: 'test-perm',
+        seoTitle: 'SEO'
+      });
+
+      const calls = chrome.runtime.sendMessage.mock.calls.map(c => c[0]);
+      const hasFinal = calls.some(c => c && c.action === 'debug_show_prompt' && c.promptType === 'imageGeneration.final');
+
+      expect(hasFinal).toBe(true);
     });
   });
 

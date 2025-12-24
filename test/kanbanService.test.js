@@ -117,6 +117,28 @@ describe('kanbanService workspace fields', () => {
     jest.useRealTimers();
   });
 
+  test('addIdeaToKanban does NOT include suggestedDescription when metaDescription absent', async () => {
+    jest.resetModules();
+    const mockSet = jest.fn().mockResolvedValue();
+    jest.doMock('../js/services/firebaseService.js', () => ({
+      getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+      getDb: jest.fn(),
+      ref: jest.fn(),
+      push: (ref) => ({ key: 'card-no-meta', set: mockSet }),
+      set: jest.fn(),
+      cleanDataForFirebase: (d) => d,
+    }));
+
+    const { addIdeaToKanban } = await import('../js/services/kanbanService.js');
+    const idea = { title: 'NoMeta', description: 'Desc', tags: [] };
+    await addIdeaToKanban(idea, 'ideas', null);
+
+    expect(mockSet).toHaveBeenCalled();
+    const saved = mockSet.mock.calls[0][0];
+    expect(saved.publishInfo).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(saved.publishInfo, 'suggestedDescription')).toBe(false);
+  });
+
   test('addIdeaToKanban should call generateIdeaBriefing for AI-generated (similar idea) uploads', async () => {
     jest.resetModules();
     const mockSet = jest.fn().mockResolvedValue();

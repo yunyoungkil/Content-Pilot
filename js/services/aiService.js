@@ -348,6 +348,8 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
   try {
+    // Debug: log the incoming prompt (short) for test visibility
+    try { Logger.debug('[callGeminiAPI] prompt preview:', typeof prompt === 'string' ? prompt.substring(0,200) : Object.prototype.toString.call(prompt)); } catch (e) { }
     // [수정] 멀티모달 입력을 위한 parts 구성
     const parts = [];
 
@@ -804,6 +806,13 @@ export async function enhanceDraftWithFeatures({
 
       // 수정된 프롬프트로 이미지 생성 요청
       try {
+        // DEV: broadcast final image prompt for debug in workspace UI
+        try {
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'debug_show_prompt', promptType: 'imageGeneration.final', prompt: finalImagePrompt });
+          }
+        } catch (e) {}
+
         console.log(
           '[enhanceDraftWithFeatures DEBUG] calling generateAiImage with prompt',
           finalImagePrompt
@@ -840,7 +849,7 @@ export async function enhanceDraftWithFeatures({
         if (refImages.length > 0) {
           const bgPrompt =
             selectedThumbnail.thumbnailPromptEn +
-            ' . Use the provided reference images as the background inspiration: prioritize texture, color palette, and atmosphere. CRITICAL: Do NOT render any text, letters, or typography in this image. Keep composition clean for overlaying text.';
+            ` . Use the provided reference images as the background inspiration: prioritize texture, color palette, and atmosphere. CRITICAL: Do NOT render any text, letters, or typography in this image. Keep composition clean for overlaying text. ${selectedThumbnail.ratio || '16:9'} aspect ratio`;
           try {
             const bgRes = await generateAiImage(bgPrompt, 1, refImages);
             if (Array.isArray(bgRes) && bgRes[0]) {
@@ -1468,9 +1477,54 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // 1. 옵션 및 체크박스 상태 확인 [수정]
     // options에서 composeThumbnailText 값을 명확히 가져옵니다.
     const { generateDraft = true, generateThumbnail = true } = options;
+    Logger.debug('[generateDraftFromIdea] received options:', options);
+    // Debug: show ideaData basics
+    try { console.log('[generateDraftFromIdea] DBG: ideaData summary:', { id: ideaData?.id, title: ideaData?.title, status: ideaData?.status }); } catch(e){}
 
     // 사용자 설정 로드 (options에 값이 없으면 저장소에서 확인)
     let composeThumbnailText = options.composeThumbnailText;
+
+    // Early safety: if caller explicitly requested thumbnail prompts and we have an idea id,
+    // create an initial placeholder publishInfo.thumbnailPrompts so that DB update is recorded
+    // quickly (helps UI show an intent and ensures tests can detect the update).
+    if (options && (options.generateThumbnailPrompts || options.generateThumbnail) && ideaData && ideaData.id) {
+      try {
+        const earlyUid = await getCurrentUserId();
+        const earlyStatus = ideaData.status || 'ideas';
+        const earlyPath = `kanban/${earlyUid}/${earlyStatus}/${ideaData.id}`;
+        const placeholder = { curiosity: [], info: [], empathy: [] };
+        console.log('[generateDraftFromIdea] Early placeholder persist for thumbnailPrompts:', earlyPath, placeholder);
+        await update(ref(getDb(), earlyPath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: placeholder } }));
+        try {
+          await update(ref(getDb(), `${earlyPath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: placeholder }));
+        } catch (nestedErr) {
+          Logger.debug('[generateDraftFromIdea] early nested persist failed:', nestedErr?.message || String(nestedErr));
+        }
+        // If caller explicitly asked to only signal intent (generateDraft === false),
+        // return early with the placeholder shape so callers get immediate feedback.
+        if (options && options.generateDraft === false) {
+          try {
+            return {
+              success: true,
+              draft: ideaData.currentDraft || ideaData.draftContent || '',
+              permalink: ideaData.permalink || null,
+              tags: ideaData.tags || [],
+              seoTitle: ideaData.seoTitle || ideaData.title || '',
+              thumbnailInfo: ideaData.publishInfo?.thumbnailInfo || [],
+              thumbnailUrls: null,
+              thumbnailPartialFailure: false,
+              jsonLdSchema: ideaData.publishInfo?.jsonLdSchema || null,
+              metaDescription: ideaData.description || '',
+              thumbnailPrompts: placeholder,
+            };
+          } catch (retErr) {
+            Logger.debug('[generateDraftFromIdea] early return failed:', retErr);
+          }
+        }
+      } catch (earlyErr) {
+        Logger.debug('[generateDraftFromIdea] early placeholder persist failed:', earlyErr?.message || String(earlyErr));
+      }
+    }
     if (composeThumbnailText === undefined) {
       // 비동기 함수 내부이므로 await 사용 가능
       try {
@@ -1766,6 +1820,15 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       day: 'numeric',
     });
 
+    // Determine whether thumbnail prompts were requested (capture early to avoid mutation of options)
+    const shouldGenerateThumbnailPrompts = !!(options && (options.generateThumbnailPrompts || options.generateThumbnail));
+    Logger.debug('[generateDraftFromIdea] shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts);
+    // Ensure visibility in tests (console) as well
+    console.log('[generateDraftFromIdea] shouldGenerateThumbnailPrompts (console):', shouldGenerateThumbnailPrompts, 'options:', options);
+
+    // Holder for generated thumbnail prompts so we can persist reliably at the end
+    let generatedThumbUpdates = null;
+
     // 백업 파일의 상세한 프롬프트 구성
     // [신규] 썸네일 프롬프트 가이드 동적 생성 (체크박스 상태에 따라 분기)
     const thumbnailPromptGuide = composeThumbnailText
@@ -1780,6 +1843,102 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           2. For Korean text, emphasize strict typography to prevent typos (e.g., "Bold, clear Korean typography", "Legible text").
           3. If the text is too long (over 8 chars), summarize it into a short keyword.
       `;
+
+    // Optional: generate thumbnail prompt concepts early when requested in options
+    if (shouldGenerateThumbnailPrompts) {
+      Logger.debug('[generateDraftFromIdea] generate-thumbnail flag present - generating thumbnail prompts', { generateThumbnail: options.generateThumbnail, generateThumbnailPrompts: options.generateThumbnailPrompts });
+      try {
+        const contextText = `${title}${ideaData.description ? ' - ' + ideaData.description : ''}`;
+
+        const prompts = {
+          curiosity: `Generate a JSON array of 4 short curiosity-stimulating thumbnail phrases (Korean), for the topic: "${contextText}". Return JSON array only, e.g. ["...","..."]`,
+          info: `Generate a JSON array of 4 concise informational thumbnail phrases (Korean) that summarize the topic: "${contextText}". Return JSON array only.`,
+          empathy: `Generate a JSON array of 4 emotional/empathetic thumbnail phrases (Korean) for the topic: "${contextText}". Return JSON array only.`,
+        };
+
+        const thumbUpdates = { curiosity: [], info: [], empathy: [] };
+
+        for (const [key, p] of Object.entries(prompts)) {
+          try {
+            const res = await callGeminiAPI(p);
+            console.log('[generateDraftFromIdea] DBG: callGeminiAPI returned for key', key, '->', String(res).slice(0,200));
+            let arr = tryParseArray(String(res || ''));
+            console.log('[generateDraftFromIdea] DBG: tryParseArray result for key', key, '->', Array.isArray(arr) ? JSON.stringify(arr).slice(0,200) : String(arr).slice(0,200));
+            if (!Array.isArray(arr)) {
+              arr = String(res || '')
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              console.log('[generateDraftFromIdea] DBG: fallback split result for key', key, '->', JSON.stringify(arr).slice(0,200));
+            }
+            if (Array.isArray(arr)) {
+              thumbUpdates[key] = arr.map((s) => String(s).replace(/\s+/g, ' ').trim()).slice(0, 6);
+            }
+          } catch (e) {
+            Logger.warn('[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':', e);
+          }
+        }
+
+        // fallback: if AI didn't produce any thumbnail prompts, try to extract from existing thumbnailCandidates
+        if (
+          (!thumbUpdates.curiosity || thumbUpdates.curiosity.length === 0) &&
+          (!thumbUpdates.info || thumbUpdates.info.length === 0) &&
+          (!thumbUpdates.empathy || thumbUpdates.empathy.length === 0)
+        ) {
+          try {
+            if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+              const findByType = (keys) => {
+                const found = thumbnailCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
+                if (!found) return [];
+                const src = found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
+                return src ? [String(src).trim()] : [];
+              };
+              thumbUpdates.curiosity = findByType(['curiosity', 'curio']);
+              thumbUpdates.info = findByType(['inform', 'info', 'informative']);
+              thumbUpdates.empathy = findByType(['emot', 'empath', '감성', 'emotional']);
+              console.log('[generateDraftFromIdea] DBG: fallback thumbUpdates (early) from thumbnailCandidates:', thumbUpdates);
+            }
+          } catch (fallbackErr) {
+            Logger.warn('[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:', fallbackErr);
+          }
+        }
+
+        // persist when present (or when generateDraft explicitly disabled)
+        // If generateDraft was explicitly disabled, we want to persist early even if ideaData.id is not present (caller may be using intent only)
+        if (options.generateDraft === false && !generatedThumbUpdates) {
+          // no-op: generatedThumbUpdates should be handled at finalization
+        }
+
+        if (
+          (thumbUpdates.curiosity && thumbUpdates.curiosity.length > 0) ||
+          (thumbUpdates.info && thumbUpdates.info.length > 0) ||
+          (thumbUpdates.empathy && thumbUpdates.empathy.length > 0)
+        ) {
+          try {
+            const status = ideaData.status || 'ideas';
+            const cardId = ideaData.id;
+            console.log('[generateDraftFromIdea] DBG: persist early block - cardId/status:', cardId, status);
+            if (!cardId) throw new Error('ideaData.id is required to persist thumbnail prompts');
+            const updatePath = `kanban/${await getCurrentUserId()}/${status}/${cardId}`;
+            Logger.debug('[generateDraftFromIdea] Persisting thumbnailPrompts to:', updatePath);
+            console.log('[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:', updatePath, thumbUpdates);
+            await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: thumbUpdates } }));
+            // also persist to nested workspace/draft/publishInfo
+            try {
+              await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: thumbUpdates }));
+            } catch (nestedErr) {
+              Logger.debug('[generateDraftFromIdea] nested thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+            }
+            // assign early generated updates to holder so finalResponse includes them
+            generatedThumbUpdates = thumbUpdates;
+          } catch (e) {
+            Logger.warn('[generateDraftFromIdea] thumbnailPrompts persistence failed:', e);
+          }
+        }
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] thumbnail prompts generation overall failed:', e);
+      }
+    }
 
     const prompt = `
             ${systemPrompt}
@@ -2748,6 +2907,7 @@ ${defaultDescription}
     }
 
     console.log('[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:', !!thumbnailUrls);
+    console.log('[generateDraftFromIdea] DBG: final flags - shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts, 'generatedThumbUpdates:', JSON.stringify(generatedThumbUpdates).slice(0,200));
     const finalResponse = {
       success: true,
       draft: formattedDraft,
@@ -2759,7 +2919,147 @@ ${defaultDescription}
       thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
       jsonLdSchema: jsonLdSchema, // [신규] JSON-LD 구조화된 데이터
       metaDescription: metaDescription,
+      // include generated thumbnail prompt suggestions if requested — default to empty arrays so callers can rely on shape
+      thumbnailPrompts: options && (options.generateThumbnailPrompts || options.generateThumbnail) ? { curiosity: [], info: [], empathy: [] } : undefined,
     };
+    // Debug: show options at finalization
+    try { Logger.debug('[generateDraftFromIdea] final options:', options); } catch(e){ }
+
+    // Persist thumbnail prompt suggestions to Firebase when requested
+    if (shouldGenerateThumbnailPrompts) {
+      try {
+        console.log('[generateDraftFromIdea] DBG: shouldGenerateThumbnailPrompts block entered - options:', options, 'ideaData.id:', ideaData && ideaData.id);
+        console.log('[generateDraftFromIdea] DBG: entering final persistence block - generateDraft:', generateDraft, 'generatedThumbUpdates:', generatedThumbUpdates !== null);
+        Logger.debug('[generateDraftFromIdea] persisting thumbnail prompts - start');
+        const contextText = `${seoTitle || title}${metaDescription ? ' - ' + metaDescription : ''}`;
+        const prompts = {
+          curiosity: `Generate a JSON array of 4 short curiosity-stimulating thumbnail phrases (Korean), for the topic: "${contextText}". Return JSON array only, e.g. ["...","..."]`,
+          info: `Generate a JSON array of 4 concise informational thumbnail phrases (Korean) that summarize the topic: "${contextText}". Return JSON array only.`,
+          empathy: `Generate a JSON array of 4 emotional/empathetic thumbnail phrases (Korean) for the topic: "${contextText}". Return JSON array only.`,
+        };
+
+        const thumbUpdates = { curiosity: [], info: [], empathy: [] };
+        for (const [key, p] of Object.entries(prompts)) {
+          try {
+            const res = await callGeminiAPI(p);
+            console.log('[generateDraftFromIdea] DBG: callGeminiAPI(final) returned for key', key, '->', String(res).slice(0,200));
+            let arr = tryParseArray(String(res || ''));
+            if (!Array.isArray(arr)) {
+              arr = String(res || '')
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+            if (Array.isArray(arr)) {
+              thumbUpdates[key] = arr.map((s) => String(s).replace(/\s+/g, ' ').trim()).slice(0, 6);
+            }
+          } catch (e) {
+            Logger.warn('[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':', e);
+          }
+        }
+        // assign to holder so finalization persistence picks it up
+        generatedThumbUpdates = thumbUpdates;
+
+        // fallback: if AI didn't produce any thumbnail prompts, try to extract from existing thumbnailCandidates
+        if (
+          (!thumbUpdates.curiosity || thumbUpdates.curiosity.length === 0) &&
+          (!thumbUpdates.info || thumbUpdates.info.length === 0) &&
+          (!thumbUpdates.empathy || thumbUpdates.empathy.length === 0)
+        ) {
+          try {
+            if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+              const findByType = (keys) => {
+                const found = thumbnailCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
+                if (!found) return [];
+                const src = found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
+                return src ? [String(src).trim()] : [];
+              };
+              thumbUpdates.curiosity = findByType(['curiosity', 'curio']);
+              thumbUpdates.info = findByType(['inform', 'info', 'informative']);
+              thumbUpdates.empathy = findByType(['emot', 'empath', '감성', 'emotional']);
+              console.log('[generateDraftFromIdea] DBG: fallback thumbUpdates from thumbnailCandidates:', thumbUpdates);
+            }
+          } catch (fallbackErr) {
+            Logger.warn('[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:', fallbackErr);
+          }
+        }
+
+        if (
+          (thumbUpdates.curiosity && thumbUpdates.curiosity.length > 0) ||
+          (thumbUpdates.info && thumbUpdates.info.length > 0) ||
+          (thumbUpdates.empathy && thumbUpdates.empathy.length > 0) ||
+          options.generateDraft === false
+        ) {
+          try {
+            const status = ideaData.status || 'ideas';
+            const cardId = ideaData.id;
+            if (cardId) {
+              const uid = await getCurrentUserId();
+              const updatePath = `kanban/${uid}/${status}/${cardId}`;
+              Logger.debug('[generateDraftFromIdea] Persisting thumbnailPrompts to:', updatePath);
+              // ensure arrays exist even if empty so UI and tests can rely on shape
+              const toPersist = {
+                curiosity: Array.isArray(thumbUpdates.curiosity) ? thumbUpdates.curiosity : [],
+                info: Array.isArray(thumbUpdates.info) ? thumbUpdates.info : [],
+                empathy: Array.isArray(thumbUpdates.empathy) ? thumbUpdates.empathy : [],
+              };
+              console.log('[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:', updatePath, toPersist);
+              await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } }));
+              try {
+                console.log('[generateDraftFromIdea] DBG: about to call update(nested) with thumbnailPrompts:', `${updatePath}/workspace/draft/publishInfo`, toPersist);
+                await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: toPersist }));
+              } catch (nestedErr) {
+                Logger.debug('[generateDraftFromIdea] nested thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+              }
+            }
+          } catch (e) {
+            Logger.warn('[generateDraftFromIdea] thumbnailPrompts persistence failed:', e);
+          }
+        }
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] thumbnail prompts generation overall failed:', e);
+      }
+    }
+
+    // SAFETY-NET: ensure publishInfo.thumbnailPrompts shape is persisted when requested
+    try {
+      if (shouldGenerateThumbnailPrompts && ideaData && ideaData.id) {
+        const status = ideaData.status || 'ideas';
+        const uid = await getCurrentUserId();
+        const updatePath = `kanban/${uid}/${status}/${ideaData.id}`;
+        const toPersist = {
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+        };
+        console.log('[generateDraftFromIdea] SAFETY-NET persisting thumbnailPrompts:', updatePath, toPersist);
+        try {
+          await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } }));
+          await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: toPersist }));
+        } catch (safetyErr) {
+          Logger.warn('[generateDraftFromIdea] safety-net thumbnailPrompts persistence failed:', safetyErr);
+        }
+      }
+    } catch (safetyErrOuter) {
+      Logger.warn('[generateDraftFromIdea] safety-net outer error:', safetyErrOuter);
+    }
+
+    // Ensure finalResponse.thumbnailPrompts reflects any thumbnail generation attempts
+    try {
+      console.log('[generateDraftFromIdea] ASSIGN FINAL thumbnailPrompts - shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts, 'generatedThumbUpdates:', JSON.stringify(generatedThumbUpdates).slice(0,200));
+      if (shouldGenerateThumbnailPrompts) {
+        finalResponse.thumbnailPrompts = {
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+        };
+      } else {
+        finalResponse.thumbnailPrompts = undefined;
+      }
+    } catch (e) {
+      finalResponse.thumbnailPrompts = { curiosity: [], info: [], empathy: [] };
+    }
+
     console.debug('[DIAG generateDraftFromIdea] final response:', {
       hasDraft: !!formattedDraft,
       seoTitle,
@@ -2767,6 +3067,22 @@ ${defaultDescription}
       tagsCount: tagsForPublish?.length,
       hasThumbnailUrls: !!thumbnailUrls,
     });
+
+    // Final safety: ensure the returned object includes thumbnailPrompts shape if caller requested it
+    try {
+      const requested = !!(options && (options.generateThumbnailPrompts || options.generateThumbnail));
+      if (requested && finalResponse.thumbnailPrompts === undefined) {
+        finalResponse.thumbnailPrompts = {
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+        };
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    try { console.log('[generateDraftFromIdea] about to RETURN finalResponse.thumbnailPrompts:', finalResponse.thumbnailPrompts); } catch(e){}
     return finalResponse;
   } catch (e) {
     // If an error occurs late in the pipeline but we already have a formattedDraft,
@@ -2774,6 +3090,12 @@ ${defaultDescription}
     Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
     if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
       Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      const safeThumbs = {
+        curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+        info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
+        empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+      };
+      console.log('[generateDraftFromIdea] about to RETURN error-handling success result thumbnailPrompts:', shouldGenerateThumbnailPrompts ? safeThumbs : undefined);
       return {
         success: true,
         draft: formattedDraft,
@@ -2785,6 +3107,7 @@ ${defaultDescription}
         thumbnailPartialFailure: !!thumbnailGenerationPartialFailure,
         jsonLdSchema: jsonLdSchema || null,
         metaDescription: metaDescription || '',
+        thumbnailPrompts: shouldGenerateThumbnailPrompts ? safeThumbs : undefined,
       };
     }
     return { success: false, error: e && e.message ? e.message : String(e) };
@@ -3273,6 +3596,74 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       await persistProgress(90);
     }
 
+    // Optional: generate a short SEO meta description and store it as a suggestion
+    if (options.generateMetaDescription) {
+      Logger.debug(`[generateIdeaBriefing] meta description generation start`);
+      try {
+        const mdPrompt = `Write a concise SEO meta description (one sentence, max 200 characters) for the topic: "${contextText}". Provide plain text only.`;
+        const mdRes = await callGeminiAPI(mdPrompt);
+        if (mdRes && String(mdRes).trim()) {
+          const md = String(mdRes).replace(/\s+/g, ' ').trim().substring(0, 200);
+          updates.publishInfo = updates.publishInfo || {};
+          updates.publishInfo.suggestedDescription = md;
+          Logger.info(`[generateIdeaBriefing] suggestedDescription generated`);
+        }
+      } catch (e) {
+        Logger.warn('[generateIdeaBriefing] meta description generation failed:', e);
+      }
+    }
+
+    // Optional: generate thumbnail prompt concepts + example phrases for three categories
+    if (options.generateThumbnailPrompts) {
+      Logger.debug('[generateIdeaBriefing] options.generateThumbnailPrompts is true');
+      Logger.debug(`[generateIdeaBriefing] thumbnail prompts generation start`);
+      try {
+        const prompts = {
+          curiosity: `Generate a JSON array of 4 short curiosity-stimulating thumbnail phrases (Korean), for the topic: "${contextText}". Return JSON array only, e.g. ["...","..."]`,
+          info: `Generate a JSON array of 4 concise informational thumbnail phrases (Korean) that summarize the topic: "${contextText}". Return JSON array only.`,
+          empathy: `Generate a JSON array of 4 emotional/empathetic thumbnail phrases (Korean) for the topic: "${contextText}". Return JSON array only.`,
+        };
+
+        const thumbUpdates = { curiosity: [], info: [], empathy: [] };
+
+        for (const [key, p] of Object.entries(prompts)) {
+          try {
+            const res = await callGeminiAPI(p);
+            Logger.debug(`[generateIdeaBriefing] thumbnail prompt response for ${key}:`, String(res || ''));
+            let arr = tryParseArray(String(res || ''));
+            Logger.debug(`[generateIdeaBriefing] parsed array for ${key}:`, arr);
+            if (!Array.isArray(arr)) {
+              // fallback: attempt simple splitting by newline when not JSON
+              arr = String(res || '')
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+            if (Array.isArray(arr)) {
+              // keep short phrases only and limit to 6
+              thumbUpdates[key] = arr.map((s) => String(s).replace(/\s+/g, ' ').trim()).slice(0, 6);
+            }
+          } catch (e) {
+            Logger.warn(`[generateIdeaBriefing] ${key} thumbnail prompts failed:`, e);
+          }
+        }
+
+        // Persist only when we have any suggestions
+        if (
+          (thumbUpdates.curiosity && thumbUpdates.curiosity.length > 0) ||
+          (thumbUpdates.info && thumbUpdates.info.length > 0) ||
+          (thumbUpdates.empathy && thumbUpdates.empathy.length > 0) ||
+          options.generateDraft === false
+        ) {
+          updates.publishInfo = updates.publishInfo || {};
+          updates.publishInfo.thumbnailPrompts = thumbUpdates;
+          Logger.info('[generateIdeaBriefing] thumbnailPrompts generated');
+        }
+      } catch (e) {
+        Logger.warn('[generateIdeaBriefing] thumbnail prompts generation overall failed:', e);
+      }
+    }
+
     if (Object.keys(updates).length > 0) {
       const updatePath = `kanban/${userId}/${status}/${cardId}`;
       Logger.debug(
@@ -3280,7 +3671,26 @@ export async function generateIdeaBriefing(cardId, title, description, options =
         updates
       );
       try {
+        // Debug: show if thumbnail prompts will be persisted
+        if (updates.publishInfo && updates.publishInfo.thumbnailPrompts) {
+          Logger.debug('[generateIdeaBriefing] Persisting thumbnailPrompts (top-level):', updates.publishInfo.thumbnailPrompts);
+        }
+
         await update(ref(getDb(), updatePath), cleanDataForFirebase(updates));
+
+        // Also persist only the thumbnailPrompts to the nested workspace/draft/publishInfo so UI reading the nested draft sees it
+        try {
+          if (updates.publishInfo && updates.publishInfo.thumbnailPrompts) {
+            await update(
+              ref(getDb(), `${updatePath}/workspace/draft/publishInfo`),
+              cleanDataForFirebase({ thumbnailPrompts: updates.publishInfo.thumbnailPrompts })
+            );
+            Logger.debug('[generateIdeaBriefing] Persisted thumbnailPrompts to nested workspace/draft/publishInfo');
+          }
+        } catch (nestedErr) {
+          Logger.debug('[generateIdeaBriefing] nested publishInfo thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+        }
+
         // mark completion metadata so UI and other consumers know briefing finished
         try {
           await update(ref(getDb(), updatePath), {
@@ -3439,6 +3849,13 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       // [핵심 수정] 시스템 프롬프트(THUMBNAIL_SYSTEM_PROMPT) 제거!
       // 대신 "이미지를 생성하라"는 명확한 지시어를 추가합니다.
       const imageGenerationPrompt = `Generate a high-quality blog thumbnail image based on the following description: ${prompt}`;
+
+      // DEV: broadcast the constructed image prompt for UI debug
+      try {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'debug_show_prompt', promptType: 'imageGeneration.input', prompt: imageGenerationPrompt });
+        }
+      } catch (e) {}
 
       const parts = [{ text: imageGenerationPrompt }];
 

@@ -175,7 +175,21 @@ async function loadStatusDataBatch(userId, status, startAfter = null, limit = 50
       .then((snapshot) => {
         const data = [];
         snapshot.forEach((childSnapshot) => {
-          data.push([childSnapshot.key, childSnapshot.val()]);
+          const val = childSnapshot.val();
+          // Debug: log publishInfo presence for each card (helps diagnose missing saves)
+          try {
+            if (!val) {
+              console.warn('[KanbanService] Loaded card has no data - key:', childSnapshot.key);
+            } else {
+              const hasPublishInfo = !!val.publishInfo;
+              const hasThumbnailPrompts = !!(val.publishInfo && val.publishInfo.thumbnailPrompts);
+              const hasThumbnailUrls = !!(val.publishInfo && val.publishInfo.thumbnailUrls);
+              console.debug('[KanbanService] card loaded:', childSnapshot.key, 'hasPublishInfo:', hasPublishInfo, 'hasThumbnailPrompts:', hasThumbnailPrompts, 'hasThumbnailUrls:', hasThumbnailUrls);
+            }
+          } catch (e) {
+            console.warn('[KanbanService] publishInfo debug check failed for key:', childSnapshot.key, e && e.message);
+          }
+          data.push([childSnapshot.key, val]);
         });
         resolve(data);
       })
@@ -252,7 +266,7 @@ export async function createAndSaveNewIdea(ideaData, targetStatus = 'ideas', cha
     // workspaceMode.js가 cardData.workspace.keywords 등을 접근하므로 필수입니다. ▼▼▼
     const newCard = {
       title: ideaData.title || '제목 없음',
-      description: ideaData.description || '',
+      ...(ideaData.description && String(ideaData.description).trim() !== '' ? { description: ideaData.description } : {}),
       createdAt: ideaData.createdAt || Date.now(),
       channelId: channelId, // 👈 핵심: 채널 ID 저장 (없으면 null = 공용/미지정)
       tags: tags,
@@ -417,12 +431,16 @@ export async function addIdeaToKanban(
     // Firebase 저장 객체 생성
     const newCard = {
       title: ideaData.title,
-      description: ideaData.description || '',
+      ...(ideaData.description && String(ideaData.description).trim() !== '' ? { description: ideaData.description } : {}),
       seoTitle: ideaData.seoTitle || '', // [Fix] 초기 생성 시에는 SEO 제목을 비워둠 (초안 생성 시 자동 입력)
       createdAt: ideaData.createdAt || Date.now(),
       channelId: channelId,
       tags: tags,
       origin: origin,
+      // publishInfo shape: include suggestedDescription only when provided (avoid storing null)
+      publishInfo: {
+        ...(ideaData.metaDescription && String(ideaData.metaDescription).trim() !== '' ? { suggestedDescription: String(ideaData.metaDescription).trim() } : {}),
+      },
       workspace: {
         keywords: workspaceKeywords || [],
         outline: ideaData.outline || ideaData.workspace?.outline || [],
@@ -695,6 +713,8 @@ export async function deleteKanbanCard(cardId, status) {
     // 카드 데이터를 먼저 읽어서 URL 인덱스 삭제에 사용
     const cardSnap = await get(ref(getDb(), cardPath));
     const cardData = cardSnap?.val();
+
+    console.debug('[KanbanService] deleteKanbanCard - fetched card data for', cardPath, 'publishInfo:', cardData && cardData.publishInfo);
 
     if (!cardData) {
       return { success: false, error: '삭제할 카드를 찾을 수 없습니다.' };

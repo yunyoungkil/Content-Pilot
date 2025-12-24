@@ -42,11 +42,11 @@ describe('workspaceMode.applyDraftResponseToIdea', () => {
     expect(updated.publishInfo.seoTitle).toBe('Cool Idea');
   });
 
-  test('propagates metaDescription into publishInfo.suggestedDescription', () => {
+  test('propagates metaDescription into publishInfo.description', () => {
     const idea = { id: 'card-4', title: 'Meta Test', publishInfo: {} };
     const resp = { draft: '# draft', metaDescription: 'AI suggested meta description' };
 
     const updated = applyDraftResponseToIdea(idea, resp);
-    expect(updated.publishInfo.suggestedDescription).toBe('AI suggested meta description');
+    expect(updated.publishInfo.description).toBe('AI suggested meta description');
   });
 });

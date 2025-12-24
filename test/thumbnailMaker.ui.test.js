@@ -144,6 +144,176 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(firstCall.data.references.length).toBeGreaterThanOrEqual(1);
   });
 
+  test('applies selected ratio to prompt and payload', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text <img src="https://images.test/ref1.png"/></p>',
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // set ratio to 9:16 and generate
+    const ratioSelect = document.querySelector('#tm-ratio');
+    expect(ratioSelect).toBeTruthy();
+    ratioSelect.value = '9:16';
+
+    // reset mock and click generate
+    global.chrome.runtime.sendMessage.mockClear();
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalled();
+    const aiCallEntry = global.chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'ai_generate_images');
+    expect(aiCallEntry).toBeTruthy();
+    const aiCall = aiCallEntry[0];
+    expect(aiCall.data.aspect).toBe('9:16');
+    expect(aiCall.data.prompt).toMatch(/9:16 aspect ratio/);
+  });
+
+  test('updates prompt display when ratio changed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = { formattedDraft: '<p>Hi</p>' };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+
+    // set ratio to 9:16 and generate
+    const ratioSelect = document.querySelector('#tm-ratio');
+    expect(ratioSelect).toBeTruthy();
+    ratioSelect.value = '9:16';
+
+    // reset mock and click generate
+    global.chrome.runtime.sendMessage.mockClear();
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(global.chrome.runtime.sendMessage).toHaveBeenCalled();
+    const aiCallEntry = global.chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'ai_generate_images');
+    expect(aiCallEntry).toBeTruthy();
+    const aiCall = aiCallEntry[0];
+    expect(aiCall.data.aspect).toBe('9:16');
+    expect(aiCall.data.prompt).toMatch(/9:16 aspect ratio/);
+  });
+
+  test('prefers AI-provided curiosity prompt when available', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      publishInfo: {
+        thumbnailPrompts: {
+          curiosity: ['AI가 제공한 호기심형 프롬프트 예시'],
+          info: [],
+          empathy: [],
+        },
+      },
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    // Should contain the AI-provided curiosity prompt
+    expect(promptDisplay.textContent).toMatch(/AI가 제공한 호기심형 프롬프트 예시/);
+  });
   test('shows failed reference URLs in diagnostics', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 

@@ -104,11 +104,47 @@ export function openThumbnailMaker(
   }
 
   // 썸네일 정보가 없으면 기본값 (3가지 대비되는 컨셉 생성 — 메타디스크립션 우선 사용)
-  if (!thumbInfo || thumbnailCandidates.length === 0) {
+  const createdMetaCandidates = (!thumbInfo || thumbnailCandidates.length === 0);
+  if (createdMetaCandidates) {
     thumbnailCandidates = createMetaBasedCandidates();
     selectedConceptIndex = 0;
     thumbInfo = thumbnailCandidates[0];
     Logger.debug('[ThumbnailMaker] 메타 기반 기본 컨셉 3개 생성:', thumbnailCandidates.length, { baseSource: (draftData.metaDescription || draftData.description || (draftData.formattedDraft||'').replace(/<[^>]+>/g, '').trim() || draftData.seoTitle || '제목을 입력하세요') });
+  }
+
+  // If AI-provided thumbnail prompts exist in publishInfo, prefer them over templates
+  try {
+    const aiPrompts = draftData && draftData.publishInfo && draftData.publishInfo.thumbnailPrompts;
+    if (aiPrompts && typeof aiPrompts === 'object') {
+      // mapping from candidate.type -> prompt key
+      const typeKeyMap = {
+        curiosity: 'curiosity',
+        informative: 'info',
+        informative: 'info',
+        emotional: 'empathy',
+        empathy: 'empathy',
+      };
+
+      thumbnailCandidates = thumbnailCandidates.map((cand) => {
+        try {
+          const key = typeKeyMap[cand.type] || (cand.type === 'informative' ? 'info' : cand.type);
+          const arr = aiPrompts && aiPrompts[key] ? aiPrompts[key] : null;
+          if (Array.isArray(arr) && arr.length > 0) {
+            // prefer the AI-provided Korean prompt if available, else set En
+            cand.thumbnailPromptKo = String(arr[0] || cand.thumbnailPromptKo || '').trim();
+            // keep original En prompt if not provided; optionally we could translate
+          }
+        } catch (e) {
+          // ignore per-candidate failures
+        }
+        return cand;
+      });
+
+      // refresh thumbInfo reference in case it was updated
+      thumbInfo = thumbnailCandidates[selectedConceptIndex] || thumbnailCandidates[0] || thumbInfo;
+    }
+  } catch (mergeErr) {
+    console.warn('[ThumbnailMaker] AI thumbnailPrompts merge failed:', mergeErr);
   }
 
   // 초기화 데이터 로깅 시 Base64 숨기기
@@ -271,6 +307,7 @@ export function openThumbnailMaker(
         <div id="tm-prompt-display" style="font-size:12px;color:#ccc;word-wrap:break-word;word-break:break-word;line-height:1.4;" title="${escapedPromptEn}">
           <div style="margin-bottom:4px;">${escapedPromptKo}</div>
           <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${escapedPromptEn}</div>
+          <div class="tm-prompt-ratio" style="font-size:11px;color:#aaa;margin-top:6px;">비율: ${thumbInfo.ratio || '16:9'}</div>
         </div>
       </div>
       
@@ -945,7 +982,8 @@ export function openThumbnailMaker(
       if (promptDisplay) {
         const newPromptKo = thumbInfo.thumbnailPromptKo || '자동 설정됨';
         const newPromptEn = thumbInfo.thumbnailPromptEn || '';
-        promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n          `;
+        const selectedRatio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
+        promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n            <div class="tm-prompt-ratio" style="font-size:11px;color:#aaa;margin-top:6px;">비율: ${selectedRatio}</div>\n          `;
         promptDisplay.title = newPromptEn;
       }
 
@@ -987,7 +1025,8 @@ export function openThumbnailMaker(
 
 
         // 기본 프롬프트 + 스타일 프롬프트 (explicitly remove high-quality text rendering to avoid textual overlays)
-        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, 16:9 aspect ratio`;
+        const selectedRatio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
+        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, ${selectedRatio} aspect ratio`;
 
         // background.js에 이미지 생성 요청 (참조 이미지도 함께 전달)
         // Decode HTML entities and ensure URLs are clean before sending to background
@@ -1103,7 +1142,7 @@ export function openThumbnailMaker(
             data: {
               prompt: enhancedPrompt,
               count: 1,
-              aspect: '16:9',
+              aspect: selectedRatio,
               references: refImagesToSend,
             },
           },
@@ -1119,7 +1158,7 @@ export function openThumbnailMaker(
               data: {
                 prompt: enhancedPrompt,
                 count: 1,
-                aspect: '16:9',
+                aspect: selectedRatio,
                 references: refImagesToSend,
               },
             },
@@ -1350,6 +1389,24 @@ export function openThumbnailMaker(
       } else if (w === 4 && h === 3) {
         canvas.width = 1024;
         canvas.height = 768;
+      }
+
+      // Update prompt display ratio badge
+      try {
+        const promptDisplay = modal.querySelector('#tm-prompt-display');
+        if (promptDisplay) {
+          const ratioEl = promptDisplay.querySelector('.tm-prompt-ratio');
+          if (ratioEl) ratioEl.textContent = `비율: ${e.target.value}`;
+          else {
+            const div = document.createElement('div');
+            div.className = 'tm-prompt-ratio';
+            div.style.cssText = 'font-size:11px;color:#aaa;margin-top:6px;';
+            div.textContent = `비율: ${e.target.value}`;
+            promptDisplay.appendChild(div);
+          }
+        }
+      } catch (err) {
+        console.warn('[ThumbnailMaker] prompt display ratio update failed:', err);
       }
 
       updatePreview(); // 크기 변경 후 다시 그리기

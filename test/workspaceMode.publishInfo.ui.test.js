@@ -63,4 +63,34 @@ describe('Workspace UI - publish info SEO title', () => {
 
     container.remove();
   });
+
+  test('does NOT prefill SEO description from top-level description when creating an idea', async () => {
+    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+
+    const idea = {
+      id: 'card-desc-1',
+      title: 'Desc Publish Test',
+      status: 'ideas',
+      // top-level description present but publishInfo.description is absent
+      description: 'This is scrap text that should not prefill SEO description',
+      publishInfo: {},
+    };
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderWorkspace(container, idea);
+
+    await global.testHelpers.waitForMs(600);
+    const tabBtn = container.querySelector('.resource-tab-btn[data-tab="publish-info"]');
+    expect(tabBtn).toBeTruthy();
+    tabBtn.click();
+    await global.testHelpers.waitForMs(200);
+
+    const descEl = container.querySelector('#seo-description-input');
+    expect(descEl).toBeTruthy();
+    // textarea value should be empty since publishInfo.description is not set
+    expect(String(descEl.value || '').trim()).toBe('');
+
+    container.remove();
+  });
 });

@@ -102,6 +102,98 @@ let galleryImageObserver = null;
 let __lastPendingTitle = null;
 // Track whether we've attached a single runtime.onMessage listener for gallery updates
 let galleryRuntimeMessageHandlerAttached = false;
+
+// ---------- AI Prompt Debug Modal (dev/debugging helper) ----------
+function showDebugPromptModal(type = 'prompt', prompt = '') {
+  try {
+    // Avoid creating multiple modals
+    let modal = document.querySelector('#ai-debug-prompt-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'ai-debug-prompt-modal';
+      modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);z-index:2147483646;padding:20px;';
+      modal.innerHTML = `
+        <div id="ai-debug-prompt-inner" style="background:#fff;color:#111;max-width:900px;width:100%;max-height:80vh;overflow:auto;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #eee;">
+            <div style="font-weight:600;">AI Prompt Debug <span id="ai-debug-prompt-type" style="font-weight:400;color:#666;margin-left:8px;">${type}</span></div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button id="ai-debug-copy-btn" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;background:#f7f7f7;cursor:pointer;">Copy</button>
+              <button id="ai-debug-close-btn" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;background:#fff;cursor:pointer;">Close</button>
+            </div>
+          </div>
+          <div style="padding:12px;">
+            <textarea id="ai-debug-prompt-text" readonly style="width:100%;height:320px;padding:10px;border:1px solid #eee;border-radius:6px;font-family:monospace;white-space:pre-wrap;">${String(prompt)}</textarea>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // Wire buttons
+      modal.querySelector('#ai-debug-close-btn').addEventListener('click', hideDebugPromptModal);
+      modal.querySelector('#ai-debug-copy-btn').addEventListener('click', () => {
+        const t = modal.querySelector('#ai-debug-prompt-text');
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(t.value);
+            showToast('프롬프트가 클립보드로 복사되었습니다. ✅');
+          } else {
+            t.select();
+            document.execCommand('copy');
+            showToast('프롬프트가 클립보드로 복사되었습니다. ✅');
+          }
+        } catch (e) {
+          console.warn('[AI Debug Modal] copy failed', e);
+          showToast('복사에 실패했습니다. 콘솔을 확인하세요. ⚠️');
+        }
+      });
+
+      // Close on overlay click
+      modal.addEventListener('click', (ev) => {
+        if (ev.target && ev.target.id === 'ai-debug-prompt-modal') hideDebugPromptModal();
+      });
+
+      // ESC to close
+      const escHandler = (ev) => {
+        if (ev.key === 'Escape') hideDebugPromptModal();
+      };
+      document.addEventListener('keydown', escHandler);
+      modal._escHandler = escHandler;
+    } else {
+      // update existing
+      const typeEl = modal.querySelector('#ai-debug-prompt-type');
+      const textEl = modal.querySelector('#ai-debug-prompt-text');
+      if (typeEl) typeEl.textContent = type;
+      if (textEl) textEl.value = String(prompt);
+    }
+  } catch (e) {
+    console.warn('[AI Debug Modal] show failed', e);
+  }
+}
+
+function hideDebugPromptModal() {
+  try {
+    const modal = document.querySelector('#ai-debug-prompt-modal');
+    if (!modal) return;
+    const esc = modal._escHandler;
+    if (esc) document.removeEventListener('keydown', esc);
+    modal.remove();
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Attach runtime onMessage listener to receive debug_show_prompt actions
+try {
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage && typeof chrome.runtime.onMessage.addListener === 'function') {
+    chrome.runtime.onMessage.addListener(function debugPromptListener(message) {
+      try {
+        if (message && message.action === 'debug_show_prompt') {
+          showDebugPromptModal(message.promptType || 'prompt', message.prompt || '');
+        }
+      } catch (e) {}
+    });
+  }
+} catch (e) {}
+
 function ensureGalleryImageObserver() {
   if (galleryImageObserver) return galleryImageObserver;
 
@@ -782,12 +874,53 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
     console.debug('[DIAG applyDraftResponseToIdea] seoTitle set:', safeSeo);
   }
 
-  // If the AI provided a metaDescription during draft generation, store it
-  // as a non-destructive suggestion so users can choose to apply it.
+  // If the AI provided a metaDescription during draft generation, apply it directly
+  // to the publishInfo.description and persist immediately (no separate suggestion UI)
   if (response.metaDescription) {
     if (!ideaData.publishInfo) ideaData.publishInfo = {};
-    ideaData.publishInfo.suggestedDescription = response.metaDescription;
-    console.debug('[DIAG applyDraftResponseToIdea] suggestedDescription set');
+    ideaData.publishInfo.description = response.metaDescription;
+    console.debug('[DIAG applyDraftResponseToIdea] applied metaDescription to publishInfo.description');
+
+    // Persist description to Firebase immediately
+    try {
+      if (ideaData.id) {
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: {
+                description: response.metaDescription,
+                updatedAt: Date.now(),
+              },
+            },
+          },
+          (resp) => {
+            if (resp && resp.success) {
+              console.debug('[DIAG applyDraftResponseToIdea] persisted description to DB');
+            } else {
+              console.debug('[DIAG applyDraftResponseToIdea] failed to persist description', resp);
+            }
+          }
+        );
+      }
+    } catch (e) {
+      Logger.debug('[applyDraftResponseToIdea] failed to send update_kanban_card for description:', e);
+    }
+  }
+
+  // If the AI provided thumbnail prompts (three categories) or thumbnailInfo, store them
+  if (response.thumbnailPrompts) {
+    if (!ideaData.publishInfo) ideaData.publishInfo = {};
+    ideaData.publishInfo.thumbnailPrompts = response.thumbnailPrompts;
+    console.debug('[DIAG applyDraftResponseToIdea] thumbnailPrompts set:', response.thumbnailPrompts);
+  }
+
+  if (response.thumbnailInfo) {
+    if (!ideaData.publishInfo) ideaData.publishInfo = {};
+    ideaData.publishInfo.thumbnailInfo = response.thumbnailInfo;
+    console.debug('[DIAG applyDraftResponseToIdea] thumbnailInfo set');
   }
 
   // If this idea is currently open in the workspace UI, refresh the publish-info panel
@@ -1836,7 +1969,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
 
   const ideaTitle = ideaData?.title || '';
   const safeIdeaTitle = escapeHtml(ideaTitle);
-  const description = ideaData?.publishInfo?.description || ideaData?.description || '';
+  // Only use publishInfo.description when present. Do NOT fall back to top-level description when creating a new idea.
+  const description = (ideaData && ideaData.publishInfo && Object.prototype.hasOwnProperty.call(ideaData.publishInfo, 'description')) ? ideaData.publishInfo.description : '';
   const safeDescription = escapeHtml(description);
   const safeSeoTitle = escapeHtml(seoTitle);
   const safePermalink = escapeHtml(permalink);
@@ -1917,35 +2051,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     updateInput('#permalink-input', safePermalink);
     updateInput('#tags-input', safeTags);
 
-    // Update or create AI suggested description area
-    try {
-      const suggestedVal = ideaData?.publishInfo?.suggestedDescription || '';
-      let suggestedEl = publishInfoPanel.querySelector('#ai-suggested-desc-text');
-      let suggestedContainer = publishInfoPanel.querySelector('#ai-suggested-desc-container');
-      if (!suggestedContainer && suggestedVal) {
-        // create container and insert before the actions container
-        const wrapper = document.createElement('div');
-        wrapper.id = 'ai-suggested-desc-container';
-        wrapper.style.cssText = 'border-left: 3px solid #e0e0e0; padding: 8px; background: #fbfdff; border-radius: 4px;';
-        wrapper.innerHTML = `
-          <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">AI 제안 SEO 설명</label>
-          <div id="ai-suggested-desc-text" style="font-size:13px; color:#222; min-height:40px;">${escapeHtml(suggestedVal)}</div>
-          <div style="margin-top:6px;"><button id="apply-suggested-desc-btn" style="padding:6px 10px; font-size:13px; background:#1a73e8; color:#fff; border:none; border-radius:4px; cursor:pointer;">AI 제안 적용</button></div>
-        `;
-        const actions = publishInfoPanel.querySelector('#publish-info-actions');
-        const containerToInsert = publishInfoPanel.querySelector('.publish-info-panel > div') || publishInfoPanel;
-        if (actions && actions.parentNode) {
-          actions.parentNode.insertBefore(wrapper, actions);
-        } else if (containerToInsert && containerToInsert.appendChild) {
-          containerToInsert.appendChild(wrapper);
-        }
-      } else {
-        if (suggestedEl) suggestedEl.textContent = suggestedVal;
-        if (suggestedContainer) suggestedContainer.style.display = suggestedVal ? 'block' : 'none';
-      }
-    } catch (e) {
-      // non-fatal UI update failure
-    }
+    // Note: AI suggestion UI removed — meta descriptions from AI are applied directly into publishInfo.description by applyDraftResponseToIdea
+    // (No UI container or "AI 제안 적용" button is created.)
   }
 
   // Now request channel info to compute full permalink URL and update
@@ -2405,8 +2512,25 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     // (Removed direct click listener on saveIdeaBtn to avoid double-firing with delegated handler)
 
     // Attach delegated handlers on the publish area once so they survive panel re-renders.
-    if (!publishInfoArea.dataset.cpPublishHandlersAttached) {
-      publishInfoArea.addEventListener('input', (ev) => {
+    // Defensive attach: if the dataset flag is present but the per-area helper methods are missing
+    // (possible in some test runs or racey re-render situations), re-attach handlers to ensure
+    // save hooks exist. This prevents cases where handlers have been removed but the flag remains.
+    const needAttach = !publishInfoArea.dataset.cpPublishHandlersAttached ||
+      typeof publishInfoArea._doSaveTitle !== 'function' ||
+      typeof publishInfoArea._doSaveSeoTitle !== 'function';
+
+    if (needAttach) {
+      // If handlers already exist (from a previous attach), remove them first to avoid duplicate
+      try {
+        if (publishInfoArea._handler_input) publishInfoArea.removeEventListener('input', publishInfoArea._handler_input);
+        if (publishInfoArea._handler_blur) publishInfoArea.removeEventListener('blur', publishInfoArea._handler_blur, true);
+        if (publishInfoArea._handler_click) publishInfoArea.removeEventListener('click', publishInfoArea._handler_click);
+      } catch (e) {
+        // ignore
+      }
+
+      // create and store handlers so they can be removed/checked deterministically
+      publishInfoArea._handler_input = (ev) => {
         const targ = ev.target;
         if (!targ || !targ.id) return;
 
@@ -2432,29 +2556,24 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           publishInfoArea._pendingSeo = targ.value;
           return;
         }
-      });
+      };
 
-      publishInfoArea.addEventListener(
-        'blur',
-        (ev) => {
-          const targ = ev.target;
-          if (!targ || !targ.id) return;
+      publishInfoArea._handler_blur = (ev) => {
+        const targ = ev.target;
+        if (!targ || !targ.id) return;
 
-          if (targ.id === 'idea-title-input' && publishInfoArea._titleChanged) {
-            publishInfoArea._doSaveTitle();
-            return;
-          }
+        if (targ.id === 'idea-title-input' && publishInfoArea._titleChanged) {
+          publishInfoArea._doSaveTitle();
+          return;
+        }
 
-          if (targ.id === 'seo-title-input' && publishInfoArea._seoChanged) {
-            publishInfoArea._doSaveSeoTitle();
-            return;
-          }
-        },
-        true
-      );
+        if (targ.id === 'seo-title-input' && publishInfoArea._seoChanged) {
+          publishInfoArea._doSaveSeoTitle();
+          return;
+        }
+      };
 
-      // Handle apply suggested description clicks (delegated)
-      publishInfoArea.addEventListener('click', (ev) => {
+      publishInfoArea._handler_click = (ev) => {
         const targ = ev.target;
         if (!targ || !targ.id) return;
         if (targ.id === 'apply-suggested-desc-btn') {
@@ -2472,7 +2591,11 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             }
           }
         }
-      });
+      };
+
+      publishInfoArea.addEventListener('input', publishInfoArea._handler_input);
+      publishInfoArea.addEventListener('blur', publishInfoArea._handler_blur, true);
+      publishInfoArea.addEventListener('click', publishInfoArea._handler_click);
 
       publishInfoArea.dataset.cpPublishHandlersAttached = '1';
     }

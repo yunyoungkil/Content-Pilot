@@ -145,6 +145,9 @@ async function dbRequest(method, path, data = null) {
 
     const response = await fetch(url, options);
 
+    // Log response status for diagnostics
+    Logger.debug('[Firebase REST] response status:', { method, path, status: response.status });
+
     if (!response.ok) {
       const errText = await response.text();
       Logger.error(`[Firebase REST] ${method} 실패 (${path}):`, errText);
@@ -160,7 +163,14 @@ async function dbRequest(method, path, data = null) {
       return true;
     }
 
-    return await response.json();
+    // On success, parse JSON and log a preview for debugging
+    const jsonRes = await response.json();
+    try {
+      Logger.debug('[Firebase REST] success payload preview:', { method, path, preview: jsonRes && typeof jsonRes === 'object' ? Object.keys(jsonRes).slice(0,6) : jsonRes });
+    } catch (e) {
+      // ignore logging errors
+    }
+    return jsonRes;
   } catch (error) {
     Logger.error(`[Firebase REST] ${method} 요청 중 오류:`, error);
     throw error;
@@ -214,6 +224,20 @@ export function ref(db, path) {
 
 export async function get(path) {
   const data = await dbRequest('GET', path);
+  try {
+    // Debug: log publishInfo presence when fetching kanban card paths
+    if (typeof path === 'string' && path.startsWith('kanban/')) {
+      const snap = data;
+      if (!snap) {
+        console.warn('[FirebaseService] GET returned null for path:', path);
+      } else {
+        const publishInfo = snap.publishInfo;
+        console.debug('[FirebaseService] GET path:', path, 'publishInfo present:', !!publishInfo);
+      }
+    }
+  } catch (e) {
+    console.warn('[FirebaseService] GET debug probe failed for path:', path, e && e.message);
+  }
   return {
     val: () => data,
     exists: () => data !== null && data !== undefined,
@@ -221,11 +245,13 @@ export async function get(path) {
 }
 
 export async function set(path, data) {
+  console.debug('[FirebaseService] SET called - path:', path, 'data keys:', data && Object.keys(data));
   await dbRequest('PUT', path, data);
   return true;
 }
 
 export async function update(path, data) {
+  console.debug('[FirebaseService] UPDATE called - path:', path, 'payload:', data);
   await dbRequest('PATCH', path, data);
   return true;
 }
