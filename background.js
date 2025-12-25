@@ -1235,6 +1235,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 데이터 정제 (undefined → null)
         const cleanedUpdates = cleanDataForFirebase(updates);
 
+        // Defensive normalization: ensure thumbnailInfo doesn't accidentally set the same bgImage for all candidates.
+        // If publishInfo.thumbnailInfo is an array and selectedThumbnailIndex is provided and the selected
+        // candidate has a bgImage equal to other candidates' bgImage, clear bgImage on non-selected candidates
+        // to avoid broad overwrites caused by shared references or buggy merges.
+        try {
+          if (cleanedUpdates && cleanedUpdates.publishInfo && Array.isArray(cleanedUpdates.publishInfo.thumbnailInfo)) {
+            const pf = cleanedUpdates.publishInfo;
+            const arr = pf.thumbnailInfo;
+            const selIndex = typeof pf.selectedThumbnailIndex === 'number' ? pf.selectedThumbnailIndex : undefined;
+            if (typeof selIndex === 'number' && selIndex >= 0 && selIndex < arr.length) {
+              const selBg = arr[selIndex] && arr[selIndex].bgImage;
+              if (selBg) {
+                cleanedUpdates.publishInfo.thumbnailInfo = arr.map((it, idx) => {
+                  if (idx === selIndex) return it;
+                  if (it && it.bgImage === selBg) {
+                    const clone = { ...it };
+                    clone.bgImage = null;
+                    return clone;
+                  }
+                  return it;
+                });
+                Logger.debug('[update_kanban_card] Normalized thumbnailInfo to keep bgImage only on selected index:', selIndex);
+              }
+            }
+          }
+        } catch (normErr) {
+          Logger.warn('[update_kanban_card] thumbnail normalization failed:', normErr);
+        }
+
         // Extra debug when publishInfo is present to diagnose missing DB writes
         try {
           Logger.debug('[update_kanban_card] about to persist cleanedUpdates:', cleanedUpdates);

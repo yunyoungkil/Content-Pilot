@@ -357,7 +357,7 @@ export function openThumbnailMaker(
 
     ${conceptSelectorHtml}
     
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0;flex-direction:column;">
       <div style="flex:1;min-width:200px;background:#2d2d2d;padding:10px 12px;border-radius:8px;display:flex;flex-direction:column;justify-content:center;">
         <span style="font-size:10px;color:#888;margin-bottom:4px;">적용된 프롬프트 (자동)</span>
         <div id="tm-prompt-display" style="font-size:12px;color:#ccc;word-wrap:break-word;word-break:break-word;line-height:1.4;" title="${escapedPromptEn}">
@@ -379,6 +379,13 @@ export function openThumbnailMaker(
         </button>
 
       </div>
+      <!-- Include options (always present) -->
+      <div style="margin-top:10px;display:flex;gap:12px;align-items:center;">
+        <div style="font-size:12px;color:#aaa;">이미지 텍스트 포함:</div>
+        <label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px;"><input name="tm-include-mode" id="tm-include-mode-none" type="radio" value="none"> 없음</label>
+        <label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px;"><input name="tm-include-mode" id="tm-include-mode-slogan" type="radio" value="slogan"> 슬로건 포함</label>
+        <label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px;"><input name="tm-include-mode" id="tm-include-mode-alt" type="radio" value="alt"> alt 텍스트 포함</label>
+      </div>
     </div>
     <style>
       @keyframes tm-spin { to { transform: rotate(360deg); } }
@@ -393,6 +400,70 @@ export function openThumbnailMaker(
 
   // Run cleanup in case older builds or test helpers injected deprecated title UI
   cleanupPotentialTitleUi(modal);
+
+// Initialize selected settings display (ratio, slogan, alt) and include mode listeners
+  try {
+    const selRatio = modal.querySelector('#tm-selected-ratio');
+    const selSlogan = modal.querySelector('#tm-selected-slogan');
+    const selAlt = modal.querySelector('#tm-selected-alt');
+    if (selRatio) selRatio.textContent = (modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9');
+    if (selSlogan) selSlogan.textContent = thumbInfo.thumbnailText || '없음';
+    if (selAlt) selAlt.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+
+    // include mode radios
+    const modeNone = modal.querySelector('#tm-include-mode-none');
+    const modeSlogan = modal.querySelector('#tm-include-mode-slogan');
+    const modeAlt = modal.querySelector('#tm-include-mode-alt');
+    // default to 'none' for explicit choice, but preserve legacy: if thumbnailText exists default to 'slogan'
+    if (modeNone && modeSlogan && modeAlt) {
+      // Always default to 'none' — explicit user action required to include text
+      modeNone.checked = true;
+      const onModeChange = () => {
+        // update prompt preview and selected alt display
+        const selAltEl = modal.querySelector('#tm-selected-alt');
+        const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+        if (selAltEl) {
+          if (checkedMode === 'alt') selAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+          else if (checkedMode === 'slogan') selAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+          else selAltEl.textContent = '(미포함)';
+        }
+
+        // Update English prompt display to show included text as requested
+        try {
+          const promptDisplayEl = modal.querySelector('#tm-prompt-display');
+          if (promptDisplayEl) {
+            const enLine = promptDisplayEl.querySelectorAll('div')[1];
+            const baseEn = thumbInfo.thumbnailPromptEn || '';
+            let includeTextForDisplay = '';
+            if (checkedMode === 'slogan') includeTextForDisplay = thumbInfo.thumbnailText || '';
+            else if (checkedMode === 'alt') includeTextForDisplay = thumbInfo.altText || thumbInfo.thumbnailText || '';
+            if (enLine) enLine.textContent = baseEn + (includeTextForDisplay ? ' ' + includeTextForDisplay : '');
+          }
+        } catch (e) {
+          // ignore prompt update errors
+        }
+
+        setTimeout(() => {
+          try {
+            updatePreview();
+          } catch (e) {}
+        }, 50);
+      };
+
+      modeNone.addEventListener('change', onModeChange);
+      modeSlogan.addEventListener('change', onModeChange);
+      modeAlt.addEventListener('change', onModeChange);
+
+      // Run one-time sync to ensure prompt display respects default 'none' mode
+      try {
+        onModeChange();
+      } catch (e) {
+        // ignore
+      }
+    }
+  } catch (e) {
+    // ignore init errors
+  }
 
   // [DEBUG] concept selector 존재 여부 확인 및 폴백
   try {
@@ -561,15 +632,21 @@ export function openThumbnailMaker(
 
   // [신규] 자동 저장 함수 (디바운스 적용)
   let saveTimeout;
-  const triggerAutoSave = () => {
+  const triggerAutoSave = (opts = {}) => {
+    // opts: { includeBg: true|false }
+    const includeBg = opts.includeBg === undefined ? true : !!opts.includeBg;
     if (!onSave) return; // onSave 콜백이 없으면 저장하지 않음
 
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
       let bgImageToSave = currentBgImage;
 
-      // Base64 데이터인 경우 Firebase Storage에 업로드 시도
-      if (bgImageToSave && bgImageToSave.startsWith('data:image')) {
+      if (!includeBg) {
+        bgImageToSave = null;
+      }
+
+      // Base64 데이터인 경우 Firebase Storage에 업로드 시도 (only if including bg)
+      if (includeBg && bgImageToSave && bgImageToSave.startsWith('data:image')) {
         try {
           const timestamp = Date.now();
           const filename = `thumbnail-bg-${timestamp}.png`;
@@ -596,6 +673,7 @@ export function openThumbnailMaker(
         }
       }
 
+      const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
       const currentInfo = {
         thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
         thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
@@ -603,10 +681,13 @@ export function openThumbnailMaker(
         templateType: modal.querySelector('#tm-template-type')?.value || 'default',
 
         ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
-        // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback)
+        // 배경 이미지 저장 (Firebase Storage URL 또는 Base64 fallback) — 포함 여부는 opts에 따름
         bgImage: bgImageToSave,
         // [신규] 선택된 컨셉 인덱스 저장 (영구 저장)
         selectedThumbnailIndex: selectedConceptIndex,
+        // [신규] 포함 옵션 (radio 기반)
+        includeSlogan: checkedModeForSave === 'slogan',
+        includeAlt: checkedModeForSave === 'alt',
 
       };
 
@@ -628,10 +709,13 @@ export function openThumbnailMaker(
     // 복원 중이면 상태 저장하지 않음
     if (isRestoring) return;
 
-    const state = {
+const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+      const state = {
       templateType: modal.querySelector('#tm-template-type')?.value || 'default',
       ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
       bgImage: currentBgImage,
+      includeSlogan: checkedModeForSave === 'slogan',
+      includeAlt: checkedModeForSave === 'alt',
 
       timestamp: Date.now(),
     };
@@ -759,6 +843,13 @@ export function openThumbnailMaker(
       ? { type: 'image', value: processedBgImage }
       : { type: 'gradient', value: 'linear-gradient(135deg, #1e272e 0%, #485460 100%)' };
 
+    // Expose background type on canvas for test/visibility purposes ('image'|'gradient')
+    try {
+      if (canvas) canvas.dataset.bgType = processedBgImage ? 'image' : 'gradient';
+    } catch (e) {
+      // ignore
+    }
+
     // [Smart Templates] 템플릿 타입에 따라 스마트 템플릿 생성 또는 기본 템플릿 사용
     let templateData;
 
@@ -778,10 +869,13 @@ export function openThumbnailMaker(
       };
     }
 
-
+    // Overlay text rendering removed: we no longer add a text layer to the rendered template when
+    // the user selects slogan/alt. The selected text will instead be appended to the English prompt
+    // shown to the user and sent to the AI generation request as plain text.
+    // (No template layer added here.)
 
     // thumbnailGenerator.js의 렌더러 호출
-    await renderTemplateFromData(ctx, templateData);
+    await renderTemplateFromData(ctx, templateData, { slogan: thumbInfo.thumbnailText || '' });
   };
 
   // [비율별 텍스트 크기 계산 함수]
@@ -848,7 +942,24 @@ export function openThumbnailMaker(
   // [신규] 컨셉 선택 버튼 이벤트 리스너
   if (thumbnailCandidates.length > 1) {
     const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
+    // Add bg indicator for persisted bgImage on each button
     conceptButtons.forEach((btn, idx) => {
+      const hasBg = thumbnailCandidates[idx] && thumbnailCandidates[idx].bgImage;
+      if (hasBg) {
+        btn.classList.add('tm-has-bg');
+        // small dot indicator
+        const dot = document.createElement('span');
+        dot.className = 'tm-bg-indicator';
+        dot.style.display = 'inline-block';
+        dot.style.width = '8px';
+        dot.style.height = '8px';
+        dot.style.borderRadius = '50%';
+        dot.style.background = '#6c5ce7';
+        dot.style.marginLeft = '6px';
+        dot.title = '이 컨셉에 저장된 이미지가 있습니다.';
+        if (!btn.querySelector('.tm-bg-indicator')) btn.appendChild(dot);
+      }
+
       btn.addEventListener('click', () => {
         // 선택된 컨셉으로 전환
         selectedConceptIndex = idx;
@@ -874,12 +985,20 @@ export function openThumbnailMaker(
         if (promptDisplay) {
           const newPromptKo = selectedConcept.thumbnailPromptKo || '자동 설정됨';
           const newPromptEn = selectedConcept.thumbnailPromptEn || '';
-          // 한글과 영문 프롬프트 모두 표시
+          // 한글과 영문 프롬프트 모두 표시. 포함 모드가 활성화된 경우에만 선택된 컨셉 텍스트를 영문 라인에 표시
+          const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+          let includeIfAllowed = '';
+          if (checkedMode === 'slogan') {
+            includeIfAllowed = selectedConcept.thumbnailText ? ' ' + selectedConcept.thumbnailText : '';
+          } else if (checkedMode === 'alt') {
+            const altOrSlogan = selectedConcept.altText || selectedConcept.thumbnailText || '';
+            includeIfAllowed = altOrSlogan ? ' ' + altOrSlogan : '';
+          }
           promptDisplay.innerHTML = `
             <div style="margin-bottom:4px;">${newPromptKo}</div>
-            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>
+            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}${includeIfAllowed}</div>
           `;
-          promptDisplay.title = newPromptEn; // 전체 영문 프롬프트를 툴팁으로도 제공
+          promptDisplay.title = newPromptEn + (includeIfAllowed ? includeIfAllowed : ''); // 전체 영문 프롬프트를 툴팁으로도 제공
           Logger.debug('[ThumbnailMaker] 프롬프트 업데이트:', {
             ko: newPromptKo.substring(0, 50) + '...',
             en: newPromptEn.substring(0, 50) + '...',
@@ -893,10 +1012,49 @@ export function openThumbnailMaker(
           fontFamily: thumbInfo.fontFamily,
           textColor: thumbInfo.textColor,
           ratio: thumbInfo.ratio,
-          bgImage: thumbInfo.bgImage,
+          // Do NOT carry over bgImage when switching concepts — switching shouldn't implicitly
+          // assign the previously generated background to the newly selected concept.
           templateType: thumbInfo.templateType,
         };
         thumbInfo = { ...selectedConcept, ...oldStyle };
+
+        // Ensure currentBgImage reflects the newly selected concept (clear if none)
+        currentBgImage = thumbInfo.bgImage || null;
+        // Update bg indicator on buttons
+        conceptButtons.forEach((b, i) => {
+          const hasBg = thumbnailCandidates[i] && thumbnailCandidates[i].bgImage;
+          if (hasBg) b.classList.add('tm-has-bg');
+          else b.classList.remove('tm-has-bg');
+          const dot = b.querySelector('.tm-bg-indicator');
+          if (hasBg && !dot) {
+            const nd = document.createElement('span');
+            nd.className = 'tm-bg-indicator';
+            nd.style.display = 'inline-block';
+            nd.style.width = '8px';
+            nd.style.height = '8px';
+            nd.style.borderRadius = '50%';
+            nd.style.background = '#6c5ce7';
+            nd.style.marginLeft = '6px';
+            nd.title = '이 컨셉에 저장된 이미지가 있습니다.';
+            b.appendChild(nd);
+          } else if (!hasBg && dot) {
+            dot.remove();
+          }
+        });
+
+        // Reset excluded reference images / UI state when switching concepts
+        excludedRefImages.clear();
+        try {
+          renderReferenceImages();
+        } catch (e) {}
+
+        // Update selected concept settings display if present
+        const selectedRatioEl = modal.querySelector('#tm-selected-ratio');
+        const selectedSloganEl = modal.querySelector('#tm-selected-slogan');
+        const selectedAltEl = modal.querySelector('#tm-selected-alt');
+        if (selectedRatioEl) selectedRatioEl.textContent = (modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9');
+        if (selectedSloganEl) selectedSloganEl.textContent = thumbInfo.thumbnailText || '없음';
+        if (selectedAltEl) selectedAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
 
         Logger.debug('[ThumbnailMaker] 컨셉 변경:', {
           index: idx,
@@ -912,8 +1070,10 @@ export function openThumbnailMaker(
           }
         }, 100);
 
-        // 자동 저장 트리거 (선택된 컨셉 인덱스도 함께 저장)
-        triggerAutoSave();
+        // Do NOT trigger autosave on concept switch to avoid accidental persistence
+        // that may clear bgImage values for other candidates. Persisting should only
+        // happen when the user explicitly generates/uploads/saves.
+        // triggerAutoSave({ includeBg: false }); // intentionally disabled
       });
     });
 
@@ -950,13 +1110,18 @@ export function openThumbnailMaker(
         // Background style selection removed — use a fixed, text-friendly prompt suffix
         const promptSuffix = 'text-friendly background, minimal distractions';
 
-        // 메인 타이틀 제거: 프롬프트에 타이틀 텍스트는 포함하지 않습니다.
-        const textPrompt = '';
+        // Append selected text (slogan or alt) to the English prompt so it's visible in UI and sent to AI
+        const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+        let includeText = '';
+        if (checkedMode === 'slogan' && thumbInfo.thumbnailText) {
+          includeText = thumbInfo.thumbnailText;
+        } else if (checkedMode === 'alt') {
+          includeText = thumbInfo.altText || thumbInfo.thumbnailText || '';
+        }
 
-
-        // 기본 프롬프트 + 스타일 프롬프트 (explicitly remove high-quality text rendering to avoid textual overlays)
+        // 기본 프롬프트 + 스타일 프롬프트
         const selectedRatio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
-        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${textPrompt}, ${promptSuffix}, ${selectedRatio} aspect ratio`;
+        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${includeText ? ' ' + includeText : ''}, ${promptSuffix}, ${selectedRatio} aspect ratio`;
 
         // background.js에 이미지 생성 요청 (참조 이미지도 함께 전달)
         // Decode HTML entities and ensure URLs are clean before sending to background
@@ -1335,6 +1500,13 @@ export function openThumbnailMaker(
             promptDisplay.appendChild(div);
           }
         }
+        // Update selected settings display ratio
+        try {
+          const selRatioEl = modal.querySelector('#tm-selected-ratio');
+          if (selRatioEl) selRatioEl.textContent = e.target.value;
+        } catch (err) {
+          void 0;
+        }
       } catch (err) {
         console.warn('[ThumbnailMaker] prompt display ratio update failed:', err);
       }
@@ -1366,8 +1538,9 @@ export function openThumbnailMaker(
         const elapsed = Math.round(performance.now() - startTime);
         console.log(`⚡ [ThumbnailMaker] 최종 이미지 생성 완료 (${elapsed}ms)`);
 
-        // [SEO 핵심] 대표 텍스트로 thumbInfo.thumbnailText 또는 기본값 사용
-        const altText = thumbInfo.thumbnailText || '썸네일 이미지';
+        // Determine whether to include alt text based on selected include mode (radio)
+        const includeAlt = modal.querySelector('input[name="tm-include-mode"]:checked')?.value === 'alt';
+        const altText = includeAlt ? (thumbInfo.altText || thumbInfo.thumbnailText || '썸네일 이미지') : '';
 
         // 1. 제목 가져오기 (파일명 생성용) - thumbInfo.thumbnailText 또는 기본값 사용
         const rawTitle = thumbInfo.thumbnailText || 'thumbnail';

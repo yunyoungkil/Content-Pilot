@@ -124,6 +124,16 @@ describe('ThumbnailMaker UI - reference images', () => {
     const imgs = refWrapper.querySelectorAll('img');
     expect(imgs.length).toBeGreaterThanOrEqual(1);
 
+    // check include radios presence and default selection
+    const includeNone = document.querySelector('#tm-include-mode-none');
+    const includeSlogan = document.querySelector('#tm-include-mode-slogan');
+    const includeAlt = document.querySelector('#tm-include-mode-alt');
+    expect(includeNone).toBeTruthy();
+    expect(includeSlogan).toBeTruthy();
+    expect(includeAlt).toBeTruthy();
+    // default selection should be 'none' when no thumbnailText present
+    expect(document.querySelector('input[name="tm-include-mode"]:checked').value).toBe('none');
+
     // click generate and assert runtime.sendMessage called with references
     const genBtn = document.querySelector('#tm-gen-bg');
     expect(genBtn).toBeTruthy();
@@ -174,9 +184,14 @@ describe('ThumbnailMaker UI - reference images', () => {
       };
     };
 
+    let savedInsertCall = null;
+
     openThumbnailMaker(
       draftData,
-      () => {},
+      // onInsert callback - capture args
+      (url, alt) => {
+        savedInsertCall = { url, alt };
+      },
       () => {},
       null,
       { showText: true },
@@ -202,6 +217,176 @@ describe('ThumbnailMaker UI - reference images', () => {
     const aiCall = aiCallEntry[0];
     expect(aiCall.data.aspect).toBe('9:16');
     expect(aiCall.data.prompt).toMatch(/9:16 aspect ratio/);
+
+    // Now test insert behavior with includeAlt unchecked
+    const includeAlt = document.querySelector('#tm-include-mode-alt');
+    expect(includeAlt).toBeTruthy();
+    // Simulate 'none' selected to represent includeAlt unchecked
+    const includeNone = document.querySelector('#tm-include-mode-none');
+    includeNone.checked = true;
+
+    // mock upload response for insert
+    global.chrome.runtime.sendMessage.mockClear();
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (typeof cb === 'function') cb({ success: true, url: 'https://images.test/uploaded.png' });
+    });
+
+    const insertBtn = document.querySelector('#tm-insert');
+    expect(insertBtn).toBeTruthy();
+    insertBtn.click();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    // onInsert should have been called with empty alt (because includeAlt false)
+    expect(savedInsertCall).toBeTruthy();
+    expect(savedInsertCall.url).toBe('https://images.test/uploaded.png');
+    expect(savedInsertCall.alt).toBe('');
+  });
+
+  test('includes render instruction when slogan selected', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text</p>',
+      thumbnailInfo: {
+        thumbnailPromptEn: 'A colorful background',
+        thumbnailText: '핵심 문장',
+        altText: '',
+      },
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // select slogan include mode
+    const sloganMode = document.querySelector('#tm-include-mode-slogan');
+    expect(sloganMode).toBeTruthy();
+    sloganMode.checked = true;
+    // fire change event to update prompt display
+    sloganMode.dispatchEvent(new Event('change'));
+
+    // check prompt display contains the slogan
+    const pd = document.querySelector('#tm-prompt-display');
+    expect(pd).toBeTruthy();
+    const enLine = pd.querySelectorAll('div')[1];
+    expect(enLine.textContent).toContain('핵심 문장');
+
+    // reset mock
+    global.chrome.runtime.sendMessage.mockClear();
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const aiCallEntry = global.chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'ai_generate_images');
+    expect(aiCallEntry).toBeTruthy();
+    const aiCall = aiCallEntry[0];
+    // should include slogan text but not the old overlay instruction wording
+    expect(aiCall.data.prompt).toMatch(/핵심 문장/);
+    expect(aiCall.data.prompt).not.toMatch(/legible overlay/);
+  });
+
+  test('includes render instruction when alt selected', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Text</p>',
+      thumbnailInfo: {
+        thumbnailPromptEn: 'A colorful background',
+        thumbnailText: '핵심 문장',
+        altText: '이미지 설명',
+      },
+      affiliateLinks: [],
+    };
+
+    // mock canvas context as above
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // select alt include mode
+    const altMode = document.querySelector('#tm-include-mode-alt');
+    expect(altMode).toBeTruthy();
+    altMode.checked = true;
+    // fire change to update prompt display
+    altMode.dispatchEvent(new Event('change'));
+
+    // check prompt display contains the alt text
+    const pd = document.querySelector('#tm-prompt-display');
+    expect(pd).toBeTruthy();
+    const enLine = pd.querySelectorAll('div')[1];
+    expect(enLine.textContent).toContain('이미지 설명');
+
+    // reset mock
+    global.chrome.runtime.sendMessage.mockClear();
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const aiCallEntry = global.chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'ai_generate_images');
+    expect(aiCallEntry).toBeTruthy();
+    const aiCall = aiCallEntry[0];
+    // should include alt text but not the old overlay instruction wording
+    expect(aiCall.data.prompt).toMatch(/이미지 설명/);
+    expect(aiCall.data.prompt).not.toMatch(/legible overlay/);
   });
 
   test('updates prompt display when ratio changed', async () => {
@@ -315,6 +500,324 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(promptDisplay.textContent).toMatch(/AI가 제공한 호기심형 프롬프트 예시/);
   });
 
+  test('does not show selected concept text when include mode is none and concept changed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptEn: 'Prompt one', thumbnailText: '첫번째 텍스트' },
+        { type: 'informative', thumbnailPromptEn: 'Prompt two', thumbnailText: '두번째 텍스트' },
+      ],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+
+    // default include mode should be 'none'
+    expect(document.querySelector('input[name="tm-include-mode"]:checked').value).toBe('none');
+
+    // click the second concept
+    buttons[1].click();
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pd = document.querySelector('#tm-prompt-display');
+    expect(pd).toBeTruthy();
+    const enLine = pd.querySelectorAll('div')[1];
+    expect(enLine.textContent).not.toContain('두번째 텍스트');
+  });
+
+  test('shows selected concept text when include mode is slogan and concept changed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptEn: 'Prompt one', thumbnailText: '첫번째 텍스트' },
+        { type: 'informative', thumbnailPromptEn: 'Prompt two', thumbnailText: '두번째 텍스트' },
+      ],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const sloganMode = document.querySelector('#tm-include-mode-slogan');
+    sloganMode.checked = true;
+    sloganMode.dispatchEvent(new Event('change'));
+
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+
+    // click the second concept
+    buttons[1].click();
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pd = document.querySelector('#tm-prompt-display');
+    expect(pd).toBeTruthy();
+    const enLine = pd.querySelectorAll('div')[1];
+    expect(enLine.textContent).toContain('두번째 텍스트');
+  });
+
+  test('shows selected concept alt text when include mode is alt and concept changed', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptEn: 'Prompt one', thumbnailText: '첫번째 텍스트', altText: '첫번째 alt' },
+        { type: 'informative', thumbnailPromptEn: 'Prompt two', thumbnailText: '두번째 텍스트', altText: '두번째 alt' },
+      ],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const altMode = document.querySelector('#tm-include-mode-alt');
+    altMode.checked = true;
+    altMode.dispatchEvent(new Event('change'));
+
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+
+    // click the second concept
+    buttons[1].click();
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pd = document.querySelector('#tm-prompt-display');
+    expect(pd).toBeTruthy();
+    const enLine = pd.querySelectorAll('div')[1];
+    expect(enLine.textContent).toContain('두번째 alt');
+  });
+
+  test('saving generated background updates only the selected thumbnail concept', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Test</p>',
+      publishInfo: {
+        thumbnailInfo: [
+          { type: 'curiosity', thumbnailPromptEn: 'P1', thumbnailText: 'T1', bgImage: null },
+          { type: 'informative', thumbnailPromptEn: 'P2', thumbnailText: 'T2', bgImage: null },
+          { type: 'empathy', thumbnailPromptEn: 'P3', thumbnailText: 'T3', bgImage: null },
+        ],
+        selectedThumbnailIndex: 1,
+      },
+      affiliateLinks: [],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+
+
+    // We collect multiple update calls so we can assert behavior across interactions
+    const updateCalls = [];
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (msg && msg.action === 'ai_generate_images') {
+        if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/gen.png'] });
+        return;
+      }
+
+      if (msg && msg.action === 'update_kanban_card') {
+        updateCalls.push(msg);
+        if (typeof cb === 'function') cb({ success: true });
+        return;
+      }
+
+      if (typeof cb === 'function') cb({ success: true });
+    });
+
+    // provide an onSave that mimics workspaceMode.onSave persistence behavior
+    const savedInfos = [];
+    const onSave = (newThumbnailInfo) => {
+      savedInfos.push(newThumbnailInfo);
+      const idea = { publishInfo: { thumbnailInfo: draftData.publishInfo.thumbnailInfo.slice(), selectedThumbnailIndex: draftData.publishInfo.selectedThumbnailIndex } };
+      if (Array.isArray(idea.publishInfo.thumbnailInfo)) {
+        const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
+        if (selectedIndex >= 0 && selectedIndex < idea.publishInfo.thumbnailInfo.length) {
+          const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
+          idea.publishInfo.thumbnailInfo[selectedIndex] = {
+            ...idea.publishInfo.thumbnailInfo[selectedIndex],
+            ...infoToUpdate,
+          };
+        }
+        idea.publishInfo.selectedThumbnailIndex = selectedIndex;
+      } else {
+        idea.publishInfo.thumbnailInfo = newThumbnailInfo;
+        if (newThumbnailInfo.selectedThumbnailIndex !== undefined) {
+          idea.publishInfo.selectedThumbnailIndex = newThumbnailInfo.selectedThumbnailIndex;
+        }
+      }
+      const publishInfoUpdates = {
+        ...(idea.publishInfo || {}),
+        thumbnailInfo: idea.publishInfo.thumbnailInfo,
+        selectedThumbnailIndex: idea.publishInfo.selectedThumbnailIndex,
+      };
+
+      chrome.runtime.sendMessage({ action: 'update_kanban_card', data: { cardId: 'test', status: 'ideas', updates: { publishInfo: publishInfoUpdates } } });
+    };
+
+    // open modal with onSave
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      onSave,
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // ensure selected concept is the second one
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBe(3);
+
+    // click second concept and generate
+    buttons[1].click();
+    const genBtn = document.querySelector('#tm-gen-bg');
+    genBtn.click();
+    // wait for AI generation + autosave to complete (increase timeout slightly for CI stability)
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // There should be at least one update call and one client-side save with bgImage for index 1
+    expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+    const url = 'https://images.test/gen.png';
+    const savedMatch = savedInfos.find((s) => s && s.bgImage === url && s.selectedThumbnailIndex === 1);
+    expect(savedMatch).toBeTruthy();
+    // Also ensure at least one persistence call was made (server messages)
+    expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+
+    // Canvas should now show an image background after generation
+    const canvas = document.querySelector('#tm-preview');
+    expect(canvas).toBeTruthy();
+    expect(canvas.dataset.bgType).toBe('image');
+
+    // Now switch to the third concept — this should NOT automatically apply the existing bgImage to the new index
+    buttons[2].click();
+    // Wait to allow preview to update
+    await new Promise((r) => setTimeout(r, 300));
+
+    // The canvas preview should have been reset to gradient (no image) when the selected concept has no bgImage
+    expect(canvas.dataset.bgType).toBe('gradient');
+
+    // We should NOT persist on simple concept switch (no autosave) — so no new update call should be present
+    const lastPub = updateCalls[updateCalls.length - 1].data && updateCalls[updateCalls.length - 1].data.updates && updateCalls[updateCalls.length - 1].data.updates.publishInfo;
+    expect(lastPub).toBeTruthy();
+    // The persisted thumbnail for index 1 should remain the generated URL
+    expect(lastPub.thumbnailInfo[1].bgImage).toBe('https://images.test/gen.png');
+    // There should be no save recorded for index 2
+    const savedFor2 = savedInfos.find((s) => s && s.selectedThumbnailIndex === 2);
+    expect(savedFor2).toBeFalsy();
+  });
+
   test('ignores persisted meta-template candidates and shows neutral prompt', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
@@ -358,12 +861,86 @@ describe('ThumbnailMaker UI - reference images', () => {
       document.body
     );
 
+    // allow async init
+    await new Promise((r) => setTimeout(r, 20));
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    // meta-based templates are removed; UI shows safe defaults (no meta text)
+    expect(promptDisplay.textContent).not.toContain('This is a concise meta');
+    expect(promptDisplay.textContent).toContain('자동 설정됨');
+
+    const modal = document.querySelector('#cp-thumbnail-modal');
+    if (modal) modal.remove();
+  });
+
+  test('selecting a concept without a bgImage resets the preview to gradient', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      publishInfo: {
+        thumbnailInfo: [
+          { type: 'curiosity', thumbnailPromptEn: 'P1', thumbnailText: 'T1', bgImage: 'https://images.test/gen.png' },
+          { type: 'informative', thumbnailPromptEn: 'P2', thumbnailText: 'T2', bgImage: null },
+        ],
+        selectedThumbnailIndex: 0,
+      },
+      affiliateLinks: [],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBe(2);
+
+    const canvas = document.querySelector('#tm-preview');
+    // initial index 0 has bgImage
+    expect(canvas.dataset.bgType).toBe('image');
+
+    // switch to index 1 which has no bgImage -> preview should reset to gradient
+    buttons[1].click();
+    // Wait for immediate update
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(canvas.dataset.bgType).toBe('gradient');
+
+    // Ensure button indicators reflect bg presence
+    expect(buttons[0].querySelector('.tm-bg-indicator')).toBeTruthy();
+    expect(buttons[1].querySelector('.tm-bg-indicator')).toBeFalsy();
+
+    // Also assert meta-template candidates are ignored and neutral prompt shown
     const promptDisplay = document.querySelector('#tm-prompt-display');
     expect(promptDisplay).toBeTruthy();
     // Should NOT display the meta-template text
     expect(promptDisplay.textContent).not.toMatch(/다음\s*메타\s*요약/);
     // Should show the neutral fallback text
     expect(promptDisplay.textContent).toMatch(/자동 설정됨/);
+
+    const modal = document.querySelector('#cp-thumbnail-modal');
+    if (modal) modal.remove();
   });
 
   test('shows prompts from publishInfo.thumbnailInfo when present', async () => {

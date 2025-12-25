@@ -279,6 +279,51 @@ describe('Background Message Handlers', () => {
 
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(123, expect.objectContaining({ action: 'delete_storage_image_result', success: true }), expect.any(Function));
     });
+
+    test('update_kanban_card normalizes thumbnailInfo bgImage to selected index', async () => {
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockRef = jest.fn().mockReturnValue('kanbanRef');
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: jest.fn(),
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        update: mockUpdate,
+        ref: mockRef,
+        cleanDataForFirebase: jest.fn((d) => d),
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const url = 'https://images.test/gen.png';
+      const message = {
+        action: 'update_kanban_card',
+        data: {
+          cardId: 'card1',
+          status: 'ideas',
+          updates: {
+            publishInfo: {
+              thumbnailInfo: [{ bgImage: url }, { bgImage: url }, { bgImage: url }],
+              selectedThumbnailIndex: 1,
+            },
+          },
+        },
+      };
+
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockUpdate).toHaveBeenCalled();
+      const passedUpdates = mockUpdate.mock.calls[0][1];
+      expect(Array.isArray(passedUpdates.publishInfo.thumbnailInfo)).toBe(true);
+      expect(passedUpdates.publishInfo.thumbnailInfo[0].bgImage).toBeNull();
+      expect(passedUpdates.publishInfo.thumbnailInfo[1].bgImage).toBe(url);
+      expect(passedUpdates.publishInfo.thumbnailInfo[2].bgImage).toBeNull();
+    });
   });
 
   describe('system handlers (ping / get_user_id)', () => {

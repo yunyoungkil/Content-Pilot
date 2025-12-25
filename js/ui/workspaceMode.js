@@ -54,6 +54,33 @@ export function isMeaningfulDraft(d) {
   return false;
 }
 
+/**
+ * Safely apply thumbnail info updates to an idea's publishInfo.
+ * This will update only the selected thumbnail candidate and break any shared
+ * references to avoid accidental cross-updates. Exported for unit testing.
+ */
+export function applyThumbnailInfoUpdate(ideaData, newThumbnailInfo) {
+  if (!ideaData.publishInfo) ideaData.publishInfo = {};
+
+  if (Array.isArray(ideaData.publishInfo.thumbnailInfo)) {
+    const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
+    if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
+      const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
+      ideaData.publishInfo.thumbnailInfo = ideaData.publishInfo.thumbnailInfo.map((item, idx) => {
+        const cloned = item && typeof item === 'object' ? { ...item } : item;
+        if (idx === selectedIndex) return { ...cloned, ...infoToUpdate };
+        return cloned;
+      });
+    }
+    ideaData.publishInfo.selectedThumbnailIndex = selectedIndex;
+  } else {
+    ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
+    if (newThumbnailInfo.selectedThumbnailIndex !== undefined) {
+      ideaData.publishInfo.selectedThumbnailIndex = newThumbnailInfo.selectedThumbnailIndex;
+    }
+  }
+}
+
 // Normalize SEO title to avoid simple duplicated forms like "T T" or "T - T".
 
 // Helper: attach a single delegated click listener on an image gallery grid.
@@ -1277,31 +1304,14 @@ function renderThumbnailButton(workspaceEl, ideaData) {
       }
     };
 
+
     const onSave = (newThumbnailInfo) => {
       // 메모리 업데이트
       if (!ideaData.publishInfo) ideaData.publishInfo = {};
 
-      // thumbnailInfo가 배열인 경우 처리
-      if (Array.isArray(ideaData.publishInfo.thumbnailInfo)) {
-        // 배열 전체를 유지하면서 선택된 컨셉만 업데이트
-        const selectedIndex = newThumbnailInfo.selectedThumbnailIndex ?? 0;
-        if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
-          // 선택된 컨셉의 정보만 업데이트 (selectedThumbnailIndex 제외)
-          const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
-          ideaData.publishInfo.thumbnailInfo[selectedIndex] = {
-            ...ideaData.publishInfo.thumbnailInfo[selectedIndex],
-            ...infoToUpdate,
-          };
-        }
-        // selectedThumbnailIndex는 publishInfo에 별도로 저장
-        ideaData.publishInfo.selectedThumbnailIndex = selectedIndex;
-      } else {
-        // 단일 객체인 경우 (구버전 호환)
-        ideaData.publishInfo.thumbnailInfo = newThumbnailInfo;
-        if (newThumbnailInfo.selectedThumbnailIndex !== undefined) {
-          ideaData.publishInfo.selectedThumbnailIndex = newThumbnailInfo.selectedThumbnailIndex;
-        }
-      }
+      // Use a helper to apply updates safely (break shared references)
+      applyThumbnailInfoUpdate(ideaData, newThumbnailInfo);
+
 
       // Firebase 업데이트
       const publishInfoUpdates = {

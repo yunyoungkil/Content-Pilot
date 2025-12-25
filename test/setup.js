@@ -143,6 +143,51 @@ Object.defineProperty(window, "self", {
   writable: false,
 });
 
+// Ensure a safe canvas 2D context exists in jsdom tests. Some environments
+// (jsdom without the canvas package) throw "Not implemented: HTMLCanvasElement.prototype.getContext".
+// Provide a minimal, shared shim that implements the drawing APIs used by the
+// thumbnail renderer (createLinearGradient, drawImage, toDataURL, etc.). Tests
+// or individual suites may override this for more specialized behavior.
+(() => {
+  const origGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type) {
+    try {
+      const ctx = origGetContext ? origGetContext.call(this, type) : null;
+      if (ctx && typeof ctx.createLinearGradient === 'function') return ctx;
+    } catch (e) {
+      // Fallthrough to shimmed context
+    }
+
+    // Lightweight fallback implementation sufficient for unit/UI tests
+    return {
+      canvas: { width: this.width || 640, height: this.height || 360 },
+      save: () => {},
+      restore: () => {},
+      measureText: (txt) => ({ width: (txt || '').length * 6 }),
+      fillRect: () => {},
+      drawImage: () => {},
+      clearRect: () => {},
+      fillStyle: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      strokeText: () => {},
+      fillText: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+      putImageData: () => {},
+      toDataURL: () => 'data:image/png;base64,',
+      beginPath: () => {},
+      closePath: () => {},
+      arc: () => {},
+      lineTo: () => {},
+      moveTo: () => {},
+      stroke: () => {},
+      fill: () => {},
+    };
+  };
+})();
+
 // Track window event listeners to allow clean teardown between tests
 (() => {
   const originalAdd = window.addEventListener.bind(window);
