@@ -385,6 +385,17 @@ describe('AI Service', () => {
       // Should include the idea's title in the fallback
       expect(cleanedDraft).toContain('샘플 제목');
     });
+
+    test('filters meta-template entries from parsed 썸네일정보', () => {
+      const svc = require('../js/services/aiService.js');
+      const raw =
+        '<썸네일정보>[{"type":"curiosity","thumbnailPromptKo":"다음 메타 요약을 바탕으로 한 호기심 유발형 썸네일: Example meta base"},{"type":"informative","thumbnailText":"valid"}]</썸네일정보>';
+      const { thumbnailCandidates } = svc.processDraftResponse(raw, {});
+
+      expect(Array.isArray(thumbnailCandidates)).toBe(true);
+      expect(thumbnailCandidates.length).toBe(1);
+      expect(thumbnailCandidates[0].thumbnailText).toBe('valid');
+    });
   });
 
   describe('generateDraftFromIdea', () => {
@@ -519,10 +530,10 @@ describe('AI Service', () => {
       expect(res.thumbnailUrls.url_16x9 || res.thumbnailUrls.url_1x1).toBeTruthy();
     });
 
-    test('curiosity template no longer contains question mark', async () => {
+    test('DEFAULT_CANDIDATES removed (no template fallbacks)', async () => {
       const cfg = require('../js/services/aiServiceConfig.js').THUMBNAIL_CONFIG;
-      expect(cfg.DEFAULT_CANDIDATES[0].thumbnailPromptEn).not.toMatch(/question mark/);
-      expect(cfg.DEFAULT_CANDIDATES[0].thumbnailText).toBe('');
+      expect(Array.isArray(cfg.DEFAULT_CANDIDATES)).toBe(true);
+      expect(cfg.DEFAULT_CANDIDATES.length).toBe(0);
     });
 
     test('sanitizes punctuation-only thumbnailText into a fallback', async () => {

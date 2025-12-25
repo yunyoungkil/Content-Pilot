@@ -54,27 +54,8 @@ CRITICAL INSTRUCTION: THE FINAL IMAGE MUST NOT CONTAIN ANY WRITTEN TEXT, LETTERS
     LANDSCAPE_16_9: '-16x9.png',
   },
 
-  // 기본 썸네일 후보들
-  DEFAULT_CANDIDATES: [
-    {
-      type: 'curiosity',
-      thumbnailPromptEn: `High-quality, dramatic thumbnail for "${'${title}'}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
-      thumbnailPromptKo: `"${'${title}'}"에 대한 호기심 자극형 썸네일`,
-      thumbnailText: '',
-    },
-    {
-      type: 'informative',
-      thumbnailPromptEn: `Clean, professional background image for "${'${title}'}", bright lighting, organized layout, modern design, 16:9 aspect ratio`,
-      thumbnailPromptKo: `"${'${title}'}"에 대한 정보 요약형 썸네일`,
-      thumbnailText: '완벽 정리',
-    },
-    {
-      type: 'emotional',
-      thumbnailPromptEn: `Warm, cozy background image for "${'${title}'}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio`,
-      thumbnailPromptKo: `"${'${title}'}"에 대한 감성/공감형 썸네일`,
-      thumbnailText: '당신을 위한',
-    },
-  ],
+  // 기본 썸네일 후보들 (완전 제거됨 — 오직 초안에 포함된 프롬프트만 사용)
+  DEFAULT_CANDIDATES: [],
 };
 
 // 제휴 링크 설정

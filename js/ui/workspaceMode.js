@@ -87,6 +87,31 @@ if (typeof window !== 'undefined' && typeof window.__cp_force_save_title !== 'fu
       }
       if (pubContainer && typeof pubContainer._doSaveTitle === 'function') {
         pubContainer._doSaveTitle(true);
+        return;
+      }
+
+      // If we couldn't find a live publish container, try a best-effort background save
+      // using any recorded pending title (this covers rapid re-render cases).
+      const pending = __lastPendingTitle || (typeof window !== 'undefined' && window.__cp_last_pending_title) || null;
+      if (pending && pending.id && pending.pending) {
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: 'update_kanban_card',
+              data: {
+                cardId: pending.id,
+                status: pending.status || 'ideas',
+                updates: { title: pending.pending },
+              },
+            },
+            () => {
+              __lastPendingTitle = null;
+              try { window.__cp_last_pending_title = null; } catch (e) {}
+            }
+          );
+        } catch (e) {
+          // ignore
+        }
       }
     } catch (e) {
       // suppress — diagnostic logs may surface during tests but shouldn't fail them
@@ -2140,6 +2165,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             if (response && response.success) {
               // Clear any recorded pending title now that save succeeded
               __lastPendingTitle = null;
+              try { window.__cp_last_pending_title = null; } catch (e) {}
               ideaData.title = newTitle;
               // update header display text
               // header element removed — rely on publish panel and kanban card updates
@@ -2544,8 +2570,13 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               pending: String(targ.value || '').trim(),
               status: ideaData && (ideaData.status || 'ideas'),
             };
+            // Expose a lightweight global fallback for fast cross-render saves
+            try {
+              window.__cp_last_pending_title = { ...__lastPendingTitle };
+            } catch (e) {}
           } catch (e) {
             __lastPendingTitle = null;
+            try { window.__cp_last_pending_title = null; } catch (e) {}
           }
           return;
         }
@@ -2770,11 +2801,14 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         // use native tooltip on hover to show the description
         input.title = '썸네일 텍스트 오버레이 적용';
 
-        // initialize checked state from storage if available
+        // initialize checked state from storage if available (support both callback and Promise mock implementations)
         try {
-          chrome.storage.local.get('composeThumbnailText').then((s) => {
-            input.checked = !!s.composeThumbnailText;
-          });
+          const maybe = chrome.storage.local.get('composeThumbnailText');
+          if (maybe && typeof maybe.then === 'function') {
+            maybe.then((s) => { input.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+          } else if (typeof chrome.storage.local.get === 'function') {
+            chrome.storage.local.get('composeThumbnailText', (s) => { input.checked = !!(s && s.composeThumbnailText); });
+          }
         } catch (e) {
           // ignore
         }
@@ -2818,9 +2852,12 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
               'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
             fallbackInput.title = '썸네일 텍스트 오버레이 적용';
             try {
-              chrome.storage.local.get('composeThumbnailText').then((s) => {
-                fallbackInput.checked = !!s.composeThumbnailText;
-              });
+              const maybe = chrome.storage.local.get('composeThumbnailText');
+              if (maybe && typeof maybe.then === 'function') {
+                maybe.then((s) => { fallbackInput.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+              } else if (typeof chrome.storage.local.get === 'function') {
+                chrome.storage.local.get('composeThumbnailText', (s) => { fallbackInput.checked = !!(s && s.composeThumbnailText); });
+              }
             } catch (e) {}
             fallbackInput.addEventListener('change', (e) => {
               chrome.storage.local.set({ composeThumbnailText: e.target.checked });
@@ -2883,9 +2920,12 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             'margin: 0 8px 0 0; cursor: pointer; accent-color: #6c5ce7; transform: scale(1.02);';
           input.title = '썸네일 텍스트 오버레이 적용';
           try {
-            chrome.storage.local.get('composeThumbnailText').then((s) => {
-              input.checked = !!s.composeThumbnailText;
-            });
+            const maybe = chrome.storage.local.get('composeThumbnailText');
+            if (maybe && typeof maybe.then === 'function') {
+              maybe.then((s) => { input.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+            } else if (typeof chrome.storage.local.get === 'function') {
+              chrome.storage.local.get('composeThumbnailText', (s) => { input.checked = !!(s && s.composeThumbnailText); });
+            }
           } catch (e) {
             // ignore
           }
@@ -3268,8 +3308,15 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
   // 사용자 설정 로드 (기본값: false - AI가 글자 그림)
   let composeThumbnailText = false;
   try {
-    const storage = await chrome.storage.local.get('composeThumbnailText');
-    composeThumbnailText = storage.composeThumbnailText || false;
+    // Support both Promise-based and callback-based mocks of chrome.storage.local.get
+    const maybe = chrome.storage.local.get('composeThumbnailText');
+    let storage = {};
+    if (maybe && typeof maybe.then === 'function') {
+      storage = await maybe;
+    } else if (typeof chrome.storage.local.get === 'function') {
+      storage = await new Promise((resolve) => chrome.storage.local.get('composeThumbnailText', (s) => resolve(s || {})));
+    }
+    composeThumbnailText = !!(storage && storage.composeThumbnailText);
   } catch (e) {
     console.warn('[Workspace] 설정 로드 실패:', e);
   }
@@ -3497,6 +3544,13 @@ export function renderWorkspace(container, ideaData) {
   try {
     const existingWorkspace = container.querySelector('.workspace-container');
     if (existingWorkspace) {
+      // Ensure any pending title is force-saved before we replace the workspace UI
+      try {
+        if (typeof window.__cp_force_save_title === 'function') window.__cp_force_save_title();
+      } catch (e) {
+        /* ignore */
+      }
+
       // Try to find the element where properties are attached (content or area)
       let publishInfoArea = existingWorkspace.querySelector('#publish-info-content');
       if (!publishInfoArea) {

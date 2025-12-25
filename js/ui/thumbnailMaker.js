@@ -35,58 +35,22 @@ export function openThumbnailMaker(
   let thumbnailCandidates = []; // 3가지 컨셉 후보 저장
   let selectedConceptIndex = 0; // 현재 선택된 컨셉 인덱스
 
-  // helper: create three meta-based prompt candidates (reusable by UI button)
-  const createMetaBasedCandidates = (baseSourceRawParam) => {
-    const stripHtml = (s) => (String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
-    const baseSourceRaw =
-      baseSourceRawParam ||
-      draftData.metaDescription ||
-      draftData.description ||
-      stripHtml(draftData.formattedDraft || '') ||
-      draftData.seoTitle ||
-      '제목을 입력하세요';
-    const baseSource = baseSourceRaw.length > 200 ? baseSourceRaw.substring(0, 200).trim() + '...' : baseSourceRaw;
-
-    return [
-      {
-        type: 'curiosity',
-        thumbnailPromptEn: `High-quality, dramatic thumbnail inspired by: "${baseSource}", create a visually intriguing image with mysterious atmosphere, bold composition, and dramatic lighting — keep the image text-free and leave room for overlay`,
-        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 호기심 유발형 썸네일: "${baseSource}" — 드라마틱한 조명과 강렬한 구성, 텍스트는 이미지에 포함하지 말고 오버레이 공간을 남겨주세요.`,
-        thumbnailText: '',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        bgImage: null,
-        overlayOpacity: 0.0,
-      },
-      {
-        type: 'informative',
-        thumbnailPromptEn: `Clean, professional thumbnail based on: "${baseSource}", minimal composition optimized for legibility, bright lighting, icons or numbers for emphasis, no embedded title text in the image`,
-        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 정보형 썸네일: "${baseSource}" — 가독성 좋은 미니멀 구성, 밝은 조명, 강조용 아이콘/숫자 사용. 이미지 내 텍스트는 제외해주세요.`,
-        thumbnailText: '완벽 정리',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        bgImage: null,
-        overlayOpacity: 0.0,
-      },
-      {
-        type: 'emotional',
-        thumbnailPromptEn: `Warm, emotive thumbnail using: "${baseSource}", soft tones, human element or relatable scene, cozy lighting and colors that evoke empathy, leave clear space for overlay text`,
-        thumbnailPromptKo: `다음 메타 요약을 바탕으로 한 감성형 썸네일: "${baseSource}" — 부드러운 톤과 인간적 요소, 따뜻한 조명으로 공감을 유도하고 오버레이 텍스트 공간을 확보하세요.`,
-        thumbnailText: '당신을 위한',
-        fontFamily: "'Pretendard', sans-serif",
-        textColor: 'auto',
-        ratio: '16:9',
-        bgImage: null,
-        overlayOpacity: 0.0,
-      },
-    ];
-  }; 
+  // NOTE: meta-template candidate generator removed — prompts should come only from AI drafts (or publishInfo.thumbnailPrompts).
 
   // thumbnailInfo가 배열인 경우
   if (Array.isArray(draftData.thumbnailInfo)) {
     thumbnailCandidates = draftData.thumbnailInfo;
+    // Remove persisted meta-template candidates from older versions
+    const looksLikeMetaTemplate = (cand) => {
+      const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+      return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
+    };
+    const beforeCount = thumbnailCandidates.length;
+    thumbnailCandidates = thumbnailCandidates.filter((c) => !looksLikeMetaTemplate(c));
+    if (thumbnailCandidates.length !== beforeCount) {
+      Logger.debug('[ThumbnailMaker] Removed meta-template candidates from draftData.thumbnailInfo:', beforeCount - thumbnailCandidates.length);
+    }
+
     // 저장된 선택 인덱스가 있으면 사용, 없으면 첫 번째 요소 사용
     const savedIndex = draftData.selectedThumbnailIndex || 0;
     selectedConceptIndex =
@@ -103,42 +67,134 @@ export function openThumbnailMaker(
     thumbnailCandidates = [draftData.thumbnailInfo];
   }
 
-  // 썸네일 정보가 없으면 기본값 (3가지 대비되는 컨셉 생성 — 메타디스크립션 우선 사용)
-  const createdMetaCandidates = (!thumbInfo || thumbnailCandidates.length === 0);
-  if (createdMetaCandidates) {
-    thumbnailCandidates = createMetaBasedCandidates();
-    selectedConceptIndex = 0;
-    thumbInfo = thumbnailCandidates[0];
-    Logger.debug('[ThumbnailMaker] 메타 기반 기본 컨셉 3개 생성:', thumbnailCandidates.length, { baseSource: (draftData.metaDescription || draftData.description || (draftData.formattedDraft||'').replace(/<[^>]+>/g, '').trim() || draftData.seoTitle || '제목을 입력하세요') });
+  // If no thumbnail candidates found at top-level, check publishInfo.thumbnailInfo (persisted from Firebase)
+  if ((!thumbnailCandidates || thumbnailCandidates.length === 0) && draftData && draftData.publishInfo && draftData.publishInfo.thumbnailInfo) {
+    try {
+      const pf = draftData.publishInfo.thumbnailInfo;
+      if (Array.isArray(pf)) {
+        thumbnailCandidates = pf;
+        // Remove persisted meta-template candidates from older versions
+        const looksLikeMetaTemplate = (cand) => {
+          const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+          return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
+        };
+        const beforeCount = thumbnailCandidates.length;
+        thumbnailCandidates = thumbnailCandidates.filter((c) => !looksLikeMetaTemplate(c));
+        if (thumbnailCandidates.length !== beforeCount) {
+          Logger.debug('[ThumbnailMaker] Removed meta-template candidates from publishInfo.thumbnailInfo:', beforeCount - thumbnailCandidates.length);
+        }
+        const savedIndex = draftData.publishInfo.selectedThumbnailIndex || 0;
+        selectedConceptIndex = savedIndex >= 0 && savedIndex < thumbnailCandidates.length ? savedIndex : 0;
+        thumbInfo = thumbnailCandidates[selectedConceptIndex] || thumbnailCandidates[0] || null;
+      } else if (typeof pf === 'object' && pf !== null) {
+        // single object stored
+        thumbInfo = pf;
+        thumbnailCandidates = [pf];
+      }
+    } catch (e) {
+      console.warn('[ThumbnailMaker] publishInfo.thumbnailInfo processing failed:', e);
+    }
   }
 
-  // If AI-provided thumbnail prompts exist in publishInfo, prefer them over templates
+  // 썸네일 정보가 없으면 이제 **자동 템플릿을 생성하지 않습니다**. 오직 초안에 포함된 `thumbnailInfo` 또는 `publishInfo.thumbnailPrompts` 만 사용합니다.
+  if (!thumbInfo && (!Array.isArray(thumbnailCandidates) || thumbnailCandidates.length === 0)) {
+    // Provide a safe empty thumbInfo object to avoid null dereferences in UI rendering
+    thumbInfo = {
+      type: 'none',
+      thumbnailPromptEn: '',
+      thumbnailPromptKo: '',
+      thumbnailText: '',
+      fontFamily: "'Pretendard', sans-serif",
+      textColor: 'auto',
+      ratio: '16:9',
+      bgImage: null,
+      overlayOpacity: 0.0,
+    };
+  }
+
+  // If AI-provided thumbnail prompts exist in publishInfo, use them to populate candidates when templates are absent,
+  // or merge them into existing candidates when present.
   try {
     const aiPrompts = draftData && draftData.publishInfo && draftData.publishInfo.thumbnailPrompts;
     if (aiPrompts && typeof aiPrompts === 'object') {
-      // mapping from candidate.type -> prompt key
-      const typeKeyMap = {
-        curiosity: 'curiosity',
-        informative: 'info',
-        informative: 'info',
-        emotional: 'empathy',
-        empathy: 'empathy',
-      };
-
-      thumbnailCandidates = thumbnailCandidates.map((cand) => {
-        try {
-          const key = typeKeyMap[cand.type] || (cand.type === 'informative' ? 'info' : cand.type);
-          const arr = aiPrompts && aiPrompts[key] ? aiPrompts[key] : null;
-          if (Array.isArray(arr) && arr.length > 0) {
-            // prefer the AI-provided Korean prompt if available, else set En
-            cand.thumbnailPromptKo = String(arr[0] || cand.thumbnailPromptKo || '').trim();
-            // keep original En prompt if not provided; optionally we could translate
-          }
-        } catch (e) {
-          // ignore per-candidate failures
+      // If there are no existing candidates, create candidates directly from AI prompts
+      if (!thumbnailCandidates || thumbnailCandidates.length === 0) {
+        const newCandidates = [];
+        if (Array.isArray(aiPrompts.curiosity) && aiPrompts.curiosity.length > 0) {
+          newCandidates.push({
+            type: 'curiosity',
+            thumbnailPromptEn: '',
+            thumbnailPromptKo: String(aiPrompts.curiosity[0] || '').trim(),
+            thumbnailText: '',
+            fontFamily: "'Pretendard', sans-serif",
+            textColor: 'auto',
+            ratio: '16:9',
+            bgImage: null,
+            overlayOpacity: 0.0,
+          });
         }
-        return cand;
-      });
+        if (Array.isArray(aiPrompts.info) && aiPrompts.info.length > 0) {
+          newCandidates.push({
+            type: 'informative',
+            thumbnailPromptEn: '',
+            thumbnailPromptKo: String(aiPrompts.info[0] || '').trim(),
+            thumbnailText: '',
+            fontFamily: "'Pretendard', sans-serif",
+            textColor: 'auto',
+            ratio: '16:9',
+            bgImage: null,
+            overlayOpacity: 0.0,
+          });
+        }
+        if (Array.isArray(aiPrompts.empathy) && aiPrompts.empathy.length > 0) {
+          newCandidates.push({
+            type: 'emotional',
+            thumbnailPromptEn: '',
+            thumbnailPromptKo: String(aiPrompts.empathy[0] || '').trim(),
+            thumbnailText: '',
+            fontFamily: "'Pretendard', sans-serif",
+            textColor: 'auto',
+            ratio: '16:9',
+            bgImage: null,
+            overlayOpacity: 0.0,
+          });
+        }
+        if (newCandidates.length > 0) {
+          thumbnailCandidates = newCandidates;
+        }
+      } else {
+        // mapping from candidate.type -> prompt key
+        const typeKeyMap = {
+          curiosity: 'curiosity',
+          informative: 'info',
+          emotional: 'empathy',
+        };
+
+        thumbnailCandidates = thumbnailCandidates.map((cand) => {
+          try {
+            const key = typeKeyMap[cand.type] || (cand.type === 'informative' ? 'info' : cand.type);
+            const arr = aiPrompts && aiPrompts[key] ? aiPrompts[key] : null;
+            if (Array.isArray(arr) && arr.length > 0) {
+              // prefer the AI-provided Korean prompt if available
+              cand.thumbnailPromptKo = String(arr[0] || cand.thumbnailPromptKo || '').trim();
+            }
+          } catch (e) {
+            // ignore per-candidate failures
+          }
+          return cand;
+        });
+      }
+
+      // Remove any meta-template style candidates that might have been persisted by older versions
+      const looksLikeMetaTemplate = (cand) => {
+        const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+        return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
+      };
+      const originalCount = thumbnailCandidates.length;
+      thumbnailCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplate(c));
+      if (thumbnailCandidates.length !== originalCount) {
+        console.log('[ThumbnailMaker] Removed meta-template candidates persisted from old versions:', originalCount - thumbnailCandidates.length);
+      }
 
       // refresh thumbInfo reference in case it was updated
       thumbInfo = thumbnailCandidates[selectedConceptIndex] || thumbnailCandidates[0] || thumbInfo;
@@ -317,9 +373,6 @@ export function openThumbnailMaker(
         </button>
         <button id="tm-redo" title="다시 실행 (Ctrl+Y)" style="padding:8px 12px;border:1px solid #555;background:transparent;color:#ccc;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:all 0.2s;" disabled>
           ↷ 다시 실행
-        </button>
-        <button id="tm-gen-from-meta" title="메타로 프롬프트 재생성" style="padding:8px 12px;border:1px solid #555;background:transparent;color:#ccc;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
-          🔁 메타로 프롬프트 생성
         </button>
         <button id="tm-edit-tui" style="padding:10px 16px;border:1px solid #555;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
           🛠️ 정밀 편집
@@ -870,129 +923,6 @@ export function openThumbnailMaker(
     });
   }
 
-  // [신규] '메타로 프롬프트 생성' 버튼 처리
-  const genFromMetaBtn = modal.querySelector('#tm-gen-from-meta');
-  if (genFromMetaBtn)
-    genFromMetaBtn.onclick = () => {
-      // regenerate candidates from current draft meta/description
-      thumbnailCandidates = createMetaBasedCandidates();
-      selectedConceptIndex = 0;
-      thumbInfo = thumbnailCandidates[0];
-
-      // remove existing concept selector block if present
-      const existingBtn = modal.querySelector('.tm-concept-btn');
-      if (existingBtn) {
-        const outer = existingBtn.parentElement && existingBtn.parentElement.parentElement;
-        if (outer) outer.remove();
-      }
-
-      // build new concept selector HTML and insert
-      const typeLabels = { curiosity: '🔥 호기심 자극형', informative: '📊 정보 요약형', emotional: '💝 감성/공감형' };
-      const newHtml =
-        thumbnailCandidates.length > 1
-          ? `
-      <div style="margin-bottom:16px;padding:12px;background:#2d2d2d;border-radius:8px;border:1px solid #444;">
-        <label style="display:block;font-size:12px;color:#aaa;margin-bottom:8px;font-weight:600;">🎨 썸네일 컨셉 선택 (A/B 테스팅)</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${thumbnailCandidates
-            .map((candidate, idx) => {
-              const isSelected = idx === selectedConceptIndex;
-              const label = typeLabels[candidate.type] || `컨셉 ${idx + 1}`;
-              return `
-            <button class="tm-concept-btn" data-index="${idx}" style="
-              flex:1;min-width:120px;padding:10px 12px;
-              background:${isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e'};
-              color:${isSelected ? '#fff' : '#ccc'};
-              border:1px solid ${isSelected ? '#6c5ce7' : '#444'};
-              border-radius:6px;
-              cursor:pointer;
-              font-size:12px;
-              font-weight:${isSelected ? '600' : '400'};
-              transition:all 0.2s;
-              text-align:center;
-            ">
-              ${label}${isSelected ? ' ✓' : ''}
-            </button>
-          `;
-            })
-            .join('')}
-        </div>
-        <div style="margin-top:8px;padding:8px;background:#1e1e1e;border-radius:4px;font-size:11px;color:#888;line-height:1.5;">
-          <strong style="color:#aaa;">선택된 컨셉:</strong> ${thumbInfo.thumbnailText || '없음'}<br>
-          <span style="font-size:10px;opacity:0.8;">각 컨셉을 클릭하여 프롬프트와 문구를 변경할 수 있습니다.</span>
-        </div>
-      </div>
-    `
-          : '';
-
-      const promptDisplayEl = modal.querySelector('#tm-prompt-display');
-      if (promptDisplayEl) {
-        promptDisplayEl.insertAdjacentHTML('beforebegin', newHtml);
-      } else {
-        const canvasWrapper = modal.querySelector('#tm-canvas-wrapper');
-        canvasWrapper.insertAdjacentHTML('afterend', newHtml);
-      }
-
-      // attach listeners to new buttons (same as initial setup)
-      const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
-      conceptButtons.forEach((btn, idx) => {
-        btn.addEventListener('click', () => {
-          selectedConceptIndex = idx;
-          const selectedConcept = thumbnailCandidates[idx];
-
-          conceptButtons.forEach((b, i) => {
-            const isSelected = i === idx;
-            b.style.background = isSelected ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#1e1e1e';
-            b.style.color = isSelected ? '#fff' : '#ccc';
-            b.style.border = `1px solid ${isSelected ? '#6c5ce7' : '#444'}`;
-            b.style.fontWeight = isSelected ? '600' : '400';
-            const label = b.textContent.replace(/\s✓$/, '');
-            b.textContent = label + (isSelected ? ' ✓' : '');
-          });
-
-
-
-          const promptDisplay = modal.querySelector('#tm-prompt-display');
-          if (promptDisplay) {
-            const newPromptKo = selectedConcept.thumbnailPromptKo || '자동 설정됨';
-            const newPromptEn = selectedConcept.thumbnailPromptEn || '';
-            promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n          `;
-            promptDisplay.title = newPromptEn;
-          }
-
-          const oldStyle = {
-            ratio: thumbInfo.ratio,
-            bgImage: thumbInfo.bgImage,
-            templateType: thumbInfo.templateType,
-          };
-          thumbInfo = { ...selectedConcept, ...oldStyle };
-
-          setTimeout(() => {
-            if (typeof updatePreview === 'function') {
-              updatePreview();
-            }
-          }, 100);
-
-          triggerAutoSave();
-        });
-      });
-
-      // update prompt display to new first candidate
-      const promptDisplay = modal.querySelector('#tm-prompt-display');
-      if (promptDisplay) {
-        const newPromptKo = thumbInfo.thumbnailPromptKo || '자동 설정됨';
-        const newPromptEn = thumbInfo.thumbnailPromptEn || '';
-        const selectedRatio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
-        promptDisplay.innerHTML = `\n            <div style="margin-bottom:4px;">${newPromptKo}</div>\n            <div style="font-size:10px;color:#888;opacity:0.8;word-break:break-word;">${newPromptEn}</div>\n            <div class="tm-prompt-ratio" style="font-size:11px;color:#aaa;margin-top:6px;">비율: ${selectedRatio}</div>\n          `;
-        promptDisplay.title = newPromptEn;
-      }
-
-      setTimeout(() => {
-        if (typeof updatePreview === 'function') updatePreview();
-      }, 100);
-
-      triggerAutoSave();
-    };
 
   // File upload UI and handlers removed: uploading background images via file input is deprecated.
   // Previously, upload button and file input change handlers uploaded images to Firebase Storage and applied them as background.

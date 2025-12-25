@@ -314,6 +314,108 @@ describe('ThumbnailMaker UI - reference images', () => {
     // Should contain the AI-provided curiosity prompt
     expect(promptDisplay.textContent).toMatch(/AI가 제공한 호기심형 프롬프트 예시/);
   });
+
+  test('ignores persisted meta-template candidates and shows neutral prompt', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const metaPrompt = '다음 메타 요약을 바탕으로 한 호기심 유발형 썸네일: "Example meta base" — 드라마틱한 조명과 강렬한 구성';
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptKo: metaPrompt, thumbnailText: '' },
+      ],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    // Should NOT display the meta-template text
+    expect(promptDisplay.textContent).not.toMatch(/다음\s*메타\s*요약/);
+    // Should show the neutral fallback text
+    expect(promptDisplay.textContent).toMatch(/자동 설정됨/);
+  });
+
+  test('shows prompts from publishInfo.thumbnailInfo when present', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const koPrompt = '퍼블리시된 썸네일 프롬프트(한글) 예시';
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      publishInfo: {
+        thumbnailInfo: [
+          { type: 'curiosity', thumbnailPromptKo: koPrompt, thumbnailText: '' },
+        ],
+      },
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    // Should contain the persisted publishInfo thumbnail prompt
+    expect(promptDisplay.textContent).toMatch(/퍼블리시된 썸네일 프롬프트\(한글\) 예시/);
+  });
   test('shows failed reference URLs in diagnostics', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
@@ -647,7 +749,7 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(document.querySelector('#tm-bg-style')).toBeFalsy();
   });
 
-  test('uses metaDescription to generate template prompts and displays them', async () => {
+  test('meta-based template prompts are no longer auto-generated (uses safe defaults)', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     const meta = 'This is a concise meta description about AI thumbnail generation and best practices.';
@@ -660,11 +762,12 @@ describe('ThumbnailMaker UI - reference images', () => {
 
     const promptDisplay = document.querySelector('#tm-prompt-display');
     expect(promptDisplay).toBeTruthy();
-    // should include a snippet of metaDescription in at least one of the visible prompts
-    expect(promptDisplay.textContent).toContain('This is a concise meta');
+    // meta-based templates are removed; UI shows safe defaults (no meta text)
+    expect(promptDisplay.textContent).not.toContain('This is a concise meta');
+    expect(promptDisplay.textContent).toContain('자동 설정됨');
   });
 
-  test('gen-from-meta button regenerates prompts and updates UI', async () => {
+  test('gen-from-meta button is removed (manual regeneration disabled)', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
     const draftData = { formattedDraft: '<p>Hi</p>', metaDescription: 'Original meta' };
 
@@ -672,18 +775,9 @@ describe('ThumbnailMaker UI - reference images', () => {
     // allow async init
     await new Promise((r) => setTimeout(r, 20));
 
-    // simulate meta change (user updated meta elsewhere before clicking)
-    draftData.metaDescription = 'New meta description for re-gen';
-
+    // gen-from-meta feature removed, button should not exist
     const btn = document.querySelector('#tm-gen-from-meta');
-    expect(btn).toBeTruthy();
-    btn.click();
-
-    // allow regeneration handler to finish
-    await new Promise((r) => setTimeout(r, 30));
-
-    const promptDisplay = document.querySelector('#tm-prompt-display');
-    expect(promptDisplay.textContent).toContain('New meta description');
+    expect(btn).toBeNull();
   });
 
   test('does not include subtitle input or label', async () => {

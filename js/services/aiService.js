@@ -61,6 +61,21 @@ function sanitizeThumbnailText(candidate, fallback) {
   } catch (e) {
     return '썸네일';
   }
+}
+
+// [신규] Detect meta-template style candidates and exclude them from use
+function looksLikeMetaTemplateCandidate(cand) {
+  try {
+    const text = ((cand && (cand.thumbnailPromptKo || cand.thumbnailPromptEn || cand.thumbnailText)) || '')
+      .toString()
+      .toLowerCase();
+    // Korean heuristic phrases and a small English heuristic
+    return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한|based on meta summary|meta\s*summary/.test(
+      text
+    );
+  } catch (e) {
+    return false;
+  }
 } 
 
 // Compute thumbnail text for overlay composition (testable helper)
@@ -575,6 +590,9 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
       try {
         const parsed = JSON.parse(thumbnailMatch[1].trim());
         thumbnailCandidates = Array.isArray(parsed) ? parsed : [parsed];
+
+        // Filter out any persisted meta-template style candidates so they are never used
+        thumbnailCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplateCandidate(c));
       } catch (e) {
         Logger.warn('[processDraftResponse] 썸네일정보 파싱 실패:', e);
         thumbnailCandidates = [];
@@ -582,6 +600,50 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
 
       // Remove the thumbnail tag from the draft
       cleanedDraft = cleanedDraft.replace(/<썸네일정보>[\s\S]*?<\/썸네일정보>/g, '').trim();
+    }
+
+    // If no explicit <썸네일정보> was provided, try to extract image prompts
+    // that the draft may have included per the '이미지 생성 프롬프트' guideline.
+    // Accept patterns like:
+    // [이미지 생성 프롬프트 (영어): High-quality photo of ...]
+    // [이미지 생성 프롬프트 (한글): ...]
+    if (thumbnailCandidates.length === 0) {
+      try {
+        const promptPairs = [];
+        const lines = cleanedDraft.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          const enMatch = lines[i].match(/\[이미지 생성 프롬프트 \(영어\):\s*(.+?)\s*\]$/i);
+          if (enMatch) {
+            const en = enMatch[1].trim();
+            // find following korean prompt line if present
+            let ko = '';
+            for (let j = i + 1; j < lines.length; j++) {
+              const koMatch = lines[j].match(/\[이미지 생성 프롬프트 \(한글\):\s*(.+?)\s*\]$/i);
+              if (koMatch) {
+                ko = koMatch[1].trim();
+                break;
+              }
+              // allow a plain next line if it looks like a Korean prompt (not bracketed)
+              if (lines[j].trim() && !/^\[.*\]$/.test(lines[j].trim())) {
+                ko = lines[j].trim();
+                break;
+              }
+            }
+            promptPairs.push({ en, ko });
+          }
+        }
+
+        if (promptPairs.length > 0) {
+          thumbnailCandidates = promptPairs.map((p) => ({
+            type: 'generated',
+            thumbnailPromptEn: p.en,
+            thumbnailPromptKo: p.ko || '',
+            thumbnailText: '',
+          }));
+        }
+      } catch (e) {
+        Logger.warn('[processDraftResponse] 이미지 프롬프트 추출 실패:', e);
+      }
     }
   } catch (e) {
     Logger.warn('[processDraftResponse] 썸네일정보 탐색 중 예외:', e);
@@ -1887,8 +1949,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         ) {
           try {
             if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+              // use only candidates that are not meta-templates
+              const cleanCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplateCandidate(c));
               const findByType = (keys) => {
-                const found = thumbnailCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
+                const found = cleanCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
                 if (!found) return [];
                 const src = found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
                 return src ? [String(src).trim()] : [];
@@ -2689,98 +2753,62 @@ ${defaultDescription}
       .filter((t) => t && t !== 'AI-추천')
       .join(', ');
 
-    // 7. 썸네일 정보가 없거나 실패 시 기본값 생성 (3가지 컨셉 강제 생성)
-    // (썸네일 정보는 이미 위에서 추출되었으므로, 여기서는 기본값 생성만 처리)
-    if (thumbnailCandidates.length === 0) {
-      const baseTitle = seoTitle || title || '콘텐츠';
-      thumbnailCandidates = [
-        {
-          type: 'curiosity',
-          thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-          thumbnailText: '',
-        },
-        {
-          type: 'informative',
-          thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
-          thumbnailText: '완벽 정리',
-        },
-        {
-          type: 'emotional',
-          thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-          thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
-          thumbnailText: '당신을 위한',
-        },
-      ];
-    }
+    // 7. 썸네일 정보는 오직 AI 초안(또는 명시적 publishInfo.thumbnailInfo)에서 제공된 경우에만 사용합니다.
+    // 따라서 여태까지의 폴백 템플릿/자동 생성 로직은 제거되었습니다.
 
     // [신규] 썸네일 자동 생성 및 업로드 (첫 번째 컨셉 사용)
     let thumbnailUrls = ideaData.publishInfo?.thumbnailUrls || null; // { url_1x1, url_4x3, url_16x9, altText }
 
-    // Try to generate short thumbnail slogans dynamically using outlines/draft
-    try {
-      const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
-      if (Array.isArray(slogans) && slogans.length > 0) {
-        thumbnailCandidates = thumbnailCandidates.map((c, i) => {
-          const suggested = slogans[i] || slogans[i % slogans.length] || '';
-          const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
-          return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
-        });
-      } else {
-        thumbnailCandidates = thumbnailCandidates.map((c) => ({
-          ...c,
-          thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
-        }));
-      }
-    } catch (e) {
-      Logger.warn('[generateDraftFromIdea] generateThumbnailTexts failed:', e);
-      thumbnailCandidates = thumbnailCandidates.map((c) => ({
-        ...c,
-        thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
-      }));
-    }
-
-    // --- 폴백: 썸네일 후보가 3개 미만인 경우 자동 보완 ---
-    try {
-      if (!Array.isArray(thumbnailCandidates)) thumbnailCandidates = [];
-      if (thumbnailCandidates.length < 3) {
-        Logger.warn('[generateDraftFromIdea] 썸네일 후보 부족: 현재 개수=', thumbnailCandidates.length);
-        const baseTitle = seoTitle || title || '콘텐츠';
-        const neededTypes = ['curiosity', 'informative', 'emotional'];
-        const existingTypes = new Set(thumbnailCandidates.map((c) => c.type));
-        for (const t of neededTypes) {
-          if (thumbnailCandidates.length >= 3) break;
-          if (existingTypes.has(t)) continue;
-          const newCandidate = (function () {
-            if (t === 'curiosity')
-              return {
-                type: 'curiosity',
-                thumbnailPromptEn: `High-quality, dramatic thumbnail for "${baseTitle}", mysterious atmosphere, vibrant colors, dramatic lighting, eye-catching composition, 16:9 aspect ratio`,
-                thumbnailPromptKo: `"${baseTitle}"에 대한 호기심 자극형 썸네일, 드라마틱한 조명, 강렬한 색상, 시선을 끄는 구성, 16:9 비율`,
-                thumbnailText: '',
-              };
-            if (t === 'informative')
-              return {
-                type: 'informative',
-                thumbnailPromptEn: `Clean, professional background image for "${baseTitle}", bright lighting, organized layout, modern design, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-                thumbnailPromptKo: `"${baseTitle}"에 대한 정보 요약형 썸네일, 깔끔한 레이아웃, 밝은 조명, 숫자나 체크마크 포함, 전문적인 디자인, 16:9 비율`,
-                thumbnailText: '완벽 정리',
-              };
-            return {
-              type: 'emotional',
-              thumbnailPromptEn: `Warm, cozy background image for "${baseTitle}", soft lighting, welcoming atmosphere, friendly colors, comfortable feeling, 16:9 aspect ratio. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.`,
-              thumbnailPromptKo: `"${baseTitle}"에 대한 감성/공감형 썸네일, 따뜻한 조명, 인간적 요소, 환영하는 분위기, 친근한 색상, 편안한 느낌, 16:9 비율`,
-              thumbnailText: '당신을 위한',
-            };
-          })();
-          thumbnailCandidates.push(newCandidate);
-          existingTypes.add(t);
+    // If thumbnail candidates exist (provided by draft or parsed tags), or the caller explicitly requested thumbnail generation,
+    // try to enhance candidates via generateThumbnailTexts. When thumbnailCandidates are missing but generation is requested,
+    // synthesize lightweight candidates from generated slogans (no templated image prompts).
+    if ((Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) || options.generateThumbnail) {
+      try {
+        const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+        if (Array.isArray(slogans) && slogans.length > 0) {
+          if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+            // Map slogans onto existing candidates
+            thumbnailCandidates = thumbnailCandidates.map((c, i) => {
+              const suggested = slogans[i] || slogans[i % slogans.length] || '';
+              const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+              return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
+            });
+          } else {
+            // No existing candidates; create minimal candidates from slogans
+            const types = ['curiosity', 'informative', 'emotional'];
+            thumbnailCandidates = slogans.slice(0, 3).map((s, i) => ({
+              type: types[i] || `type${i}`,
+              thumbnailPromptEn: '',
+              thumbnailPromptKo: '',
+              thumbnailText: sanitizeThumbnailText(s || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+              fontFamily: "'Pretendard', sans-serif",
+              textColor: 'auto',
+              ratio: '16:9',
+              bgImage: null,
+              overlayOpacity: 0.0,
+            }));
+          }
+        } else {
+          // No slogans generated — sanitize existing candidates' thumbnailText if any
+          if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+            thumbnailCandidates = thumbnailCandidates.map((c) => ({
+              ...c,
+              thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+            }));
+          }
         }
-        Logger.debug('[generateDraftFromIdea] 폴백으로 보완한 썸네일 후보 개수:', thumbnailCandidates.length);
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] generateThumbnailTexts failed:', e);
+        if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
+          thumbnailCandidates = thumbnailCandidates.map((c) => ({
+            ...c,
+            thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+          }));
+        }
       }
-    } catch (e) {
-      Logger.warn('[generateDraftFromIdea] 썸네일 후보 폴백 중 예외:', e && e.message);
+    } else {
+      // No thumbnail candidates provided and thumbnail generation not requested; remain empty
+      thumbnailCandidates = Array.isArray(thumbnailCandidates) ? thumbnailCandidates : [];
     }
 
     // NOTE: Thumbnail IMAGE creation (AI image generation, composition, and upload)

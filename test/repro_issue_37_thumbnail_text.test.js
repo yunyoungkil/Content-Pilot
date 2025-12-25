@@ -19,8 +19,9 @@ describe('Issue #37 - Thumbnail text generation & fallback', () => {
 
     const res = await generateDraftFromIdea(ideaData, { generateDraft: false, generateThumbnail: false });
 
-    expect(res.thumbnailInfo).toBeDefined();
-    expect(res.thumbnailInfo[0].thumbnailText).toBe('짧은 슬로건');
+    // With template fallbacks removed, thumbnailInfo is only provided when the draft includes it.
+    expect(Array.isArray(res.thumbnailInfo)).toBe(true);
+    expect(res.thumbnailInfo.length).toBe(0);
   });
 
   test('falls back to sanitized seo/title when slogans are punctuation-only', async () => {
@@ -33,8 +34,8 @@ describe('Issue #37 - Thumbnail text generation & fallback', () => {
 
     const res = await generateDraftFromIdea(ideaData, { generateDraft: false, generateThumbnail: false });
 
-    expect(res.thumbnailInfo).toBeDefined();
-    // fallback is truncated to 12 chars without punctuation
-    expect(res.thumbnailInfo[0].thumbnailText).toBe((('My Test Title'.replace(/[^\p{L}\p{N}\s]+/gu, '').trim()).substring(0, 12)));
+    // With template fallbacks removed, thumbnailInfo is only provided when the draft includes it.
+    expect(Array.isArray(res.thumbnailInfo)).toBe(true);
+    expect(res.thumbnailInfo.length).toBe(0);
   });
 });
