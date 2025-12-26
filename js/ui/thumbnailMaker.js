@@ -990,12 +990,81 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
               const res = await new Promise((resolve) => {
                 chrome.runtime.sendMessage({ action: 'delete_storage_image_by_url', data: { url } }, (r) => resolve(r));
               });
-              if (!res || !res.success) {
-                showToast('원본 삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+
+              // No response or generic failure -> offer local delete fallback
+              if (!res) {
+                console.error('[ThumbnailMaker] delete_storage_image_by_url returned no response for url:', url);
+                if (confirm('서버 응답이 없거나 오류가 발생했습니다. 로컬(히스토리)에서만 삭제하시겠습니까?')) {
+                  if (cand && Array.isArray(cand.bgImages)) {
+                    cand.bgImages = cand.bgImages.filter((u) => u !== url);
+                    if (cand.bgImages.length === 0) delete cand.bgImages;
+                  }
+                  if (currentBgImage === url) {
+                    const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                    currentBgImage = candArr[0] || null;
+                    updatePreview();
+                  }
+                  renderHistory();
+                  triggerAutoSave();
+                  showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+                  return;
+                }
+                showToast('삭제이 취소되었습니다.', 'warning');
                 return;
               }
 
-              // Remove url from candidate bgImages
+              if (!res.success) {
+                const errMsg = res && res.error ? String(res.error) : '';
+                console.error('[ThumbnailMaker] delete_storage_image_by_url failed:', errMsg, res);
+
+                // Auth/permission errors - show specific guidance
+                if (/auth|permission|401|403|unauthorized/i.test(errMsg)) {
+                  if (confirm('원본 삭제 권한이 없습니다. 로그인/권한을 확인하시겠습니까? (확인: 로컬에서만 삭제)')) {
+                    if (cand && Array.isArray(cand.bgImages)) {
+                      cand.bgImages = cand.bgImages.filter((u) => u !== url);
+                      if (cand.bgImages.length === 0) delete cand.bgImages;
+                    }
+                    if (currentBgImage === url) {
+                      const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                      currentBgImage = candArr[0] || null;
+                      updatePreview();
+                    }
+                    renderHistory();
+                    triggerAutoSave();
+                    showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+                    return;
+                  }
+                  showToast('삭제이 취소되었습니다.', 'warning');
+                  return;
+                }
+
+                // Metadata not found -> offer local-only deletion
+                if (/not found|metadata not found|uploaded image metadata not found/i.test(errMsg)) {
+                  if (confirm('원본을 찾을 수 없습니다. 로컬(히스토리)에서만 삭제하시겠습니까?')) {
+                    if (cand && Array.isArray(cand.bgImages)) {
+                      cand.bgImages = cand.bgImages.filter((u) => u !== url);
+                      if (cand.bgImages.length === 0) delete cand.bgImages;
+                    }
+                    if (currentBgImage === url) {
+                      const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                      currentBgImage = candArr[0] || null;
+                      updatePreview();
+                    }
+                    renderHistory();
+                    triggerAutoSave();
+                    showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+                    return;
+                  }
+                  showToast('삭제이 취소되었습니다.', 'warning');
+                  return;
+                }
+
+                // Generic failure - surface backend error if available
+                showToast('원본 삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                return;
+              }
+              
+              // Success: remove url from candidate bgImages
               if (cand && Array.isArray(cand.bgImages)) {
                 cand.bgImages = cand.bgImages.filter((u) => u !== url);
                 if (cand.bgImages.length === 0) delete cand.bgImages;

@@ -2867,6 +2867,411 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // New: delete by download URL - finds metadata entry and deletes storage + metadata
+  if (msg.action === 'delete_storage_image_by_url') {
+    if (!msg || !msg.data || !msg.data.url) {
+      return sendResponse({ success: false, error: 'missing url' });
+    }
+
+    return handleAsync(
+      (async () => {
+        const url = String(msg.data.url || '');
+        const userId = await getCurrentUserId();
+        Logger.info('[delete_storage_image_by_url] received delete request for url:', url);
+        try {
+          const list = await getUploadedImagesLog();
+          Logger.debug('[delete_storage_image_by_url] uploaded images metadata count:', Array.isArray(list) ? list.length : 0);
+
+          const target = normalizeUrlForDeletion(url);
+          Logger.debug('[delete_storage_image_by_url] normalized target:', target.substring(0, 120));
+
+          const matches = Array.isArray(list)
+            ? list.filter((it) => {
+                const d = normalizeUrlForDeletion(it.downloadURL || '');
+                return d === target || d.endsWith(target) || target.endsWith(d);
+              })
+            : [];
+
+          if (matches.length > 0) {
+            Logger.info('[delete_storage_image_by_url] found metadata matches count:', matches.length);
+
+            // Collect unique storage paths (derive from downloadURL if missing)
+            const storagePaths = new Set();
+            for (const m of matches) {
+              if (m.storagePath) storagePaths.add(m.storagePath);
+              else {
+                // try to parse from downloadURL
+                try {
+                  const u2 = new URL(m.downloadURL);
+                  const pMatch2 = u2.pathname.match(/\/o\/([^?\/]+)/) || u2.pathname.match(/\/v0\/b\/[^\/]+\/o\/([^?\/]+)/);
+                  if (pMatch2 && pMatch2[1]) {
+                    const decoded = decodeURIComponent(pMatch2[1]);
+                    // fallback to firebaseConfig if available
+                    const bucketGuess = (typeof firebaseConfig !== 'undefined' && firebaseConfig && firebaseConfig.storageBucket) ? firebaseConfig.storageBucket : null;
+                    if (bucketGuess) storagePaths.add(`gs://${bucketGuess}/${decoded}`);
+                  }
+                } catch (e) {
+                  Logger.debug('[delete_storage_image_by_url] failed to parse storage path from match downloadURL:', e && e.message);
+                }
+              }
+            }
+
+            // Attempt deletes + verification for each storage path
+            const verifiedPaths = new Set();
+            const failedPaths = [];
+            for (const sp of storagePaths) {
+              try {
+                await deleteImageFromStorage(sp);
+              } catch (e) {
+                Logger.warn('[delete_storage_image_by_url] storage delete failed for path from matches:', sp, e && e.message);
+              }
+
+              // verify via HEAD
+              try {
+                const m2 = String(sp || '').match(/^gs:\/\/([^\/]+)\/(.+)$/);
+                if (m2) {
+                  const bucket2 = m2[1];
+                  const objectPath2 = m2[2];
+                  const encoded2 = encodeURIComponent(objectPath2);
+                  const dlUrl2 = `https://firebasestorage.googleapis.com/v0/b/${bucket2}/o/${encoded2}?alt=media`;
+                  const metaUrl2 = `https://firebasestorage.googleapis.com/v0/b/${bucket2}/o/${encoded2}`;
+
+                  let confirmed = false;
+                  let lastErr = null;
+
+                  for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
+                    try {
+                      let token2 = await getValidToken(false);
+                      if (!token2) token2 = await getValidToken(true);
+
+                      // Try HEAD (fast)
+                      try {
+                        const verifyResp2 = await fetch(dlUrl2, { method: 'HEAD', headers: { Authorization: `Bearer ${token2}` } });
+                        if (verifyResp2 && verifyResp2.status === 404) {
+                          Logger.info('[delete_storage_image_by_url] storage delete confirmed (not found) for path:', sp, 'via HEAD');
+                          confirmed = true;
+                          break;
+                        }
+                        lastErr = `HEAD status:${verifyResp2 ? verifyResp2.status : 'no-response'}`;
+                      } catch (e) {
+                        lastErr = e && e.message ? e.message : String(e);
+                        Logger.debug('[delete_storage_image_by_url] HEAD fetch failed for verification:', lastErr);
+                      }
+
+                      // Try metadata GET as fallback
+                      try {
+                        const metaResp = await fetch(metaUrl2, { method: 'GET', headers: { Authorization: `Bearer ${token2}` } });
+                        if (metaResp && metaResp.status === 404) {
+                          Logger.info('[delete_storage_image_by_url] storage delete confirmed (not found) for path:', sp, 'via metadata GET');
+                          confirmed = true;
+                          break;
+                        }
+                        lastErr = `META status:${metaResp ? metaResp.status : 'no-response'}`;
+                      } catch (e) {
+                        lastErr = e && e.message ? e.message : String(e);
+                        Logger.debug('[delete_storage_image_by_url] metadata GET failed for verification:', lastErr);
+                      }
+
+                      // if not confirmed, refresh token on next attempt
+                      if (attempt === 0) {
+                        await getValidToken(true);
+                      }
+                    } catch (e) {
+                      lastErr = e && e.message ? e.message : String(e);
+                      Logger.debug('[delete_storage_image_by_url] verification attempt error:', lastErr);
+                    }
+                  }
+
+                  if (confirmed) {
+                    verifiedPaths.add(sp);
+                  } else {
+                    Logger.warn('[delete_storage_image_by_url] storage delete not confirmed after retries for path:', sp, 'lastErr:', lastErr);
+                    failedPaths.push({ path: sp, error: lastErr });
+                  }
+                } else {
+                  Logger.debug('[delete_storage_image_by_url] unable to parse gs:// path for verification:', sp);
+                }
+              } catch (e) {
+                Logger.warn('[delete_storage_image_by_url] verification HEAD failed for path from matches:', sp, e && e.message);
+                failedPaths.push(sp);
+              }
+            }
+
+            // Remove all metadata entries that match verified paths or normalized url
+            const removedIds = [];
+            for (const m of matches) {
+              const mStorage = m.storagePath;
+              const shouldRemove = (mStorage && verifiedPaths.has(mStorage)) || (!mStorage && verifiedPaths.size > 0);
+              // Additionally, remove if normalized downloadURL matches target
+              const dnorm = normalizeUrlForDeletion(m.downloadURL || '');
+              if (shouldRemove || dnorm === target || dnorm.endsWith(target) || target.endsWith(dnorm)) {
+                try {
+                  await remove(ref(getDb(), `thumbnail_images/${userId}/${m.id}`));
+                  Logger.info('[delete_storage_image_by_url] metadata removed for id:', m.id);
+                  removedIds.push(m.id);
+                } catch (e) {
+                  Logger.warn('[delete_storage_image_by_url] failed to remove metadata for id:', m.id, e && e.message);
+                }
+              }
+            }
+
+            Logger.info('[delete_storage_image_by_url] removed metadata ids count:', removedIds.length, 'failedPaths:', failedPaths.length);
+
+            // Additionally, clear any references to the deleted download URL in kanban publishInfo/thumbnailInfo
+            try {
+              const urlsToClear = new Set();
+              if (url) urlsToClear.add(url);
+              for (const p of verifiedPaths) {
+                const m = String(p).match(/^gs:\/\/([^\/]+)\/(.+)$/);
+                if (m) {
+                  const b = m[1];
+                  const op = encodeURIComponent(m[2]);
+                  urlsToClear.add(`https://firebasestorage.googleapis.com/v0/b/${b}/o/${op}?alt=media`);
+                }
+              }
+
+              const statuses = Object.values(KANBAN_STATUS || {});
+              for (const status of statuses) {
+                const basePath = `kanban/${userId}/${status}`;
+                const snap = await get(basePath);
+                const all = snap && snap.val ? snap.val() : null;
+                if (!all) continue;
+
+                for (const id in all) {
+                  try {
+                    const card = all[id];
+                    const publish = card && card.publishInfo ? { ...card.publishInfo } : null;
+                    let dirty = false;
+
+                    if (publish && Array.isArray(publish.thumbnailInfo)) {
+                      const newThumbs = publish.thumbnailInfo.map((t) => {
+                        const copy = { ...t };
+                        if (copy.bgImage && Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(copy.bgImage || '') === normalizeUrlForDeletion(u))) {
+                          copy.bgImage = null;
+                          dirty = true;
+                        }
+                        if (copy.bgImages && Array.isArray(copy.bgImages)) {
+                          const filtered = copy.bgImages.filter((x) => !Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(x || '') === normalizeUrlForDeletion(u)));
+                          if (filtered.length !== copy.bgImages.length) {
+                            copy.bgImages = filtered;
+                            dirty = true;
+                          }
+                        }
+                        return copy;
+                      });
+
+                      if (dirty) {
+                        publish.thumbnailInfo = newThumbs;
+                        await update(`${basePath}/${id}`, { publishInfo: publish });
+                        Logger.info('[delete_storage_image_by_url] cleared thumbnail refs for card:', `${basePath}/${id}`);
+                      }
+                    }
+
+                    if (publish && publish.bgImage && Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(publish.bgImage || '') === normalizeUrlForDeletion(u))) {
+                      publish.bgImage = null;
+                      dirty = true;
+                    }
+                    if (publish && Array.isArray(publish.bgImages)) {
+                      const filtered = publish.bgImages.filter((x) => !Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(x || '') === normalizeUrlForDeletion(u)));
+                      if (filtered.length !== publish.bgImages.length) {
+                        publish.bgImages = filtered;
+                        dirty = true;
+                      }
+                    }
+
+                    if (dirty && !(publish && publish.thumbnailInfo && publish.thumbnailInfo.length === 0)) {
+                      await update(`${basePath}/${id}`, { publishInfo: publish });
+                      Logger.info('[delete_storage_image_by_url] publishInfo updated for card:', `${basePath}/${id}`);
+                    }
+                  } catch (e) {
+                    Logger.warn('[delete_storage_image_by_url] failed to clear publishInfo refs for card:', `${basePath}/${id}`, e && e.message);
+                  }
+                }
+              }
+            } catch (e) {
+              Logger.warn('[delete_storage_image_by_url] failed to scan/update kanban publishInfo entries:', e && e.message);
+            }
+
+            return { success: true, removedIds, failedPaths };
+          }
+
+          // try to parse storage path from a firebase download URL (multiple fallbacks)
+          try {
+            const u = new URL(url);
+
+            // Attempt to extract bucket and object path explicitly from known firebase download URL patterns
+            // Pattern 1: /v0/b/<bucket>/o/<encodedPath>
+            // Pattern 2: /o/<encodedPath>  (no bucket in path)
+            let bucket = null;
+            let encodedPath = null;
+
+            const mFull = u.pathname.match(/\/v0\/b\/([^\/]+)\/o\/([^?\/]+)/);
+            if (mFull) {
+              bucket = mFull[1];
+              encodedPath = mFull[2];
+            } else {
+              const mShort = u.pathname.match(/\/o\/([^?\/]+)/);
+              if (mShort) {
+                encodedPath = mShort[1];
+                // fallback to firebaseConfig.storageBucket only if available
+                if (typeof firebaseConfig !== 'undefined' && firebaseConfig && firebaseConfig.storageBucket) {
+                  bucket = firebaseConfig.storageBucket;
+                }
+              }
+            }
+
+            if (!bucket) {
+              Logger.warn('[delete_storage_image_by_url] could not determine storage bucket from URL:', url);
+              return { success: false, error: 'could not determine storage bucket' };
+            }
+
+            if (!encodedPath) {
+              Logger.warn('[delete_storage_image_by_url] could not determine object path from URL:', url);
+              return { success: false, error: 'could not determine object path' };
+            }
+
+            const decoded = decodeURIComponent(encodedPath);
+            const storagePath = `gs://${bucket}/${decoded}`;
+            Logger.info('[delete_storage_image_by_url] parsed storage path:', storagePath);
+
+            try {
+              await deleteImageFromStorage(storagePath);
+            } catch (e) {
+              Logger.warn('[delete_storage_image_by_url] storage delete failed for parsed path:', storagePath, e && e.message);
+              return { success: false, error: e && e.message ? e.message : String(e) };
+            }
+
+            // Verify deletion via HEAD on media URL
+            try {
+              const m2 = String(storagePath || '').match(/^gs:\/\/([^\/]+)\/(.+)$/);
+              if (m2) {
+                const bucket2 = m2[1];
+                const objectPath2 = m2[2];
+                const encoded2 = encodeURIComponent(objectPath2);
+                const dlUrl2 = `https://firebasestorage.googleapis.com/v0/b/${bucket2}/o/${encoded2}?alt=media`;
+                let token2 = await getValidToken(false);
+                if (!token2) token2 = await getValidToken(true);
+                const verifyResp2 = await fetch(dlUrl2, { method: 'HEAD', headers: { Authorization: `Bearer ${token2}` } });
+                if (verifyResp2.status !== 404) {
+                  Logger.warn('[delete_storage_image_by_url] storage delete not confirmed (HEAD status):', verifyResp2.status, 'url:', dlUrl2);
+                  return { success: false, error: 'storage delete not confirmed' };
+                }
+                Logger.info('[delete_storage_image_by_url] storage delete confirmed (not found) for parsed path');
+              } else {
+                Logger.debug('[delete_storage_image_by_url] unable to parse gs:// parsed path for verification:', storagePath);
+              }
+            } catch (e) {
+                Logger.warn('[delete_storage_image_by_url] verification HEAD failed for parsed path:', e && e.message);
+                return { success: false, error: e && e.message ? e.message : String(e) };
+              }
+
+              // Remove all metadata entries that reference this parsed storage path
+              const matchesByStorage = Array.isArray(list)
+                ? list.filter((it) => it.storagePath === storagePath || normalizeUrlForDeletion(it.downloadURL || '').endsWith(normalizeUrlForDeletion(`https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(decoded)}`)))
+                : [];
+
+              const removedParsedIds = [];
+              for (const b of matchesByStorage) {
+                try {
+                  await remove(ref(getDb(), `thumbnail_images/${userId}/${b.id}`));
+                  Logger.info('[delete_storage_image_by_url] metadata removed for parsed storage id:', b.id);
+                  removedParsedIds.push(b.id);
+                } catch (e) {
+                  Logger.warn('[delete_storage_image_by_url] failed to remove metadata for parsed storage id:', b.id, e && e.message);
+                }
+              }
+
+              Logger.info('[delete_storage_image_by_url] removed parsed storage metadata ids count:', removedParsedIds.length);
+
+              // Also clear references to this parsed download URL in kanban publishInfo
+              try {
+                const urlsToClear = new Set();
+                const m = String(storagePath || '').match(/^gs:\/\/([^\/]+)\/(.+)$/);
+                if (m) {
+                  const bucket2 = m[1];
+                  const objectPath2 = encodeURIComponent(m[2]);
+                  const dlUrl2 = `https://firebasestorage.googleapis.com/v0/b/${bucket2}/o/${objectPath2}?alt=media`;
+                  urlsToClear.add(dlUrl2);
+                }
+                if (url) urlsToClear.add(url);
+
+                const statuses = Object.values(KANBAN_STATUS || {});
+                for (const status of statuses) {
+                  const basePath = `kanban/${userId}/${status}`;
+                  const snap = await get(basePath);
+                  const all = snap && snap.val ? snap.val() : null;
+                  if (!all) continue;
+
+                  for (const id in all) {
+                    try {
+                      const card = all[id];
+                      const publish = card && card.publishInfo ? { ...card.publishInfo } : null;
+                      let dirty = false;
+
+                      if (publish && Array.isArray(publish.thumbnailInfo)) {
+                        const newThumbs = publish.thumbnailInfo.map((t) => {
+                          const copy = { ...t };
+                          if (copy.bgImage && Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(copy.bgImage || '') === normalizeUrlForDeletion(u))) {
+                            copy.bgImage = null;
+                            dirty = true;
+                          }
+                          if (copy.bgImages && Array.isArray(copy.bgImages)) {
+                            const filtered = copy.bgImages.filter((x) => !Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(x || '') === normalizeUrlForDeletion(u)));
+                            if (filtered.length !== copy.bgImages.length) {
+                              copy.bgImages = filtered;
+                              dirty = true;
+                            }
+                          }
+                          return copy;
+                        });
+
+                        if (dirty) {
+                          publish.thumbnailInfo = newThumbs;
+                          await update(`${basePath}/${id}`, { publishInfo: publish });
+                          Logger.info('[delete_storage_image_by_url] cleared thumbnail refs for card:', `${basePath}/${id}`);
+                        }
+                      }
+
+                      if (publish && publish.bgImage && Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(publish.bgImage || '') === normalizeUrlForDeletion(u))) {
+                        publish.bgImage = null;
+                        dirty = true;
+                      }
+                      if (publish && Array.isArray(publish.bgImages)) {
+                        const filtered = publish.bgImages.filter((x) => !Array.from(urlsToClear).some((u) => normalizeUrlForDeletion(x || '') === normalizeUrlForDeletion(u)));
+                        if (filtered.length !== publish.bgImages.length) {
+                          publish.bgImages = filtered;
+                          dirty = true;
+                        }
+                      }
+
+                      if (dirty && !(publish && publish.thumbnailInfo && publish.thumbnailInfo.length === 0)) {
+                        await update(`${basePath}/${id}`, { publishInfo: publish });
+                        Logger.info('[delete_storage_image_by_url] publishInfo updated for card:', `${basePath}/${id}`);
+                      }
+                    } catch (e) {
+                      Logger.warn('[delete_storage_image_by_url] failed to clear publishInfo refs for card:', `${basePath}/${id}`, e && e.message);
+                    }
+                  }
+                }
+              } catch (e) {
+                Logger.warn('[delete_storage_image_by_url] failed to scan/update kanban publishInfo entries for parsed path:', e && e.message);
+              }
+
+              return { success: true, removedParsedIds };
+          } catch (e) {
+            Logger.debug('[delete_storage_image_by_url] failed to parse storage path from url (URL constructor):', e && e.message);
+          }
+
+          Logger.warn('[delete_storage_image_by_url] uploaded image metadata not found for url:', url);
+          return { success: false, error: 'uploaded image metadata not found' };
+        } catch (e) {
+          Logger.error('[delete_storage_image_by_url] unexpected error:', e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+      })()
+    );
+  }
+
   // 알 수 없는 액션
   Logger.warn(`[Router] 알 수 없는 액션: ${msg.action}`);
   sendResponse({ success: false, error: `Unknown action: ${msg.action}` });

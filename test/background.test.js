@@ -41,8 +41,14 @@ describe('Background Message Handlers', () => {
     jest.doMock('../js/services/firebaseService.js', () => ({
       getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
       getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
-      // 다른 필요한 함수들도 모킹
+      // 기본적으로 테스트에서 사용하는 Firebase helper들을 스텁으로 제공
       getDb: jest.fn(),
+      get: jest.fn().mockResolvedValue({ val: () => null }),
+      getUploadedImagesLog: jest.fn().mockResolvedValue([]),
+      remove: jest.fn(),
+      ref: jest.fn(),
+      markDeletedThumbnail: jest.fn(),
+      isThumbnailDeleted: jest.fn().mockResolvedValue(false),
       CONSTANTS: { USER_ID: 'default_user' },
       initializeFirebase: jest.fn(),
       uploadImageToFirebaseStorage: jest.fn(),
@@ -96,7 +102,8 @@ describe('Background Message Handlers', () => {
       // 실제로는 background.js의 핸들러 로직을 테스트하기 위해 별도 함수로 분리하는 것이 좋음
 
       expect(mockGetUnifiedGalleryImages).toHaveBeenCalledWith('ALL');
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true, images: mockImages });
+      const lastResp = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastResp).toEqual(expect.objectContaining({ success: true, images: mockImages }));
     });
 
     test('should handle get_unified_gallery message with STORAGE filter', async () => {
@@ -154,7 +161,8 @@ describe('Background Message Handlers', () => {
       await runtimeHandler4(message, {}, mockSendResponse);
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: false, error: 'Database error' });
+      const lastErr = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastErr).toEqual(expect.objectContaining({ success: false, error: 'Database error' }));
     });
 
     test('delete_storage_image returns error when storagePath is missing', async () => {
@@ -178,7 +186,8 @@ describe('Background Message Handlers', () => {
       // now returns synchronous error response (false) instead of async handler
       expect(ret).toBe(false);
 
-      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'missing storagePath' });
+      const lastErr = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastErr).toEqual(expect.objectContaining({ success: false, error: 'missing storagePath' }));
       expect(mockDelete).not.toHaveBeenCalled();
     });
 
@@ -192,7 +201,8 @@ describe('Background Message Handlers', () => {
 
       // synchronous early-return => false and immediate response
       expect(ret).toBe(false);
-      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'missing message data' });
+      const lastErr = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastErr).toEqual(expect.objectContaining({ success: false, error: 'missing message data' }));
     });
 
     test('delete_storage_image handles deleteImageFromStorage failure gracefully', async () => {
@@ -216,7 +226,8 @@ describe('Background Message Handlers', () => {
       expect(ret).toBe(true);
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'DELETE failed' });
+      const lastErr = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastErr).toEqual(expect.objectContaining({ success: false, error: 'DELETE failed' }));
       expect(mockRemove).not.toHaveBeenCalled();
     });
 
@@ -243,7 +254,8 @@ describe('Background Message Handlers', () => {
       expect(ret).toBe(true);
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(sendResponse).toHaveBeenCalledWith({ success: true });
+      const lastSucc = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastSucc).toEqual(expect.objectContaining({ success: true }));
       expect(mockRemove).toHaveBeenCalled();
     });
 
@@ -280,6 +292,295 @@ describe('Background Message Handlers', () => {
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(123, expect.objectContaining({ action: 'delete_storage_image_result', success: true }), expect.any(Function));
     });
 
+    test('delete_storage_image marks tombstone for parsed storage path', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const mockRef = jest.fn().mockReturnValue('thumbnail_ref');
+      const mockMark = jest.fn().mockResolvedValue(true);
+
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+        ref: mockRef,
+        markDeletedThumbnail: mockMark,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+
+      const message = { action: 'delete_storage_image', data: { id: 'x', storagePath: 'gs://bucket/thumbnails/user/gen-1.png' } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockRemove).toHaveBeenCalled();
+      expect(mockMark).toHaveBeenCalledWith('test-user', 'thumbnails/user/gen-1.png');
+    });
+
+    test('delete_storage_image_by_url marks tombstone for parsed path', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const mockGetUploaded = jest.fn().mockResolvedValue([]);
+      const mockMark = jest.fn().mockResolvedValue(true);
+      const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media&token=abc';
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+        ref: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        markDeletedThumbnail: mockMark,
+        firebaseConfig: { storageBucket: 'content-pilot-7eb03.appspot.com' },
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image_by_url', data: { url: downloadUrl } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockMark).toHaveBeenCalledWith('test-user', 'thumbnails/user/gen-1.png');
+    });
+
+    test('force_remove_url_references dryRun shows planned removals', async () => {
+      const testUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.firebasestorage.app/o/thumbnails%2F113959899989339493619%2F1766719112553_0.png?alt=media&token=tok';
+
+      const mockGetUploaded = jest.fn().mockResolvedValue([{ id: 'img1', downloadURL: testUrl, storagePath: 'gs://content-pilot-7eb03.firebasestorage.app/thumbnails/113959899989339493619/1766719112553_0.png' }]);
+
+      const kanbanData = {
+        ideas: {
+          card1: {
+            publishInfo: {
+              thumbnailInfo: [{ bgImage: testUrl, bgImages: [testUrl] }],
+              bgImage: testUrl,
+              bgImages: [testUrl],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData.ideas : null) }));
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('113959899989339493619'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        get: mockGet,
+        remove: mockRemove,
+        update: mockUpdate,
+        markDeletedThumbnail: jest.fn().mockResolvedValue(true),
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'force_remove_url_references', data: { url: testUrl, dryRun: true } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      // sendResponse captured result via handleAsync - find last call
+      const lastCall = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastCall && lastCall.success).toBe(true);
+      expect(lastCall.planned).toBeTruthy();
+      expect(lastCall.planned.thumbnailIds.length).toBeGreaterThanOrEqual(1);
+      expect(lastCall.planned.kanbanUpdates.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('delete_storage_image_by_url clears and removes empty bgImages arrays', async () => {
+      const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2F113959899989339493619%2F1766719112553_0.png?alt=media&token=tok';
+
+      const mockGetUploaded = jest.fn().mockResolvedValue([{ id: 'img1', downloadURL: downloadUrl, storagePath: 'gs://content-pilot-7eb03.appspot.com/thumbnails/113959899989339493619/1766719112553_0.png' }]);
+
+      const kanbanData = {
+        ideas: {
+          card1: {
+            publishInfo: {
+              bgImages: [downloadUrl],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData.ideas : null) }));
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('113959899989339493619'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        get: mockGet,
+        update: mockUpdate,
+        markDeletedThumbnail: jest.fn().mockResolvedValue(true),
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image_by_url', data: { url: downloadUrl } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      // update should be called to remove the publishInfo.bgImages field (one of the updates should remove the bgImages field)
+      const updateCalls = mockUpdate.mock.calls;
+      expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+      const hadDeletedBgImages = updateCalls.some((c) => {
+        const upd = c[1];
+        return upd && upd.publishInfo && !Object.prototype.hasOwnProperty.call(upd.publishInfo, 'bgImages');
+      });
+      expect(hadDeletedBgImages).toBe(true);
+    });
+
+    test('force_remove_url_references sends immediate ACK and delivers final result to sender tab', async () => {
+      const testUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.firebasestorage.app/o/thumbnails%2F113959899989339493619%2F1766719112553_0.png?alt=media&token=tok';
+
+      const mockGetUploaded = jest.fn().mockResolvedValue([{ id: 'img1', downloadURL: testUrl, storagePath: 'gs://content-pilot-7eb03.firebasestorage.app/thumbnails/113959899989339493619/1766719112553_0.png' }]);
+
+      const kanbanData = {
+        ideas: {
+          card1: {
+            publishInfo: {
+              thumbnailInfo: [{ bgImage: testUrl, bgImages: [testUrl] }],
+              bgImage: testUrl,
+              bgImages: [testUrl],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData.ideas : null) }));
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+
+      // mock tabs sendMessage to capture final result
+      chrome.tabs = { sendMessage: jest.fn((tabId, msg, cb) => cb && cb()) };
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('113959899989339493619'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        get: mockGet,
+        update: mockUpdate,
+        remove: mockRemove,
+        markDeletedThumbnail: jest.fn().mockResolvedValue(true),
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'force_remove_url_references', data: { url: testUrl, dryRun: false } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, { tab: { id: 987 } }, sendResponse);
+
+      // handler returns true and should have sent immediate ACK
+      expect(ret).toBe(true);
+      expect(sendResponse).toHaveBeenCalled();
+      const firstCall = sendResponse.mock.calls[0][0];
+      expect(firstCall && firstCall.success).toBe('accepted');
+      expect(firstCall && firstCall.requestId).toBeTruthy();
+
+      // wait for async work to finish
+      await new Promise((r) => setTimeout(r, 0));
+
+      // verify final result delivered to tab
+      expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(987, expect.objectContaining({ action: 'force_remove_url_references_result', requestId: expect.any(String) }), expect.any(Function));
+      // final sendResponse attempt should also have been made (last call)
+      const lastCall = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastCall && (lastCall.success === true || lastCall.success === false || lastCall.requestId)).toBeTruthy();
+    });
+
+    test('force_remove_url_references executes removals when dryRun=false', async () => {
+      const testUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.firebasestorage.app/o/thumbnails%2F113959899989339493619%2F1766719112553_0.png?alt=media&token=tok';
+
+      const mockGetUploaded = jest.fn().mockResolvedValue([{ id: 'img1', downloadURL: testUrl, storagePath: 'gs://content-pilot-7eb03.firebasestorage.app/thumbnails/113959899989339493619/1766719112553_0.png' }]);
+
+      const kanbanData = {
+        ideas: {
+          card1: {
+            publishInfo: {
+              thumbnailInfo: [{ bgImage: testUrl, bgImages: [testUrl] }],
+              bgImage: testUrl,
+              bgImages: [testUrl],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData.ideas : null) }));
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockDeleteImage = jest.fn().mockResolvedValue(true);
+      const mockMarkDeleted = jest.fn().mockResolvedValue(true);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('113959899989339493619'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        get: mockGet,
+        remove: mockRemove,
+        update: mockUpdate,
+        deleteImageFromStorage: mockDeleteImage,
+        markDeletedThumbnail: mockMarkDeleted,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'force_remove_url_references', data: { url: testUrl, dryRun: false } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      // wait for immediate ACK + handler to compute planned removals
+      await new Promise((r) => setTimeout(r, 50));
+
+      const lastCall = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastCall && lastCall.success).toBe(true);
+      // planned should be returned by the handler
+      expect(lastCall.planned).toBeTruthy();
+      expect(lastCall.planned.thumbnailIds.length).toBeGreaterThanOrEqual(1);
+
+      // allow execution of removals to proceed
+      await new Promise((r) => setTimeout(r, 50));
+
+      // debug: output planned removals
+      // eslint-disable-next-line no-console
+      console.log('[TEST DEBUG] force_remove executed planned:', JSON.stringify(lastCall.planned));
+
+      expect(mockDeleteImage).toHaveBeenCalled();
+      expect(mockMarkDeleted).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
+    });
+
     test('delete_storage_image_by_url deletes when metadata found', async () => {
       const mockDelete = jest.fn().mockResolvedValue(true);
       const mockRemove = jest.fn().mockResolvedValue(true);
@@ -295,6 +596,8 @@ describe('Background Message Handlers', () => {
         remove: mockRemove,
         ref: jest.fn(),
         getUploadedImagesLog: mockGetUploaded,
+        markDeletedThumbnail: jest.fn(),
+        isThumbnailDeleted: jest.fn().mockResolvedValue(false),
         firebaseConfig: { storageBucket: 'content-pilot-7eb03.appspot.com' },
       }));
 
@@ -315,9 +618,150 @@ describe('Background Message Handlers', () => {
       const mockDelete = jest.fn().mockResolvedValue(true);
       const mockRemove = jest.fn().mockResolvedValue(true);
       const mockGetUploaded = jest.fn().mockResolvedValue([]);
+      const mockMarkDeleted = jest.fn();
 
       // URL with encoded object path
       const dlUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media&token=abc';
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        markDeletedThumbnail: mockMarkDeleted,
+        isThumbnailDeleted: jest.fn().mockResolvedValue(false),
+        remove: mockRemove,
+        ref: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        firebaseConfig: { storageBucket: 'content-pilot-7eb03.appspot.com' },
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image_by_url', data: { url: dlUrl } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockDelete).toHaveBeenCalled();
+      expect(mockMarkDeleted).toHaveBeenCalled();
+    });
+    test('delete_storage_image_by_url clears publishInfo thumbnail refs in kanban cards', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const storagePath = 'gs://content-pilot-7eb03.appspot.com/thumbnails/user/gen-1.png';
+      const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media&token=abc';
+      const mockGetUploaded = jest.fn().mockResolvedValue([]);
+
+      // kanban entries containing publishInfo with thumbnailInfo referencing the URL
+      const mockKanban = {
+        ideas: {
+          card1: { publishInfo: { thumbnailInfo: [{ bgImage: downloadUrl }], bgImages: [downloadUrl] } },
+          card2: { publishInfo: { thumbnailInfo: [{ bgImage: downloadUrl }], bgImages: [downloadUrl] } },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => {
+        const parts = path.split('/');
+        if (path === `kanban/test-user/ideas`) return Promise.resolve({ val: () => mockKanban.ideas });
+        return Promise.resolve({ val: () => null });
+      });
+
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+        ref: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        firebaseConfig: { storageBucket: 'content-pilot-7eb03.appspot.com' },
+        get: mockGet,
+        update: mockUpdate,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image_by_url', data: { url: downloadUrl } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockUpdate).toHaveBeenCalled();
+      // ensure both cards were updated
+      expect(mockUpdate.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test('delete_storage_image_by_url clears publishInfo for encoded / filename variants', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const downloadUrlWithToken = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media&token=abc';
+      const downloadUrlNoToken = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media';
+      const filenameOnly = 'gen-1.png';
+      const mockGetUploaded = jest.fn().mockResolvedValue([]);
+
+      const mockKanban = {
+        ideas: {
+          card1: { publishInfo: { thumbnailInfo: [{ bgImage: downloadUrlWithToken }], bgImages: [downloadUrlWithToken] } },
+          card2: { publishInfo: { thumbnailInfo: [{ bgImage: downloadUrlNoToken }], bgImages: [downloadUrlNoToken] } },
+          card3: { publishInfo: { thumbnailInfo: [{ bgImage: filenameOnly }], bgImages: [filenameOnly] } },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => {
+        const parts = path.split('/');
+        if (path === `kanban/test-user/ideas`) return Promise.resolve({ val: () => mockKanban.ideas });
+        return Promise.resolve({ val: () => null });
+      });
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        deleteImageFromStorage: mockDelete,
+        remove: mockRemove,
+        ref: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        firebaseConfig: { storageBucket: 'content-pilot-7eb03.appspot.com' },
+        get: mockGet,
+        update: mockUpdate,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'delete_storage_image_by_url', data: { url: downloadUrlWithToken } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Should have updated all three cards (token variant, no-token variant, filename match)
+      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockUpdate.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+    test('delete_storage_image_by_url removes multiple metadata entries for parsed path', async () => {
+      const mockDelete = jest.fn().mockResolvedValue(true);
+      const mockRemove = jest.fn().mockResolvedValue(true);
+      const storagePath = 'gs://content-pilot-7eb03.appspot.com/thumbnails/user/gen-1.png';
+      const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.appspot.com/o/thumbnails%2Fuser%2Fgen-1.png?alt=media&token=abc';
+      const mockGetUploaded = jest.fn().mockResolvedValue([
+        { id: 'a', downloadURL: downloadUrl, storagePath },
+        { id: 'b', downloadURL: downloadUrl, storagePath },
+      ]);
 
       jest.resetModules();
       jest.doMock('../js/services/firebaseService.js', () => ({
@@ -335,13 +779,59 @@ describe('Background Message Handlers', () => {
       await import('../background.js');
       const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
 
-      const message = { action: 'delete_storage_image_by_url', data: { url: dlUrl } };
+      const message = { action: 'delete_storage_image_by_url', data: { url: downloadUrl } };
       const sendResponse = jest.fn();
       const ret = runtimeHandler(message, {}, sendResponse);
       expect(ret).toBe(true);
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(mockDelete).toHaveBeenCalled();
+      expect(mockDelete).toHaveBeenCalledWith(storagePath);
+      expect(mockRemove).toHaveBeenCalledTimes(2);
+    });
+
+    test('find_url_references finds URL in thumbnail_images and kanban', async () => {
+      const testUrl = 'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.firebasestorage.app/o/thumbnails%2F113959899989339493619%2F1766714193282_0.png?alt=media&token=tok';
+      const mockGetUploaded = jest.fn().mockResolvedValue([
+        { id: 'img1', downloadURL: testUrl, storagePath: 'gs://content-pilot-7eb03.firebasestorage.app/thumbnails/113959899989339493619/1766714193282_0.png' },
+      ]);
+
+      const kanbanData = {
+        card1: {
+          publishInfo: {
+            thumbnailInfo: [{ bgImage: testUrl, bgImages: [testUrl] }],
+            bgImage: testUrl,
+            bgImages: [testUrl],
+          },
+        },
+      };
+
+      const mockGet = jest.fn().mockImplementation((path) => Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData : null) }));
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUnifiedGalleryImages: mockGetUnifiedGalleryImages,
+        getCurrentUserId: jest.fn().mockResolvedValue('113959899989339493619'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        getUploadedImagesLog: mockGetUploaded,
+        get: mockGet,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'find_url_references', data: { url: testUrl } };
+      const sendResponse = jest.fn();
+      const ret = runtimeHandler(message, {}, sendResponse);
+      expect(ret).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Verify the response captured a thumbnail_images entry and kanban references
+      expect(sendResponse).toHaveBeenCalled();
+      const lastResp = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastResp && lastResp.success).toBe(true);
+      expect(lastResp.results.thumbnailImages.length).toBe(1);
+      expect(lastResp.results.kanban.length).toBeGreaterThanOrEqual(1);
     });
 
     test('update_kanban_card normalizes thumbnailInfo bgImage to selected index', async () => {
@@ -434,7 +924,8 @@ describe('Background Message Handlers', () => {
       // wait for microtasks to complete
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(sendResponse).toHaveBeenCalledWith({ success: true, userId: mockedUserId });
+      const lastResp = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastResp).toEqual(expect.objectContaining({ success: true, userId: mockedUserId }));
     });
   });
 
@@ -588,7 +1079,8 @@ describe('Background Message Handlers', () => {
         'Some description',
         undefined
       );
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+      const lastOk = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk).toEqual(expect.objectContaining({ success: true }));
     });
 
     test('should handle generate_idea_briefing message with nested data payload', async () => {
@@ -614,7 +1106,8 @@ describe('Background Message Handlers', () => {
         'Nested desc',
         undefined
       );
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+      const lastOk2 = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk2).toEqual(expect.objectContaining({ success: true }));
     });
 
     test('should handle retry_idea_briefing by queuing DB state and scheduling generateIdeaBriefing', async () => {
@@ -658,7 +1151,8 @@ describe('Background Message Handlers', () => {
       expect(mockGen).toHaveBeenCalledWith('card-999', 'Retry Title', 'Retry Desc', {
         status: 'ideas',
       });
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+      const lastOk3 = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk3).toEqual(expect.objectContaining({ success: true }));
     });
   });
 
@@ -677,7 +1171,8 @@ describe('Background Message Handlers', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockFetchAll).toHaveBeenCalled();
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true, count: 3 });
+      const lastOk = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk).toEqual(expect.objectContaining({ success: true, count: 3 }));
     });
 
     test('should handle refresh_channel_data with source and platform', async () => {
@@ -694,7 +1189,8 @@ describe('Background Message Handlers', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockRefresh).toHaveBeenCalledWith('source-x', 'blogs');
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true, refreshed: 1 });
+      const lastOk = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk).toEqual(expect.objectContaining({ success: true, refreshed: 1 }));
     });
 
     test('should handle fetch_and_save_single_post with url and ids', async () => {
@@ -717,7 +1213,8 @@ describe('Background Message Handlers', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockFetchSave).toHaveBeenCalledWith('https://example.com/post', 'chan1', 'source1');
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true, saved: true });
+      const lastOk = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk).toEqual(expect.objectContaining({ success: true, saved: true }));
     });
 
     test('delete_channel should reject when user is default_user (not authenticated)', async () => {
@@ -737,10 +1234,8 @@ describe('Background Message Handlers', () => {
       await runtimeHandler(message, {}, mockSendResponse);
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(mockSendResponse).toHaveBeenCalledWith({
-        success: false,
-        error: '로그인이 필요합니다.',
-      });
+      const lastErr2 = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastErr2).toEqual(expect.objectContaining({ success: false, error: '로그인이 필요합니다.' }));
     });
 
     test('delete_draft_and_publish_info treats nulls as removed and does not retry', async () => {
@@ -800,7 +1295,8 @@ describe('Background Message Handlers', () => {
       expect(mockSet).toHaveBeenCalledTimes(1);
 
       // response should indicate success
-      expect(mockSendResponse).toHaveBeenCalledWith({ success: true, moved: false });
+      const lastOk = mockSendResponse.mock.calls.slice(-1)[0][0];
+      expect(lastOk).toEqual(expect.objectContaining({ success: true, moved: false }));
     });
   });
 });

@@ -334,8 +334,33 @@ export function cleanDataForFirebase(data) {
 }
 
 // Storage 업로드 함수 (REST API 기반)
+// Test-only in-memory tombstone overrides (used by unit tests)
+export const __TEST_tombstones = {};
+export function __TEST_markTombstone(userId, path) {
+  __TEST_tombstones[`${userId}:${path}`] = true;
+}
+
 export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
   try {
+    // Check tombstone: avoid re-uploading a recently deleted path
+    const uid = userId || (await getCurrentUserId());
+
+        // perform tombstone check: call isThumbnailDeleted but handle errors separately
+      let tomb = false;
+      try {
+        tomb = await isThumbnailDeleted(uid, path);
+      } catch (e) {
+        // If tombstone check fails, log and treat as non-tombstoned (allow upload)
+        Logger.debug('[Firebase Storage] tombstone lookup failed (continuing):', e && e.message);
+        tomb = false;
+      }
+
+      // Test hook: if a test set a tombstone in-memory, honor it synchronously
+      if (__TEST_tombstones[`${uid}:${path}`] || tomb) {
+        Logger.warn('[Firebase Storage] upload blocked by tombstone for path:', path);
+        throw new Error('upload blocked: tombstoned path');
+      }
+
     const blob = dataURLtoBlob(dataUrl);
     let token = await getValidToken(false);
     if (!token) {
@@ -400,6 +425,46 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
   } catch (error) {
     Logger.error('[Firebase Storage] 업로드 실패:', error);
     throw error;
+  }
+}
+
+/**
+ * Tombstone: mark a thumbnail path as deleted to prevent immediate re-uploads
+ */
+export async function markDeletedThumbnail(userId, path, ttlMs = 24 * 3600 * 1000) {
+  try {
+    const ts = Date.now();
+    const encoded = encodeURIComponent(path);
+    await set(`deleted_thumbnails/${userId}/${encoded}`, { deletedAt: ts, expireAt: ts + ttlMs });
+    Logger.info('[Firebase] marked tombstone for deleted thumbnail:', userId, path);
+    return true;
+  } catch (e) {
+    Logger.warn('[Firebase] failed to mark tombstone for deleted thumbnail:', e && e.message);
+    return false;
+  }
+}
+
+export async function isThumbnailDeleted(userId, path) {
+  try {
+    const encoded = encodeURIComponent(path);
+    const snap = await get(`deleted_thumbnails/${userId}/${encoded}`);
+    const val = snap && snap.val ? snap.val() : null;
+    if (!val) return false;
+
+    if (val.expireAt && Date.now() > val.expireAt) {
+      // expired tombstone - clean up
+      try {
+        await remove(ref(getDb(), `deleted_thumbnails/${userId}/${encoded}`));
+      } catch (e) {
+        Logger.debug('[Firebase] failed to cleanup expired tombstone:', e && e.message);
+      }
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    Logger.warn('[Firebase] tombstone check failed:', e && e.message);
+    return false;
   }
 }
 
