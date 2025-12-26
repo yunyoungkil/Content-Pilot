@@ -166,7 +166,12 @@ async function dbRequest(method, path, data = null) {
     // On success, parse JSON and log a preview for debugging
     const jsonRes = await response.json();
     try {
-      Logger.debug('[Firebase REST] success payload preview:', { method, path, preview: jsonRes && typeof jsonRes === 'object' ? Object.keys(jsonRes).slice(0,6) : jsonRes });
+      Logger.debug('[Firebase REST] success payload preview:', {
+        method,
+        path,
+        preview:
+          jsonRes && typeof jsonRes === 'object' ? Object.keys(jsonRes).slice(0, 6) : jsonRes,
+      });
     } catch (e) {
       // ignore logging errors
     }
@@ -245,7 +250,12 @@ export async function get(path) {
 }
 
 export async function set(path, data) {
-  console.debug('[FirebaseService] SET called - path:', path, 'data keys:', data && Object.keys(data));
+  console.debug(
+    '[FirebaseService] SET called - path:',
+    path,
+    'data keys:',
+    data && Object.keys(data)
+  );
   await dbRequest('PUT', path, data);
   return true;
 }
@@ -703,7 +713,9 @@ export async function deleteImageFromStorage(storageUrl) {
     } catch (e) {
       // On auth errors, try an interactive token refresh once
       if (e && (e.status === 401 || e.status === 403)) {
-        Logger.warn('[Storage] DELETE failed with auth error, attempting interactive token refresh');
+        Logger.warn(
+          '[Storage] DELETE failed with auth error, attempting interactive token refresh'
+        );
         const interactiveToken = await getValidToken(true);
         if (interactiveToken && interactiveToken !== token) {
           try {

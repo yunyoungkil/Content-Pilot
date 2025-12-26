@@ -646,7 +646,7 @@ export async function parseBlogPage(url, html) {
       const res = await fetch(url, {
         method: 'GET',
         cache: 'no-cache',
-        credentials: 'omit'
+        credentials: 'omit',
       });
       if (!res.ok) throw new Error(`Fetch Fail: ${res.status}`);
       content = await res.text();
@@ -714,27 +714,30 @@ export async function fetchImageAsBase64(url) {
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
-            resolve({ success: true, dataUrl: reader.result });
+          resolve({ success: true, dataUrl: reader.result });
         } else {
-            resolve({ success: false, error: 'FileReader result empty' });
+          resolve({ success: false, error: 'FileReader result empty' });
         }
       };
       reader.onerror = () => {
         console.error('[collectorService] FileReader error:', reader.error);
-        resolve({ success: false, error: 'FileReader error: ' + (reader.error ? reader.error.message : 'unknown') });
+        resolve({
+          success: false,
+          error: 'FileReader error: ' + (reader.error ? reader.error.message : 'unknown'),
+        });
       };
       reader.readAsDataURL(blob);
     });
   } catch (e) {
     console.error('[collectorService] fetchImageAsBase64 exception:', e);
     Logger.warn('[fetchImageAsBase64] fetch 실패:', e.message);
-    
+
     // 폴백: img 태그 사용 (Service Worker에서는 불가)
     if (!isServiceWorker) {
       Logger.info('[fetchImageAsBase64] img 태그 방식 시도');
       return await fetchImageViaImgTag(url);
     }
-    
+
     return { success: false, error: e.message };
   }
 }

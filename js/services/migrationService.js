@@ -226,18 +226,20 @@ export async function runDataMigration(userId, targetChannelId = null, options =
         const distKey = status === 'ideas' ? 'ideas' : 'kanban';
         // overall distribution - counts for all kanban items
         distributionAll[distKey][String(chId)] = (distributionAll[distKey][String(chId)] || 0) + 1;
-        
+
         // Track specific statuses in overall distribution as well
         if (status === 'in-progress') {
-          distributionAll.kanban_inprogress[String(chId)] = (distributionAll.kanban_inprogress[String(chId)] || 0) + 1;
+          distributionAll.kanban_inprogress[String(chId)] =
+            (distributionAll.kanban_inprogress[String(chId)] || 0) + 1;
         } else if (status === 'done') {
-          distributionAll.kanban_done[String(chId)] = (distributionAll.kanban_done[String(chId)] || 0) + 1;
+          distributionAll.kanban_done[String(chId)] =
+            (distributionAll.kanban_done[String(chId)] || 0) + 1;
         }
 
         if (!chId) {
           // status가 'ideas'인 경우 별도 타입으로 분류하여 보고
           const type = status === 'ideas' ? 'ideas' : 'kanban';
-          
+
           // Only include when collections not supplied or this type is selected
           let isSelected = false;
           if (!Array.isArray(collections) || collections.length === 0) {
@@ -342,7 +344,8 @@ export async function runDataMigration(userId, targetChannelId = null, options =
 
               if (isSelected) {
                 itemsToMigrate.push({ type, status, id, card, currentChannelId: chId });
-                distribution[distKey][String(chId)] = (distribution[distKey][String(chId)] || 0) + 1;
+                distribution[distKey][String(chId)] =
+                  (distribution[distKey][String(chId)] || 0) + 1;
                 if (status === 'in-progress') {
                   distribution.kanban_inprogress[String(chId)] =
                     (distribution.kanban_inprogress[String(chId)] || 0) + 1;
@@ -374,9 +377,7 @@ export async function runDataMigration(userId, targetChannelId = null, options =
         // [Fix] Only include if host matches target channel host (even for unassigned scraps)
         const hasMatchingHost =
           targetChannelHost &&
-          extractUrlsFromObject(scrap).some(
-            (u) => getHostFromUrlString(u) === targetChannelHost
-          );
+          extractUrlsFromObject(scrap).some((u) => getHostFromUrlString(u) === targetChannelHost);
 
         if (hasMatchingHost) {
           if (
@@ -396,9 +397,7 @@ export async function runDataMigration(userId, targetChannelId = null, options =
           // [Modified] Only include if host matches target channel host
           const hasMatchingHost =
             targetChannelHost &&
-            extractUrlsFromObject(scrap).some(
-              (u) => getHostFromUrlString(u) === targetChannelHost
-            );
+            extractUrlsFromObject(scrap).some((u) => getHostFromUrlString(u) === targetChannelHost);
 
           if (hasMatchingHost) {
             if (

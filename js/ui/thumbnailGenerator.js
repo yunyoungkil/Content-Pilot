@@ -409,7 +409,9 @@ const renderHelpers = {
                 ctx.fillRect(0, 0, canvasWidth, canvasHeight);
               } else {
                 // no-op when test-provided context lacks drawing APIs
-                console.warn('[Background Render] ⚠️ ctx.fillRect not available; skipping gradient fill');
+                console.warn(
+                  '[Background Render] ⚠️ ctx.fillRect not available; skipping gradient fill'
+                );
               }
               console.log(
                 `[Background Render] ✅ 그라디언트: ${colors[0]} → ${colors[colors.length - 1]}`
@@ -420,9 +422,13 @@ const renderHelpers = {
               if (typeof ctx.fillRect === 'function') {
                 ctx.fillRect(0, 0, canvasWidth, canvasHeight);
               } else {
-                console.warn('[Background Render] ⚠️ ctx.fillRect not available; skipping solid fill');
+                console.warn(
+                  '[Background Render] ⚠️ ctx.fillRect not available; skipping solid fill'
+                );
               }
-              console.warn('[Background Render] ⚠️ createLinearGradient is not available; using solid fill');
+              console.warn(
+                '[Background Render] ⚠️ createLinearGradient is not available; using solid fill'
+              );
             }
           } else {
             ctx.fillStyle = '#FFFFFF';

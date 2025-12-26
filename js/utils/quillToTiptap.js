@@ -78,11 +78,18 @@ export async function convertDeltaToTipTapJSON(delta) {
       if (marks.bold) textNode.marks = (textNode.marks || []).concat({ type: 'bold' });
       if (marks.italic) textNode.marks = (textNode.marks || []).concat({ type: 'italic' });
       if (marks.underline) textNode.marks = (textNode.marks || []).concat({ type: 'underline' });
-      if (marks.link) textNode.marks = (textNode.marks || []).concat({ type: 'link', attrs: { href: marks.link } });
+      if (marks.link)
+        textNode.marks = (textNode.marks || []).concat({
+          type: 'link',
+          attrs: { href: marks.link },
+        });
       return textNode;
     }
     if (op.insert && op.insert.image) {
-      return { type: 'image', attrs: { src: op.insert.image, alt: (op.attributes && op.attributes.alt) || null } };
+      return {
+        type: 'image',
+        attrs: { src: op.insert.image, alt: (op.attributes && op.attributes.alt) || null },
+      };
     }
     return null;
   };
@@ -125,7 +132,10 @@ export async function convertDeltaToTipTapJSON(delta) {
           }
           if (inCodeBlock) {
             // flush code block
-            content.push({ type: 'codeBlock', content: [{ type: 'text', text: codeLines.join('\n') }] });
+            content.push({
+              type: 'codeBlock',
+              content: [{ type: 'text', text: codeLines.join('\n') }],
+            });
             inCodeBlock = false;
             codeLines = [];
           }
@@ -133,7 +143,11 @@ export async function convertDeltaToTipTapJSON(delta) {
           if (attrs.header) {
             flushList();
             if (currentInline.length > 0) {
-              content.push({ type: 'heading', attrs: { level: attrs.header }, content: currentInline });
+              content.push({
+                type: 'heading',
+                attrs: { level: attrs.header },
+                content: currentInline,
+              });
               currentInline = [];
             } else {
               content.push({ type: 'heading', attrs: { level: attrs.header } });
@@ -142,13 +156,21 @@ export async function convertDeltaToTipTapJSON(delta) {
           }
           if (attrs['list']) {
             if (!listBuffer) listBuffer = { ordered: attrs.list === 'ordered', items: [] };
-            listBuffer.items.push(currentInline.length > 0 ? currentInline : [{ type: 'paragraph' }]);
+            listBuffer.items.push(
+              currentInline.length > 0 ? currentInline : [{ type: 'paragraph' }]
+            );
             currentInline = [];
             continue;
           }
           if (attrs['blockquote']) {
             flushList();
-            content.push({ type: 'blockquote', content: currentInline.length > 0 ? [{ type: 'paragraph', content: currentInline }] : [{ type: 'paragraph' }] });
+            content.push({
+              type: 'blockquote',
+              content:
+                currentInline.length > 0
+                  ? [{ type: 'paragraph', content: currentInline }]
+                  : [{ type: 'paragraph' }],
+            });
             currentInline = [];
             continue;
           }
@@ -200,10 +222,18 @@ export function _convertHtmlTableToTipTapJSON(htmlString) {
         if (node.tagName === 'STRONG' || node.tagName === 'B') {
           children.push({ type: 'text', text: node.textContent || '', marks: [{ type: 'bold' }] });
         } else if (node.tagName === 'EM' || node.tagName === 'I') {
-          children.push({ type: 'text', text: node.textContent || '', marks: [{ type: 'italic' }] });
+          children.push({
+            type: 'text',
+            text: node.textContent || '',
+            marks: [{ type: 'italic' }],
+          });
         } else if (node.tagName === 'A') {
           const href = node.getAttribute('href') || '';
-          children.push({ type: 'text', text: node.textContent || '', marks: [{ type: 'link', attrs: { href } }] });
+          children.push({
+            type: 'text',
+            text: node.textContent || '',
+            marks: [{ type: 'link', attrs: { href } }],
+          });
         } else {
           // fallback: use node text
           const text = node.textContent || '';
@@ -218,7 +248,9 @@ export function _convertHtmlTableToTipTapJSON(htmlString) {
   const rows = [];
   for (const tr of Array.from(table.querySelectorAll('tr'))) {
     const cells = [];
-    const children = Array.from(tr.children).filter((n) => n.tagName === 'TD' || n.tagName === 'TH');
+    const children = Array.from(tr.children).filter(
+      (n) => n.tagName === 'TD' || n.tagName === 'TH'
+    );
     for (const cell of children) {
       const isHeader = cell.tagName === 'TH';
       const cellContent = buildCellContent(cell);
@@ -231,4 +263,3 @@ export function _convertHtmlTableToTipTapJSON(htmlString) {
   const tableNode = [{ type: 'table', content: rows }];
   return tableNode;
 }
-

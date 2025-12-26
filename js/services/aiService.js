@@ -56,7 +56,9 @@ function sanitizeThumbnailText(candidate, fallback) {
     }
   } catch (e) {}
   try {
-    const fb = String(fallback || '').replace(/[\p{P}\p{S}]+/gu, '').trim();
+    const fb = String(fallback || '')
+      .replace(/[\p{P}\p{S}]+/gu, '')
+      .trim();
     return fb ? (fb.length > 12 ? fb.substring(0, 12).trim() : fb) : '썸네일';
   } catch (e) {
     return '썸네일';
@@ -66,7 +68,10 @@ function sanitizeThumbnailText(candidate, fallback) {
 // [신규] Detect meta-template style candidates and exclude them from use
 function looksLikeMetaTemplateCandidate(cand) {
   try {
-    const text = ((cand && (cand.thumbnailPromptKo || cand.thumbnailPromptEn || cand.thumbnailText)) || '')
+    const text = (
+      (cand && (cand.thumbnailPromptKo || cand.thumbnailPromptEn || cand.thumbnailText)) ||
+      ''
+    )
       .toString()
       .toLowerCase();
     // Korean heuristic phrases and a small English heuristic
@@ -76,19 +81,31 @@ function looksLikeMetaTemplateCandidate(cand) {
   } catch (e) {
     return false;
   }
-} 
+}
 
 // Compute thumbnail text for overlay composition (testable helper)
 function computeThumbnailTextForCompose(selectedThumbnail = {}, seoTitle = '', ideaData = {}) {
-  const fallback = (seoTitle || ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+  const fallback = (seoTitle || ideaData.title || '')
+    .replace(/[^\p{L}\p{N}\s]+/gu, '')
+    .trim()
+    .substring(0, 12);
   return sanitizeThumbnailText(selectedThumbnail.thumbnailText || '', fallback);
 }
 
 // Try to replace title-like fallback with an AI generated slogan (async helper)
-async function selectSloganIfTitleFallback(selectedThumbnail = {}, thumbnailCandidates = [], seoTitle = '', ideaData = {}, formattedDraft = '') {
+async function selectSloganIfTitleFallback(
+  selectedThumbnail = {},
+  thumbnailCandidates = [],
+  seoTitle = '',
+  ideaData = {},
+  formattedDraft = ''
+) {
   try {
     const currentText = String(selectedThumbnail.thumbnailText || '').trim();
-    const titleFallback = (seoTitle || ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
+    const titleFallback = (seoTitle || ideaData.title || '')
+      .replace(/[^\p{L}\p{N}\s]+/gu, '')
+      .trim()
+      .substring(0, 12);
     const normalizedTitle = (ideaData.title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim();
     const looksLikeTitleFallback =
       !currentText ||
@@ -96,7 +113,8 @@ async function selectSloganIfTitleFallback(selectedThumbnail = {}, thumbnailCand
       (currentText && currentText === sanitizeThumbnailText('', titleFallback)) ||
       currentText === (ideaData.title || '') ||
       (ideaData.title && ideaData.title.includes(currentText)) ||
-      (currentText && currentText.includes(normalizedTitle.substring(0, Math.min(12, normalizedTitle.length))));
+      (currentText &&
+        currentText.includes(normalizedTitle.substring(0, Math.min(12, normalizedTitle.length))));
     if (!looksLikeTitleFallback) return selectedThumbnail;
 
     const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
@@ -104,8 +122,12 @@ async function selectSloganIfTitleFallback(selectedThumbnail = {}, thumbnailCand
       const suggested = slogans[0] || '';
       const newText = sanitizeThumbnailText(suggested, titleFallback);
       selectedThumbnail.thumbnailText = newText;
-      if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) thumbnailCandidates[0] = selectedThumbnail;
-      Logger.info('[selectSloganIfTitleFallback] Using generated slogan for overlay:', selectedThumbnail.thumbnailText);
+      if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0)
+        thumbnailCandidates[0] = selectedThumbnail;
+      Logger.info(
+        '[selectSloganIfTitleFallback] Using generated slogan for overlay:',
+        selectedThumbnail.thumbnailText
+      );
     }
   } catch (e) {
     Logger.debug('[selectSloganIfTitleFallback] error:', e && e.message);
@@ -140,7 +162,9 @@ async function fetchImageAsBase64(url) {
         // Expected response: { success: true, dataUrl: 'data:image/png;base64,...' } or { success: true, mimeType, data }
         if (responseMsg && responseMsg.success) {
           try {
-            console.log('%c[AI 썸네일 메이커 디버깅][fetchImage success]', 'color:#9E9E9E', { url });
+            console.log('%c[AI 썸네일 메이커 디버깅][fetchImage success]', 'color:#9E9E9E', {
+              url,
+            });
           } catch (e) {
             void 0;
           }
@@ -156,7 +180,9 @@ async function fetchImageAsBase64(url) {
       } catch (e) {
         Logger.debug('[fetchImageAsBase64] chrome.runtime.fetch failed, falling back', e);
         try {
-          console.log('%c[AI 썸네일 메이커 디버깅][fetchImage bg-failed]', 'color:#9E9E9E', { url });
+          console.log('%c[AI 썸네일 메이커 디버깅][fetchImage bg-failed]', 'color:#9E9E9E', {
+            url,
+          });
         } catch (e) {
           void 0;
         }
@@ -172,7 +198,9 @@ async function fetchImageAsBase64(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패: ${response.status}`);
     try {
-      console.log('%c[AI 썸네일 메이커 디버깅][fetchImage fetch-success]', 'color:#9E9E9E', { url });
+      console.log('%c[AI 썸네일 메이커 디버깅][fetchImage fetch-success]', 'color:#9E9E9E', {
+        url,
+      });
     } catch (e) {
       void 0;
     }
@@ -221,13 +249,16 @@ async function analyzeScrapImage(imageUrl) {
 
 // Select multiple reference images for background generation (prioritized)
 // Returns array of URLs (maxCount default 3)
-export function selectBackgroundReferenceImages({ formattedDraft, ideaData = {}, affiliateLinks = [] }, maxCount = 3) {
+export function selectBackgroundReferenceImages(
+  { formattedDraft, ideaData = {}, affiliateLinks = [] },
+  maxCount = 3
+) {
   const urls = [];
-  
+
   console.log('[DEBUG_REF] selectBackgroundReferenceImages input:', {
     draftLength: (formattedDraft || '').length,
     linkedScrapsCount: ideaData.linkedScrapsContent?.length || 0,
-    affiliateLinksCount: affiliateLinks?.length || 0
+    affiliateLinksCount: affiliateLinks?.length || 0,
   });
 
   // 1) images from formattedDraft (editor), exclude firebase thumbnail paths
@@ -258,8 +289,9 @@ export function selectBackgroundReferenceImages({ formattedDraft, ideaData = {},
     for (const scrap of ideaData.linkedScrapsContent) {
       // scrap.image might be in scrap.originData.image or scrap.imageUrl or scrap.image
       // Normalize scrap image access
-      const candidate = scrap.image || scrap.imageUrl || scrap.originData?.image || scrap.originData?.thumbnail;
-      
+      const candidate =
+        scrap.image || scrap.imageUrl || scrap.originData?.image || scrap.originData?.thumbnail;
+
       if (candidate) {
         if (!urls.includes(candidate)) {
           urls.push(candidate);
@@ -364,7 +396,14 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
 
   try {
     // Debug: log the incoming prompt (short) for test visibility
-    try { Logger.debug('[callGeminiAPI] prompt preview:', typeof prompt === 'string' ? prompt.substring(0,200) : Object.prototype.toString.call(prompt)); } catch (e) { }
+    try {
+      Logger.debug(
+        '[callGeminiAPI] prompt preview:',
+        typeof prompt === 'string'
+          ? prompt.substring(0, 200)
+          : Object.prototype.toString.call(prompt)
+      );
+    } catch (e) {}
     // [수정] 멀티모달 입력을 위한 parts 구성
     const parts = [];
 
@@ -592,7 +631,9 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
         thumbnailCandidates = Array.isArray(parsed) ? parsed : [parsed];
 
         // Filter out any persisted meta-template style candidates so they are never used
-        thumbnailCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplateCandidate(c));
+        thumbnailCandidates = (thumbnailCandidates || []).filter(
+          (c) => !looksLikeMetaTemplateCandidate(c)
+        );
       } catch (e) {
         Logger.warn('[processDraftResponse] 썸네일정보 파싱 실패:', e);
         thumbnailCandidates = [];
@@ -871,7 +912,11 @@ export async function enhanceDraftWithFeatures({
         // DEV: broadcast final image prompt for debug in workspace UI
         try {
           if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-            chrome.runtime.sendMessage({ action: 'debug_show_prompt', promptType: 'imageGeneration.final', prompt: finalImagePrompt });
+            chrome.runtime.sendMessage({
+              action: 'debug_show_prompt',
+              promptType: 'imageGeneration.final',
+              prompt: finalImagePrompt,
+            });
           }
         } catch (e) {}
 
@@ -901,9 +946,15 @@ export async function enhanceDraftWithFeatures({
     // --- Background generation using multiple reference images (EXPANDED MODE) ---
     let backgroundImageUrl = null;
     try {
-      const referenceUrls = selectBackgroundReferenceImages({ formattedDraft, ideaData, affiliateLinks }, 3);
+      const referenceUrls = selectBackgroundReferenceImages(
+        { formattedDraft, ideaData, affiliateLinks },
+        3
+      );
       if (referenceUrls && referenceUrls.length > 0) {
-        Logger.info('[enhanceDraftWithFeatures] background reference URLs:', referenceUrls.map((u) => u.substring(0, 80)));
+        Logger.info(
+          '[enhanceDraftWithFeatures] background reference URLs:',
+          referenceUrls.map((u) => u.substring(0, 80))
+        );
         const refBase64s = await Promise.all(
           referenceUrls.map((u) => fetchImageAsBase64(u).catch(() => null))
         );
@@ -919,19 +970,31 @@ export async function enhanceDraftWithFeatures({
               Logger.info('[enhanceDraftWithFeatures] background generated:', backgroundImageUrl);
             }
           } catch (bgErr) {
-            Logger.warn('[enhanceDraftWithFeatures] background generation failed:', bgErr && bgErr.message ? bgErr.message : bgErr);
+            Logger.warn(
+              '[enhanceDraftWithFeatures] background generation failed:',
+              bgErr && bgErr.message ? bgErr.message : bgErr
+            );
           }
         }
       }
     } catch (err) {
-      Logger.warn('[enhanceDraftWithFeatures] background reference processing failed:', err && err.message ? err.message : err);
+      Logger.warn(
+        '[enhanceDraftWithFeatures] background reference processing failed:',
+        err && err.message ? err.message : err
+      );
     }
 
     // Compose text overlay if requested
     let composedDataUrl = backgroundImageUrl || sourceImageUrl;
     if (composeThumbnailText) {
       // Try to prefer a generated slogan when current thumbnailText looks like title fallback
-      await selectSloganIfTitleFallback(selectedThumbnail, thumbnailCandidates, seoTitle, ideaData, formattedDraft);
+      await selectSloganIfTitleFallback(
+        selectedThumbnail,
+        thumbnailCandidates,
+        seoTitle,
+        ideaData,
+        formattedDraft
+      );
 
       // Prefer user-provided or AI-generated thumbnail text; otherwise use a cleaned, truncated title as fallback.
       const thumbnailText = computeThumbnailTextForCompose(selectedThumbnail, seoTitle, ideaData);
@@ -1118,7 +1181,10 @@ export async function enhanceDraftWithFeatures({
       url_1x1,
       url_4x3,
       url_16x9,
-      altText: sanitizeAltText(selectedThumbnail.altText, `${seoTitle || ideaData.title} 썸네일 이미지`),
+      altText: sanitizeAltText(
+        selectedThumbnail.altText,
+        `${seoTitle || ideaData.title} 썸네일 이미지`
+      ),
     };
     try {
       if (typeof onProgress === 'function')
@@ -1541,7 +1607,13 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const { generateDraft = true, generateThumbnail = true } = options;
     Logger.debug('[generateDraftFromIdea] received options:', options);
     // Debug: show ideaData basics
-    try { console.log('[generateDraftFromIdea] DBG: ideaData summary:', { id: ideaData?.id, title: ideaData?.title, status: ideaData?.status }); } catch(e){}
+    try {
+      console.log('[generateDraftFromIdea] DBG: ideaData summary:', {
+        id: ideaData?.id,
+        title: ideaData?.title,
+        status: ideaData?.status,
+      });
+    } catch (e) {}
 
     // 사용자 설정 로드 (options에 값이 없으면 저장소에서 확인)
     let composeThumbnailText = options.composeThumbnailText;
@@ -1549,18 +1621,36 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // Early safety: if caller explicitly requested thumbnail prompts and we have an idea id,
     // create an initial placeholder publishInfo.thumbnailPrompts so that DB update is recorded
     // quickly (helps UI show an intent and ensures tests can detect the update).
-    if (options && (options.generateThumbnailPrompts || options.generateThumbnail) && ideaData && ideaData.id) {
+    if (
+      options &&
+      (options.generateThumbnailPrompts || options.generateThumbnail) &&
+      ideaData &&
+      ideaData.id
+    ) {
       try {
         const earlyUid = await getCurrentUserId();
         const earlyStatus = ideaData.status || 'ideas';
         const earlyPath = `kanban/${earlyUid}/${earlyStatus}/${ideaData.id}`;
         const placeholder = { curiosity: [], info: [], empathy: [] };
-        console.log('[generateDraftFromIdea] Early placeholder persist for thumbnailPrompts:', earlyPath, placeholder);
-        await update(ref(getDb(), earlyPath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: placeholder } }));
+        console.log(
+          '[generateDraftFromIdea] Early placeholder persist for thumbnailPrompts:',
+          earlyPath,
+          placeholder
+        );
+        await update(
+          ref(getDb(), earlyPath),
+          cleanDataForFirebase({ publishInfo: { thumbnailPrompts: placeholder } })
+        );
         try {
-          await update(ref(getDb(), `${earlyPath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: placeholder }));
+          await update(
+            ref(getDb(), `${earlyPath}/workspace/draft/publishInfo`),
+            cleanDataForFirebase({ thumbnailPrompts: placeholder })
+          );
         } catch (nestedErr) {
-          Logger.debug('[generateDraftFromIdea] early nested persist failed:', nestedErr?.message || String(nestedErr));
+          Logger.debug(
+            '[generateDraftFromIdea] early nested persist failed:',
+            nestedErr?.message || String(nestedErr)
+          );
         }
         // If caller explicitly asked to only signal intent (generateDraft === false),
         // return early with the placeholder shape so callers get immediate feedback.
@@ -1584,7 +1674,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           }
         }
       } catch (earlyErr) {
-        Logger.debug('[generateDraftFromIdea] early placeholder persist failed:', earlyErr?.message || String(earlyErr));
+        Logger.debug(
+          '[generateDraftFromIdea] early placeholder persist failed:',
+          earlyErr?.message || String(earlyErr)
+        );
       }
     }
     if (composeThumbnailText === undefined) {
@@ -1883,10 +1976,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     });
 
     // Determine whether thumbnail prompts were requested (capture early to avoid mutation of options)
-    const shouldGenerateThumbnailPrompts = !!(options && (options.generateThumbnailPrompts || options.generateThumbnail));
-    Logger.debug('[generateDraftFromIdea] shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts);
+    const shouldGenerateThumbnailPrompts = !!(
+      options &&
+      (options.generateThumbnailPrompts || options.generateThumbnail)
+    );
+    Logger.debug(
+      '[generateDraftFromIdea] shouldGenerateThumbnailPrompts:',
+      shouldGenerateThumbnailPrompts
+    );
     // Ensure visibility in tests (console) as well
-    console.log('[generateDraftFromIdea] shouldGenerateThumbnailPrompts (console):', shouldGenerateThumbnailPrompts, 'options:', options);
+    console.log(
+      '[generateDraftFromIdea] shouldGenerateThumbnailPrompts (console):',
+      shouldGenerateThumbnailPrompts,
+      'options:',
+      options
+    );
 
     // Holder for generated thumbnail prompts so we can persist reliably at the end
     let generatedThumbUpdates = null;
@@ -1908,7 +2012,13 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
     // Optional: generate thumbnail prompt concepts early when requested in options
     if (shouldGenerateThumbnailPrompts) {
-      Logger.debug('[generateDraftFromIdea] generate-thumbnail flag present - generating thumbnail prompts', { generateThumbnail: options.generateThumbnail, generateThumbnailPrompts: options.generateThumbnailPrompts });
+      Logger.debug(
+        '[generateDraftFromIdea] generate-thumbnail flag present - generating thumbnail prompts',
+        {
+          generateThumbnail: options.generateThumbnail,
+          generateThumbnailPrompts: options.generateThumbnailPrompts,
+        }
+      );
       try {
         const contextText = `${title}${ideaData.description ? ' - ' + ideaData.description : ''}`;
 
@@ -1923,21 +2033,39 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         for (const [key, p] of Object.entries(prompts)) {
           try {
             const res = await callGeminiAPI(p);
-            console.log('[generateDraftFromIdea] DBG: callGeminiAPI returned for key', key, '->', String(res).slice(0,200));
+            console.log(
+              '[generateDraftFromIdea] DBG: callGeminiAPI returned for key',
+              key,
+              '->',
+              String(res).slice(0, 200)
+            );
             let arr = tryParseArray(String(res || ''));
-            console.log('[generateDraftFromIdea] DBG: tryParseArray result for key', key, '->', Array.isArray(arr) ? JSON.stringify(arr).slice(0,200) : String(arr).slice(0,200));
+            console.log(
+              '[generateDraftFromIdea] DBG: tryParseArray result for key',
+              key,
+              '->',
+              Array.isArray(arr) ? JSON.stringify(arr).slice(0, 200) : String(arr).slice(0, 200)
+            );
             if (!Array.isArray(arr)) {
               arr = String(res || '')
                 .split(/\r?\n/)
                 .map((s) => s.trim())
                 .filter(Boolean);
-              console.log('[generateDraftFromIdea] DBG: fallback split result for key', key, '->', JSON.stringify(arr).slice(0,200));
+              console.log(
+                '[generateDraftFromIdea] DBG: fallback split result for key',
+                key,
+                '->',
+                JSON.stringify(arr).slice(0, 200)
+              );
             }
             if (Array.isArray(arr)) {
               thumbUpdates[key] = arr.map((s) => String(s).replace(/\s+/g, ' ').trim()).slice(0, 6);
             }
           } catch (e) {
-            Logger.warn('[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':', e);
+            Logger.warn(
+              '[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':',
+              e
+            );
           }
         }
 
@@ -1950,20 +2078,35 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           try {
             if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
               // use only candidates that are not meta-templates
-              const cleanCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplateCandidate(c));
+              const cleanCandidates = (thumbnailCandidates || []).filter(
+                (c) => !looksLikeMetaTemplateCandidate(c)
+              );
               const findByType = (keys) => {
-                const found = cleanCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
+                const found = cleanCandidates.find((t) =>
+                  keys.some((k) =>
+                    String(t.type || '')
+                      .toLowerCase()
+                      .includes(k)
+                  )
+                );
                 if (!found) return [];
-                const src = found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
+                const src =
+                  found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
                 return src ? [String(src).trim()] : [];
               };
               thumbUpdates.curiosity = findByType(['curiosity', 'curio']);
               thumbUpdates.info = findByType(['inform', 'info', 'informative']);
               thumbUpdates.empathy = findByType(['emot', 'empath', '감성', 'emotional']);
-              console.log('[generateDraftFromIdea] DBG: fallback thumbUpdates (early) from thumbnailCandidates:', thumbUpdates);
+              console.log(
+                '[generateDraftFromIdea] DBG: fallback thumbUpdates (early) from thumbnailCandidates:',
+                thumbUpdates
+              );
             }
           } catch (fallbackErr) {
-            Logger.warn('[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:', fallbackErr);
+            Logger.warn(
+              '[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:',
+              fallbackErr
+            );
           }
         }
 
@@ -1981,17 +2124,34 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           try {
             const status = ideaData.status || 'ideas';
             const cardId = ideaData.id;
-            console.log('[generateDraftFromIdea] DBG: persist early block - cardId/status:', cardId, status);
+            console.log(
+              '[generateDraftFromIdea] DBG: persist early block - cardId/status:',
+              cardId,
+              status
+            );
             if (!cardId) throw new Error('ideaData.id is required to persist thumbnail prompts');
             const updatePath = `kanban/${await getCurrentUserId()}/${status}/${cardId}`;
             Logger.debug('[generateDraftFromIdea] Persisting thumbnailPrompts to:', updatePath);
-            console.log('[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:', updatePath, thumbUpdates);
-            await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: thumbUpdates } }));
+            console.log(
+              '[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:',
+              updatePath,
+              thumbUpdates
+            );
+            await update(
+              ref(getDb(), updatePath),
+              cleanDataForFirebase({ publishInfo: { thumbnailPrompts: thumbUpdates } })
+            );
             // also persist to nested workspace/draft/publishInfo
             try {
-              await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: thumbUpdates }));
+              await update(
+                ref(getDb(), `${updatePath}/workspace/draft/publishInfo`),
+                cleanDataForFirebase({ thumbnailPrompts: thumbUpdates })
+              );
             } catch (nestedErr) {
-              Logger.debug('[generateDraftFromIdea] nested thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+              Logger.debug(
+                '[generateDraftFromIdea] nested thumbnailPrompts update failed:',
+                nestedErr?.message || String(nestedErr)
+              );
             }
             // assign early generated updates to holder so finalResponse includes them
             generatedThumbUpdates = thumbUpdates;
@@ -2417,7 +2577,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       // API 호출을 helper로 분리 (재시도, 백오프 포함)
       try {
         rawDraft = await callDraftAPI(prompt);
-        console.log('[generateDraftFromIdea] checkpoint: rawDraft length:', rawDraft ? String(rawDraft).length : 0);
+        console.log(
+          '[generateDraftFromIdea] checkpoint: rawDraft length:',
+          rawDraft ? String(rawDraft).length : 0
+        );
       } catch (apiError) {
         // generateDraftFromIdea의 기존 동작을 유지: 마지막 시도 실패 시 에러 전파
         throw apiError;
@@ -2458,8 +2621,14 @@ ${defaultDescription}
 
       // 응답 마크다운 -> cleanedDraft / JSON-LD / 썸네일 후보를 처리하는 helper로 이동
       const processed = processDraftResponse(rawDraft, ideaData);
-      console.log('[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:', processed.cleanedDraft ? String(processed.cleanedDraft).length : 0);
-      console.log('[generateDraftFromIdea] checkpoint: thumbnailCandidates length:', processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0);
+      console.log(
+        '[generateDraftFromIdea] checkpoint: processed.cleanedDraft length:',
+        processed.cleanedDraft ? String(processed.cleanedDraft).length : 0
+      );
+      console.log(
+        '[generateDraftFromIdea] checkpoint: thumbnailCandidates length:',
+        processed.thumbnailCandidates ? processed.thumbnailCandidates.length : 0
+      );
       try {
         if (typeof options.onProgress === 'function')
           options.onProgress({
@@ -2496,7 +2665,10 @@ ${defaultDescription}
           await saveIntermediateDraft(ideaData.id, formattedDraft);
           console.log('[generateDraftFromIdea] checkpoint: saveIntermediateDraft succeeded (1st)');
         } catch (e) {
-          console.warn('[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):', e && e.message ? e.message : e);
+          console.warn(
+            '[generateDraftFromIdea] checkpoint: saveIntermediateDraft failed (1st):',
+            e && e.message ? e.message : e
+          );
         }
       }
 
@@ -2550,7 +2722,9 @@ ${defaultDescription}
             seoTitle = normalizeSeoTitle(seoTitle, title);
           } else {
             // Fallback: if helper unavailable, keep seoTitle as-is
-            Logger.warn('[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization');
+            Logger.warn(
+              '[generateDraftFromIdea] normalizeSeoTitle helper missing, skipping normalization'
+            );
           }
         } catch (e) {
           Logger.warn('[generateDraftFromIdea] normalizeSeoTitle failed, skipping:', e);
@@ -2762,16 +2936,31 @@ ${defaultDescription}
     // If thumbnail candidates exist (provided by draft or parsed tags), or the caller explicitly requested thumbnail generation,
     // try to enhance candidates via generateThumbnailTexts. When thumbnailCandidates are missing but generation is requested,
     // synthesize lightweight candidates from generated slogans (no templated image prompts).
-    if ((Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) || options.generateThumbnail) {
+    if (
+      (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) ||
+      options.generateThumbnail
+    ) {
       try {
-        const { slogans } = await generateThumbnailTexts(ideaData.outline || [], formattedDraft || '');
+        const { slogans } = await generateThumbnailTexts(
+          ideaData.outline || [],
+          formattedDraft || ''
+        );
         if (Array.isArray(slogans) && slogans.length > 0) {
           if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
             // Map slogans onto existing candidates
             thumbnailCandidates = thumbnailCandidates.map((c, i) => {
               const suggested = slogans[i] || slogans[i % slogans.length] || '';
-              const fallbackText = (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12);
-              return { ...c, thumbnailText: sanitizeThumbnailText(suggested || c.thumbnailText || '', fallbackText) };
+              const fallbackText = (seoTitle || title || '')
+                .replace(/[^\p{L}\p{N}\s]+/gu, '')
+                .trim()
+                .substring(0, 12);
+              return {
+                ...c,
+                thumbnailText: sanitizeThumbnailText(
+                  suggested || c.thumbnailText || '',
+                  fallbackText
+                ),
+              };
             });
           } else {
             // No existing candidates; create minimal candidates from slogans
@@ -2780,7 +2969,13 @@ ${defaultDescription}
               type: types[i] || `type${i}`,
               thumbnailPromptEn: '',
               thumbnailPromptKo: '',
-              thumbnailText: sanitizeThumbnailText(s || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+              thumbnailText: sanitizeThumbnailText(
+                s || '',
+                (seoTitle || title || '')
+                  .replace(/[^\p{L}\p{N}\s]+/gu, '')
+                  .trim()
+                  .substring(0, 12)
+              ),
               fontFamily: "'Pretendard', sans-serif",
               textColor: 'auto',
               ratio: '16:9',
@@ -2793,7 +2988,13 @@ ${defaultDescription}
           if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
             thumbnailCandidates = thumbnailCandidates.map((c) => ({
               ...c,
-              thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+              thumbnailText: sanitizeThumbnailText(
+                c.thumbnailText || '',
+                (seoTitle || title || '')
+                  .replace(/[^\p{L}\p{N}\s]+/gu, '')
+                  .trim()
+                  .substring(0, 12)
+              ),
             }));
           }
         }
@@ -2802,7 +3003,13 @@ ${defaultDescription}
         if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
           thumbnailCandidates = thumbnailCandidates.map((c) => ({
             ...c,
-            thumbnailText: sanitizeThumbnailText(c.thumbnailText || '', (seoTitle || title || '').replace(/[^\p{L}\p{N}\s]+/gu, '').trim().substring(0, 12)),
+            thumbnailText: sanitizeThumbnailText(
+              c.thumbnailText || '',
+              (seoTitle || title || '')
+                .replace(/[^\p{L}\p{N}\s]+/gu, '')
+                .trim()
+                .substring(0, 12)
+            ),
           }));
         }
       }
@@ -2822,7 +3029,6 @@ ${defaultDescription}
     // slogans above, but leaves image creation to the explicit image-generation flow.
 
     // (Thumbnail generation moved to `generateThumbnailImages`)
-
 
     // Ensure thumbnail altText exists for accessibility/SEO (set a sanitized fallback when necessary)
     if (thumbnailUrls) {
@@ -2934,8 +3140,16 @@ ${defaultDescription}
       seoTitle = seoTitle || '';
     }
 
-    console.log('[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:', !!thumbnailUrls);
-    console.log('[generateDraftFromIdea] DBG: final flags - shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts, 'generatedThumbUpdates:', JSON.stringify(generatedThumbUpdates).slice(0,200));
+    console.log(
+      '[generateDraftFromIdea] checkpoint: before finalResponse, thumbnailUrls:',
+      !!thumbnailUrls
+    );
+    console.log(
+      '[generateDraftFromIdea] DBG: final flags - shouldGenerateThumbnailPrompts:',
+      shouldGenerateThumbnailPrompts,
+      'generatedThumbUpdates:',
+      JSON.stringify(generatedThumbUpdates).slice(0, 200)
+    );
     const finalResponse = {
       success: true,
       draft: formattedDraft,
@@ -2948,16 +3162,31 @@ ${defaultDescription}
       jsonLdSchema: jsonLdSchema, // [신규] JSON-LD 구조화된 데이터
       metaDescription: metaDescription,
       // include generated thumbnail prompt suggestions if requested — default to empty arrays so callers can rely on shape
-      thumbnailPrompts: options && (options.generateThumbnailPrompts || options.generateThumbnail) ? { curiosity: [], info: [], empathy: [] } : undefined,
+      thumbnailPrompts:
+        options && (options.generateThumbnailPrompts || options.generateThumbnail)
+          ? { curiosity: [], info: [], empathy: [] }
+          : undefined,
     };
     // Debug: show options at finalization
-    try { Logger.debug('[generateDraftFromIdea] final options:', options); } catch(e){ }
+    try {
+      Logger.debug('[generateDraftFromIdea] final options:', options);
+    } catch (e) {}
 
     // Persist thumbnail prompt suggestions to Firebase when requested
     if (shouldGenerateThumbnailPrompts) {
       try {
-        console.log('[generateDraftFromIdea] DBG: shouldGenerateThumbnailPrompts block entered - options:', options, 'ideaData.id:', ideaData && ideaData.id);
-        console.log('[generateDraftFromIdea] DBG: entering final persistence block - generateDraft:', generateDraft, 'generatedThumbUpdates:', generatedThumbUpdates !== null);
+        console.log(
+          '[generateDraftFromIdea] DBG: shouldGenerateThumbnailPrompts block entered - options:',
+          options,
+          'ideaData.id:',
+          ideaData && ideaData.id
+        );
+        console.log(
+          '[generateDraftFromIdea] DBG: entering final persistence block - generateDraft:',
+          generateDraft,
+          'generatedThumbUpdates:',
+          generatedThumbUpdates !== null
+        );
         Logger.debug('[generateDraftFromIdea] persisting thumbnail prompts - start');
         const contextText = `${seoTitle || title}${metaDescription ? ' - ' + metaDescription : ''}`;
         const prompts = {
@@ -2970,7 +3199,12 @@ ${defaultDescription}
         for (const [key, p] of Object.entries(prompts)) {
           try {
             const res = await callGeminiAPI(p);
-            console.log('[generateDraftFromIdea] DBG: callGeminiAPI(final) returned for key', key, '->', String(res).slice(0,200));
+            console.log(
+              '[generateDraftFromIdea] DBG: callGeminiAPI(final) returned for key',
+              key,
+              '->',
+              String(res).slice(0, 200)
+            );
             let arr = tryParseArray(String(res || ''));
             if (!Array.isArray(arr)) {
               arr = String(res || '')
@@ -2982,7 +3216,10 @@ ${defaultDescription}
               thumbUpdates[key] = arr.map((s) => String(s).replace(/\s+/g, ' ').trim()).slice(0, 6);
             }
           } catch (e) {
-            Logger.warn('[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':', e);
+            Logger.warn(
+              '[generateDraftFromIdea] thumbnail prompt generation failed for ' + key + ':',
+              e
+            );
           }
         }
         // assign to holder so finalization persistence picks it up
@@ -2997,18 +3234,31 @@ ${defaultDescription}
           try {
             if (Array.isArray(thumbnailCandidates) && thumbnailCandidates.length > 0) {
               const findByType = (keys) => {
-                const found = thumbnailCandidates.find((t) => keys.some((k) => String(t.type || '').toLowerCase().includes(k)));
+                const found = thumbnailCandidates.find((t) =>
+                  keys.some((k) =>
+                    String(t.type || '')
+                      .toLowerCase()
+                      .includes(k)
+                  )
+                );
                 if (!found) return [];
-                const src = found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
+                const src =
+                  found.thumbnailPromptKo || found.thumbnailPromptEn || found.thumbnailText || '';
                 return src ? [String(src).trim()] : [];
               };
               thumbUpdates.curiosity = findByType(['curiosity', 'curio']);
               thumbUpdates.info = findByType(['inform', 'info', 'informative']);
               thumbUpdates.empathy = findByType(['emot', 'empath', '감성', 'emotional']);
-              console.log('[generateDraftFromIdea] DBG: fallback thumbUpdates from thumbnailCandidates:', thumbUpdates);
+              console.log(
+                '[generateDraftFromIdea] DBG: fallback thumbUpdates from thumbnailCandidates:',
+                thumbUpdates
+              );
             }
           } catch (fallbackErr) {
-            Logger.warn('[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:', fallbackErr);
+            Logger.warn(
+              '[generateDraftFromIdea] fallback thumbnailCandidates extraction failed:',
+              fallbackErr
+            );
           }
         }
 
@@ -3031,13 +3281,30 @@ ${defaultDescription}
                 info: Array.isArray(thumbUpdates.info) ? thumbUpdates.info : [],
                 empathy: Array.isArray(thumbUpdates.empathy) ? thumbUpdates.empathy : [],
               };
-              console.log('[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:', updatePath, toPersist);
-              await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } }));
+              console.log(
+                '[generateDraftFromIdea] DBG: about to call update(top-level) with publishInfo.thumbnailPrompts:',
+                updatePath,
+                toPersist
+              );
+              await update(
+                ref(getDb(), updatePath),
+                cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } })
+              );
               try {
-                console.log('[generateDraftFromIdea] DBG: about to call update(nested) with thumbnailPrompts:', `${updatePath}/workspace/draft/publishInfo`, toPersist);
-                await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: toPersist }));
+                console.log(
+                  '[generateDraftFromIdea] DBG: about to call update(nested) with thumbnailPrompts:',
+                  `${updatePath}/workspace/draft/publishInfo`,
+                  toPersist
+                );
+                await update(
+                  ref(getDb(), `${updatePath}/workspace/draft/publishInfo`),
+                  cleanDataForFirebase({ thumbnailPrompts: toPersist })
+                );
               } catch (nestedErr) {
-                Logger.debug('[generateDraftFromIdea] nested thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+                Logger.debug(
+                  '[generateDraftFromIdea] nested thumbnailPrompts update failed:',
+                  nestedErr?.message || String(nestedErr)
+                );
               }
             }
           } catch (e) {
@@ -3056,16 +3323,33 @@ ${defaultDescription}
         const uid = await getCurrentUserId();
         const updatePath = `kanban/${uid}/${status}/${ideaData.id}`;
         const toPersist = {
-          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity)
+            ? generatedThumbUpdates.curiosity
+            : [],
           info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
-          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy)
+            ? generatedThumbUpdates.empathy
+            : [],
         };
-        console.log('[generateDraftFromIdea] SAFETY-NET persisting thumbnailPrompts:', updatePath, toPersist);
+        console.log(
+          '[generateDraftFromIdea] SAFETY-NET persisting thumbnailPrompts:',
+          updatePath,
+          toPersist
+        );
         try {
-          await update(ref(getDb(), updatePath), cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } }));
-          await update(ref(getDb(), `${updatePath}/workspace/draft/publishInfo`), cleanDataForFirebase({ thumbnailPrompts: toPersist }));
+          await update(
+            ref(getDb(), updatePath),
+            cleanDataForFirebase({ publishInfo: { thumbnailPrompts: toPersist } })
+          );
+          await update(
+            ref(getDb(), `${updatePath}/workspace/draft/publishInfo`),
+            cleanDataForFirebase({ thumbnailPrompts: toPersist })
+          );
         } catch (safetyErr) {
-          Logger.warn('[generateDraftFromIdea] safety-net thumbnailPrompts persistence failed:', safetyErr);
+          Logger.warn(
+            '[generateDraftFromIdea] safety-net thumbnailPrompts persistence failed:',
+            safetyErr
+          );
         }
       }
     } catch (safetyErrOuter) {
@@ -3074,12 +3358,21 @@ ${defaultDescription}
 
     // Ensure finalResponse.thumbnailPrompts reflects any thumbnail generation attempts
     try {
-      console.log('[generateDraftFromIdea] ASSIGN FINAL thumbnailPrompts - shouldGenerateThumbnailPrompts:', shouldGenerateThumbnailPrompts, 'generatedThumbUpdates:', JSON.stringify(generatedThumbUpdates).slice(0,200));
+      console.log(
+        '[generateDraftFromIdea] ASSIGN FINAL thumbnailPrompts - shouldGenerateThumbnailPrompts:',
+        shouldGenerateThumbnailPrompts,
+        'generatedThumbUpdates:',
+        JSON.stringify(generatedThumbUpdates).slice(0, 200)
+      );
       if (shouldGenerateThumbnailPrompts) {
         finalResponse.thumbnailPrompts = {
-          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity)
+            ? generatedThumbUpdates.curiosity
+            : [],
           info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
-          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy)
+            ? generatedThumbUpdates.empathy
+            : [],
         };
       } else {
         finalResponse.thumbnailPrompts = undefined;
@@ -3098,32 +3391,51 @@ ${defaultDescription}
 
     // Final safety: ensure the returned object includes thumbnailPrompts shape if caller requested it
     try {
-      const requested = !!(options && (options.generateThumbnailPrompts || options.generateThumbnail));
+      const requested = !!(
+        options &&
+        (options.generateThumbnailPrompts || options.generateThumbnail)
+      );
       if (requested && finalResponse.thumbnailPrompts === undefined) {
         finalResponse.thumbnailPrompts = {
-          curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+          curiosity: Array.isArray(generatedThumbUpdates?.curiosity)
+            ? generatedThumbUpdates.curiosity
+            : [],
           info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
-          empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
+          empathy: Array.isArray(generatedThumbUpdates?.empathy)
+            ? generatedThumbUpdates.empathy
+            : [],
         };
       }
     } catch (e) {
       // ignore
     }
 
-    try { console.log('[generateDraftFromIdea] about to RETURN finalResponse.thumbnailPrompts:', finalResponse.thumbnailPrompts); } catch(e){}
+    try {
+      console.log(
+        '[generateDraftFromIdea] about to RETURN finalResponse.thumbnailPrompts:',
+        finalResponse.thumbnailPrompts
+      );
+    } catch (e) {}
     return finalResponse;
   } catch (e) {
     // If an error occurs late in the pipeline but we already have a formattedDraft,
     // return a best-effort successful response to avoid losing the generated content.
     Logger.error('[generateDraftFromIdea] 오류:', e && e.stack ? e.stack : e);
     if (typeof formattedDraft === 'string' && formattedDraft.trim().length > 0) {
-      Logger.warn('[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환');
+      Logger.warn(
+        '[generateDraftFromIdea] 오류 발생했지만 formattedDraft가 있습니다. 베스트-에포트 결과 반환'
+      );
       const safeThumbs = {
-        curiosity: Array.isArray(generatedThumbUpdates?.curiosity) ? generatedThumbUpdates.curiosity : [],
+        curiosity: Array.isArray(generatedThumbUpdates?.curiosity)
+          ? generatedThumbUpdates.curiosity
+          : [],
         info: Array.isArray(generatedThumbUpdates?.info) ? generatedThumbUpdates.info : [],
         empathy: Array.isArray(generatedThumbUpdates?.empathy) ? generatedThumbUpdates.empathy : [],
       };
-      console.log('[generateDraftFromIdea] about to RETURN error-handling success result thumbnailPrompts:', shouldGenerateThumbnailPrompts ? safeThumbs : undefined);
+      console.log(
+        '[generateDraftFromIdea] about to RETURN error-handling success result thumbnailPrompts:',
+        shouldGenerateThumbnailPrompts ? safeThumbs : undefined
+      );
       return {
         success: true,
         draft: formattedDraft,
@@ -3657,7 +3969,10 @@ export async function generateIdeaBriefing(cardId, title, description, options =
         for (const [key, p] of Object.entries(prompts)) {
           try {
             const res = await callGeminiAPI(p);
-            Logger.debug(`[generateIdeaBriefing] thumbnail prompt response for ${key}:`, String(res || ''));
+            Logger.debug(
+              `[generateIdeaBriefing] thumbnail prompt response for ${key}:`,
+              String(res || '')
+            );
             let arr = tryParseArray(String(res || ''));
             Logger.debug(`[generateIdeaBriefing] parsed array for ${key}:`, arr);
             if (!Array.isArray(arr)) {
@@ -3701,7 +4016,10 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       try {
         // Debug: show if thumbnail prompts will be persisted
         if (updates.publishInfo && updates.publishInfo.thumbnailPrompts) {
-          Logger.debug('[generateIdeaBriefing] Persisting thumbnailPrompts (top-level):', updates.publishInfo.thumbnailPrompts);
+          Logger.debug(
+            '[generateIdeaBriefing] Persisting thumbnailPrompts (top-level):',
+            updates.publishInfo.thumbnailPrompts
+          );
         }
 
         await update(ref(getDb(), updatePath), cleanDataForFirebase(updates));
@@ -3713,10 +4031,15 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               ref(getDb(), `${updatePath}/workspace/draft/publishInfo`),
               cleanDataForFirebase({ thumbnailPrompts: updates.publishInfo.thumbnailPrompts })
             );
-            Logger.debug('[generateIdeaBriefing] Persisted thumbnailPrompts to nested workspace/draft/publishInfo');
+            Logger.debug(
+              '[generateIdeaBriefing] Persisted thumbnailPrompts to nested workspace/draft/publishInfo'
+            );
           }
         } catch (nestedErr) {
-          Logger.debug('[generateIdeaBriefing] nested publishInfo thumbnailPrompts update failed:', nestedErr?.message || String(nestedErr));
+          Logger.debug(
+            '[generateIdeaBriefing] nested publishInfo thumbnailPrompts update failed:',
+            nestedErr?.message || String(nestedErr)
+          );
         }
 
         // mark completion metadata so UI and other consumers know briefing finished
@@ -3881,7 +4204,11 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       // DEV: broadcast the constructed image prompt for UI debug
       try {
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-          chrome.runtime.sendMessage({ action: 'debug_show_prompt', promptType: 'imageGeneration.input', prompt: imageGenerationPrompt });
+          chrome.runtime.sendMessage({
+            action: 'debug_show_prompt',
+            promptType: 'imageGeneration.input',
+            prompt: imageGenerationPrompt,
+          });
         }
       } catch (e) {}
 
@@ -3890,11 +4217,23 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
       // [DEBUG] generateAiImage에 전달된 referenceImage 요약
       try {
         const refsSummary = Array.isArray(referenceImage)
-          ? referenceImage.map((r) => ({ mimeType: r?.mimeType, hasData: !!r?.data, dataLen: r?.data ? r.data.length : 0 }))
+          ? referenceImage.map((r) => ({
+              mimeType: r?.mimeType,
+              hasData: !!r?.data,
+              dataLen: r?.data ? r.data.length : 0,
+            }))
           : referenceImage
-          ? [{ mimeType: referenceImage.mimeType, hasData: !!referenceImage.data, dataLen: referenceImage.data ? referenceImage.data.length : 0 }]
-          : [];
-        console.log('%c[AI 썸네일 메이커 디버깅][generateAiImage input summary]', 'color:#9E9E9E', { refsSummary });
+            ? [
+                {
+                  mimeType: referenceImage.mimeType,
+                  hasData: !!referenceImage.data,
+                  dataLen: referenceImage.data ? referenceImage.data.length : 0,
+                },
+              ]
+            : [];
+        console.log('%c[AI 썸네일 메이커 디버깅][generateAiImage input summary]', 'color:#9E9E9E', {
+          refsSummary,
+        });
       } catch (e) {
         void 0;
       }
@@ -3908,7 +4247,11 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
             if (r && r.data) {
               // 데이터 길이 로그
               try {
-                console.log('%c[AI 썸네일 메이커 디버깅][inlineData add]', 'color:#9E9E9E', { index: i, mimeType: r.mimeType, dataLen: r.data.length });
+                console.log('%c[AI 썸네일 메이커 디버깅][inlineData add]', 'color:#9E9E9E', {
+                  index: i,
+                  mimeType: r.mimeType,
+                  dataLen: r.data.length,
+                });
               } catch (e) {
                 void 0;
               }
@@ -3926,8 +4269,8 @@ export async function generateAiImage(prompt, count = 1, referenceImage = null) 
 
       // [DEBUG] 최종 요청 데이터 확인
       console.log('%c[AI 썸네일 메이커 디버깅][API Request]', 'color:#9E9E9E', {
-        textPart: parts.find(p => p.text)?.text,
-        imagePartsCount: parts.filter(p => p.inlineData).length
+        textPart: parts.find((p) => p.text)?.text,
+        imagePartsCount: parts.filter((p) => p.inlineData).length,
       });
 
       const res = await fetch(API_URL, {

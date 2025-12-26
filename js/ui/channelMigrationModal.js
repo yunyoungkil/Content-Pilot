@@ -156,7 +156,7 @@ export function showChannelMigrationModal(root, channel) {
             distLines.push('대상 아이디어 분포:');
             oIdeaKeys.forEach((k) => distLines.push(`- ${k}: ${oIdeas[k]}`));
           }
-          
+
           const oKanIn = oDist.kanban_inprogress || {};
           const oKanInKeys = Object.keys(oKanIn).filter((k) => k !== 'null' && k !== 'undefined');
           if (oKanInKeys.length > 0) {
