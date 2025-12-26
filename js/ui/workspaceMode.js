@@ -67,8 +67,19 @@ export function applyThumbnailInfoUpdate(ideaData, newThumbnailInfo) {
     if (selectedIndex >= 0 && selectedIndex < ideaData.publishInfo.thumbnailInfo.length) {
       const { selectedThumbnailIndex, ...infoToUpdate } = newThumbnailInfo;
       ideaData.publishInfo.thumbnailInfo = ideaData.publishInfo.thumbnailInfo.map((item, idx) => {
-        const cloned = item && typeof item === 'object' ? { ...item } : item;
-        if (idx === selectedIndex) return { ...cloned, ...infoToUpdate };
+        let cloned = item && typeof item === 'object' ? { ...item } : item;
+        if (idx === selectedIndex) {
+          // If the update includes a bgImage, maintain a per-concept history array `bgImages` (latest first)
+          if (Object.prototype.hasOwnProperty.call(infoToUpdate, 'bgImage') && infoToUpdate.bgImage) {
+            const newUrl = infoToUpdate.bgImage;
+            const existingBgImages = Array.isArray(cloned?.bgImages) ? cloned.bgImages.slice() : [];
+            // Ensure latest-first and remove duplicates
+            const dedup = [newUrl, ...existingBgImages.filter((u) => u !== newUrl)];
+            cloned = { ...cloned, ...infoToUpdate, bgImages: dedup, bgImage: newUrl };
+            return cloned;
+          }
+          return { ...cloned, ...infoToUpdate };
+        }
         return cloned;
       });
     }

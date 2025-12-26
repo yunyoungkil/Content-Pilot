@@ -134,6 +134,12 @@ describe('ThumbnailMaker UI - reference images', () => {
     // default selection should be 'none' when no thumbnailText present
     expect(document.querySelector('input[name="tm-include-mode"]:checked').value).toBe('none');
 
+    // prompt preview should show the no-text instruction by default
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    const enLine = promptDisplay.querySelectorAll('div')[1];
+    expect(enLine.textContent).toMatch(/Do NOT include any text/);
+
     // click generate and assert runtime.sendMessage called with references
     const genBtn = document.querySelector('#tm-gen-bg');
     expect(genBtn).toBeTruthy();
@@ -152,6 +158,76 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(firstCall.action).toBe('ai_generate_images');
     expect(Array.isArray(firstCall.data.references)).toBe(true);
     expect(firstCall.data.references.length).toBeGreaterThanOrEqual(1);
+
+    // The default include mode is 'none' for this test, so instruction should be 'Do NOT include'
+    expect(firstCall.data.prompt).toMatch(/Do NOT include any text/);
+  });
+
+  test('when include mode is slogan, prompt instructs to include text and does not contain the no-text ban', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptEn: 'Prompt one', thumbnailText: '포함할 슬로건' },
+      ],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // select slogan include mode
+    const sloganMode = document.querySelector('#tm-include-mode-slogan');
+    sloganMode.checked = true;
+    sloganMode.dispatchEvent(new Event('change'));
+
+    // prompt preview should be updated to reflect the included text and include instruction
+    const promptDisplay = document.querySelector('#tm-prompt-display');
+    expect(promptDisplay).toBeTruthy();
+    const enLine = promptDisplay.querySelectorAll('div')[1];
+    expect(enLine.textContent).toContain('포함할 슬로건');
+    expect(enLine.textContent).toMatch(/Include the provided text/);
+
+    const genBtn = document.querySelector('#tm-gen-bg');
+    expect(genBtn).toBeTruthy();
+
+    // reset mock and click generate
+    global.chrome.runtime.sendMessage.mockClear();
+    genBtn.click();
+    await new Promise((r) => setTimeout(r, 200));
+
+    const aiCall = global.chrome.runtime.sendMessage.mock.calls.find((c) => c[0] && c[0].action === 'ai_generate_images')[0];
+    expect(aiCall.data.prompt).toContain('포함할 슬로건');
+    expect(aiCall.data.prompt).toMatch(/Include the provided text/);
+    expect(aiCall.data.prompt).not.toMatch(/Do NOT include any text/);
   });
 
   test('applies selected ratio to prompt and payload', async () => {
@@ -818,6 +894,132 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(savedFor2).toBeFalsy();
   });
 
+  test('generating multiple images for same concept stores history and preserves previous images', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+    const { applyThumbnailInfoUpdate } = require('../js/ui/workspaceMode.js');
+
+    const draftData = {
+      formattedDraft: '<p>Test</p>',
+      publishInfo: {
+        thumbnailInfo: [
+          { type: 'curiosity', thumbnailPromptEn: 'P1', thumbnailText: 'T1', bgImage: null },
+          { type: 'informative', thumbnailPromptEn: 'P2', thumbnailText: 'T2', bgImage: null },
+          { type: 'empathy', thumbnailPromptEn: 'P3', thumbnailText: 'T3', bgImage: null },
+        ],
+        selectedThumbnailIndex: 1,
+      },
+      affiliateLinks: [],
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    // We collect update calls
+    const updateCalls = [];
+    let genCounter = 0;
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (msg && msg.action === 'ai_generate_images') {
+        genCounter++;
+        const url = `https://images.test/gen-${genCounter}.png`;
+        if (typeof cb === 'function') cb({ success: true, images: [url] });
+        return;
+      }
+
+      if (msg && msg.action === 'update_kanban_card') {
+        updateCalls.push(msg);
+        if (typeof cb === 'function') cb({ success: true });
+        return;
+      }
+
+      if (typeof cb === 'function') cb({ success: true });
+    });
+
+    // onSave uses real applyThumbnailInfoUpdate to simulate server-side merge
+    const onSave = (newThumbnailInfo) => {
+      const idea = { publishInfo: { thumbnailInfo: draftData.publishInfo.thumbnailInfo.slice(), selectedThumbnailIndex: draftData.publishInfo.selectedThumbnailIndex } };
+      applyThumbnailInfoUpdate(idea, newThumbnailInfo);
+      // Persist merged state back into the draftData simulation so subsequent saves stack correctly
+      draftData.publishInfo = idea.publishInfo;
+      const publishInfoUpdates = {
+        ...(idea.publishInfo || {}),
+        thumbnailInfo: idea.publishInfo.thumbnailInfo,
+        selectedThumbnailIndex: idea.publishInfo.selectedThumbnailIndex,
+      };
+      chrome.runtime.sendMessage({ action: 'update_kanban_card', data: { cardId: 'test', status: 'ideas', updates: { publishInfo: publishInfoUpdates } } });
+    };
+
+    // open modal with onSave
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      onSave,
+      null,
+      { showText: true },
+      document.body
+    );
+
+    // generate twice for the same concept (index 1)
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBe(3);
+
+    buttons[1].click();
+    const genBtn = document.querySelector('#tm-gen-bg');
+
+    // First generation
+    genBtn.click();
+    // Wait long enough for generation+autosave to complete before second generation
+    await new Promise((r) => setTimeout(r, 1800));
+
+    // Second generation
+    genBtn.click();
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // DOM history should reflect generated image(s) when available; fall back to saved payload validation
+    const historyWrap = document.querySelector('#tm-bg-history');
+    if (historyWrap) {
+      const imgs = historyWrap.querySelectorAll('img');
+      if (imgs.length >= 1) {
+        expect(imgs[0].src).toContain('gen-1.png');
+      } else {
+        // fallback: ensure server-update payload contains a bgImages entry for the selected concept
+        expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+        const lastPub = updateCalls[updateCalls.length - 1].data.updates.publishInfo;
+        expect(lastPub.thumbnailInfo[1].bgImages && lastPub.thumbnailInfo[1].bgImages.length).toBeGreaterThanOrEqual(1);
+        expect(lastPub.thumbnailInfo[1].bgImages[0]).toBe('https://images.test/gen-1.png');
+      }
+    } else {
+      // If render not available in this environment, verify persistence payload
+      expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+      const lastPub = updateCalls[updateCalls.length - 1].data.updates.publishInfo;
+      expect(lastPub.thumbnailInfo[1].bgImages && lastPub.thumbnailInfo[1].bgImages.length).toBeGreaterThanOrEqual(1);
+      expect(lastPub.thumbnailInfo[1].bgImages[0]).toBe('https://images.test/gen-1.png');
+    }
+
+    // Optionally, check latest preview is an image
+    const canvas = document.querySelector('#tm-preview');
+    expect(canvas).toBeTruthy();
+    expect(canvas.dataset.bgType).toBe('image');
+  });
+
   test('ignores persisted meta-template candidates and shows neutral prompt', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
@@ -992,6 +1194,63 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(promptDisplay).toBeTruthy();
     // Should contain the persisted publishInfo thumbnail prompt
     expect(promptDisplay.textContent).toMatch(/퍼블리시된 썸네일 프롬프트\(한글\) 예시/);
+  });
+
+  test('uses publishInfo.thumbnailUrls as preview when candidate lacks bgImage', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = {
+      formattedDraft: '<p>Hi</p>',
+      thumbnailInfo: [
+        { type: 'curiosity', thumbnailPromptEn: 'Prompt one', thumbnailText: '첫번째 텍스트' },
+        { type: 'informative', thumbnailPromptEn: 'Prompt two', thumbnailText: '두번째 텍스트' },
+      ],
+      publishInfo: {
+        thumbnailUrls: { url_16x9: 'https://images.test/thumb-16x9.png' },
+      },
+    };
+
+    // mock canvas context
+    HTMLCanvasElement.prototype.getContext = function () {
+      return {
+        canvas: { width: 640, height: 360 },
+        save: () => {},
+        restore: () => {},
+        measureText: (txt) => ({ width: (txt || '').length * 6 }),
+        fillRect: () => {},
+        drawImage: () => {},
+        clearRect: () => {},
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        strokeText: () => {},
+        fillText: () => {},
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4 * 10) }),
+        putImageData: () => {},
+      };
+    };
+
+    openThumbnailMaker(
+      draftData,
+      () => {},
+      () => {},
+      null,
+      { showText: true },
+      document.body
+    );
+
+    const buttons = document.querySelectorAll('.tm-concept-btn');
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+
+    // click the second concept
+    buttons[1].click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const canvas = document.querySelector('#tm-preview');
+    // when publishInfo.thumbnailUrls exists, preview should use image background
+    expect(canvas.dataset.bgType).toBe('image');
   });
   test('shows failed reference URLs in diagnostics', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');

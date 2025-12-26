@@ -437,7 +437,12 @@ export function openThumbnailMaker(
             let includeTextForDisplay = '';
             if (checkedMode === 'slogan') includeTextForDisplay = thumbInfo.thumbnailText || '';
             else if (checkedMode === 'alt') includeTextForDisplay = thumbInfo.altText || thumbInfo.thumbnailText || '';
-            if (enLine) enLine.textContent = baseEn + (includeTextForDisplay ? ' ' + includeTextForDisplay : '');
+            if (enLine) {
+              const includeInstructionForDisplay = includeTextForDisplay
+                ? ' IMPORTANT: Include the provided text in the image and render it clearly as readable text integrated into the composition.'
+                : ' IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.';
+              enLine.textContent = baseEn + (includeTextForDisplay ? ' ' + includeTextForDisplay : '') + includeInstructionForDisplay;
+            }
           }
         } catch (e) {
           // ignore prompt update errors
@@ -459,6 +464,12 @@ export function openThumbnailMaker(
         onModeChange();
       } catch (e) {
         // ignore
+      }
+      // Render initial history UI for selected concept
+      try {
+        renderHistory();
+      } catch (e) {
+        // ignore render errors
       }
     }
   } catch (e) {
@@ -905,6 +916,87 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
   // 4. 이벤트 리스너 연결
 
+  // [신규] 히스토리 렌더링 함수: 컨셉별 bgImages 히스토리 표시
+  const renderHistory = () => {
+    try {
+      const historyWrapId = 'tm-bg-history';
+      let wrap = modal.querySelector('#' + historyWrapId);
+      if (!wrap) {
+        const canvasWrap = modal.querySelector('#tm-canvas-wrapper');
+        wrap = document.createElement('div');
+        wrap.id = historyWrapId;
+        wrap.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;';
+        canvasWrap.insertAdjacentElement('afterend', wrap);
+      }
+      wrap.innerHTML = '';
+      const sel = thumbnailCandidates[selectedConceptIndex] || {};
+      const arr = Array.isArray(sel.bgImages) ? sel.bgImages.slice() : (sel.bgImage ? [sel.bgImage] : []);
+      if (!arr || arr.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.fontSize = '12px';
+        empty.style.color = '#777';
+        empty.textContent = '(생성된 이미지 없음)';
+        wrap.appendChild(empty);
+        return;
+      }
+      for (const url of arr) {
+        const item = document.createElement('div');
+        item.style.position='relative';
+        item.style.width='96px';
+        item.style.height='54px';
+        item.style.borderRadius='6px';
+        item.style.overflow='hidden';
+        item.style.cursor='pointer';
+        item.style.border='1px solid #333';
+        item.style.background = '#111';
+        const img = document.createElement('img');
+        img.src = url;
+        img.style.width='100%';
+        img.style.height='100%';
+        img.style.objectFit='cover';
+        img.alt = 'history';
+        item.appendChild(img);
+        const del = document.createElement('button');
+        del.textContent = '×';
+        del.style.position='absolute';
+        del.style.top='4px';
+        del.style.right='4px';
+        del.style.background='rgba(0,0,0,0.6)';
+        del.style.border='none';
+        del.style.color='#fff';
+        del.style.width='22px';
+        del.style.height='22px';
+        del.style.borderRadius='4px';
+        del.addEventListener('click',(e)=>{e.stopPropagation();
+          // remove url from candidate bgImages
+          const cand = thumbnailCandidates[selectedConceptIndex];
+          if (cand && Array.isArray(cand.bgImages)) {
+            cand.bgImages = cand.bgImages.filter((u)=>u!==url);
+            if (cand.bgImages.length===0) delete cand.bgImages;
+          }
+          if (currentBgImage === url) {
+            const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+            currentBgImage = candArr[0] || null;
+            updatePreview();
+          }
+          renderHistory();
+          triggerAutoSave(); // persist change
+        });
+        item.addEventListener('click', ()=> {
+          currentBgImage = url;
+          updatePreview();
+          saveState();
+          triggerAutoSave();
+          showToast('✅ 이미지로 적용되었습니다.');
+        });
+        item.appendChild(del);
+        wrap.appendChild(item);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
   // [신규] 탭 전환 UI 로직
   const toggleTabs = (mode) => {
     const aiPanel = modal.querySelector('#tm-bg-ai-panel');
@@ -942,9 +1034,10 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
   // [신규] 컨셉 선택 버튼 이벤트 리스너
   if (thumbnailCandidates.length > 1) {
     const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
-    // Add bg indicator for persisted bgImage on each button
+    // Add bg indicator for persisted bgImage on each button. Also consider saved publish thumbnails when selected index matches.
     conceptButtons.forEach((btn, idx) => {
-      const hasBg = thumbnailCandidates[idx] && thumbnailCandidates[idx].bgImage;
+      const hasBg = (thumbnailCandidates[idx] && thumbnailCandidates[idx].bgImage) ||
+        (draftData && draftData.publishInfo && draftData.publishInfo.selectedThumbnailIndex === idx && draftData.publishInfo.thumbnailUrls);
       if (hasBg) {
         btn.classList.add('tm-has-bg');
         // small dot indicator
@@ -1020,9 +1113,19 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
         // Ensure currentBgImage reflects the newly selected concept (clear if none)
         currentBgImage = thumbInfo.bgImage || null;
+        // If no per-concept bgImage, fall back to publishInfo.thumbnailUrls for the selected concept (by current ratio)
+        if (!currentBgImage) {
+          const urls = (draftData && draftData.publishInfo && draftData.publishInfo.thumbnailUrls) || draftData.thumbnailUrls || null;
+          if (urls) {
+            const ratio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
+            const key = ratio === '16:9' ? 'url_16x9' : ratio === '1:1' ? 'url_1x1' : ratio === '4:3' ? 'url_4x3' : 'url_16x9';
+            if (urls[key]) currentBgImage = urls[key];
+          }
+        }
         // Update bg indicator on buttons
         conceptButtons.forEach((b, i) => {
-          const hasBg = thumbnailCandidates[i] && thumbnailCandidates[i].bgImage;
+          const hasBg = (thumbnailCandidates[i] && thumbnailCandidates[i].bgImage) ||
+            (draftData && draftData.publishInfo && draftData.publishInfo.selectedThumbnailIndex === i && draftData.publishInfo.thumbnailUrls);
           if (hasBg) b.classList.add('tm-has-bg');
           else b.classList.remove('tm-has-bg');
           const dot = b.querySelector('.tm-bg-indicator');
@@ -1043,6 +1146,8 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         });
 
         // Reset excluded reference images / UI state when switching concepts
+        // Update history UI for newly selected concept
+        try { renderHistory(); } catch (e) { /* ignore */ }
         excludedRefImages.clear();
         try {
           renderReferenceImages();
@@ -1121,7 +1226,14 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
         // 기본 프롬프트 + 스타일 프롬프트
         const selectedRatio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
-        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${includeText ? ' ' + includeText : ''}, ${promptSuffix}, ${selectedRatio} aspect ratio`;
+
+        // If user selected slogan/alt (includeText non-empty), prefer an explicit include-text instruction
+        // Otherwise keep prompt guidance for text-free background
+        const includeInstruction = includeText
+          ? 'IMPORTANT: Include the provided text in the image and render it clearly as readable text integrated into the composition.'
+          : 'IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.';
+
+        const enhancedPrompt = `${thumbInfo.thumbnailPromptEn}${includeText ? ' ' + includeText : ''}, ${promptSuffix}, ${includeInstruction}, ${selectedRatio} aspect ratio`;
 
         // background.js에 이미지 생성 요청 (참조 이미지도 함께 전달)
         // Decode HTML entities and ensure URLs are clean before sending to background
@@ -1387,8 +1499,22 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
             '[ThumbnailMaker] ✅ AI 생성 배경 이미지:',
             currentBgImage.substring(0, 80) + '...'
           );
+
+          // Update local per-concept history (bgImages) and keep latest-first, deduped
+          try {
+            const sel = (thumbnailCandidates[selectedConceptIndex] = thumbnailCandidates[selectedConceptIndex] || {});
+            const existing = Array.isArray(sel.bgImages) ? sel.bgImages.slice() : [];
+            sel.bgImages = [currentBgImage, ...existing.filter((u) => u !== currentBgImage)];
+            // Ensure thumbInfo reference updates while preserving style settings
+            thumbInfo = { ...sel, ...{ fontFamily: thumbInfo.fontFamily, textColor: thumbInfo.textColor, ratio: thumbInfo.ratio, templateType: thumbInfo.templateType } };
+          } catch (e) {
+            // ignore history update errors
+          }
+
           await updatePreview(); // 다시 렌더링
           saveState(); // 배경 생성 후 상태 저장
+          renderHistory();
+          triggerAutoSave(); // persist the new bgImage into publishInfo
         } else {
           if (response && response.diagnostics) {
             // diagnostics already displayed above; just restore preview

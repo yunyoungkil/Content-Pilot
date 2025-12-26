@@ -1249,9 +1249,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               if (selBg) {
                 cleanedUpdates.publishInfo.thumbnailInfo = arr.map((it, idx) => {
                   if (idx === selIndex) return it;
-                  if (it && it.bgImage === selBg) {
+                  // If another candidate references the same selected bg (either as bgImage or in bgImages), remove it from that candidate
+                  if (it && (it.bgImage === selBg || (Array.isArray(it.bgImages) && it.bgImages.includes(selBg)))) {
                     const clone = { ...it };
-                    clone.bgImage = null;
+                    if (clone.bgImage === selBg) clone.bgImage = null;
+                    if (Array.isArray(clone.bgImages)) {
+                      clone.bgImages = clone.bgImages.filter((u) => u !== selBg);
+                      if (clone.bgImages.length === 0) delete clone.bgImages;
+                    }
                     return clone;
                   }
                   return it;
