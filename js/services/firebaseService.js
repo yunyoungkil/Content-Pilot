@@ -345,21 +345,21 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
     // Check tombstone: avoid re-uploading a recently deleted path
     const uid = userId || (await getCurrentUserId());
 
-        // perform tombstone check: call isThumbnailDeleted but handle errors separately
-      let tomb = false;
-      try {
-        tomb = await isThumbnailDeleted(uid, path);
-      } catch (e) {
-        // If tombstone check fails, log and treat as non-tombstoned (allow upload)
-        Logger.debug('[Firebase Storage] tombstone lookup failed (continuing):', e && e.message);
-        tomb = false;
-      }
+    // perform tombstone check: call isThumbnailDeleted but handle errors separately
+    let tomb = false;
+    try {
+      tomb = await isThumbnailDeleted(uid, path);
+    } catch (e) {
+      // If tombstone check fails, log and treat as non-tombstoned (allow upload)
+      Logger.debug('[Firebase Storage] tombstone lookup failed (continuing):', e && e.message);
+      tomb = false;
+    }
 
-      // Test hook: if a test set a tombstone in-memory, honor it synchronously
-      if (__TEST_tombstones[`${uid}:${path}`] || tomb) {
-        Logger.warn('[Firebase Storage] upload blocked by tombstone for path:', path);
-        throw new Error('upload blocked: tombstoned path');
-      }
+    // Test hook: if a test set a tombstone in-memory, honor it synchronously
+    if (__TEST_tombstones[`${uid}:${path}`] || tomb) {
+      Logger.warn('[Firebase Storage] upload blocked by tombstone for path:', path);
+      throw new Error('upload blocked: tombstoned path');
+    }
 
     const blob = dataURLtoBlob(dataUrl);
     let token = await getValidToken(false);

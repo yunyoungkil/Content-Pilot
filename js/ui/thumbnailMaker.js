@@ -42,13 +42,22 @@ export function openThumbnailMaker(
     thumbnailCandidates = draftData.thumbnailInfo;
     // Remove persisted meta-template candidates from older versions
     const looksLikeMetaTemplate = (cand) => {
-      const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+      const text = (
+        (cand.thumbnailPromptKo || '') +
+        ' ' +
+        (cand.thumbnailPromptEn || '') +
+        ' ' +
+        (cand.thumbnailText || '')
+      ).toLowerCase();
       return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
     };
     const beforeCount = thumbnailCandidates.length;
     thumbnailCandidates = thumbnailCandidates.filter((c) => !looksLikeMetaTemplate(c));
     if (thumbnailCandidates.length !== beforeCount) {
-      Logger.debug('[ThumbnailMaker] Removed meta-template candidates from draftData.thumbnailInfo:', beforeCount - thumbnailCandidates.length);
+      Logger.debug(
+        '[ThumbnailMaker] Removed meta-template candidates from draftData.thumbnailInfo:',
+        beforeCount - thumbnailCandidates.length
+      );
     }
 
     // 저장된 선택 인덱스가 있으면 사용, 없으면 첫 번째 요소 사용
@@ -68,23 +77,38 @@ export function openThumbnailMaker(
   }
 
   // If no thumbnail candidates found at top-level, check publishInfo.thumbnailInfo (persisted from Firebase)
-  if ((!thumbnailCandidates || thumbnailCandidates.length === 0) && draftData && draftData.publishInfo && draftData.publishInfo.thumbnailInfo) {
+  if (
+    (!thumbnailCandidates || thumbnailCandidates.length === 0) &&
+    draftData &&
+    draftData.publishInfo &&
+    draftData.publishInfo.thumbnailInfo
+  ) {
     try {
       const pf = draftData.publishInfo.thumbnailInfo;
       if (Array.isArray(pf)) {
         thumbnailCandidates = pf;
         // Remove persisted meta-template candidates from older versions
         const looksLikeMetaTemplate = (cand) => {
-          const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+          const text = (
+            (cand.thumbnailPromptKo || '') +
+            ' ' +
+            (cand.thumbnailPromptEn || '') +
+            ' ' +
+            (cand.thumbnailText || '')
+          ).toLowerCase();
           return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
         };
         const beforeCount = thumbnailCandidates.length;
         thumbnailCandidates = thumbnailCandidates.filter((c) => !looksLikeMetaTemplate(c));
         if (thumbnailCandidates.length !== beforeCount) {
-          Logger.debug('[ThumbnailMaker] Removed meta-template candidates from publishInfo.thumbnailInfo:', beforeCount - thumbnailCandidates.length);
+          Logger.debug(
+            '[ThumbnailMaker] Removed meta-template candidates from publishInfo.thumbnailInfo:',
+            beforeCount - thumbnailCandidates.length
+          );
         }
         const savedIndex = draftData.publishInfo.selectedThumbnailIndex || 0;
-        selectedConceptIndex = savedIndex >= 0 && savedIndex < thumbnailCandidates.length ? savedIndex : 0;
+        selectedConceptIndex =
+          savedIndex >= 0 && savedIndex < thumbnailCandidates.length ? savedIndex : 0;
         thumbInfo = thumbnailCandidates[selectedConceptIndex] || thumbnailCandidates[0] || null;
       } else if (typeof pf === 'object' && pf !== null) {
         // single object stored
@@ -187,13 +211,22 @@ export function openThumbnailMaker(
 
       // Remove any meta-template style candidates that might have been persisted by older versions
       const looksLikeMetaTemplate = (cand) => {
-        const text = ((cand.thumbnailPromptKo || '') + ' ' + (cand.thumbnailPromptEn || '') + ' ' + (cand.thumbnailText || '')).toLowerCase();
+        const text = (
+          (cand.thumbnailPromptKo || '') +
+          ' ' +
+          (cand.thumbnailPromptEn || '') +
+          ' ' +
+          (cand.thumbnailText || '')
+        ).toLowerCase();
         return /다음\s*메타\s*요약|메타\s*요약|메타\s*요약을\s*바탕|바탕으로\s*한/i.test(text);
       };
       const originalCount = thumbnailCandidates.length;
       thumbnailCandidates = (thumbnailCandidates || []).filter((c) => !looksLikeMetaTemplate(c));
       if (thumbnailCandidates.length !== originalCount) {
-        console.log('[ThumbnailMaker] Removed meta-template candidates persisted from old versions:', originalCount - thumbnailCandidates.length);
+        console.log(
+          '[ThumbnailMaker] Removed meta-template candidates persisted from old versions:',
+          originalCount - thumbnailCandidates.length
+        );
       }
 
       // refresh thumbInfo reference in case it was updated
@@ -401,14 +434,18 @@ export function openThumbnailMaker(
   // Run cleanup in case older builds or test helpers injected deprecated title UI
   cleanupPotentialTitleUi(modal);
 
-// Initialize selected settings display (ratio, slogan, alt) and include mode listeners
+  // Initialize selected settings display (ratio, slogan, alt) and include mode listeners
   try {
     const selRatio = modal.querySelector('#tm-selected-ratio');
     const selSlogan = modal.querySelector('#tm-selected-slogan');
     const selAlt = modal.querySelector('#tm-selected-alt');
-    if (selRatio) selRatio.textContent = (modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9');
+    if (selRatio)
+      selRatio.textContent = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
     if (selSlogan) selSlogan.textContent = thumbInfo.thumbnailText || '없음';
-    if (selAlt) selAlt.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+    if (selAlt)
+      selAlt.textContent =
+        thumbInfo.altText ||
+        (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
 
     // include mode radios
     const modeNone = modal.querySelector('#tm-include-mode-none');
@@ -421,10 +458,17 @@ export function openThumbnailMaker(
       const onModeChange = () => {
         // update prompt preview and selected alt display
         const selAltEl = modal.querySelector('#tm-selected-alt');
-        const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+        const checkedMode =
+          modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
         if (selAltEl) {
-          if (checkedMode === 'alt') selAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
-          else if (checkedMode === 'slogan') selAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+          if (checkedMode === 'alt')
+            selAltEl.textContent =
+              thumbInfo.altText ||
+              (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+          else if (checkedMode === 'slogan')
+            selAltEl.textContent =
+              thumbInfo.altText ||
+              (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
           else selAltEl.textContent = '(미포함)';
         }
 
@@ -436,12 +480,16 @@ export function openThumbnailMaker(
             const baseEn = thumbInfo.thumbnailPromptEn || '';
             let includeTextForDisplay = '';
             if (checkedMode === 'slogan') includeTextForDisplay = thumbInfo.thumbnailText || '';
-            else if (checkedMode === 'alt') includeTextForDisplay = thumbInfo.altText || thumbInfo.thumbnailText || '';
+            else if (checkedMode === 'alt')
+              includeTextForDisplay = thumbInfo.altText || thumbInfo.thumbnailText || '';
             if (enLine) {
               const includeInstructionForDisplay = includeTextForDisplay
                 ? ' IMPORTANT: Include the provided text in the image and render it clearly as readable text integrated into the composition.'
                 : ' IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay.';
-              enLine.textContent = baseEn + (includeTextForDisplay ? ' ' + includeTextForDisplay : '') + includeInstructionForDisplay;
+              enLine.textContent =
+                baseEn +
+                (includeTextForDisplay ? ' ' + includeTextForDisplay : '') +
+                includeInstructionForDisplay;
             }
           }
         } catch (e) {
@@ -684,7 +732,8 @@ export function openThumbnailMaker(
         }
       }
 
-      const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+      const checkedModeForSave =
+        modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
       const currentInfo = {
         thumbnailPromptEn: thumbInfo.thumbnailPromptEn, // 프롬프트는 유지
         thumbnailPromptKo: thumbInfo.thumbnailPromptKo,
@@ -699,7 +748,6 @@ export function openThumbnailMaker(
         // [신규] 포함 옵션 (radio 기반)
         includeSlogan: checkedModeForSave === 'slogan',
         includeAlt: checkedModeForSave === 'alt',
-
       };
 
       // 로깅 시 Base64 숨기기
@@ -720,8 +768,9 @@ export function openThumbnailMaker(
     // 복원 중이면 상태 저장하지 않음
     if (isRestoring) return;
 
-const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
-      const state = {
+    const checkedModeForSave =
+      modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+    const state = {
       templateType: modal.querySelector('#tm-template-type')?.value || 'default',
       ratio: modal.querySelector('#tm-ratio')?.value || '16:9',
       bgImage: currentBgImage,
@@ -763,8 +812,6 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
     // Restore persisted ratio and background image
     modal.querySelector('#tm-ratio').value = state.ratio;
-
-
 
     currentBgImage = state.bgImage;
 
@@ -925,12 +972,17 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         const canvasWrap = modal.querySelector('#tm-canvas-wrapper');
         wrap = document.createElement('div');
         wrap.id = historyWrapId;
-        wrap.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;';
+        wrap.style.cssText =
+          'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;';
         canvasWrap.insertAdjacentElement('afterend', wrap);
       }
       wrap.innerHTML = '';
       const sel = thumbnailCandidates[selectedConceptIndex] || {};
-      const arr = Array.isArray(sel.bgImages) ? sel.bgImages.slice() : (sel.bgImage ? [sel.bgImage] : []);
+      const arr = Array.isArray(sel.bgImages)
+        ? sel.bgImages.slice()
+        : sel.bgImage
+          ? [sel.bgImage]
+          : [];
       if (!arr || arr.length === 0) {
         const empty = document.createElement('div');
         empty.style.fontSize = '12px';
@@ -941,38 +993,40 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
       }
       for (const url of arr) {
         const item = document.createElement('div');
-        item.style.position='relative';
-        item.style.width='96px';
-        item.style.height='54px';
-        item.style.borderRadius='6px';
-        item.style.overflow='hidden';
-        item.style.cursor='pointer';
-        item.style.border='1px solid #333';
+        item.style.position = 'relative';
+        item.style.width = '96px';
+        item.style.height = '54px';
+        item.style.borderRadius = '6px';
+        item.style.overflow = 'hidden';
+        item.style.cursor = 'pointer';
+        item.style.border = '1px solid #333';
         item.style.background = '#111';
         const img = document.createElement('img');
         img.src = url;
-        img.style.width='100%';
-        img.style.height='100%';
-        img.style.objectFit='cover';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'cover';
         img.alt = 'history';
         item.appendChild(img);
         const del = document.createElement('button');
         del.textContent = '×';
-        del.style.position='absolute';
-        del.style.top='4px';
-        del.style.right='4px';
-        del.style.background='rgba(0,0,0,0.6)';
-        del.style.border='none';
-        del.style.color='#fff';
-        del.style.width='22px';
-        del.style.height='22px';
-        del.style.borderRadius='4px';
+        del.style.position = 'absolute';
+        del.style.top = '4px';
+        del.style.right = '4px';
+        del.style.background = 'rgba(0,0,0,0.6)';
+        del.style.border = 'none';
+        del.style.color = '#fff';
+        del.style.width = '22px';
+        del.style.height = '22px';
+        del.style.borderRadius = '4px';
         del.addEventListener('click', async (e) => {
           e.stopPropagation();
           const cand = thumbnailCandidates[selectedConceptIndex];
 
           // Prevent deleting images that are currently published for this concept
-          const isPublished = draftData && draftData.publishInfo &&
+          const isPublished =
+            draftData &&
+            draftData.publishInfo &&
             draftData.publishInfo.selectedThumbnailIndex === selectedConceptIndex &&
             draftData.publishInfo.thumbnailUrls &&
             Object.values(draftData.publishInfo.thumbnailUrls).includes(url);
@@ -982,25 +1036,40 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
           }
 
           // Ask whether to delete original storage file as well
-          const deleteOriginal = confirm('이미지를 삭제하시겠습니까?\n\n확인: 원본(스토리지)까지 삭제\n취소: 로컬(히스토리)에서만 삭제');
+          const deleteOriginal = confirm(
+            '이미지를 삭제하시겠습니까?\n\n확인: 원본(스토리지)까지 삭제\n취소: 로컬(히스토리)에서만 삭제'
+          );
 
           if (deleteOriginal) {
             // Attempt to delete original via background handler that can find metadata by URL
             try {
               const res = await new Promise((resolve) => {
-                chrome.runtime.sendMessage({ action: 'delete_storage_image_by_url', data: { url } }, (r) => resolve(r));
+                chrome.runtime.sendMessage(
+                  { action: 'delete_storage_image_by_url', data: { url } },
+                  (r) => resolve(r)
+                );
               });
 
               // No response or generic failure -> offer local delete fallback
               if (!res) {
-                console.error('[ThumbnailMaker] delete_storage_image_by_url returned no response for url:', url);
-                if (confirm('서버 응답이 없거나 오류가 발생했습니다. 로컬(히스토리)에서만 삭제하시겠습니까?')) {
+                console.error(
+                  '[ThumbnailMaker] delete_storage_image_by_url returned no response for url:',
+                  url
+                );
+                if (
+                  confirm(
+                    '서버 응답이 없거나 오류가 발생했습니다. 로컬(히스토리)에서만 삭제하시겠습니까?'
+                  )
+                ) {
                   if (cand && Array.isArray(cand.bgImages)) {
                     cand.bgImages = cand.bgImages.filter((u) => u !== url);
                     if (cand.bgImages.length === 0) delete cand.bgImages;
                   }
                   if (currentBgImage === url) {
-                    const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                    const candArr =
+                      (thumbnailCandidates[selectedConceptIndex] &&
+                        thumbnailCandidates[selectedConceptIndex].bgImages) ||
+                      [];
                     currentBgImage = candArr[0] || null;
                     updatePreview();
                   }
@@ -1019,13 +1088,20 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
                 // Auth/permission errors - show specific guidance
                 if (/auth|permission|401|403|unauthorized/i.test(errMsg)) {
-                  if (confirm('원본 삭제 권한이 없습니다. 로그인/권한을 확인하시겠습니까? (확인: 로컬에서만 삭제)')) {
+                  if (
+                    confirm(
+                      '원본 삭제 권한이 없습니다. 로그인/권한을 확인하시겠습니까? (확인: 로컬에서만 삭제)'
+                    )
+                  ) {
                     if (cand && Array.isArray(cand.bgImages)) {
                       cand.bgImages = cand.bgImages.filter((u) => u !== url);
                       if (cand.bgImages.length === 0) delete cand.bgImages;
                     }
                     if (currentBgImage === url) {
-                      const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                      const candArr =
+                        (thumbnailCandidates[selectedConceptIndex] &&
+                          thumbnailCandidates[selectedConceptIndex].bgImages) ||
+                        [];
                       currentBgImage = candArr[0] || null;
                       updatePreview();
                     }
@@ -1039,14 +1115,19 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
                 }
 
                 // Metadata not found -> offer local-only deletion
-                if (/not found|metadata not found|uploaded image metadata not found/i.test(errMsg)) {
+                if (
+                  /not found|metadata not found|uploaded image metadata not found/i.test(errMsg)
+                ) {
                   if (confirm('원본을 찾을 수 없습니다. 로컬(히스토리)에서만 삭제하시겠습니까?')) {
                     if (cand && Array.isArray(cand.bgImages)) {
                       cand.bgImages = cand.bgImages.filter((u) => u !== url);
                       if (cand.bgImages.length === 0) delete cand.bgImages;
                     }
                     if (currentBgImage === url) {
-                      const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                      const candArr =
+                        (thumbnailCandidates[selectedConceptIndex] &&
+                          thumbnailCandidates[selectedConceptIndex].bgImages) ||
+                        [];
                       currentBgImage = candArr[0] || null;
                       updatePreview();
                     }
@@ -1063,14 +1144,17 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
                 showToast('원본 삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
                 return;
               }
-              
+
               // Success: remove url from candidate bgImages
               if (cand && Array.isArray(cand.bgImages)) {
                 cand.bgImages = cand.bgImages.filter((u) => u !== url);
                 if (cand.bgImages.length === 0) delete cand.bgImages;
               }
               if (currentBgImage === url) {
-                const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                const candArr =
+                  (thumbnailCandidates[selectedConceptIndex] &&
+                    thumbnailCandidates[selectedConceptIndex].bgImages) ||
+                  [];
                 currentBgImage = candArr[0] || null;
                 updatePreview();
               }
@@ -1078,7 +1162,11 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
               triggerAutoSave();
               showToast('✅ 이미지와 원본이 삭제되었습니다.');
             } catch (err) {
-              showToast('원본 삭제 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)), 'error');
+              showToast(
+                '원본 삭제 중 오류가 발생했습니다: ' +
+                  (err && err.message ? err.message : String(err)),
+                'error'
+              );
             }
           } else {
             // Local-only deletion
@@ -1087,7 +1175,10 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
               if (cand.bgImages.length === 0) delete cand.bgImages;
             }
             if (currentBgImage === url) {
-              const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+              const candArr =
+                (thumbnailCandidates[selectedConceptIndex] &&
+                  thumbnailCandidates[selectedConceptIndex].bgImages) ||
+                [];
               currentBgImage = candArr[0] || null;
               updatePreview();
             }
@@ -1096,7 +1187,7 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
             showToast('✅ 이미지가 로컬에서 제거되었습니다.');
           }
         });
-        item.addEventListener('click', ()=> {
+        item.addEventListener('click', () => {
           currentBgImage = url;
           updatePreview();
           saveState();
@@ -1150,8 +1241,12 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
     const conceptButtons = modal.querySelectorAll('.tm-concept-btn');
     // Add bg indicator for persisted bgImage on each button. Also consider saved publish thumbnails when selected index matches.
     conceptButtons.forEach((btn, idx) => {
-      const hasBg = (thumbnailCandidates[idx] && thumbnailCandidates[idx].bgImage) ||
-        (draftData && draftData.publishInfo && draftData.publishInfo.selectedThumbnailIndex === idx && draftData.publishInfo.thumbnailUrls);
+      const hasBg =
+        (thumbnailCandidates[idx] && thumbnailCandidates[idx].bgImage) ||
+        (draftData &&
+          draftData.publishInfo &&
+          draftData.publishInfo.selectedThumbnailIndex === idx &&
+          draftData.publishInfo.thumbnailUrls);
       if (hasBg) {
         btn.classList.add('tm-has-bg');
         // small dot indicator
@@ -1186,17 +1281,19 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
         // 입력 필드 업데이트
 
-
         // 프롬프트 정보 업데이트 (ID로 정확히 찾기)
         const promptDisplay = modal.querySelector('#tm-prompt-display');
         if (promptDisplay) {
           const newPromptKo = selectedConcept.thumbnailPromptKo || '자동 설정됨';
           const newPromptEn = selectedConcept.thumbnailPromptEn || '';
           // 한글과 영문 프롬프트 모두 표시. 포함 모드가 활성화된 경우에만 선택된 컨셉 텍스트를 영문 라인에 표시
-          const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+          const checkedMode =
+            modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
           let includeIfAllowed = '';
           if (checkedMode === 'slogan') {
-            includeIfAllowed = selectedConcept.thumbnailText ? ' ' + selectedConcept.thumbnailText : '';
+            includeIfAllowed = selectedConcept.thumbnailText
+              ? ' ' + selectedConcept.thumbnailText
+              : '';
           } else if (checkedMode === 'alt') {
             const altOrSlogan = selectedConcept.altText || selectedConcept.thumbnailText || '';
             includeIfAllowed = altOrSlogan ? ' ' + altOrSlogan : '';
@@ -1229,17 +1326,31 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         currentBgImage = thumbInfo.bgImage || null;
         // If no per-concept bgImage, fall back to publishInfo.thumbnailUrls for the selected concept (by current ratio)
         if (!currentBgImage) {
-          const urls = (draftData && draftData.publishInfo && draftData.publishInfo.thumbnailUrls) || draftData.thumbnailUrls || null;
+          const urls =
+            (draftData && draftData.publishInfo && draftData.publishInfo.thumbnailUrls) ||
+            draftData.thumbnailUrls ||
+            null;
           if (urls) {
             const ratio = modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
-            const key = ratio === '16:9' ? 'url_16x9' : ratio === '1:1' ? 'url_1x1' : ratio === '4:3' ? 'url_4x3' : 'url_16x9';
+            const key =
+              ratio === '16:9'
+                ? 'url_16x9'
+                : ratio === '1:1'
+                  ? 'url_1x1'
+                  : ratio === '4:3'
+                    ? 'url_4x3'
+                    : 'url_16x9';
             if (urls[key]) currentBgImage = urls[key];
           }
         }
         // Update bg indicator on buttons
         conceptButtons.forEach((b, i) => {
-          const hasBg = (thumbnailCandidates[i] && thumbnailCandidates[i].bgImage) ||
-            (draftData && draftData.publishInfo && draftData.publishInfo.selectedThumbnailIndex === i && draftData.publishInfo.thumbnailUrls);
+          const hasBg =
+            (thumbnailCandidates[i] && thumbnailCandidates[i].bgImage) ||
+            (draftData &&
+              draftData.publishInfo &&
+              draftData.publishInfo.selectedThumbnailIndex === i &&
+              draftData.publishInfo.thumbnailUrls);
           if (hasBg) b.classList.add('tm-has-bg');
           else b.classList.remove('tm-has-bg');
           const dot = b.querySelector('.tm-bg-indicator');
@@ -1261,7 +1372,11 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
         // Reset excluded reference images / UI state when switching concepts
         // Update history UI for newly selected concept
-        try { renderHistory(); } catch (e) { /* ignore */ }
+        try {
+          renderHistory();
+        } catch (e) {
+          /* ignore */
+        }
         excludedRefImages.clear();
         try {
           renderReferenceImages();
@@ -1271,9 +1386,14 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         const selectedRatioEl = modal.querySelector('#tm-selected-ratio');
         const selectedSloganEl = modal.querySelector('#tm-selected-slogan');
         const selectedAltEl = modal.querySelector('#tm-selected-alt');
-        if (selectedRatioEl) selectedRatioEl.textContent = (modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9');
+        if (selectedRatioEl)
+          selectedRatioEl.textContent =
+            modal.querySelector('#tm-ratio')?.value || thumbInfo.ratio || '16:9';
         if (selectedSloganEl) selectedSloganEl.textContent = thumbInfo.thumbnailText || '없음';
-        if (selectedAltEl) selectedAltEl.textContent = thumbInfo.altText || (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
+        if (selectedAltEl)
+          selectedAltEl.textContent =
+            thumbInfo.altText ||
+            (thumbInfo.thumbnailText ? `${thumbInfo.thumbnailText} 썸네일 이미지` : '없음');
 
         Logger.debug('[ThumbnailMaker] 컨셉 변경:', {
           index: idx,
@@ -1302,10 +1422,8 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
     });
   }
 
-
   // File upload UI and handlers removed: uploading background images via file input is deprecated.
   // Previously, upload button and file input change handlers uploaded images to Firebase Storage and applied them as background.
-
 
   // [핵심] 배경 생성 버튼 클릭 (스타일 반영)
   const genBgBtn = modal.querySelector('#tm-gen-bg');
@@ -1330,7 +1448,8 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         const promptSuffix = 'text-friendly background, minimal distractions';
 
         // Append selected text (slogan or alt) to the English prompt so it's visible in UI and sent to AI
-        const checkedMode = modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
+        const checkedMode =
+          modal.querySelector('input[name="tm-include-mode"]:checked')?.value || 'none';
         let includeText = '';
         if (checkedMode === 'slogan' && thumbInfo.thumbnailText) {
           includeText = thumbInfo.thumbnailText;
@@ -1616,11 +1735,20 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
           // Update local per-concept history (bgImages) and keep latest-first, deduped
           try {
-            const sel = (thumbnailCandidates[selectedConceptIndex] = thumbnailCandidates[selectedConceptIndex] || {});
+            const sel = (thumbnailCandidates[selectedConceptIndex] =
+              thumbnailCandidates[selectedConceptIndex] || {});
             const existing = Array.isArray(sel.bgImages) ? sel.bgImages.slice() : [];
             sel.bgImages = [currentBgImage, ...existing.filter((u) => u !== currentBgImage)];
             // Ensure thumbInfo reference updates while preserving style settings
-            thumbInfo = { ...sel, ...{ fontFamily: thumbInfo.fontFamily, textColor: thumbInfo.textColor, ratio: thumbInfo.ratio, templateType: thumbInfo.templateType } };
+            thumbInfo = {
+              ...sel,
+              ...{
+                fontFamily: thumbInfo.fontFamily,
+                textColor: thumbInfo.textColor,
+                ratio: thumbInfo.ratio,
+                templateType: thumbInfo.templateType,
+              },
+            };
           } catch (e) {
             // ignore history update errors
           }
@@ -1695,16 +1823,9 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
 
   // [신규] 텍스트 표시 토글 이벤트
 
-
   // 텍스트 실시간 반영 (입력할 때마다 렌더링) - 상태 저장 포함
 
-
-
-
-
-
   // [신규] 타이포그래피 컨트롤 이벤트 리스너 - 상태 저장 포함
-
 
   // [신규] 비율 변경 이벤트 - 상태 저장 포함
   const ratioSelect = modal.querySelector('#tm-ratio');
@@ -1779,8 +1900,11 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         console.log(`⚡ [ThumbnailMaker] 최종 이미지 생성 완료 (${elapsed}ms)`);
 
         // Determine whether to include alt text based on selected include mode (radio)
-        const includeAlt = modal.querySelector('input[name="tm-include-mode"]:checked')?.value === 'alt';
-        const altText = includeAlt ? (thumbInfo.altText || thumbInfo.thumbnailText || '썸네일 이미지') : '';
+        const includeAlt =
+          modal.querySelector('input[name="tm-include-mode"]:checked')?.value === 'alt';
+        const altText = includeAlt
+          ? thumbInfo.altText || thumbInfo.thumbnailText || '썸네일 이미지'
+          : '';
 
         // 1. 제목 가져오기 (파일명 생성용) - thumbInfo.thumbnailText 또는 기본값 사용
         const rawTitle = thumbInfo.thumbnailText || 'thumbnail';
@@ -2025,8 +2149,6 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
   // 닫기 버튼
   const closeBtn = modal.querySelector('#tm-close');
   if (closeBtn) closeBtn.onclick = () => modal.remove();
-
-
 
   // 초기 1회 렌더링 (기본 배경 + 텍스트)
   updatePreview();
