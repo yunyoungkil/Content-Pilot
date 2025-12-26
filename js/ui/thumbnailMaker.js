@@ -967,20 +967,65 @@ const checkedModeForSave = modal.querySelector('input[name="tm-include-mode"]:ch
         del.style.width='22px';
         del.style.height='22px';
         del.style.borderRadius='4px';
-        del.addEventListener('click',(e)=>{e.stopPropagation();
-          // remove url from candidate bgImages
+        del.addEventListener('click', async (e) => {
+          e.stopPropagation();
           const cand = thumbnailCandidates[selectedConceptIndex];
-          if (cand && Array.isArray(cand.bgImages)) {
-            cand.bgImages = cand.bgImages.filter((u)=>u!==url);
-            if (cand.bgImages.length===0) delete cand.bgImages;
+
+          // Prevent deleting images that are currently published for this concept
+          const isPublished = draftData && draftData.publishInfo &&
+            draftData.publishInfo.selectedThumbnailIndex === selectedConceptIndex &&
+            draftData.publishInfo.thumbnailUrls &&
+            Object.values(draftData.publishInfo.thumbnailUrls).includes(url);
+          if (isPublished) {
+            showToast('발행된 이미지는 삭제할 수 없습니다.', 'warning');
+            return;
           }
-          if (currentBgImage === url) {
-            const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
-            currentBgImage = candArr[0] || null;
-            updatePreview();
+
+          // Ask whether to delete original storage file as well
+          const deleteOriginal = confirm('이미지를 삭제하시겠습니까?\n\n확인: 원본(스토리지)까지 삭제\n취소: 로컬(히스토리)에서만 삭제');
+
+          if (deleteOriginal) {
+            // Attempt to delete original via background handler that can find metadata by URL
+            try {
+              const res = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: 'delete_storage_image_by_url', data: { url } }, (r) => resolve(r));
+              });
+              if (!res || !res.success) {
+                showToast('원본 삭제 실패: ' + (res?.error || '알 수 없는 오류'), 'error');
+                return;
+              }
+
+              // Remove url from candidate bgImages
+              if (cand && Array.isArray(cand.bgImages)) {
+                cand.bgImages = cand.bgImages.filter((u) => u !== url);
+                if (cand.bgImages.length === 0) delete cand.bgImages;
+              }
+              if (currentBgImage === url) {
+                const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+                currentBgImage = candArr[0] || null;
+                updatePreview();
+              }
+              renderHistory();
+              triggerAutoSave();
+              showToast('✅ 이미지와 원본이 삭제되었습니다.');
+            } catch (err) {
+              showToast('원본 삭제 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)), 'error');
+            }
+          } else {
+            // Local-only deletion
+            if (cand && Array.isArray(cand.bgImages)) {
+              cand.bgImages = cand.bgImages.filter((u) => u !== url);
+              if (cand.bgImages.length === 0) delete cand.bgImages;
+            }
+            if (currentBgImage === url) {
+              const candArr = (thumbnailCandidates[selectedConceptIndex] && thumbnailCandidates[selectedConceptIndex].bgImages) || [];
+              currentBgImage = candArr[0] || null;
+              updatePreview();
+            }
+            renderHistory();
+            triggerAutoSave();
+            showToast('✅ 이미지가 로컬에서 제거되었습니다.');
           }
-          renderHistory();
-          triggerAutoSave(); // persist change
         });
         item.addEventListener('click', ()=> {
           currentBgImage = url;

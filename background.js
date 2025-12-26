@@ -45,6 +45,8 @@ import {
   getCurrentUserId,
   getUnifiedGalleryImages,
   deleteImageFromStorage,
+  getUploadedImagesLog,
+  firebaseConfig,
 } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
@@ -3115,6 +3117,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         Logger.info('[delete_storage_image] operation completed for id:', id);
         return { success: true };
+      })()
+    );
+  }
+
+  // New: delete by download URL - finds metadata entry and deletes storage + metadata
+  if (msg.action === 'delete_storage_image_by_url') {
+    if (!msg || !msg.data || !msg.data.url) {
+      return sendResponse({ success: false, error: 'missing url' });
+    }
+
+    return handleAsync(
+      (async () => {
+        const url = msg.data.url;
+        const userId = await getCurrentUserId();
+        try {
+          const list = await getUploadedImagesLog();
+          const target = normalizeUrlForDeletion(url);
+          const found = list.find((it) => normalizeUrlForDeletion(it.downloadURL || '') === target || normalizeUrlForDeletion(it.downloadURL || '').endsWith(target));
+
+          if (found) {
+            Logger.info('[delete_storage_image_by_url] found metadata id:', found.id, 'path:', found.storagePath);
+            await deleteImageFromStorage(found.storagePath);
+            await remove(ref(getDb(), `thumbnail_images/${userId}/${found.id}`));
+            return { success: true };
+          }
+
+          // try to parse storage path from a firebase download URL
+          try {
+            const u = new URL(url);
+            const match = u.pathname.match(/\/o\/([^?\/]+)/);
+            if (match && match[1]) {
+              const decoded = decodeURIComponent(match[1]);
+              const storagePath = `gs://${firebaseConfig.storageBucket}/${decoded}`;
+              Logger.info('[delete_storage_image_by_url] parsed storage path:', storagePath);
+              await deleteImageFromStorage(storagePath);
+              // If metadata exists, remove it
+              const byStorage = list.find((it) => it.storagePath === storagePath);
+              if (byStorage) {
+                await remove(ref(getDb(), `thumbnail_images/${userId}/${byStorage.id}`));
+              }
+              return { success: true };
+            }
+          } catch (e) {
+            Logger.debug('[delete_storage_image_by_url] failed to parse storage path from url:', e && e.message);
+          }
+
+          return { success: false, error: 'uploaded image metadata not found' };
+        } catch (e) {
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
       })()
     );
   }
