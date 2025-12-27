@@ -763,6 +763,45 @@ export function openThumbnailMaker(
     }, 500); // 0.5초 뒤 저장
   };
 
+  // [신규] 전체 thumbnailCandidates를 publishInfo에 동기화 (삭제 등 전체 업데이트 필요 시)
+  const saveAllConcepts = () => {
+    if (!onSave || !ideaData || !ideaData.id) return;
+    
+    // thumbnailCandidates 배열을 publishInfo.thumbnailInfo 형식으로 변환
+    const thumbnailInfoToSave = Array.isArray(thumbnailCandidates) 
+      ? thumbnailCandidates.map(c => ({
+          ...c,
+          // bgImages가 빈 배열이면 제거
+          bgImages: Array.isArray(c.bgImages) && c.bgImages.length > 0 ? c.bgImages : undefined,
+        }))
+      : [];
+
+    // Firebase에 직접 업데이트
+    chrome.runtime.sendMessage(
+      {
+        action: 'update_kanban_card',
+        data: {
+          cardId: ideaData.id,
+          status: ideaData.status || 'ideas',
+          updates: {
+            publishInfo: {
+              ...(ideaData.publishInfo || {}),
+              thumbnailInfo: thumbnailInfoToSave,
+              selectedThumbnailIndex: selectedConceptIndex,
+            },
+          },
+        },
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[ThumbnailMaker] saveAllConcepts 실패:', chrome.runtime.lastError);
+        } else if (response && response.success) {
+          console.log('[ThumbnailMaker] ✅ 전체 컨셉 동기화 완료');
+        }
+      }
+    );
+  };
+
   // 상태 저장 함수 (Undo/Redo용)
   const saveState = () => {
     // 복원 중이면 상태 저장하지 않음
@@ -1093,6 +1132,19 @@ export function openThumbnailMaker(
                       '원본 삭제 권한이 없습니다. 로그인/권한을 확인하시겠습니까? (확인: 로컬에서만 삭제)'
                     )
                   ) {
+                    // Remove from ALL concepts
+                    let removedCount = 0;
+                    if (Array.isArray(thumbnailCandidates)) {
+                      thumbnailCandidates.forEach((concept) => {
+                        if (concept && Array.isArray(concept.bgImages)) {
+                          const before = concept.bgImages.length;
+                          concept.bgImages = concept.bgImages.filter((u) => u !== url);
+                          if (concept.bgImages.length < before) removedCount++;
+                          if (concept.bgImages.length === 0) delete concept.bgImages;
+                        }
+                      });
+                    }
+                    
                     if (cand && Array.isArray(cand.bgImages)) {
                       cand.bgImages = cand.bgImages.filter((u) => u !== url);
                       if (cand.bgImages.length === 0) delete cand.bgImages;
@@ -1106,8 +1158,8 @@ export function openThumbnailMaker(
                       updatePreview();
                     }
                     renderHistory();
-                    triggerAutoSave();
-                    showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+                    saveAllConcepts();  // 전체 컨셉 동기화
+                    showToast(`✅ 이미지가 로컬에서 제거되었습니다${removedCount > 1 ? ` (${removedCount}개 컨셉에서 제거)` : ''}.`);
                     return;
                   }
                   showToast('삭제이 취소되었습니다.', 'warning');
@@ -1119,6 +1171,19 @@ export function openThumbnailMaker(
                   /not found|metadata not found|uploaded image metadata not found/i.test(errMsg)
                 ) {
                   if (confirm('원본을 찾을 수 없습니다. 로컬(히스토리)에서만 삭제하시겠습니까?')) {
+                    // Remove from ALL concepts
+                    let removedCount = 0;
+                    if (Array.isArray(thumbnailCandidates)) {
+                      thumbnailCandidates.forEach((concept) => {
+                        if (concept && Array.isArray(concept.bgImages)) {
+                          const before = concept.bgImages.length;
+                          concept.bgImages = concept.bgImages.filter((u) => u !== url);
+                          if (concept.bgImages.length < before) removedCount++;
+                          if (concept.bgImages.length === 0) delete concept.bgImages;
+                        }
+                      });
+                    }
+                    
                     if (cand && Array.isArray(cand.bgImages)) {
                       cand.bgImages = cand.bgImages.filter((u) => u !== url);
                       if (cand.bgImages.length === 0) delete cand.bgImages;
@@ -1132,8 +1197,8 @@ export function openThumbnailMaker(
                       updatePreview();
                     }
                     renderHistory();
-                    triggerAutoSave();
-                    showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+                    saveAllConcepts();  // 전체 컨셉 동기화
+                    showToast(`✅ 이미지가 로컬에서 제거되었습니다${removedCount > 1 ? ` (${removedCount}개 컨셉에서 제거)` : ''}.`);
                     return;
                   }
                   showToast('삭제이 취소되었습니다.', 'warning');
@@ -1145,11 +1210,25 @@ export function openThumbnailMaker(
                 return;
               }
 
-              // Success: remove url from candidate bgImages
+              // Success: remove url from ALL concepts' bgImages (not just current)
+              let removedCount = 0;
+              if (Array.isArray(thumbnailCandidates)) {
+                thumbnailCandidates.forEach((concept) => {
+                  if (concept && Array.isArray(concept.bgImages)) {
+                    const before = concept.bgImages.length;
+                    concept.bgImages = concept.bgImages.filter((u) => u !== url);
+                    if (concept.bgImages.length < before) removedCount++;
+                    if (concept.bgImages.length === 0) delete concept.bgImages;
+                  }
+                });
+              }
+              
+              // Also update current concept reference
               if (cand && Array.isArray(cand.bgImages)) {
                 cand.bgImages = cand.bgImages.filter((u) => u !== url);
                 if (cand.bgImages.length === 0) delete cand.bgImages;
               }
+              
               if (currentBgImage === url) {
                 const candArr =
                   (thumbnailCandidates[selectedConceptIndex] &&
@@ -1159,8 +1238,8 @@ export function openThumbnailMaker(
                 updatePreview();
               }
               renderHistory();
-              triggerAutoSave();
-              showToast('✅ 이미지와 원본이 삭제되었습니다.');
+              saveAllConcepts();  // 전체 컨셉 동기화
+              showToast(`✅ 이미지와 원본이 삭제되었습니다${removedCount > 1 ? ` (${removedCount}개 컨셉에서 제거)` : ''}.`);
             } catch (err) {
               showToast(
                 '원본 삭제 중 오류가 발생했습니다: ' +
@@ -1169,7 +1248,19 @@ export function openThumbnailMaker(
               );
             }
           } else {
-            // Local-only deletion
+            // Local-only deletion - remove from ALL concepts
+            let removedCount = 0;
+            if (Array.isArray(thumbnailCandidates)) {
+              thumbnailCandidates.forEach((concept) => {
+                if (concept && Array.isArray(concept.bgImages)) {
+                  const before = concept.bgImages.length;
+                  concept.bgImages = concept.bgImages.filter((u) => u !== url);
+                  if (concept.bgImages.length < before) removedCount++;
+                  if (concept.bgImages.length === 0) delete concept.bgImages;
+                }
+              });
+            }
+            
             if (cand && Array.isArray(cand.bgImages)) {
               cand.bgImages = cand.bgImages.filter((u) => u !== url);
               if (cand.bgImages.length === 0) delete cand.bgImages;
@@ -1183,8 +1274,8 @@ export function openThumbnailMaker(
               updatePreview();
             }
             renderHistory();
-            triggerAutoSave();
-            showToast('✅ 이미지가 로컬에서 제거되었습니다.');
+            saveAllConcepts();  // 전체 컨셉 동기화
+            showToast(`✅ 이미지가 로컬에서 제거되었습니다${removedCount > 1 ? ` (${removedCount}개 컨셉에서 제거)` : ''}.`);
           }
         });
         item.addEventListener('click', () => {

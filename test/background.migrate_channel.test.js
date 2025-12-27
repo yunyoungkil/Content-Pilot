@@ -82,11 +82,12 @@ describe('Background - migrate_channel handler', () => {
     runtimeHandler({ action: 'migrate_channel', channelId: 'not-owned', dryRun: true }, {}, sendResponse);
 
     // wait for async
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(runDataMigrationMock).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalled();
-    const resp = sendResponse.mock.calls[0][0];
+    // handleAsync sends immediate ACK then final result
+    const resp = sendResponse.mock.calls.slice(-1)[0][0];
     expect(resp.success).toBe(false);
     expect(resp.error).toContain('권한');
   });
@@ -130,10 +131,11 @@ describe('Background - migrate_channel handler', () => {
     const sendResponse = jest.fn();
     runtimeHandler({ action: 'migrate_channel', channelId: 'my-blog', dryRun: false }, {}, sendResponse);
 
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(sendResponse).toHaveBeenCalled();
-    const resp = sendResponse.mock.calls[0][0];
+    // handleAsync sends immediate ACK then final result
+    const resp = sendResponse.mock.calls.slice(-1)[0][0];
     expect(resp.success).toBe(true);
     expect(resp.jobId).toBeTruthy();
     // verify job enqueued

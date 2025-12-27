@@ -48,6 +48,7 @@ import {
   getUploadedImagesLog,
   firebaseConfig,
   markDeletedThumbnail,
+  isThumbnailDeleted,
 } from './js/services/firebaseService.js';
 import { Logger } from './js/utils.js';
 // [추가] 상수 임포트
@@ -1307,6 +1308,93 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const updatePath = `kanban/${userId}/${status}/${cardId}`;
 
         Logger.debug(`[update_kanban_card] 업데이트 시작 - path: ${updatePath}, updates:`, updates);
+
+        // Sanitize incoming publishInfo: remove any thumbnail URLs that have been tombstoned (recently deleted)
+        try {
+          if (updates && updates.publishInfo) {
+            const pub = updates.publishInfo;
+
+            const sanitizeUrl = async (u) => {
+              try {
+                if (!u) return null;
+                let objectPath = null;
+                if (u.startsWith('gs://')) {
+                  const m = String(u).match(/^gs:\/\/[^\/]+\/(.+)$/);
+                  if (m && m[1]) objectPath = decodeURIComponent(m[1]);
+                } else {
+                  try {
+                    const uu = new URL(u);
+                    const mFull = uu.pathname.match(/\/v0\/b\/([^\/]+)\/o\/([^?\/]+)/);
+                    if (mFull && mFull[2]) objectPath = decodeURIComponent(mFull[2]);
+                    else {
+                      const mShort = uu.pathname.match(/\/o\/([^?\/]+)/);
+                      if (mShort && mShort[1]) objectPath = decodeURIComponent(mShort[1]);
+                    }
+                  } catch (e) {}
+                }
+                if (!objectPath) return u;
+                const uid = await getCurrentUserId();
+                const deleted = await (typeof isThumbnailDeleted === 'function' ? isThumbnailDeleted(uid, objectPath) : false);
+                return deleted ? null : u;
+              } catch (e) {
+                return u;
+              }
+            };
+
+            if (Array.isArray(pub.thumbnailInfo)) {
+              pub.thumbnailInfo = await Promise.all(
+                pub.thumbnailInfo.map(async (t) => {
+                  const copy = { ...t };
+                  if (copy.bgImage) {
+                    const safe = await sanitizeUrl(copy.bgImage);
+                    if (!safe) delete copy.bgImage;
+                    else copy.bgImage = safe;
+                  }
+                  if (Array.isArray(copy.bgImages)) {
+                    const filtered = [];
+                    for (const x of copy.bgImages) {
+                      const safe = await sanitizeUrl(x);
+                      if (safe) filtered.push(safe);
+                    }
+                    if (filtered.length > 0) copy.bgImages = filtered;
+                    else delete copy.bgImages;
+                  }
+                  return copy;
+                })
+              );
+            }
+
+            if (pub.bgImage) {
+              const safe = await sanitizeUrl(pub.bgImage);
+              if (!safe) delete pub.bgImage;
+              else pub.bgImage = safe;
+            }
+            if (Array.isArray(pub.bgImages)) {
+              const newArr = [];
+              for (const x of pub.bgImages) {
+                const safe = await sanitizeUrl(x);
+                if (safe) newArr.push(safe);
+              }
+              if (newArr.length > 0) pub.bgImages = newArr;
+              else delete pub.bgImages;
+            }
+
+            if (pub.thumbnailUrls && typeof pub.thumbnailUrls === 'object') {
+              const keys = Object.keys(pub.thumbnailUrls);
+              for (const k of keys) {
+                try {
+                  const safe = await sanitizeUrl(pub.thumbnailUrls[k]);
+                  if (!safe) delete pub.thumbnailUrls[k];
+                  else pub.thumbnailUrls[k] = safe;
+                } catch (e) {}
+              }
+            }
+
+            updates.publishInfo = pub;
+          }
+        } catch (sanitizeErr) {
+          Logger.warn('[update_kanban_card] publishInfo sanitation failed:', sanitizeErr && sanitizeErr.message);
+        }
 
         // 데이터 정제 (undefined → null)
         const cleanedUpdates = cleanDataForFirebase(updates);
@@ -3496,6 +3584,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               }
             } catch (e) {
               Logger.warn('[delete_storage_image_by_url] failed to scan/update kanban publishInfo entries:', e && e.message);
+            }
+
+            // Broadcast kanban changes to UI tabs so clients refresh cached publishInfo
+            try {
+              const kanbanRefBroad = ref(getDb(), `kanban/${userId}`);
+              const kanbanSnapBroad = await get(kanbanRefBroad);
+              const kanbanDataBroad = kanbanSnapBroad?.val() || {};
+
+              try {
+                chrome.runtime.sendMessage({ action: 'kanban_data_updated', data: kanbanDataBroad });
+              } catch (e) {
+                Logger.debug('[delete_storage_image_by_url] broadcast runtime.sendMessage failed:', e && e.message);
+              }
+
+              try {
+                chrome.tabs.query({}, (tabs) => {
+                  tabs.forEach((tab) => {
+                    if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                      try {
+                        chrome.tabs.sendMessage(tab.id, { action: 'kanban_data_updated', data: kanbanDataBroad }, () => {});
+                      } catch (ignored) {}
+                    }
+                  });
+                });
+              } catch (e) {
+                Logger.debug('[delete_storage_image_by_url] tabs broadcast failed:', e && e.message);
+              }
+            } catch (e) {
+              Logger.debug('[delete_storage_image_by_url] preparing broadcast failed:', e && e.message);
             }
 
             return { success: true, removedIds, failedPaths };

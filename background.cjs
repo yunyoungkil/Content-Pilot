@@ -60,6 +60,9 @@ const {
   getUnifiedGalleryImages,
   deleteImageFromStorage,
   getUploadedImagesLog,
+  // Tombstone helpers
+  markDeletedThumbnail,
+  isThumbnailDeleted,
 } = require('./js/services/firebaseService.js');
 const { Logger } = require('./js/utils.js');
 // [추가] 상수 임포트
@@ -1043,6 +1046,101 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const updatePath = `kanban/${userId}/${status}/${cardId}`;
 
         Logger.debug(`[update_kanban_card] 업데이트 시작 - path: ${updatePath}, updates:`, updates);
+
+        // Sanitize incoming publishInfo: remove any thumbnail URLs that have been tombstoned (recently deleted)
+        try {
+          if (updates && updates.publishInfo) {
+            const pub = updates.publishInfo;
+
+            // Normalize helper to test and filter arrays/fields
+            const sanitizeUrl = async (u) => {
+              try {
+                if (!u) return null;
+                // Attempt to extract object path
+                let objectPath = null;
+                if (u.startsWith('gs://')) {
+                  const m = String(u).match(/^gs:\/\/[^\/]+\/(.+)$/);
+                  if (m && m[1]) objectPath = decodeURIComponent(m[1]);
+                } else {
+                  try {
+                    const uu = new URL(u);
+                    const mFull = uu.pathname.match(/\/v0\/b\/([^\/]+)\/o\/([^?\/]+)/);
+                    if (mFull && mFull[2]) objectPath = decodeURIComponent(mFull[2]);
+                    else {
+                      const mShort = uu.pathname.match(/\/o\/([^?\/]+)/);
+                      if (mShort && mShort[1]) objectPath = decodeURIComponent(mShort[1]);
+                    }
+                  } catch (e) {
+                    // ignore
+                  }
+                }
+                if (!objectPath) return u; // cannot determine -> keep
+                const uid = await getCurrentUserId();
+                const deleted = await (typeof isThumbnailDeleted === 'function' ? isThumbnailDeleted(uid, objectPath) : false);
+                return deleted ? null : u;
+              } catch (e) {
+                return u; // on error, keep original to avoid accidental loss
+              }
+            };
+
+            // thumbnailInfo array
+            if (Array.isArray(pub.thumbnailInfo)) {
+              pub.thumbnailInfo = await Promise.all(
+                pub.thumbnailInfo.map(async (t) => {
+                  const copy = { ...t };
+                  if (copy.bgImage) {
+                    const safe = await sanitizeUrl(copy.bgImage);
+                    if (!safe) delete copy.bgImage;
+                    else copy.bgImage = safe;
+                  }
+                  if (Array.isArray(copy.bgImages)) {
+                    const filtered = [];
+                    for (const x of copy.bgImages) {
+                      const safe = await sanitizeUrl(x);
+                      if (safe) filtered.push(safe);
+                    }
+                    if (filtered.length > 0) copy.bgImages = filtered;
+                    else delete copy.bgImages;
+                  }
+                  return copy;
+                })
+              );
+            }
+
+            // top-level bgImage/bgImages
+            if (pub.bgImage) {
+              const safe = await sanitizeUrl(pub.bgImage);
+              if (!safe) delete pub.bgImage;
+              else pub.bgImage = safe;
+            }
+            if (Array.isArray(pub.bgImages)) {
+              const newArr = [];
+              for (const x of pub.bgImages) {
+                const safe = await sanitizeUrl(x);
+                if (safe) newArr.push(safe);
+              }
+              if (newArr.length > 0) pub.bgImages = newArr;
+              else delete pub.bgImages;
+            }
+
+            // thumbnailUrls: object with ratio keys
+            if (pub.thumbnailUrls && typeof pub.thumbnailUrls === 'object') {
+              const keys = Object.keys(pub.thumbnailUrls);
+              for (const k of keys) {
+                try {
+                  const safe = await sanitizeUrl(pub.thumbnailUrls[k]);
+                  if (!safe) delete pub.thumbnailUrls[k];
+                  else pub.thumbnailUrls[k] = safe;
+                } catch (e) {}
+              }
+            }
+
+            // write back sanitized publishInfo into updates
+            updates.publishInfo = pub;
+          }
+        } catch (sanitizeErr) {
+          Logger.warn('[update_kanban_card] publishInfo sanitation failed:', sanitizeErr && sanitizeErr.message);
+        }
 
         // 데이터 정제 (undefined → null)
         const cleanedUpdates = cleanDataForFirebase(updates);
@@ -3243,6 +3341,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               );
             }
 
+            // Broadcast kanban changes to UI tabs so clients refresh cached publishInfo
+            try {
+              try {
+                const kanbanRefBroad = ref(getDb(), `kanban/${userId}`);
+                const kanbanSnapBroad = await get(kanbanRefBroad);
+                const kanbanDataBroad = kanbanSnapBroad?.val() || {};
+
+                try {
+                  chrome.runtime.sendMessage({ action: 'kanban_data_updated', data: kanbanDataBroad });
+                } catch (e) {
+                  Logger.debug('[delete_storage_image_by_url] broadcast runtime.sendMessage failed:', e && e.message);
+                }
+
+                try {
+                  chrome.tabs.query({}, (tabs) => {
+                    tabs.forEach((tab) => {
+                      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                        try {
+                          chrome.tabs.sendMessage(tab.id, { action: 'kanban_data_updated', data: kanbanDataBroad }, () => {});
+                        } catch (ignored) {}
+                      }
+                    });
+                  });
+                } catch (e) {
+                  Logger.debug('[delete_storage_image_by_url] tabs broadcast failed:', e && e.message);
+                }
+              } catch (e) {
+                Logger.debug('[delete_storage_image_by_url] preparing broadcast failed:', e && e.message);
+              }
+            } catch (e) {}
+
             return { success: true, removedIds, failedPaths };
           }
 
@@ -3513,6 +3642,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return { success: false, error: 'uploaded image metadata not found' };
         } catch (e) {
           Logger.error('[delete_storage_image_by_url] unexpected error:', e && e.message);
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+      })()
+    );
+  }
+
+  // Check whether a thumbnail path has been tombstoned (deleted recently)
+  if (msg.action === 'is_thumbnail_deleted') {
+    if (!msg || !msg.data || !msg.data.url) {
+      return sendResponse({ success: false, error: 'missing url' });
+    }
+
+    return handleAsync(
+      (async () => {
+        const url = String(msg.data.url || '');
+        try {
+          // parse possible storage object path from gs:// or firebase download URL
+          let objectPath = null;
+          if (url.startsWith('gs://')) {
+            const m = String(url).match(/^gs:\/\/[^\/]+\/(.+)$/);
+            if (m && m[1]) objectPath = decodeURIComponent(m[1]);
+          } else {
+            try {
+              const u = new URL(url);
+              const mFull = u.pathname.match(/\/v0\/b\/([^\/]+)\/o\/([^?\/]+)/);
+              if (mFull && mFull[2]) objectPath = decodeURIComponent(mFull[2]);
+              else {
+                const mShort = u.pathname.match(/\/o\/([^?\/]+)/);
+                if (mShort && mShort[1]) objectPath = decodeURIComponent(mShort[1]);
+              }
+            } catch (e) {
+              // ignore URL parse errors
+            }
+          }
+
+          if (!objectPath) return { success: true, deleted: false };
+
+          const userId = await getCurrentUserId();
+          // Note: isThumbnailDeleted comes from firebaseService
+          const deleted = await (typeof isThumbnailDeleted === 'function'
+            ? isThumbnailDeleted(userId, objectPath)
+            : false);
+
+          return { success: true, deleted: !!deleted };
+        } catch (e) {
+          Logger.error('[is_thumbnail_deleted] error:', e && e.message);
           return { success: false, error: e && e.message ? e.message : String(e) };
         }
       })()

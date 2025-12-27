@@ -1317,41 +1317,65 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
 
     const onSave = (newThumbnailInfo) => {
-      // 메모리 업데이트
-      if (!ideaData.publishInfo) ideaData.publishInfo = {};
+      // Helper to apply updates and persist to Firebase
+      const proceedWithSave = (info) => {
+        // 메모리 업데이트
+        if (!ideaData.publishInfo) ideaData.publishInfo = {};
 
-      // Use a helper to apply updates safely (break shared references)
-      applyThumbnailInfoUpdate(ideaData, newThumbnailInfo);
+        // Use a helper to apply updates safely (break shared references)
+        applyThumbnailInfoUpdate(ideaData, info);
 
+        // Firebase 업데이트
+        const publishInfoUpdates = {
+          ...(ideaData.publishInfo || {}),
+          thumbnailInfo: ideaData.publishInfo.thumbnailInfo,
+          selectedThumbnailIndex: ideaData.publishInfo.selectedThumbnailIndex,
+        };
 
-      // Firebase 업데이트
-      const publishInfoUpdates = {
-        ...(ideaData.publishInfo || {}),
-        thumbnailInfo: ideaData.publishInfo.thumbnailInfo,
-        selectedThumbnailIndex: ideaData.publishInfo.selectedThumbnailIndex,
-      };
-
-      chrome.runtime.sendMessage(
-        {
-          action: 'update_kanban_card',
-          data: {
-            cardId: ideaData.id,
-            status: ideaData.status || 'ideas',
-            updates: {
-              publishInfo: publishInfoUpdates,
+        chrome.runtime.sendMessage(
+          {
+            action: 'update_kanban_card',
+            data: {
+              cardId: ideaData.id,
+              status: ideaData.status || 'ideas',
+              updates: {
+                publishInfo: publishInfoUpdates,
+              },
             },
           },
-        },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            Logger.error('[Thumbnail] 저장 오류:', chrome.runtime.lastError);
-          } else if (response && response.success) {
-            Logger.biz('[Thumbnail] 작업 상태 자동 저장됨:', newThumbnailInfo);
-          } else {
-            Logger.error('[Thumbnail] 저장 실패:', response?.error);
+          (response) => {
+            if (chrome.runtime.lastError) {
+              Logger.error('[Thumbnail] 저장 오류:', chrome.runtime.lastError);
+            } else if (response && response.success) {
+              Logger.biz('[Thumbnail] 작업 상태 자동 저장됨:', info);
+            } else {
+              Logger.error('[Thumbnail] 저장 실패:', response?.error);
+            }
           }
+        );
+      };
+
+      // If user-provided bgImage exists, check with background whether the path is tombstoned
+      try {
+        if (newThumbnailInfo && newThumbnailInfo.bgImage) {
+          chrome.runtime.sendMessage(
+            { action: 'is_thumbnail_deleted', data: { url: newThumbnailInfo.bgImage } },
+            (res) => {
+              if (res && res.success && res.deleted) {
+                // Prevent re-adding a recently deleted original file
+                delete newThumbnailInfo.bgImage; // remove from payload
+                showToast('⚠️ 원본이 삭제되어 이미지 참조는 저장되지 않았습니다.', 'warning');
+              }
+              proceedWithSave(newThumbnailInfo);
+            }
+          );
+        } else {
+          proceedWithSave(newThumbnailInfo);
         }
-      );
+      } catch (e) {
+        // On unexpected errors, fall back to immediate save to avoid blocking
+        proceedWithSave(newThumbnailInfo);
+      }
     };
 
     // 모달 즉시 열기

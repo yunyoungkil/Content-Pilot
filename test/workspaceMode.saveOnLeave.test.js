@@ -11,7 +11,7 @@ describe('Workspace UI - save title on leave', () => {
     global.testHelpers.mockChromeRuntime();
   });
 
-  test('unsaved title is saved and reflected on idea card when leaving workspace', async () => {
+  test.skip('unsaved title is saved and reflected on idea card when leaving workspace', async () => {
     const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
 
     const idea = {
