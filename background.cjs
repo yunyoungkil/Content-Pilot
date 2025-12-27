@@ -3648,6 +3648,196 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // Mark thumbnail as used in draft
+  if (msg.action === 'mark_thumbnail_used') {
+    return handleAsync(
+      (async () => {
+        try {
+          if (!msg || !msg.data || !msg.data.url) return { success: false, error: 'missing url' };
+          const url = String(msg.data.url || '');
+          const cardId = msg.data.cardId || null;
+          const userId = await getCurrentUserId();
+          Logger.info(`[mark_thumbnail_used] 시작 - url: ${url.substring(0, 100)}, cardId: ${cardId}, userId: ${userId}`);
+
+          const list = await getUploadedImagesLog();
+          Logger.info(`[mark_thumbnail_used] 업로드 로그 조회 완료 - ${list ? list.length : 0}개 항목`);
+          
+          // Helper: normalizeUrlForDeletion
+          const normalizeUrlForDeletion = (u) => {
+            if (!u) return '';
+            try {
+              let cleanUrl = u.replace(/&amp;/g, '&');
+              const urlObj = new URL(cleanUrl);
+              let decodedPath;
+              try {
+                decodedPath = decodeURIComponent(urlObj.pathname);
+              } catch (e) {
+                decodedPath = urlObj.pathname;
+              }
+              return (urlObj.hostname + decodedPath).replace(/\/$/, '').trim();
+            } catch (e) {
+              return u.trim();
+            }
+          };
+
+          // Helper: matchUrlLoose
+          const matchUrlLoose = (a, b) => {
+            try {
+              const an = normalizeUrlForDeletion(a || '');
+              const bn = normalizeUrlForDeletion(b || '');
+              if (!an || !bn) return false;
+              if (an === bn) return true;
+              if (an.endsWith(bn) || bn.endsWith(an)) return true;
+              if (an.includes(bn) || bn.includes(an)) return true;
+              const af = an.split('/').pop();
+              const bf = bn.split('/').pop();
+              if (af && bf && af === bf) return true;
+              return false;
+            } catch (e) {
+              Logger.debug('[matchUrlLoose] comparison failed:', e && e.message);
+              return false;
+            }
+          };
+
+          const match = (list || []).find((it) => {
+            try {
+              if (!it || !it.downloadURL) return false;
+              if (matchUrlLoose(it.downloadURL, url)) return true;
+              if (it.storagePath && typeof it.storagePath === 'string' && url.startsWith('gs://')) {
+                return it.storagePath === url;
+              }
+              return false;
+            } catch (e) {
+              return false;
+            }
+          });
+
+          const ts = Date.now();
+          let didUpdateThumbnailImage = false;
+          if (match) {
+            Logger.info(`[mark_thumbnail_used] thumbnail_images 업데이트 시작 - imageId: ${match.id}`);
+            await update(`thumbnail_images/${userId}/${match.id}`, {
+              usedInDraft: true,
+              usedInDraftAt: ts,
+              usedInDraftCardId: cardId || null,
+            });
+            didUpdateThumbnailImage = true;
+            Logger.info(`[mark_thumbnail_used] thumbnail_images 업데이트 완료`);
+          } else {
+            Logger.warn(`[mark_thumbnail_used] 업로드 로그에서 매칭되는 이미지를 찾지 못함`);
+          }
+
+          // Also update the card's publishInfo.thumbnailInfo entry when cardId is provided
+          let didUpdateKanban = false;
+          if (cardId) {
+            Logger.info(`[mark_thumbnail_used] kanban publishInfo.thumbnailInfo 업데이트 시작 - cardId: ${cardId}`);
+            try {
+              const kanbanSnap = await get(ref(getDb(), `kanban/${userId}`));
+              const kanban = kanbanSnap && kanbanSnap.val ? kanbanSnap.val() : {};
+              for (const statusKey of Object.keys(kanban || {})) {
+                const statusBucket = kanban[statusKey];
+                if (!statusBucket || typeof statusBucket !== 'object') continue;
+                const card = statusBucket[cardId];
+                if (!card) continue;
+
+                const publishInfo = card.publishInfo || {};
+                const tinfo = publishInfo.thumbnailInfo;
+                let changed = false;
+                let newTinfo = tinfo;
+
+                const providedUrl = url;
+                const downloadToCompare = match ? match.downloadURL : providedUrl;
+                const storageToCompare = match && match.storagePath ? match.storagePath : (providedUrl && providedUrl.startsWith('gs://') ? providedUrl : null);
+
+                if (Array.isArray(tinfo)) {
+                  newTinfo = tinfo.map((it) => {
+                    if (!it || typeof it !== 'object') return it;
+                    const bg = it.bgImage || '';
+                    const bgs = Array.isArray(it.bgImages) ? it.bgImages : [];
+
+                    const matchesDownload = downloadToCompare ? (matchUrlLoose(bg, downloadToCompare) || bgs.some((u) => matchUrlLoose(u, downloadToCompare))) : false;
+                    const matchesStorage = storageToCompare ? (bg === storageToCompare || bgs.some((u) => u === storageToCompare)) : false;
+
+                    if (matchesDownload || matchesStorage) {
+                      const copy = { ...it };
+                      copy.usedInDraft = true;
+                      copy.usedInDraftAt = ts;
+                      copy.usedInDraftCardId = cardId || null;
+                      changed = true;
+                      return copy;
+                    }
+                    return it;
+                  });
+                } else if (tinfo && typeof tinfo === 'object') {
+                  const bg = tinfo.bgImage || '';
+                  const bgs = Array.isArray(tinfo.bgImages) ? tinfo.bgImages : [];
+                  const matchesDownload = downloadToCompare ? (matchUrlLoose(bg, downloadToCompare) || bgs.some((u) => matchUrlLoose(u, downloadToCompare))) : false;
+                  const matchesStorage = storageToCompare ? (bg === storageToCompare || bgs.some((u) => u === storageToCompare)) : false;
+                  if (matchesDownload || matchesStorage) {
+                    newTinfo = { ...tinfo, usedInDraft: true, usedInDraftAt: ts, usedInDraftCardId: cardId || null };
+                    changed = true;
+                  }
+                }
+
+                if (changed) {
+                  const updates = { ...(publishInfo || {}), thumbnailInfo: newTinfo };
+                  Logger.info(`[mark_thumbnail_used] kanban 카드 업데이트 - status: ${statusKey}, cardId: ${cardId}`);
+                  await update(`kanban/${userId}/${statusKey}/${cardId}`, { publishInfo: updates });
+                  didUpdateKanban = true;
+                  Logger.info(`[mark_thumbnail_used] kanban 카드 업데이트 완료`);
+                } else {
+                  // No match found in existing thumbnailInfo - add a new entry
+                  Logger.info(`[mark_thumbnail_used] 기존 항목에서 매칭 실패, 새 항목 추가`);
+                  const newEntry = {
+                    usedInDraft: true,
+                    usedInDraftAt: ts,
+                    usedInDraftCardId: cardId || null,
+                  };
+                  
+                  // Add bgImage from match or provided URL
+                  if (match && match.downloadURL) {
+                    newEntry.bgImage = match.downloadURL;
+                  } else if (providedUrl) {
+                    newEntry.bgImage = providedUrl;
+                  }
+                  
+                  // Append to array or create new array
+                  if (Array.isArray(tinfo)) {
+                    newTinfo = [...tinfo, newEntry];
+                  } else if (tinfo && typeof tinfo === 'object') {
+                    newTinfo = [tinfo, newEntry];
+                  } else {
+                    newTinfo = [newEntry];
+                  }
+                  
+                  const updates = { ...(publishInfo || {}), thumbnailInfo: newTinfo };
+                  Logger.info(`[mark_thumbnail_used] 새 항목 추가하여 kanban 카드 업데이트`);
+                  await update(`kanban/${userId}/${statusKey}/${cardId}`, { publishInfo: updates });
+                  didUpdateKanban = true;
+                  Logger.info(`[mark_thumbnail_used] kanban 카드 업데이트 완료 (새 항목 추가)`);
+                }
+
+                break;
+              }
+            } catch (e) {
+              Logger.warn('[Background] mark_thumbnail_used: failed to update card publishInfo', e && e.message);
+            }
+          }
+
+          if (!didUpdateThumbnailImage && !didUpdateKanban) {
+            Logger.warn(`[mark_thumbnail_used] 업데이트 실패 - thumbnail_images 매치: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`);
+            return { success: false, error: 'not_found' };
+          }
+
+          Logger.info(`[mark_thumbnail_used] 완료 - thumbnail_images 업데이트: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`);
+          return { success: true, updatedId: match ? match.id : null };
+        } catch (e) {
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+      })()
+    );
+  }
+
   // Check whether a thumbnail path has been tombstoned (deleted recently)
   if (msg.action === 'is_thumbnail_deleted') {
     if (!msg || !msg.data || !msg.data.url) {

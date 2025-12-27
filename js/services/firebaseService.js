@@ -429,12 +429,32 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
 }
 
 /**
+ * Convert an arbitrary path to a DB-safe key using base64url encoding.
+ * This avoids characters that Firebase Realtime DB treats as invalid in keys
+ * (e.g., '%', '/', '[', ']', '.', '#', '$').
+ */
+function toBase64Url(str) {
+  try {
+    // prefer browser btoa with UTF-8 support
+    const b64 = typeof btoa === 'function'
+      ? btoa(unescape(encodeURIComponent(String(str))))
+      : typeof Buffer !== 'undefined'
+      ? Buffer.from(String(str), 'utf8').toString('base64')
+      : encodeURIComponent(String(str));
+    return String(b64).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch (e) {
+    // fallback to encodeURIComponent if anything goes wrong
+    return encodeURIComponent(String(str));
+  }
+}
+
+/**
  * Tombstone: mark a thumbnail path as deleted to prevent immediate re-uploads
  */
 export async function markDeletedThumbnail(userId, path, ttlMs = 24 * 3600 * 1000) {
   try {
     const ts = Date.now();
-    const encoded = encodeURIComponent(path);
+    const encoded = toBase64Url(path);
     await set(`deleted_thumbnails/${userId}/${encoded}`, { deletedAt: ts, expireAt: ts + ttlMs });
     Logger.info('[Firebase] marked tombstone for deleted thumbnail:', userId, path);
     return true;
@@ -446,7 +466,7 @@ export async function markDeletedThumbnail(userId, path, ttlMs = 24 * 3600 * 100
 
 export async function isThumbnailDeleted(userId, path) {
   try {
-    const encoded = encodeURIComponent(path);
+    const encoded = toBase64Url(path);
     const snap = await get(`deleted_thumbnails/${userId}/${encoded}`);
     const val = snap && snap.val ? snap.val() : null;
     if (!val) return false;

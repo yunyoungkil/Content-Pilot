@@ -1064,6 +1064,125 @@ describe('Background Message Handlers', () => {
       expect(mockUpdate).toHaveBeenCalled();
     });
 
+    test('mark_thumbnail_used updates card publishInfo.thumbnailInfo when matching', async () => {
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockGetUploaded = jest.fn().mockResolvedValue([
+        { id: '123', downloadURL: 'https://storage.googleapis.com/bucket/o/path.png', storagePath: 'gs://bucket/path' },
+      ]);
+
+      // Mock kanban get to return a card under 'ideas' with thumbnailInfo matching the downloadURL
+      const kanbanData = {
+        ideas: {
+          'card-1': {
+            publishInfo: {
+              thumbnailInfo: [
+                { bgImage: 'https://storage.googleapis.com/bucket/o/path.png' },
+                { bgImage: 'https://other.example/x.png' },
+              ],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest
+        .fn()
+        .mockImplementation((path) =>
+          Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData : null) })
+        );
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUploadedImagesLog: mockGetUploaded,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        update: mockUpdate,
+        get: mockGet,
+        ref: (db, path) => path,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'mark_thumbnail_used', data: { url: 'https://storage.googleapis.com/bucket/o/path.png', cardId: 'card-1' } };
+      const sendResponse = jest.fn();
+      runtimeHandler(message, {}, sendResponse);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const last = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(last && last.success).toBe(true);
+      // expect update was called for thumbnail_images and for kanban publishInfo
+      expect(mockUpdate.mock.calls.length).toBeGreaterThanOrEqual(2);
+      const calls = mockUpdate.mock.calls;
+      const kanbanCall = calls.find((c) => String(c[0]).includes('kanban/test-user/ideas/card-1'));
+      expect(kanbanCall).toBeTruthy();
+      const updatedPublishInfo = kanbanCall && kanbanCall[1] && kanbanCall[1].publishInfo ? kanbanCall[1].publishInfo : null;
+      expect(updatedPublishInfo).toBeTruthy();
+      expect(Array.isArray(updatedPublishInfo.thumbnailInfo)).toBe(true);
+      const updatedFirst = updatedPublishInfo.thumbnailInfo[0];
+      expect(updatedFirst.usedInDraft).toBe(true);
+      expect(updatedFirst.usedInDraftAt).toBeTruthy();
+      expect(updatedFirst.usedInDraftCardId).toBe('card-1');
+    });
+
+    test('mark_thumbnail_used updates card publishInfo.thumbnailInfo when upload log missing (fallback)', async () => {
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockGetUploaded = jest.fn().mockResolvedValue([]); // upload log missing
+
+      // Kanban contains card with thumbnailInfo that matches the provided URL
+      const kanbanData = {
+        ideas: {
+          'card-1': {
+            publishInfo: {
+              thumbnailInfo: [
+                { bgImage: 'https://storage.googleapis.com/bucket/o/path.png' },
+              ],
+            },
+          },
+        },
+      };
+
+      const mockGet = jest
+        .fn()
+        .mockImplementation((path) =>
+          Promise.resolve({ val: () => (path.startsWith('kanban/') ? kanbanData : null) })
+        );
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUploadedImagesLog: mockGetUploaded,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        update: mockUpdate,
+        get: mockGet,
+        ref: (db, path) => path,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'mark_thumbnail_used', data: { url: 'https://storage.googleapis.com/bucket/o/path.png', cardId: 'card-1' } };
+      const sendResponse = jest.fn();
+      runtimeHandler(message, {}, sendResponse);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const last = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(last && last.success).toBe(true);
+      // expect update was called at least once (for kanban publishInfo)
+      expect(mockUpdate.mock.calls.length).toBeGreaterThanOrEqual(1);
+      const calls = mockUpdate.mock.calls;
+      const kanbanCall = calls.find((c) => String(c[0]).includes('kanban/test-user/ideas/card-1'));
+      expect(kanbanCall).toBeTruthy();
+      const updatedPublishInfo = kanbanCall && kanbanCall[1] && kanbanCall[1].publishInfo ? kanbanCall[1].publishInfo : null;
+      expect(updatedPublishInfo).toBeTruthy();
+      expect(Array.isArray(updatedPublishInfo.thumbnailInfo)).toBe(true);
+      const updatedFirst = updatedPublishInfo.thumbnailInfo[0];
+      expect(updatedFirst.usedInDraft).toBe(true);
+      expect(updatedFirst.usedInDraftAt).toBeTruthy();
+      expect(updatedFirst.usedInDraftCardId).toBe('card-1');
+    });
+
     test('update_kanban_card normalizes thumbnailInfo bgImage to selected index', async () => {
       const mockUpdate = jest.fn().mockResolvedValue(true);
       const mockRef = jest.fn().mockReturnValue('kanbanRef');
