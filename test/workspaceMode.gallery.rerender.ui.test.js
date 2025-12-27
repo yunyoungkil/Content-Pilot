@@ -71,6 +71,35 @@ describe('Workspace gallery rerender robustness', () => {
     const thumbs = Array.from(workspaceEl.querySelectorAll('.image-gallery-grid .gallery-thumb'));
     expect(thumbs.length).toBe(1);
 
+    // Since the mocked gallery item does not have usedInDraft, badge should be absent
+    const usedBadges = Array.from(workspaceEl.querySelectorAll('.image-gallery-grid .used-badge'));
+    expect(usedBadges.length).toBe(0);
+
+    // Now mock a used-in-draft scrap and re-render to verify the badge
+    chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+      if (message && message.action === 'get_all_scraps') {
+        if (cb)
+          cb({ success: true, scraps: [{ id: 's1', image: 'https://example.test/a.png', usedInDraft: true, originData: { usedInDraft: true } }] });
+        return;
+      }
+      if (message && message.action === 'get_unified_gallery') {
+        if (cb) cb({ success: true, images: [] });
+        return;
+      }
+      if (cb) cb({ success: true });
+    });
+
+    // re-render (this will fetch get_all_scraps)
+    updateWorkspaceScraps(container, idea);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // debug: output gallery HTML
+    // eslint-disable-next-line no-console
+    console.log('[TEST DEBUG] imageGalleryGrid innerHTML:', workspaceEl.querySelector('.image-gallery-grid').innerHTML);
+
+    const usedBadgesAfter = Array.from(workspaceEl.querySelectorAll('.image-gallery-grid .used-badge'));
+    expect(usedBadgesAfter.length).toBe(1);
+
     // click once -> should send one insert-image + focus
     thumbs[0].click();
     const calls = iframe.contentWindow.postMessage.mock.calls;

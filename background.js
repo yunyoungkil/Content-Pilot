@@ -978,10 +978,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
+        const meta = msg.data && msg.data.createdBy ? { createdBy: msg.data.createdBy } : {};
         return uploadImageToFirebaseStorage(
           msg.data.dataUrl,
           `thumbnails/${userId}/${msg.data.filename || Date.now() + '.png'}`,
-          userId
+          userId,
+          meta
         ).then((url) => ({ success: true, url }));
       })()
     );
@@ -2615,6 +2617,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const filter = msg.filter || msg.data?.filter || 'ALL';
         const images = await getUnifiedGalleryImages(filter);
         return { success: true, images };
+      })()
+    );
+  }
+
+  // Mark a thumbnail image as used in a draft (for badges/analytics)
+  if (msg.action === 'mark_thumbnail_used') {
+    return handleAsync(
+      (async () => {
+        try {
+          if (!msg || !msg.data || !msg.data.url) return { success: false, error: 'missing url' };
+          const url = String(msg.data.url || '');
+          const cardId = msg.data.cardId || null;
+          const userId = await getCurrentUserId();
+
+          const list = await getUploadedImagesLog();
+          const match = (list || []).find((it) => {
+            try {
+              if (!it || !it.downloadURL) return false;
+              if (matchUrlLoose(it.downloadURL, url)) return true;
+              // also match storagePath / gs://
+              if (it.storagePath && typeof it.storagePath === 'string' && url.startsWith('gs://')) {
+                return it.storagePath === url;
+              }
+              return false;
+            } catch (e) {
+              return false;
+            }
+          });
+
+          if (!match) return { success: false, error: 'not_found' };
+
+          const ts = Date.now();
+          await update(`thumbnail_images/${userId}/${match.id}`, {
+            usedInDraft: true,
+            usedInDraftAt: ts,
+            usedInDraftCardId: cardId || null,
+          });
+
+          return { success: true, updatedId: match.id };
+        } catch (e) {
+          return { success: false, error: e && e.message ? e.message : String(e) };
+        }
       })()
     );
   }

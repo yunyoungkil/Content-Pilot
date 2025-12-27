@@ -980,6 +980,7 @@ describe('Background Message Handlers', () => {
     test('find_url_references finds URL in thumbnail_images and kanban', async () => {
       const testUrl =
         'https://firebasestorage.googleapis.com/v0/b/content-pilot-7eb03.firebasestorage.app/o/thumbnails%2F113959899989339493619%2F1766714193282_0.png?alt=media&token=tok';
+
       const mockGetUploaded = jest
         .fn()
         .mockResolvedValue([
@@ -1032,6 +1033,35 @@ describe('Background Message Handlers', () => {
       expect(lastResp && lastResp.success).toBe(true);
       expect(lastResp.results.thumbnailImages.length).toBe(1);
       expect(lastResp.results.kanban.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('mark_thumbnail_used marks metadata for matching storage url', async () => {
+      const mockUpdate = jest.fn().mockResolvedValue(true);
+      const mockGetUploaded = jest.fn().mockResolvedValue([
+        { id: '123', downloadURL: 'https://storage.googleapis.com/bucket/o/path.png', storagePath: 'gs://bucket/path' },
+      ]);
+
+      jest.resetModules();
+      jest.doMock('../js/services/firebaseService.js', () => ({
+        getUploadedImagesLog: mockGetUploaded,
+        getCurrentUserId: jest.fn().mockResolvedValue('test-user'),
+        getDb: jest.fn(),
+        initializeFirebase: jest.fn(),
+        update: mockUpdate,
+      }));
+
+      await import('../background.js');
+      const runtimeHandler = chrome.runtime.onMessage.addListener.mock.calls.slice(-1)[0][0];
+
+      const message = { action: 'mark_thumbnail_used', data: { url: 'https://storage.googleapis.com/bucket/o/path.png', cardId: 'card-1' } };
+      const sendResponse = jest.fn();
+      runtimeHandler(message, {}, sendResponse);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const last = sendResponse.mock.calls.slice(-1)[0][0];
+      expect(last && last.success).toBe(true);
+      expect(last.updatedId).toBe('123');
+      expect(mockUpdate).toHaveBeenCalled();
     });
 
     test('update_kanban_card normalizes thumbnailInfo bgImage to selected index', async () => {

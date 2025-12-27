@@ -715,6 +715,7 @@ export function openThumbnailMaker(
             data: {
               dataUrl: bgImageToSave,
               filename: filename,
+              createdBy: 'ai-thumbnail-maker',
             },
           });
 
@@ -2015,6 +2016,7 @@ export function openThumbnailMaker(
           data: {
             dataUrl: dataUrl,
             filename: seoFilename, // [변경] 의미 있는 파일명 전달
+            createdBy: 'ai-thumbnail-maker',
           },
         });
 

@@ -340,7 +340,7 @@ export function __TEST_markTombstone(userId, path) {
   __TEST_tombstones[`${userId}:${path}`] = true;
 }
 
-export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
+export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta = {}) {
   try {
     // Check tombstone: avoid re-uploading a recently deleted path
     const uid = userId || (await getCurrentUserId());
@@ -414,11 +414,11 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId) {
         downloadURL: downloadURL,
         timestamp: timestamp,
         size: blob.size,
+        ...cleanDataForFirebase(meta),
       });
     } catch (error) {
       Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
     }
-
     Logger.debug('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
 
     return downloadURL;
@@ -689,6 +689,9 @@ export async function getUnifiedGalleryImages(filterTag = null) {
       tags: ['#Storage', '#Upload'], // #Storage 태그 자동 추가
       originData: item, // storagePath 등 포함
       timestamp: item.timestamp || 0,
+      usedInDraft: !!item.usedInDraft,
+      usedInDraftAt: item.usedInDraftAt || null,
+      usedInDraftCardId: item.usedInDraftCardId || null,
     });
   });
 
