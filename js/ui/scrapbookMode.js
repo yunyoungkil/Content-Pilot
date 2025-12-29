@@ -751,8 +751,8 @@ function renderDetailView(scrapId, container) {
                   <div class="scrapbook-detail-title">${detailTitle}</div>
                 </div>
                 <div style="flex: 0 0 auto;">
-                  <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin: 0 0 0 12px; padding: 8px 12px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
-                    💡 아이디어로 전환
+                  <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin: 0 0 0 12px; padding: 8px 12px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;" aria-label="아이디어 생성">
+                    💡 아이디어 생성
                   </button>
                 </div>
               </div>
@@ -1043,7 +1043,7 @@ function renderDetailView(scrapId, container) {
           (response) => {
             if (response && response.success) {
               showConfirmationToast(
-                '✅ 아이디어로 전환되었습니다! 기획 보드에서 확인하세요.',
+                '✅ 아이디어가 생성되었습니다! 기획 보드에서 확인하세요.',
                 null
               );
 
