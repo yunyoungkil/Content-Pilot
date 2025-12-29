@@ -1102,18 +1102,10 @@ function renderDetailView(scrapId, container) {
     }
     const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
 
-    // Gemini API 키 확인
-    chrome.storage.local.get('geminiApiKey', async (sres) => {
-      const key = sres.geminiApiKey;
-      if (!key || !String(key).trim()) {
-        showToast('Gemini API 키가 설정되어 있지 않습니다. 채널 설정에서 API 키를 입력해주세요.');
-        return;
-      }
-
-      showLoadingToast('아이디어 생성 중... (Gemini)');
-      try {
-        const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
-        const res = await callGeminiAPI(prompt);
+    showLoadingToast('✨ 추천 아이디어를 요청 중입니다...');
+    try {
+      const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
+      const res = await callGeminiAPI(prompt);
         let arr = null;
         try {
           arr = JSON.parse(res);
@@ -1209,11 +1201,10 @@ function renderDetailView(scrapId, container) {
             showToast('클립보드에 복사되었습니다.');
           });
         });
-      } catch (err) {
-        hideLoadingToast();
-        showToast('아이디어 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
-      }
-    });
+    } catch (err) {
+      hideLoadingToast();
+      showToast('아이디어 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
+    }
   }
 
   // 이벤트 위임: detailContainer에서 버튼 클릭 처리 (한 번만 바인딩)
