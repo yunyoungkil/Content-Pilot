@@ -1091,17 +1091,22 @@ function renderDetailView(scrapId, container) {
           }
         );
 
-      // 추천 아이디어 버튼 이벤트 리스너 (Gemini 사용)
-      const recommendIdeasBtn = detailContainer.querySelector('.scrap-ideas-gemini-btn');
-      if (recommendIdeasBtn) {
-        recommendIdeasBtn.addEventListener('click', async () => {
-          const scrapId = recommendIdeasBtn.dataset.scrapId;
-          const scrap = allScraps.find((s) => s.id === scrapId);
-          if (!scrap) {
-            showToast('스크랩을 찾을 수 없습니다.');
+      // 추천 아이디어 처리 함수 (공통)
+      async function recommendIdeasForScrap(scrap) {
+        if (!scrap) {
+          showToast('스크랩을 찾을 수 없습니다.');
+          return;
+        }
+        const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
+
+        // Gemini API 키 확인
+        chrome.storage.local.get('geminiApiKey', async (sres) => {
+          const key = sres.geminiApiKey;
+          if (!key || !String(key).trim()) {
+            showToast('Gemini API 키가 설정되어 있지 않습니다. 채널 설정에서 API 키를 입력해주세요.');
             return;
           }
-          const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
+
           showLoadingToast('아이디어 생성 중... (Gemini)');
           try {
             const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
@@ -1123,7 +1128,8 @@ function renderDetailView(scrapId, container) {
               return;
             }
             hideLoadingToast();
-            // modal 생성
+
+            // modal 생성 (동일 로직 재사용)
             let modal = document.getElementById('scrap-ideas-modal');
             if (modal) modal.remove();
             modal = document.createElement('div');
@@ -1206,6 +1212,16 @@ function renderDetailView(scrapId, container) {
           }
         });
       }
+
+      // 이벤트 위임: detailContainer에서 버튼 클릭 처리
+      detailContainer.addEventListener('click', (ev) => {
+        const btn = ev.target.closest && ev.target.closest('.scrap-ideas-gemini-btn');
+        if (btn) {
+          const scrapId = btn.dataset.scrapId;
+          const scrap = allScraps.find((s) => s.id === scrapId);
+          recommendIdeasForScrap(scrap);
+        }
+      });
       });
     });
 
