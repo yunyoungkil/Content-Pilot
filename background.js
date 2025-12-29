@@ -944,7 +944,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           void 0;
         }
 
-        const images = await generateAiImage(prompt, count, refImages);
+        // Forward draft permalink (if present) so generated uploads are attributed to the draft
+        const images = await generateAiImage(prompt, count, refImages, msg.data && msg.data.permalink ? msg.data.permalink : null);
         return { 
           success: true, 
           images, 
@@ -978,13 +979,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return handleAsync(
       (async () => {
         const userId = await getCurrentUserId();
-        const meta = msg.data && msg.data.createdBy ? { createdBy: msg.data.createdBy } : {};
-        return uploadImageToFirebaseStorage(
-          msg.data.dataUrl,
-          `thumbnails/${userId}/${msg.data.filename || Date.now() + '.png'}`,
-          userId,
-          meta
-        ).then((url) => ({ success: true, url }));
+        const filename = msg.data && msg.data.filename ? msg.data.filename : `${Date.now()}.png`;
+        const storagePath = `thumbnails/${userId}/${filename}`;
+        const meta = msg.data && msg.data.meta ? msg.data.meta : (msg.data && msg.data.createdBy ? { createdBy: msg.data.createdBy } : {});
+        const url = await uploadImageToFirebaseStorage(msg.data.dataUrl, storagePath, userId, meta);
+        return { success: true, url };
       })()
     );
   }

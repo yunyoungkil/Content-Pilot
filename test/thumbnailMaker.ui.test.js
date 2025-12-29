@@ -66,6 +66,9 @@ describe('ThumbnailMaker UI - reference images', () => {
       document.body
     );
 
+    // wait for async reference render to complete
+    await new Promise((r) => setTimeout(r, 200));
+
     // also test that published badge renders when image item contains published flag
     // simulate response that includes published metadata for one of the images
     const uploadedStub = [
@@ -1400,13 +1403,14 @@ describe('ThumbnailMaker UI - reference images', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  test('retries on timeout and succeeds', async () => {
+  test('retries on timeout and succeeds and refreshes uploaded AI images', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
     const draftData = {
       formattedDraft:
         '<p>Text <img src="https://images.test/ref1.png"/> <img src="https://images.test/ref2.png"/></p>',
       affiliateLinks: [],
+      permalink: 'post-xyz'
     };
 
     // mock canvas context as above
@@ -1449,25 +1453,52 @@ describe('ThumbnailMaker UI - reference images', () => {
           if (typeof cb === 'function') cb({ success: false, error: 'timeout' });
           return;
         }
-        if (typeof cb === 'function')
-          cb({ success: true, images: ['https://images.test/generated_after_retry.png'] });
+        if (typeof cb === 'function') cb({ success: true, images: ['https://storage.test/generated_after_retry.png'] });
         return;
       }
-      if (typeof cb === 'function')
-        cb({ success: true, images: ['https://images.test/generated.png'] });
+
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [
+          { id: 'G1', path: 'thumbnails/AI/post-xyz-16x9.png', downloadURL: 'https://storage.test/generated_after_retry.png', storagePath: 'thumbnails/AI/post-xyz-16x9.png', timestamp: 999, permalink: 'post-xyz' }
+        ] });
+        return;
+      }
+
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
     });
 
     const genBtn = document.querySelector('#tm-gen-bg');
     genBtn.click();
 
-    // wait longer for retry path
-    await new Promise((r) => setTimeout(r, 700));
+    // wait longer for retry path and refresh
+    await new Promise((r) => setTimeout(r, 1200));
 
     // ensure we attempted at least twice and eventually succeeded
     const aiCalls = global.chrome.runtime.sendMessage.mock.calls.filter(
       (c) => c[0] && c[0].action === 'ai_generate_images'
     );
     expect(aiCalls.length).toBeGreaterThanOrEqual(2);
+
+    // Ensure retry call included the draft permalink so uploaded image metadata will be persisted against the draft
+    expect(aiCalls[1][0].data.permalink).toBe('post-xyz');
+
+    // AI uploaded image should appear in the ai wrapper at some point (allow transient refresh timing)
+    const aiWrapper = document.querySelector('#tm-ref-images-below');
+    expect(aiWrapper).toBeTruthy();
+
+    // Poll for up to 1500ms for the image to appear (avoid flappy timing)
+    const targetUrl = 'https://storage.test/generated_after_retry.png';
+    let found = false;
+    const start = Date.now();
+    while (Date.now() - start < 1500) {
+      const imgs = Array.from(aiWrapper.querySelectorAll('img'));
+      found = imgs.some((i) => i.src === targetUrl);
+      if (found) break;
+      // small delay
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(found).toBe(true);
 
     // diagnostics or preview UI should be present without errors
     const preview = document.querySelector('#tm-preview');
@@ -1480,6 +1511,7 @@ describe('ThumbnailMaker UI - reference images', () => {
     const draftData = { formattedDraft: '<p>Hi</p>' };
 
     // mock canvas context
+
     HTMLCanvasElement.prototype.getContext = function () {
       return {
         canvas: { width: 640, height: 360 },
@@ -1553,14 +1585,14 @@ describe('ThumbnailMaker UI - reference images', () => {
   test('allows deleting single uploaded image via X button', async () => {
     const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
 
-    // mock get_uploaded_images_log response and delete handler
+    // Setup mock responses: return both legacy uploaded image and AI-uploaded thumbnails
     global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
       if (msg && msg.action === 'get_uploaded_images_log') {
-        if (typeof cb === 'function')
-          cb({
-            success: true,
-            images: [{ id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }],
-          });
+        if (typeof cb === 'function') cb({ success: true, images: [
+          { id: 'AI1', path: 'thumbnails/AI/post-123-16x9.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/post-123-16x9.png', timestamp: 123, permalink: 'post-123' },
+          { id: 'AI2', path: 'thumbnails/Other/thumbnail-bg-1.png', downloadURL: 'https://storage.test/other.png', storagePath: 'thumbnails/Other/thumbnail-bg-1.png', timestamp: 120 },
+          { id: '1', downloadURL: 'https://images.test/u1.png', timestamp: 123 }
+        ] });
         return;
       }
       if (msg && msg.action === 'delete_storage_image') {
@@ -1730,5 +1762,58 @@ describe('ThumbnailMaker UI - reference images', () => {
     expect(modal.innerHTML).not.toContain('텍스트 표시');
 
     modal.remove();
+
+  test('renders AI uploaded images for permalink and allows deletion', async () => {
+    const { openThumbnailMaker } = require('../js/ui/thumbnailMaker.js');
+
+    const draftData = { formattedDraft: '<p>Text</p>', permalink: 'post-123' };
+
+    // ensure get_uploaded_images_log returns our AI item
+    global.chrome.runtime.sendMessage.mockImplementation((msg, cb) => {
+      if (msg && msg.action === 'get_uploaded_images_log') {
+        if (typeof cb === 'function') cb({ success: true, images: [
+          { id: 'AI1', path: 'thumbnails/AI/post-123-16x9.png', downloadURL: 'https://storage.test/ai1.png', storagePath: 'thumbnails/AI/post-123-16x9.png', timestamp: 123, permalink: 'post-123' }
+        ] });
+        return;
+      }
+      if (typeof cb === 'function') cb({ success: true, images: ['https://images.test/generated.png'] });
+    });
+
+    // render modal
+    openThumbnailMaker(draftData, () => {}, () => {}, null, { showText: true }, document.body);
+
+    // wait for async renderReferenceImages to fetch uploaded log
+    await new Promise((r) => setTimeout(r, 200));
+
+    // AI uploaded images should be rendered below the canvas wrapper
+    const aiWrapper = document.querySelector('#tm-ref-images-below');
+    expect(aiWrapper).toBeTruthy();
+
+    // there should be an image with the storage URL inside AI wrapper
+    const imgs = Array.from(aiWrapper.querySelectorAll('img'));
+    const found = imgs.some((i) => i.src === 'https://storage.test/ai1.png');
+    expect(found).toBe(true);
+
+    // AI badge should exist (look for span with 'AI' inside the AI wrapper)
+    const badge = Array.from(aiWrapper.querySelectorAll('span')).some((s) => s.textContent === 'AI');
+    expect(badge).toBe(true);
+
+    // delete button should be present in AI wrapper
+    const delBtn = Array.from(aiWrapper.querySelectorAll('button')).find((b) => b.title === '영구 삭제');
+    expect(delBtn).toBeTruthy();
+
+    // mock confirm to automatically accept
+    global.confirm = jest.fn(() => true);
+
+    // simulate click
+    delBtn.click();
+
+    // wait for delete handler
+    await new Promise((r) => setTimeout(r, 200));
+
+    // ensure delete_storage_image was called
+    const deleteCalls = global.chrome.runtime.sendMessage.mock.calls.filter((c) => c[0] && c[0].action === 'delete_storage_image');
+    expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
+  });
   });
 });

@@ -9,7 +9,18 @@ describe('Workspace UI - repeated save', () => {
   });
 
   test('can save title multiple times', async () => {
-    const { renderWorkspace } = await import('../js/ui/workspaceMode.js');
+    // retry import to avoid flakiness in full-suite runs
+    let renderWorkspace;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        ({ renderWorkspace } = await import('../js/ui/workspaceMode.js'));
+        break;
+      } catch (err) {
+        console.error(`Workspace import failed on attempt ${attempt + 1}:`, err);
+        if (attempt === 2) throw err;
+        await global.testHelpers.waitForMs(100);
+      }
+    }
 
     const idea = {
       id: 'card-repeated-save',

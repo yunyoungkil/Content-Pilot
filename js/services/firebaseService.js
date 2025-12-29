@@ -334,12 +334,15 @@ export function cleanDataForFirebase(data) {
 }
 
 // Storage 업로드 함수 (REST API 기반)
+<<<<<<< HEAD
 // Test-only in-memory tombstone overrides (used by unit tests)
 export const __TEST_tombstones = {};
 export function __TEST_markTombstone(userId, path) {
   __TEST_tombstones[`${userId}:${path}`] = true;
 }
 
+=======
+>>>>>>> dab97c174ced7e1e6089599a25a3bcc8aa7814cf
 export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta = {}) {
   try {
     // Check tombstone: avoid re-uploading a recently deleted path
@@ -404,8 +407,9 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
 
     // Firebase Realtime Database에 메타데이터 저장 (중복 방지 로직 추가)
     const storagePath = `gs://${bucket}/${path}`;
-    try {
+    {
       const timestamp = Date.now();
+<<<<<<< HEAD
 
       try {
         // Load existing entries for this user and try to match by storagePath, path, or downloadURL
@@ -455,6 +459,23 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
       }
     } catch (error) {
       Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
+=======
+      const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
+      const metadata = {
+        path: path,
+        storagePath: storagePath,
+        downloadURL: downloadURL,
+        timestamp: timestamp,
+        size: blob.size,
+        // include optional meta (e.g., permalink)
+        ...(meta && typeof meta === 'object' ? cleanDataForFirebase(meta) : {}),
+      };
+
+      const saved = await saveUploadedImageMetadata(imageDataPath, metadata);
+      if (!saved) {
+        Logger.warn('[Firebase Storage] 메타데이터 저장이 실패했습니다. 이미지 업로드는 완료되었지만 DB 항목이 없습니다:', imageDataPath);
+      }
+>>>>>>> dab97c174ced7e1e6089599a25a3bcc8aa7814cf
     }
     Logger.debug('[Firebase Storage] ✅ 이미지 업로드 및 메타데이터 저장 완료');
 
@@ -466,6 +487,7 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
 }
 
 /**
+<<<<<<< HEAD
  * Convert an arbitrary path to a DB-safe key using base64url encoding.
  * This avoids characters that Firebase Realtime DB treats as invalid in keys
  * (e.g., '%', '/', '[', ']', '.', '#', '$').
@@ -522,6 +544,28 @@ export async function isThumbnailDeleted(userId, path) {
   } catch (e) {
     Logger.warn('[Firebase] tombstone check failed:', e && e.message);
     return false;
+=======
+ * Save metadata with a retry-on-auth-refresh fallback.
+ * Returns true on success, false on final failure.
+ */
+export async function saveUploadedImageMetadata(imageDataPath, metadata) {
+  try {
+    await set(imageDataPath, metadata);
+    Logger.info('[Firebase Storage] 메타데이터 저장 완료:', imageDataPath);
+    return true;
+  } catch (error) {
+    Logger.warn('[Firebase Storage] 메타데이터 저장 실패, 재시도 시도:', error);
+    try {
+      // Force token refresh and retry once
+      await getValidToken(true);
+      await set(imageDataPath, metadata);
+      Logger.info('[Firebase Storage] 메타데이터 저장 완료 (retry):', imageDataPath);
+      return true;
+    } catch (err2) {
+      Logger.error('[Firebase Storage] 메타데이터 저장 재시도 실패:', err2);
+      return false;
+    }
+>>>>>>> dab97c174ced7e1e6089599a25a3bcc8aa7814cf
   }
 }
 
