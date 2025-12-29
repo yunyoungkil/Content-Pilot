@@ -402,20 +402,44 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
     // 다운로드 URL 생성
     const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${uploadResult.downloadTokens || token}`;
 
-    // Firebase Realtime Database에 메타데이터 저장
+    // Firebase Realtime Database에 메타데이터 저장 (중복 방지 로직 추가)
     const storagePath = `gs://${bucket}/${path}`;
     try {
       const timestamp = Date.now();
-      const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
+      
+      // 기존 thumbnail_images에서 같은 downloadURL이 있는지 확인
+      const thumbnailImagesPath = `thumbnail_images/${userId}`;
+      const existingImagesSnap = await get(thumbnailImagesPath);
+      const existingImages = existingImagesSnap?.val() || {};
+      
+      // 같은 downloadURL을 가진 기존 엔트리 찾기
+      let existingKey = null;
+      for (const [key, value] of Object.entries(existingImages)) {
+        if (value && value.downloadURL === downloadURL) {
+          existingKey = key;
+          break;
+        }
+      }
+      
+      // 기존 엔트리가 있으면 업데이트, 없으면 새로 생성
+      const imageDataKey = existingKey || timestamp.toString();
+      const imageDataPath = `thumbnail_images/${userId}/${imageDataKey}`;
 
       await set(imageDataPath, {
         path: path,
         storagePath: storagePath,
         downloadURL: downloadURL,
-        timestamp: timestamp,
+        timestamp: existingKey ? existingImages[existingKey].timestamp : timestamp,
+        lastUsed: timestamp, // 마지막 사용 시간 업데이트
         size: blob.size,
         ...cleanDataForFirebase(meta),
       });
+      
+      if (existingKey) {
+        Logger.debug('[Firebase Storage] ♻️ 기존 메타데이터 업데이트:', imageDataKey);
+      } else {
+        Logger.debug('[Firebase Storage] ✨ 새 메타데이터 생성:', imageDataKey);
+      }
     } catch (error) {
       Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
     }
@@ -797,7 +821,50 @@ export async function deleteImageFromStorage(storageUrl) {
     };
 
     try {
-      return await doDelete(token);
+      const result = await doDelete(token);
+      
+      // [추가] Storage에서 삭제 성공 시, thumbnail_images에서도 해당 이미지 메타데이터 삭제
+      try {
+        const userId = await getCurrentUserId();
+        const thumbnailImagesPath = `thumbnail_images/${userId}`;
+        const existingImagesSnap = await get(thumbnailImagesPath);
+        const existingImages = existingImagesSnap?.val() || {};
+        
+        // storageUrl이나 downloadURL과 매칭되는 엔트리 찾기
+        const storagePath = `gs://${bucket}/${path}`;
+        let deletedCount = 0;
+        
+        for (const [key, value] of Object.entries(existingImages)) {
+          if (value && (
+            value.storagePath === storagePath || 
+            value.storagePath === storageUrl ||
+            value.downloadURL?.includes(encodedPath) ||
+            value.path === path
+          )) {
+            await remove(`thumbnail_images/${userId}/${key}`);
+            deletedCount++;
+            Logger.debug('[Storage] 🗑️ thumbnail_images 메타데이터 삭제:', key);
+          }
+        }
+        
+        if (deletedCount > 0) {
+          Logger.info(`[Storage] ✅ thumbnail_images에서 ${deletedCount}개 메타데이터 삭제 완료`);
+        } else {
+          Logger.debug('[Storage] ℹ️ thumbnail_images에서 삭제할 메타데이터 없음');
+        }
+      } catch (metaError) {
+        Logger.warn('[Storage] thumbnail_images 메타데이터 삭제 실패 (Storage 삭제는 성공):', metaError);
+      }
+      
+      // Mark as tombstone to prevent immediate re-uploads
+      try {
+        const userId = await getCurrentUserId();
+        await markDeletedThumbnail(userId, path);
+      } catch (tombError) {
+        Logger.warn('[Storage] tombstone 마킹 실패:', tombError);
+      }
+      
+      return result;
     } catch (e) {
       // On auth errors, try an interactive token refresh once
       if (e && (e.status === 401 || e.status === 403)) {

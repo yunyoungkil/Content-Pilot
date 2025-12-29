@@ -1998,36 +1998,61 @@ export function openThumbnailMaker(
           ? thumbInfo.altText || thumbInfo.thumbnailText || '썸네일 이미지'
           : '';
 
-        // 1. 제목 가져오기 (파일명 생성용) - thumbInfo.thumbnailText 또는 기본값 사용
-        const rawTitle = thumbInfo.thumbnailText || 'thumbnail';
+        // [중복 방지] 이미지 내용의 해시값 생성 (dataUrl의 base64 부분 해시)
+        const base64Data = dataUrl.split(',')[1];
+        const imageHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(base64Data))
+          .then(hashBuffer => {
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+          });
 
-        // 2. [SEO] 안전한 파일명으로 변환 (한글/영어/숫자 외 제거, 공백 -> 하이픈)
-        // 예: "집 전체를 손끝으로!" -> "집-전체를-손끝으로-170..."
-        const safeTitle = rawTitle
-          .trim()
-          .replace(/[^a-zA-Z0-9가-힣\s-]/g, '') // 특수문자 제거
-          .replace(/\s+/g, '-'); // 공백을 하이픈으로
-
-        const seoFilename = `${safeTitle}-${Date.now()}.png`; // 중복 방지를 위해 시간 추가
-
-        // 3. Firebase Storage에 업로드 (수정된 파일명 사용)
-        const response = await sendRuntimeMessageWithTimeout({
-          action: 'upload_thumbnail_to_storage',
-          data: {
-            dataUrl: dataUrl,
-            filename: seoFilename, // [변경] 의미 있는 파일명 전달
-            createdBy: 'ai-thumbnail-maker',
-          },
-        });
-
-        if (response && response.success && response.url) {
-          // [수정] url과 함께 altText 전달
-          if (onInsert) onInsert(response.url, altText);
-          modal.remove();
+        // [중복 확인] 이미 업로드된 이미지가 있는지 확인
+        let finalUrl = null;
+        const cacheKey = `thumbnail_upload_cache_${imageHash}`;
+        const cachedUrl = sessionStorage.getItem(cacheKey);
+        
+        if (cachedUrl) {
+          console.log('♻️ [ThumbnailMaker] 캐시된 이미지 URL 재사용:', cachedUrl);
+          finalUrl = cachedUrl;
         } else {
-          // [수정] Base64 Fallback 시에도 altText 전달
-          console.warn('[ThumbnailMaker] Firebase Storage 업로드 실패, Base64로 fallback');
-          if (onInsert) onInsert(dataUrl, altText);
+          // 1. 제목 가져오기 (파일명 생성용) - thumbInfo.thumbnailText 또는 기본값 사용
+          const rawTitle = thumbInfo.thumbnailText || 'thumbnail';
+
+          // 2. [SEO] 안전한 파일명으로 변환 (한글/영어/숫자 외 제거, 공백 -> 하이픈)
+          // 예: "집 전체를 손끝으로!" -> "집-전체를-손끝으로-170..."
+          const safeTitle = rawTitle
+            .trim()
+            .replace(/[^a-zA-Z0-9가-힣\s-]/g, '') // 특수문자 제거
+            .replace(/\s+/g, '-'); // 공백을 하이픈으로
+
+          // [변경] 이미지 해시를 파일명에 포함하여 같은 이미지는 같은 파일명 사용
+          const seoFilename = `${safeTitle}-${imageHash}.png`;
+
+          // 3. Firebase Storage에 업로드 (수정된 파일명 사용)
+          const response = await sendRuntimeMessageWithTimeout({
+            action: 'upload_thumbnail_to_storage',
+            data: {
+              dataUrl: dataUrl,
+              filename: seoFilename, // [변경] 해시 포함 파일명 전달
+              createdBy: 'ai-thumbnail-maker',
+            },
+          });
+
+          if (response && response.success && response.url) {
+            finalUrl = response.url;
+            // 캐시에 저장 (세션 동안 유지)
+            sessionStorage.setItem(cacheKey, finalUrl);
+            console.log('✨ [ThumbnailMaker] 새 이미지 업로드 완료 및 캐시 저장');
+          } else {
+            // [수정] Base64 Fallback 시에도 altText 전달
+            console.warn('[ThumbnailMaker] Firebase Storage 업로드 실패, Base64로 fallback');
+            finalUrl = dataUrl;
+          }
+        }
+
+        if (finalUrl) {
+          // [수정] url과 함께 altText 전달
+          if (onInsert) onInsert(finalUrl, altText);
           modal.remove();
         }
       } catch (e) {
