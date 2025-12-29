@@ -1,5 +1,10 @@
 import { jest } from '@jest/globals';
 
+// Ensure getValidToken returns a fake token in tests that exercise upload flow
+jest.mock('../js/services/authService.js', () => ({
+  getValidToken: jest.fn().mockResolvedValue('FAKE_TOKEN'),
+}));
+
 describe('firebaseService tombstone behavior', () => {
   beforeEach(() => {
     jest.resetModules();
@@ -54,6 +59,52 @@ describe('firebaseService tombstone behavior', () => {
     expect(decodeURIComponent(keyPart2).includes('/')).toBe(false);
 
     // restore
+    global.fetch = originalFetch;
+  });
+
+  test('uploadImageToFirebaseStorage updates existing thumbnail_images entry instead of creating new one', async () => {
+    const svc = await import('../js/services/firebaseService.js');
+
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA';
+    const path = 'thumbnails/test-user/foo.png';
+    const userId = 'test-user';
+
+    // Prepare fetch mock to handle sequence: tombstone GET -> storage POST -> get thumbnail_images -> PATCH
+    const fakeFetch = jest.fn().mockImplementation((url, opts) => {
+      // tombstone check GET to deleted_thumbnails
+      if (url.includes('/deleted_thumbnails/')) {
+        return Promise.resolve({ ok: true, json: async () => null, text: async () => 'null' });
+      }
+      // storage upload POST to firebasestorage
+      if (url.startsWith('https://firebasestorage.googleapis.com/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ downloadTokens: 'tok' }) });
+      }
+      // GET thumbnail_images for user
+      if (url.includes(`/thumbnail_images/${userId}.json`)) {
+        const bucket = svc.firebaseConfig.storageBucket;
+        const storagePath = `gs://${bucket}/${path}`;
+        return Promise.resolve({ ok: true, json: async () => ({ existingKey: { storagePath, downloadURL: 'https://old', path } }) });
+      }
+      // PATCH to existing entry - simulate success
+      if (opts && opts.method === 'PATCH' && url.includes('/thumbnail_images/')) {
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }
+      // Fallback for set etc
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = fakeFetch;
+
+    await svc.uploadImageToFirebaseStorage(dataUrl, path, userId);
+
+    // Find a call with method PATCH to thumbnail_images/{userId}/existingKey.json
+    const patchCalled = fakeFetch.mock.calls.some((call) => {
+      const [callUrl, callOpts] = call;
+      return callOpts && callOpts.method === 'PATCH' && callUrl.includes(`/thumbnail_images/${userId}/existingKey.json`);
+    });
+    expect(patchCalled).toBe(true);
+
     global.fetch = originalFetch;
   });
 });

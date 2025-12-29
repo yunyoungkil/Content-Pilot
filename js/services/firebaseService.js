@@ -406,39 +406,52 @@ export async function uploadImageToFirebaseStorage(dataUrl, path, userId, meta =
     const storagePath = `gs://${bucket}/${path}`;
     try {
       const timestamp = Date.now();
-      
-      // 기존 thumbnail_images에서 같은 downloadURL이 있는지 확인
-      const thumbnailImagesPath = `thumbnail_images/${userId}`;
-      const existingImagesSnap = await get(thumbnailImagesPath);
-      const existingImages = existingImagesSnap?.val() || {};
-      
-      // 같은 downloadURL을 가진 기존 엔트리 찾기
-      let existingKey = null;
-      for (const [key, value] of Object.entries(existingImages)) {
-        if (value && value.downloadURL === downloadURL) {
-          existingKey = key;
-          break;
-        }
-      }
-      
-      // 기존 엔트리가 있으면 업데이트, 없으면 새로 생성
-      const imageDataKey = existingKey || timestamp.toString();
-      const imageDataPath = `thumbnail_images/${userId}/${imageDataKey}`;
 
-      await set(imageDataPath, {
-        path: path,
-        storagePath: storagePath,
-        downloadURL: downloadURL,
-        timestamp: existingKey ? existingImages[existingKey].timestamp : timestamp,
-        lastUsed: timestamp, // 마지막 사용 시간 업데이트
-        size: blob.size,
-        ...cleanDataForFirebase(meta),
-      });
-      
-      if (existingKey) {
-        Logger.debug('[Firebase Storage] ♻️ 기존 메타데이터 업데이트:', imageDataKey);
-      } else {
-        Logger.debug('[Firebase Storage] ✨ 새 메타데이터 생성:', imageDataKey);
+      try {
+        // Load existing entries for this user and try to match by storagePath, path, or downloadURL
+        const snap = await get(`thumbnail_images/${userId}`);
+        const existing = (snap && (snap.val ? snap.val() : snap)) || {};
+
+        let matchedKey = null;
+        for (const k of Object.keys(existing || {})) {
+          const e = existing[k];
+          if (e && (e.storagePath === storagePath || e.path === path || e.downloadURL === downloadURL)) {
+            matchedKey = k;
+            break;
+          }
+        }
+
+        const basePayload = {
+          path: path,
+          storagePath: storagePath,
+          downloadURL: downloadURL,
+          size: blob.size,
+          ...cleanDataForFirebase(meta),
+        };
+
+        if (matchedKey) {
+          // Preserve original timestamp when updating; refresh lastUsed
+          const originalTs = existing[matchedKey]?.timestamp || timestamp;
+          const updatePayload = { ...basePayload, timestamp: originalTs, lastUsed: timestamp };
+          await update(`thumbnail_images/${userId}/${matchedKey}`, updatePayload);
+          Logger.debug('[Firebase Storage] ♻️ 기존 메타데이터 업데이트:', matchedKey);
+        } else {
+          const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
+          const setPayload = { ...basePayload, timestamp };
+          await set(imageDataPath, setPayload);
+          Logger.debug('[Firebase Storage] ✨ 새 메타데이터 생성:', timestamp);
+        }
+      } catch (err) {
+        // Fallback: ensure we still write a safe record
+        const imageDataPath = `thumbnail_images/${userId}/${timestamp}`;
+        await set(imageDataPath, {
+          path: path,
+          storagePath: storagePath,
+          downloadURL: downloadURL,
+          timestamp: timestamp,
+          size: blob.size,
+          ...cleanDataForFirebase(meta),
+        });
       }
     } catch (error) {
       Logger.warn('[Firebase Storage] 메타데이터 저장 실패:', error);
