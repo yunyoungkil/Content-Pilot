@@ -1213,15 +1213,29 @@ function renderDetailView(scrapId, container) {
         });
       }
 
-      // 이벤트 위임: detailContainer에서 버튼 클릭 처리
-      detailContainer.addEventListener('click', (ev) => {
-        const btn = ev.target.closest && ev.target.closest('.scrap-ideas-gemini-btn');
-        if (btn) {
-          const scrapId = btn.dataset.scrapId;
-          const scrap = allScraps.find((s) => s.id === scrapId);
-          recommendIdeasForScrap(scrap);
-        }
-      });
+      // 이벤트 위임: detailContainer에서 버튼 클릭 처리 (한 번만 바인딩)
+      if (!detailContainer.dataset.geminiListenerAttached) {
+        detailContainer.addEventListener('click', (ev) => {
+          try {
+            const btn = ev.target.closest && ev.target.closest('.scrap-ideas-gemini-btn');
+            if (btn) {
+              console.debug('[Scrapbook] scrap-ideas-gemini-btn clicked', { scrapId: btn.dataset.scrapId });
+              showToast('✨ 추천 아이디어를 요청 중입니다...');
+              const scrapId = btn.dataset.scrapId;
+              const scrap = allScraps.find((s) => s.id === scrapId);
+              try {
+                recommendIdeasForScrap(scrap);
+              } catch (err) {
+                console.error('[Scrapbook] recommendIdeasForScrap error:', err);
+                showToast('요청 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+              }
+            }
+          } catch (e) {
+            console.error('[Scrapbook] gemini button click handler error:', e);
+          }
+        });
+        detailContainer.dataset.geminiListenerAttached = '1';
+      }
       });
     });
 
