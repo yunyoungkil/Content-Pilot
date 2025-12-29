@@ -443,6 +443,14 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
       // 가능한한 유의미한 오류 메시지 추출
       const body = await resp.json().catch(() => ({}));
       const msg = body?.error?.message || `HTTP ${resp.status}`;
+      
+      // 403 오류 시 사용자 친화적인 메시지 제공
+      if (resp.status === 403) {
+        throw new Error(
+          'Gemini API 키가 유효하지 않거나 권한이 없습니다. Google AI Studio(https://aistudio.google.com/app/apikey)에서 새 API 키를 발급받아 채널 설정에 입력해주세요.'
+        );
+      }
+      
       throw new Error(msg);
     }
 
