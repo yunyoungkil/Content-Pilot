@@ -2,7 +2,6 @@
 import { shortenLink, showConfirmationToast, showToast, showLoadingToast, hideLoadingToast } from '../utils.js';
 import { renderKanban, addKanbanEventListeners } from './kanbanMode.js';
 import { renderHeaderAndTabs } from './header.js';
-import { callGeminiAPI } from '../services/aiService.js';
 
 let selectedScrapId = null;
 let allScraps = [];
@@ -1101,17 +1100,22 @@ function renderDetailView(scrapId, container) {
       return;
     }
     const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
-
-    // API 키 확인 (디버깅용)
-    const { geminiApiKey } = await chrome.storage.local.get('geminiApiKey');
-    console.debug('[Scrapbook] Chrome Storage에서 가져온 API 키:', geminiApiKey ? `${geminiApiKey.substring(0, 10)}...` : 'null');
     
     showLoadingToast('✨ 추천 아이디어를 요청 중입니다...');
     try {
       const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
-      console.debug('[Scrapbook] callGeminiAPI 호출 전, 프롬프트 길이:', prompt.length);
-      const res = await callGeminiAPI(prompt);
-      console.debug('[Scrapbook] callGeminiAPI 응답 받음, 길이:', res?.length);
+      
+      // background script를 통해 Gemini API 호출 (초안 작성과 동일한 방식)
+      const response = await chrome.runtime.sendMessage({
+        action: 'call_gemini_api',
+        prompt: prompt
+      });
+      
+      if (!response || !response.success) {
+        throw new Error(response?.error || '아이디어 생성 실패');
+      }
+      
+      const res = response.result;
         let arr = null;
         try {
           arr = JSON.parse(res);

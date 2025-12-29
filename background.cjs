@@ -568,6 +568,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(() => {});
     return handleAsync(resultPromise);
   }
+  
+  // Gemini API 호출 (스크랩 추천용)
+  if (msg.action === 'call_gemini_api') {
+    return handleAsync(
+      (async () => {
+        try {
+          const { callGeminiAPI } = require('./js/services/aiService.js');
+          const result = await callGeminiAPI(msg.prompt, msg.model);
+          return { success: true, result };
+        } catch (error) {
+          Logger.error('[call_gemini_api] 오류:', error);
+          return { success: false, error: error.message || String(error) };
+        }
+      })()
+    );
+  }
+  
   if (msg.action === 'generate_idea_briefing') {
     // Support callers that send payload either top-level or under `data`. Normalize options so both
     // top-level flags and nested `options` are accepted.
