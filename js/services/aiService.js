@@ -1819,6 +1819,18 @@ function findContextAroundKeyword(text, keyword, contextChars = 100) {
 }
 
 /**
+ * 키워드를 의미 있는 단어로 분리합니다 (부분 매칭용)
+ * @param {string} keyword - 분리할 키워드
+ * @returns {Array<string>} 분리된 단어 배열
+ */
+function splitKeywordIntoWords(keyword) {
+  // 특수문자 제거하고 공백으로 분리
+  const cleaned = keyword.replace(/[^\w\sㄱ-ㅎ가-힣0-9]/g, ' ');
+  const words = cleaned.split(/\s+/).filter(w => w.length >= 2); // 2글자 이상만
+  return words;
+}
+
+/**
  * 연결 자료에서 키워드 기반으로 관련 내용을 검색합니다.
  * @param {Array} scrapsContent - 연결된 자료 배열
  * @param {Object} searchTerms - 검색 키워드 객체 {keywords, longTail, searchQueries}
@@ -1836,20 +1848,50 @@ function searchRelevantContent(scrapsContent, searchTerms) {
     return [];
   }
   
+  // [CRITICAL DEBUG] 모든 키워드 출력
+  console.log('🔍 [searchRelevantContent] 원본 키워드:', allTerms);
+  
+  // [개선] 키워드를 단어로 분리하여 부분 매칭
+  const expandedTerms = [];
+  const termOrigins = new Map(); // 각 단어가 어떤 원본 키워드에서 왔는지 추적
+  
+  allTerms.forEach(term => {
+    const words = splitKeywordIntoWords(term);
+    console.log(`📝 "${term}" → [${words.join(', ')}]`);
+    
+    words.forEach(word => {
+      if (!expandedTerms.includes(word)) {
+        expandedTerms.push(word);
+        termOrigins.set(word, term);
+      }
+    });
+  });
+  
+  console.log('🔍 [searchRelevantContent] 확장된 검색어 (중복 제거):', expandedTerms);
+  
   const relevantSections = [];
   const fullText = scrapsContent.map(s => s.text || '').join('\n\n');
   
-  allTerms.forEach(term => {
-    const matches = findContextAroundKeyword(fullText, term, 150);
+  // [CRITICAL DEBUG] 연결 자료 샘플 출력
+  console.log('📄 [searchRelevantContent] 연결 자료 텍스트 길이:', fullText.length);
+  console.log('📄 [searchRelevantContent] 연결 자료 샘플 (첫 500자):', fullText.substring(0, 500));
+  
+  expandedTerms.forEach((word, index) => {
+    const matches = findContextAroundKeyword(fullText, word, 150);
     if (matches.length > 0) {
+      const originKeyword = termOrigins.get(word);
       relevantSections.push({
-        keyword: term,
-        content: matches.slice(0, 3) // 각 키워드당 최대 3개 매칭
+        keyword: originKeyword, // 원본 키워드 유지
+        searchWord: word, // 실제 검색된 단어
+        content: matches.slice(0, 3) // 각 단어당 최대 3개 매칭
       });
+      console.log(`✅ [${index + 1}/${expandedTerms.length}] "${word}" (from "${originKeyword}") → 매칭 ${matches.length}개`);
+    } else {
+      console.warn(`❌ [${index + 1}/${expandedTerms.length}] "${word}" → 매칭 없음`);
     }
   });
   
-  Logger.info(`[searchRelevantContent] 키워드 ${allTerms.length}개로 검색하여 ${relevantSections.length}개 섹션 추출`);
+  Logger.info(`[searchRelevantContent] 키워드 ${allTerms.length}개 → 검색어 ${expandedTerms.length}개로 확장하여 ${relevantSections.length}개 섹션 추출`);
   return relevantSections;
 }
 
@@ -1877,11 +1919,16 @@ function structureByOutline(relevantSections, outline) {
     return {};
   }
   
+  Logger.info('[structureByOutline] 목차:', outline);
+  Logger.info('[structureByOutline] 매칭할 섹션 수:', relevantSections.length);
+  
   const structured = {};
   
   outline.forEach((section, index) => {
     const sectionNumber = index + 1;
     const sectionKeywords = extractKeywordsFromSection(section);
+    
+    Logger.debug(`[structureByOutline] 섹션${sectionNumber} "${section}" 키워드:`, sectionKeywords);
     
     // 이 섹션과 관련된 내용 필터링
     const relatedContent = relevantSections.filter(item => 
@@ -1890,6 +1937,8 @@ function structureByOutline(relevantSections, outline) {
         kw.toLowerCase().includes(item.keyword.toLowerCase())
       )
     );
+    
+    Logger.debug(`[structureByOutline] 섹션${sectionNumber} 매칭된 내용:`, relatedContent.length);
     
     if (relatedContent.length > 0) {
       structured[`섹션${sectionNumber}`] = {
@@ -2420,16 +2469,28 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // [신규] 키워드 기반 검색 및 목차별 구조화
     let structuredByOutlineText = '';
     try {
-      // 브리핑 메타데이터 추출
+      Logger.info('[RAG] 연결 자료 개수:', linkedScrapsContent.length);
+      
+      // 브리핑 메타데이터 추출 (키워드가 배열일 수도 있고 문자열일 수도 있음)
+      let keywordsArray = [];
+      if (ideaData.keywords) {
+        if (Array.isArray(ideaData.keywords)) {
+          keywordsArray = ideaData.keywords.map(k => String(k).trim());
+        } else if (typeof ideaData.keywords === 'string') {
+          keywordsArray = ideaData.keywords.split(',').map(k => k.trim());
+        }
+      }
+      
       const searchTerms = {
-        keywords: ideaData.keywords ? ideaData.keywords.split(',').map(k => k.trim()) : [],
-        longTail: ideaData.longTailKeywords || [],
-        searchQueries: ideaData.searchQueries || [],
-        outline: ideaData.outline || []
+        keywords: keywordsArray,
+        longTail: Array.isArray(ideaData.longTailKeywords) ? ideaData.longTailKeywords : [],
+        searchQueries: Array.isArray(ideaData.searchQueries) ? ideaData.searchQueries : [],
+        outline: Array.isArray(ideaData.outline) ? ideaData.outline : []
       };
       
       Logger.info('[RAG] 브리핑 메타데이터:', {
         keywords: searchTerms.keywords.length,
+        keywordsSample: searchTerms.keywords.slice(0, 3),
         longTail: searchTerms.longTail.length,
         searchQueries: searchTerms.searchQueries.length,
         outline: searchTerms.outline.length
@@ -2437,6 +2498,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       
       // 키워드가 있고 연결 자료가 있을 때만 실행
       if ((searchTerms.keywords.length > 0 || searchTerms.longTail.length > 0) && linkedScrapsContent.length > 0) {
+        Logger.info('[RAG] 조건 통과 - 키워드 기반 검색 시작');
         // 1. 키워드 기반 검색
         const relevantSections = searchRelevantContent(linkedScrapsContent, searchTerms);
         
@@ -2464,11 +2526,18 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             });
             
             Logger.info('[RAG] 목차별 구조화 완료:', Object.keys(structured).length + '개 섹션');
+          } else {
+            Logger.debug('[RAG] 구조화 결과 없음');
           }
+        } else {
+          Logger.debug('[RAG] 목차가 없거나 관련 섹션이 없음');
         }
+      } else {
+        Logger.warn('[RAG] 조건 미충족 - keywords:', searchTerms.keywords.length, 'linkedScraps:', linkedScrapsContent.length);
       }
     } catch (ragError) {
-      Logger.warn('[RAG] 키워드 기반 검색 실패:', ragError);
+      Logger.error('[RAG] 키워드 기반 검색 실패:', ragError);
+      console.error('[RAG] Error details:', ragError);
     }
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
@@ -2936,7 +3005,57 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             [참고 자료 활용 규칙 - 절대 준수, 위반 시 초안 거부]
             
-            ⚠️ **경고**: 참고 자료가 제공되었는데 본문에 전혀 활용하지 않으면 초안이 거부됩니다.
+            ⚠️ **[최우선 규칙] 섹션별 참고 자료 강제 활용 - 절대 엄수 필수**
+            
+            **🚨 경고: 각 섹션을 작성할 때 해당 섹션의 참고 자료를 반드시 활용해야 합니다! 일반론만 작성하면 초안이 거부됩니다!**
+            
+            위의 "섹션별 참고 자료"에 섹션1, 섹션2, 섹션3 등이 제공되었다면:
+            - **섹션1 본문 작성 시**: 위의 "섹션1" 참고 자료에서 **최소 3개 이상**의 구체적 정보(제품명, 통계, 후기 등) 필수
+            - **섹션2 본문 작성 시**: 위의 "섹션2" 참고 자료에서 **최소 3개 이상**의 구체적 정보 필수
+            - **섹션3 본문 작성 시**: 위의 "섹션3" 참고 자료에서 **최소 3개 이상**의 구체적 정보 필수
+            - **섹션4 본문 작성 시**: 위의 "섹션4" 참고 자료에서 **최소 3개 이상**의 구체적 정보 필수
+            - **섹션5 본문 작성 시**: 위의 "섹션5" 참고 자료에서 **최소 3개 이상**의 구체적 정보 필수
+            
+            **엄격한 검증 기준 (절대 엄수)**:
+            - 각 섹션에서 해당 섹션 참고 자료의 **제품명, 브랜드명, 구체적 수치, 사용자 후기** 중 **최소 3개**를 명시적으로 언급해야 합니다
+            - "일반적으로", "보통", "다양한 제품", "이런 케이스" 같은 모호한 표현만으로는 **절대 부족**합니다
+            - 해당 섹션의 참고 자료에 없는 내용을 창작하지 마세요
+            - **절대 금지**: 섹션5에서만 제품명을 언급하고 섹션1~4에서는 일반론만 쓰는 것
+            - **절대 금지**: "얇은 두께로 생폰 느낌을 살리는..." 같은 일반적 설명만 나열
+            
+            🔥 **[섹션별 구체적 예시 - 반드시 이 패턴을 따르세요]**
+            
+            **❌ 나쁜 예시 - 섹션1 "왜 고민될까?" (참고 자료 무시)**:
+            "아이폰 케이스를 고르는 일은 생각보다 복잡합니다. 디자인과 보호력 사이에서 고민하게 되죠..."
+            
+            **✅ 좋은 예시 - 섹션1 "왜 고민될까?" (참고 자료 활용, 3개 이상)**:
+            "실제로 누아트 맥세이프 컬러 엣지 케이스 구매자 1,656명 중(1) '디자인은 예쁜데 내구성이 걱정된다'는 의견과 'SUMMIT 맥세이프 카드 케이스 2,504명 리뷰에서 87% 만족했지만(2), 일부는 카드 수납 때문에 두께가 부담스럽다'는 평가가 공존합니다(3). 김정 님은 '얇고 가벼운 케이스를 샀지만 떨어뜨리니 모서리에 찍힘이 생겼다'고 후회했습니다(4)."
+            
+            **❌ 나쁜 예시 - 섹션2 "예쁜 케이스" (참고 자료 무시)**:
+            "얇고 가벼운 케이스는 아이폰의 슬림한 디자인을 살려줍니다. TPU 소재의 젤리 케이스나 PC 소재의 하드 케이스가 있습니다..."
+            
+            **✅ 좋은 예시 - 섹션2 "예쁜 케이스" (참고 자료 활용, 3개 이상)**:
+            "누아트 맥세이프 컬러 엣지 케이스는 투명 바디에 컬러 엣지 포인트가 들어가 '심플하면서도 밋밋하지 않고, 기기 색상을 살리면서 포인트까지 준다'는 평가를 받았습니다(1). 디자인 만족도는 70%로 높은 편이며(2), 이라 님은 '빛을 받았을 때 가장자리 부분이 은은하게 반짝이는 듯한 효과가 있어 손에 쥐고 있을 때마다 만족감이 높다'고 극찬했습니다(3). 다만 김정 님은 '얇고 가벼운 풀커버 케이스라 부담이 없지만, 떨어뜨려 보니 모서리 부분에 바로 찍힘이 생겨 내구성은 다소 아쉽다'고 지적했습니다(4)."
+            
+            **❌ 나쁜 예시 - 섹션3 "튼튼한 케이스" (참고 자료 무시)**:
+            "튼튼한 케이스는 범퍼 타입이나 PC+TPU 이중 구조가 효과적입니다. 모서리 에어 포켓 디자인으로 충격을 흡수합니다..."
+            
+            **✅ 좋은 예시 - 섹션3 "튼튼한 케이스" (참고 자료 활용, 3개 이상)**:
+            "SUMMIT 맥세이프 카드 케이스는 2,504개 리뷰에서 견고함 78%의 높은 평가를 받았습니다(1). 레몬트리 님은 '5만건의 판매 경험 동안 3번의 자력 업그레이드를 거쳐 더 강력하고 안정적인 부착력을 완성했다'고 강조했습니다(2). 누아트 케이스의 경우 박진 님이 '변색 없는 소재로 오래 사용해도 깨끗하다'고 평가했지만(3), 김정 님은 '떨어뜨리니 모서리에 찍힘이 생겼다'며 내구성에 아쉬움을 표했습니다(4)."
+            
+            **❌ 나쁜 예시 - 섹션4 "선택 가이드" (참고 자료 무시)**:
+            "용도에 맞는 케이스를 고르는 것이 중요합니다. 디자인 중시면 투명 케이스, 보호력 중시면 범퍼 케이스를 추천합니다..."
+            
+            **✅ 좋은 예시 - 섹션4 "선택 가이드" (참고 자료 활용, 3개 이상)**:
+            "실용성을 중시한다면 SUMMIT 맥세이프 카드 케이스 세트를 추천합니다(1). 카드 2~3장을 수납할 수 있으며, 카드 1장만 넣어도 내부 고정 클립으로 안전하게 카드를 잡아줍니다(2). 2,504개 리뷰에서 87%가 최고 평점을 주었고, 견고함 78%의 높은 만족도를 기록했습니다(3). 레몬트리 님은 '5만건의 판매 경험 동안 3번의 자력 업그레이드로 더 강력하고 안정적인 부착력으로 완성했다'며 자력에 만족했습니다(4)."
+            
+            **❌ 나쁜 예시 - 섹션5 "추천 케이스" (참고 자료 무시)**:
+            "종합적으로 디자인과 내구성을 모두 갖춘 제품을 선택하는 것이 좋습니다. 예산과 용도에 맞게 고르세요..."
+            
+            **✅ 좋은 예시 - 섹션5 "추천 케이스" (참고 자료 활용, 3개 이상)**:
+            "디자인을 최우선으로 한다면 누아트 맥세이프 컬러 엣지 케이스(1,656개 리뷰, 디자인 만족도 70%)를 추천합니다(1). 이라 님은 '은은하게 반짝이는 효과가 손에 쥘 때마다 만족감을 준다'고 극찬했습니다(2). 실용성이 중요하다면 SUMMIT 맥세이프 카드 케이스(2,504개 리뷰, 87% 최고 평점, 견고함 78%)가 최선의 선택입니다(3). 레몬트리 님은 '5만건 판매 경험에서 3번의 자력 업그레이드로 완성했다'며 품질을 보증했습니다(4)."
+            
+            🚨 **[최종 경고]**: 모든 섹션(특히 섹션1, 3, 5)에서 참고 자료가 제공되었는데도 일반론만 작성하면 초안이 거부됩니다! 위의 "✅ 좋은 예시"처럼 각 섹션마다 반드시 제품명, 통계, 사용자 후기를 포함하세요!
             
             - **원본 본문**(리뉴얼 아이디어)이 제공된 경우:
               * 그 내용을 핵심 기반으로 삼아 팩트 기반 작성하되, 단순 복사가 아닌 새로운 관점이나 더 풍부한 정보로 발전시켜주세요.
