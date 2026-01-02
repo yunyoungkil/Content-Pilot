@@ -23,12 +23,71 @@ import { generateThumbnailTexts } from './thumbnailService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
-// [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수
+// [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수 (강화)
 function removeDuplicateYears(title) {
   if (!title) return title;
-  // 정규식으로 연속된 같은 년도 패턴을 찾아 하나로 줄임
-  // 예: "2024년 2024년 최고의" -> "2024년 최고의"
-  return title.replace(/(\d{4}년)(\s+\1)+/g, '$1');
+
+  // Find all year matches (e.g., '2024년', '2024') with positions
+  // Use alternation to prefer matching '년' suffix when present
+  const matches = Array.from(title.matchAll(/(\d{4}년|\d{4})/g));
+  if (matches.length <= 1) {
+    // 기본 정리만 수행
+    let s = title
+      .replace(/\s{2,}/g, ' ') // 연속 공백 축소
+      .replace(/\s*\/\s*/g, '/') // 슬래시 주변 정리
+      .trim();
+    // Punctuation normalization (commas no leading space, single trailing space)
+    s = s.replace(/\s*([,;:])\s*/g, '$1 ').replace(/\s*([–—-])\s*/g, ' - ').replace(/\s+([.?!])/g, '$1');
+    s = s.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+    return s.trim();
+  }
+
+  let result = '';
+  let lastIndex = 0;
+  const seen = new Set();
+
+  for (const m of matches) {
+    // m[0] is entire match, m.index is its position
+    const token = m[0];
+    const yearOnly = token.replace(/년$/, '');
+    const start = m.index;
+    const end = start + token.length;
+
+    if (!seen.has(yearOnly)) {
+      // keep first occurrence: append everything from lastIndex to end
+      result += title.slice(lastIndex, end);
+      seen.add(yearOnly);
+      lastIndex = end;
+    } else {
+      // remove duplicate occurrence: append text before match but trim trailing spaces and commas
+      result += title.slice(lastIndex, start).replace(/[\s,]+$/g, '');
+      lastIndex = end;
+    }
+  }
+  // append tail
+  result += title.slice(lastIndex);
+
+  // Special: remove commas that immediately follow a year (leftover formatting)
+  result = result.replace(/(\b\d{4}(년)?\b)\s*,\s*/g, '$1 ');
+
+  // Normalize punctuation and whitespace
+  let cleaned = result
+    .replace(/\s{2,}/g, ' ') // collapse multiple spaces
+    .replace(/\s*\/\s*/g, '/') // normalize slashes
+    .replace(/\s*([,;:])\s*/g, '$1 ') // no leading space, single trailing space
+    .replace(/\s*([–—-])\s*/g, ' - ') // dashes with spaces
+    .replace(/\s+([.?!])/g, '$1') // remove space before sentence end
+    .trim();
+
+  // remove any duplicated punctuation spacing issues
+  cleaned = cleaned.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+
+  return cleaned;
+
+  // remove any duplicated punctuation spacing issues
+  cleaned = cleaned.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+
+  return cleaned;
 }
 
 // [신규] 이미지 alt 텍스트 유효성 검사 및 정리
@@ -1301,11 +1360,29 @@ export async function enhanceDraftWithFeatures({
   }
 }
 
-// [신규] 제휴 링크 조회 및 필터링 헬퍼 함수
+// [최적화] 제휴 링크 캐시 (메모리 기반, 5분 TTL)
+const affiliateLinkCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5분
+
+// [신규] 제휴 링크 조회 및 필터링 헬퍼 함수 (최적화 버전)
 async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
   try {
-    const snap = await get(ref(getDb(), `affiliate_links/${userId}`));
-    const linksMap = snap?.val();
+    // 캐시 확인
+    const cacheKey = `${userId}`;
+    const cached = affiliateLinkCache.get(cacheKey);
+    const now = Date.now();
+
+    let linksMap;
+    if (cached && now - cached.timestamp < CACHE_TTL) {
+      Logger.debug('[getRelevantAffiliateLinks] 캐시에서 링크 로드');
+      linksMap = cached.data;
+    } else {
+      const snap = await get(ref(getDb(), `affiliate_links/${userId}`));
+      linksMap = snap?.val();
+      if (linksMap) {
+        affiliateLinkCache.set(cacheKey, { data: linksMap, timestamp: now });
+      }
+    }
 
     if (!linksMap) {
       Logger.debug('[getRelevantAffiliateLinks] 제휴 링크 없음');
@@ -1318,30 +1395,114 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
       return [];
     }
 
-    // contextText(제목+태그)에 키워드/상품명이 포함된 링크를 스코어링하고 정렬
+    // contextText 전처리: 제목, 태그, 설명을 개별 토큰으로 분리
     const contextLower = (contextText || '').toLowerCase();
+    const contextTokens = contextLower
+      .split(/[\s,]+/)
+      .filter((t) => t.length > 1)
+      .map((t) => t.trim());
     const preferredId = options.preferredAffiliateId || null;
 
+    // 고급 스코어링 알고리즘
     const scored = links
       .map((link) => {
         const keywords = Array.isArray(link.keywords) ? link.keywords : [];
         let score = 0;
-        // keywords matching score
+        let matchDetails = { exact: 0, partial: 0, position: 0 };
+
+        // 1. 키워드 매칭 (정교화)
         keywords.forEach((keyword) => {
           try {
-            if (keyword && contextLower.includes(String(keyword).toLowerCase())) score += 1;
+            const keywordLower = String(keyword).toLowerCase().trim();
+            if (!keywordLower) return;
+
+            // 완전 일치 (최고 점수)
+            if (contextLower === keywordLower) {
+              score += 10;
+              matchDetails.exact += 1;
+            }
+            // 단어 단위 완전 일치
+            else if (contextTokens.includes(keywordLower)) {
+              score += 8;
+              matchDetails.exact += 1;
+            }
+            // 부분 일치 (포함)
+            else if (contextLower.includes(keywordLower)) {
+              score += 3;
+              matchDetails.partial += 1;
+
+              // 앞쪽에 위치할수록 더 관련성이 높음
+              const position = contextLower.indexOf(keywordLower);
+              if (position === 0) score += 2; // 시작 위치
+              else if (position < contextLower.length / 3) score += 1; // 앞 1/3 구간
+            }
+            // 역방향 매칭: context 토큰이 키워드에 포함되는 경우
+            else {
+              for (const token of contextTokens) {
+                if (token.length > 2 && keywordLower.includes(token)) {
+                  score += 1;
+                  matchDetails.partial += 1;
+                  break;
+                }
+              }
+            }
           } catch (e) {
             /* ignore */
           }
         });
-        // product name match gives higher priority
-        const productNameLower = (link.productName || '').toLowerCase();
-        if (productNameLower && contextLower.includes(productNameLower)) score += 5;
-        // if preferred id provided, give a large bonus
-        if (preferredId && link.id === preferredId) score += 1000;
-        return { link, score };
+
+        // 2. 상품명 매칭 (더 높은 가중치)
+        const productNameLower = (link.productName || '').toLowerCase().trim();
+        if (productNameLower) {
+          // 완전 일치
+          if (contextLower === productNameLower) {
+            score += 20;
+            matchDetails.exact += 1;
+          }
+          // 포함
+          else if (contextLower.includes(productNameLower)) {
+            score += 12;
+            matchDetails.partial += 1;
+          }
+          // 역방향: context 토큰이 상품명에 포함
+          else {
+            for (const token of contextTokens) {
+              if (token.length > 2 && productNameLower.includes(token)) {
+                score += 4;
+                matchDetails.partial += 1;
+                break;
+              }
+            }
+          }
+        }
+
+        // 3. 설명(description) 매칭 (보조적)
+        const descLower = (link.description || '').toLowerCase();
+        if (descLower) {
+          let descMatch = 0;
+          for (const token of contextTokens) {
+            if (token.length > 2 && descLower.includes(token)) {
+              descMatch += 1;
+            }
+          }
+          if (descMatch > 0) {
+            score += Math.min(descMatch * 0.5, 3); // 최대 3점까지만
+          }
+        }
+
+        // 4. 선호 ID 보너스
+        if (preferredId && link.id === preferredId) {
+          score += 1000;
+        }
+
+        // 5. 이미지 존재 시 약간의 보너스 (시각적 소구력)
+        if (link.cardData?.imageUrl) {
+          score += 0.5;
+        }
+
+        return { link, score, matchDetails };
       })
-      // Exclude invalid entries (no keywords/url) or zero score, unless it's preferred
+      // 유효성 검증 및 필터링
       .filter(({ link, score }) => {
         if (
           !link.keywords ||
@@ -1352,22 +1513,27 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
           Logger.debug(`[getRelevantAffiliateLinks] 링크 필터링 제외 (키워드/URL 없음):`, link);
           return false;
         }
-        return score > 0;
+        // 최소 스코어 임계값 (0.5 이상만 허용)
+        return score >= 0.5;
       });
 
-    // sort by score desc, then most recent
+    // 정렬: 점수 내림차순, 동점 시 최신순
     scored.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return (b.link.createdAt || 0) - (a.link.createdAt || 0);
     });
 
     const relevantLinks = scored.map((s) => s.link);
+
+    // 상세 로깅
     try {
       Logger.debug(
-        '[getRelevantAffiliateLinks] link scores:',
-        scored.map((s) => ({
+        '[getRelevantAffiliateLinks] 매칭 결과:',
+        scored.slice(0, 10).map((s) => ({
           id: s.link.id,
-          score: s.score,
+          score: s.score.toFixed(2),
+          exact: s.matchDetails.exact,
+          partial: s.matchDetails.partial,
           hasImage: !!s.link.cardData?.imageUrl,
           productName: s.link.productName,
         }))
@@ -1375,12 +1541,14 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
     } catch (e) {
       Logger.debug('[getRelevantAffiliateLinks] score logging failed', e);
     }
+
     try {
       console.log(
         '[getRelevantAffiliateLinks DEBUG] link scores',
-        scored.map((s) => ({
+        scored.slice(0, 10).map((s) => ({
           id: s.link.id,
-          score: s.score,
+          score: s.score.toFixed(2),
+          matchDetails: s.matchDetails,
           hasImage: !!s.link.cardData?.imageUrl,
         }))
       );
@@ -1389,9 +1557,15 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
     }
 
     // 최대 10개까지만 반환 (프롬프트 과부하 방지)
-    const result = relevantLinks.slice(0, 10);
+    // 단, 점수 차이가 너무 크면 상위 5개만 (품질 우선)
+    let result = relevantLinks.slice(0, 10);
+    if (scored.length > 5 && scored[0].score > scored[4].score * 2) {
+      result = relevantLinks.slice(0, 5);
+      Logger.info('[getRelevantAffiliateLinks] 고품질 매칭 감지: 상위 5개만 선택');
+    }
+
     Logger.info(
-      `[getRelevantAffiliateLinks] 관련 링크 ${result.length}개 선택됨 (전체 ${links.length}개 중)`
+      `[getRelevantAffiliateLinks] 관련 링크 ${result.length}개 선택됨 (전체 ${links.length}개 중, 스코어 범위: ${scored[0]?.score.toFixed(2)} ~ ${scored[result.length - 1]?.score.toFixed(2)})`
     );
     return result;
   } catch (error) {
@@ -1399,8 +1573,23 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
     return [];
   }
 }
-export { getRelevantAffiliateLinks };
+
+// [최적화] 캐시 무효화 함수 (제휴 링크 추가/수정/삭제 시 호출)
+function invalidateAffiliateLinkCache(userId = null) {
+  if (userId) {
+    affiliateLinkCache.delete(`${userId}`);
+    Logger.debug(`[invalidateAffiliateLinkCache] 사용자 ${userId}의 캐시 삭제됨`);
+  } else {
+    affiliateLinkCache.clear();
+    Logger.debug('[invalidateAffiliateLinkCache] 전체 캐시 삭제됨');
+  }
+}
+
+export { getRelevantAffiliateLinks, invalidateAffiliateLinkCache };
 export { sanitizeThumbnailText, computeThumbnailTextForCompose, selectSloganIfTitleFallback };
+
+// Export helper for testing
+export { removeDuplicateYears };
 
 /**
  * Post-process draft HTML to validate affiliate anchors and optionally insert affiliate links.
@@ -1412,18 +1601,36 @@ export { sanitizeThumbnailText, computeThumbnailTextForCompose, selectSloganIfTi
  * @returns {string} modified HTML
  */
 export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options = {}) {
-  const { maxLinks = 3 } = options || {};
-  if (!html || !Array.isArray(affiliateLinks) || affiliateLinks.length === 0) return html;
+  const { maxLinks = 3, internalLinks = [], referenceLinks = [] } = options || {};
+  if (!html) return html;
+
+  // If no links at all, return early
+  if (!Array.isArray(affiliateLinks)) affiliateLinks = [];
+  if (!Array.isArray(internalLinks)) internalLinks = [];
+  if (!Array.isArray(referenceLinks)) referenceLinks = [];
 
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 
     // Normalize affiliate urls for quick lookup
-    const normalized = affiliateLinks.map((l) => ({
+    const normalizedAffiliates = (affiliateLinks || []).map((l) => ({
       url: (l.url || '').trim(),
       productName: l.productName || '',
       keywords: Array.isArray(l.keywords) ? l.keywords : [],
+    }));
+
+    // Normalize internal links (posts)
+    const normalizedInternals = (internalLinks || []).map((p) => ({
+      url: (p.url || p.fullLink || '').trim(),
+      title: p.title || '',
+      keywords: Array.isArray(p.keywords) ? p.keywords : [],
+    }));
+
+    // Normalize reference links (scraps)
+    const normalizedRefs = (referenceLinks || []).map((r) => ({
+      url: (r.url || '').trim(),
+      title: r.title || '',
     }));
 
     // Helper: check if href matches any affiliate URL (startsWith or exact)
@@ -1465,7 +1672,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       }
     });
 
-    // 2) If we need more, attempt deterministic insertion: find keywords/productName matches in text nodes
+    // 2) If we need more, attempt deterministic insertion: internalLinks -> referenceLinks -> affiliateLinks
     if (insertedCount < maxLinks) {
       const usedUrls = new Set(
         Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map((el) =>
@@ -1486,63 +1693,87 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       // Helper to escape regex
       const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-      for (const link of normalized) {
-        if (insertedCount >= maxLinks) break;
-        const targetUrl = link.url;
-        if (!targetUrl || usedUrls.has(targetUrl)) continue;
+      // A function to attempt insertion for a set of link objects
+      const tryInsertLinks = (links, makeAnchorText) => {
+        for (const link of links) {
+          if (insertedCount >= maxLinks) return;
+          const targetUrl = link.url;
+          if (!targetUrl || usedUrls.has(targetUrl)) continue;
 
-        const candidates = [...(link.keywords || []), link.productName].filter(Boolean);
-        if (candidates.length === 0) continue;
+          const candidates = [
+            ...(link.keywords || []),
+            link.productName || link.title || '',
+          ].filter(Boolean);
+          if (candidates.length === 0) continue;
 
-        // try to find first occurrence among text nodes
-        let matched = false;
-        // Use plain substring match (case-insensitive) for keywords and product names
-        const patterns = candidates.map((c) => new RegExp(escapeReg(c), 'i'));
+          // Sort candidates by length desc to prefer longer, more specific phrases
+          candidates.sort((a, b) => b.length - a.length);
+          const patterns = candidates.map((c) => new RegExp(escapeReg(c), 'i'));
 
-        for (const tnode of textNodes) {
-          const txt = tnode.textContent;
-          for (const pattern of patterns) {
-            const m = txt.match(pattern);
-            if (m) {
-              // Create replacement span > a
-              const span = doc.createElement('span');
-              span.setAttribute('style', 'color: #2e7d32;');
-              const a = doc.createElement('a');
-              a.setAttribute('href', targetUrl);
-              a.setAttribute('target', '_blank');
-              a.setAttribute('rel', 'noopener noreferrer');
-              // CTA text - prefer short CTA using productName when available
-              const cta = link.productName
-                ? `${link.productName} 최저가 확인하기`
-                : '상품 상세보기';
-              a.textContent = cta;
-              span.appendChild(a);
+          let matched = false;
+          for (const tnode of textNodes) {
+            const txt = tnode.textContent;
+            for (const pattern of patterns) {
+              const m = txt.match(pattern);
+              if (m) {
+                // Use matched phrase as anchor text to preserve context
+                const anchorText = makeAnchorText ? makeAnchorText(m[0], link) : m[0];
 
-              // Replace only the first match occurrence inside this text node
-              const before = txt.slice(0, m.index);
-              const after = txt.slice(m.index + m[0].length);
-              const frag = doc.createDocumentFragment();
-              if (before) frag.appendChild(doc.createTextNode(before));
-              frag.appendChild(span);
-              if (after) frag.appendChild(doc.createTextNode(after));
+                const span = doc.createElement('span');
+                span.setAttribute('style', 'color: #2e7d32;');
+                const a = doc.createElement('a');
+                a.setAttribute('href', targetUrl);
+                a.setAttribute('target', '_blank');
+                a.setAttribute('rel', 'noopener noreferrer');
+                a.textContent = anchorText;
+                span.appendChild(a);
 
-              // Guard against detached text nodes: ensure parentNode exists before replacing
-              if (tnode.parentNode) {
-                tnode.parentNode.replaceChild(frag, tnode);
-              } else {
-                Logger.warn(
-                  '[postProcessAffiliateHtml] 텍스트 노드의 parentNode가 존재하지 않아 대체 작업을 건너뜁니다.',
-                  tnode
-                );
+                // Replace only the first match occurrence inside this text node
+                const before = txt.slice(0, m.index);
+                const after = txt.slice(m.index + m[0].length);
+                const frag = doc.createDocumentFragment();
+                if (before) frag.appendChild(doc.createTextNode(before));
+                frag.appendChild(span);
+                if (after) frag.appendChild(doc.createTextNode(after));
+
+                if (tnode.parentNode) {
+                  tnode.parentNode.replaceChild(frag, tnode);
+                } else {
+                  Logger.warn(
+                    '[postProcessAffiliateHtml] 텍스트 노드의 parentNode가 존재하지 않아 대체 작업을 건너뜁니다.',
+                    tnode
+                  );
+                }
+                insertedCount += 1;
+                usedUrls.add(targetUrl);
+                matched = true;
+                break;
               }
-              insertedCount += 1;
-              usedUrls.add(targetUrl);
-              matched = true;
-              break;
             }
+            if (matched) break;
           }
-          if (matched) break;
         }
+      };
+
+      // internalLinks: prefer using post title as anchor text if it fits; otherwise use matched phrase
+      tryInsertLinks(normalizedInternals, (matchedText, link) => {
+        // prefer full title if it contains matchedText or is short
+        if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase())) return link.title;
+        if (link.title && link.title.split(' ').length <= 4) return link.title; // short title
+        return matchedText;
+      });
+
+      // reference links: use matched phrase
+      if (insertedCount < maxLinks) tryInsertLinks(normalizedRefs, (m) => m);
+
+      // affiliate links: use matched phrase; fallback to productName + CTA if matched phrase is too generic
+      if (insertedCount < maxLinks) {
+        tryInsertLinks(normalizedAffiliates, (matchedText, link) => {
+          const genericWords = ['제품', '상품', '구매', '자세히'];
+          const isGeneric = genericWords.some((w) => matchedText.toLowerCase().includes(w));
+          if (isGeneric && link.productName) return `${link.productName} 최저가 확인하기`;
+          return matchedText;
+        });
       }
     }
 
@@ -1885,30 +2116,191 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       linkedScrapsContent.map(async (scrap, index) => {
         let content = compressText(scrap.text || '');
 
-        // 이미지가 있고 텍스트가 적거나(500자 미만) 이미지를 강조하고 싶을 때 분석 시도
-        // 여기서는 이미지가 있으면 무조건 분석하도록 설정 (필요시 조건 조절)
+        // 이미지 분석을 먼저 수행
         let imageAnalysis = '';
         if (scrap.image) {
           Logger.info(`[generateDraft] 스크랩 #${index + 1} 이미지 분석 시작...`);
           const analysisResult = await analyzeScrapImage(scrap.image);
           if (analysisResult) {
-            imageAnalysis = `\n\n[이미지 분석 내용 (Vision AI)]:\n${analysisResult}`;
+            imageAnalysis = `[이미지 분석 (Vision AI)]:\n${analysisResult}\n\n`;
           }
         }
 
-        // 길이 제한 (2500자)
-        if (content.length > 2500) {
-          const front = content.substring(0, 2000);
-          const back = content.substring(content.length - 500);
-          content = `${front}\n...(중략)...\n${back}`;
+        // 스마트 텍스트 압축: 중요 키워드 주변 컨텍스트 유지
+        // ✅ 외부 비교 사이트 컨텐츠 제거 (노써치, 다나와 등)
+        if (content.includes('노써치') || content.includes('nosearch') || content.includes('다나와')) {
+          console.log('[aiService] 외부 비교 사이트 컨텐츠 감지, 필터링 수행');
+          
+          // 1. 비교표 섹션 제거 (예: "추천 & 리뷰 : 인기 TOP 8")
+          content = content.replace(/[^\n]*추천\s*&\s*리뷰\s*[:：]\s*인기\s*TOP\s*\d+[^\n]*[\s\S]*?(?=상품\s*리뷰|$)/gi, '');
+          
+          // 2. 파워링크 광고 섹션 제거
+          content = content.replace(/파워링크[\s\S]*?(?=상품\s*리뷰|$)/gi, '');
+          
+          // 3. 베스트픽/가성비픽 섹션 제거
+          content = content.replace(/[①②③\d]+\s*\n[^\n]*베스트픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi, '');
+          content = content.replace(/[①②③\d]+\s*\n[^\n]*가성비픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi, '');
+          
+          console.log('[aiService] 외부 비교 사이트 필터링 완료');
+        }
+        
+        // 스마트 텍스트 압축
+        if (content.length > 3500) {
+          // 제품 관련 키워드 찾기
+          const productKeywords = ['리뷰', '평점', '만족도', '사용자', '후기', '장점', '단점', '가격', '품질', '디자인', '기능', '성능', '추천'];
+          const keywordPositions = [];
+          
+          productKeywords.forEach(keyword => {
+            let pos = content.indexOf(keyword);
+            while (pos !== -1) {
+              keywordPositions.push(pos);
+              pos = content.indexOf(keyword, pos + 1);
+            }
+          });
+          
+          if (keywordPositions.length > 0) {
+            // 키워드 주변 컨텍스트 추출 (각 키워드 전후 300자)
+            keywordPositions.sort((a, b) => a - b);
+            const chunks = [];
+            let lastEnd = 0;
+            
+            keywordPositions.forEach(pos => {
+              if (pos - lastEnd > 100) { // 겹치지 않는 경우만
+                const start = Math.max(0, pos - 300);
+                const end = Math.min(content.length, pos + 300);
+                chunks.push(content.substring(start, end));
+                lastEnd = end;
+              }
+            });
+            
+            // 앞부분 1000자 + 키워드 주변 컨텍스트
+            content = content.substring(0, 1000) + '\n\n' + chunks.join('\n...\n') + '\n\n' + content.substring(content.length - 500);
+          } else {
+            // 키워드가 없으면 기존 방식
+            content = content.substring(0, 2500) + '\n...(중략)...\n' + content.substring(content.length - 500);
+          }
         }
 
         processedScraps[index] =
-          `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n내용:\n${content}${imageAnalysis}\n`;
+          `[참고 자료 ${index + 1}]\n제목: ${scrap.title || ''}\nURL: ${scrap.url || ''}\n\n${imageAnalysis}내용:\n${content}\n`;
       })
     );
 
     const linkedScrapsText = processedScraps.join('\n\n');
+
+    // [신규] 참고 자료에서 제품명/브랜드 추출
+    const extractedProducts = [];
+    const extractedBrands = [];
+    
+    linkedScrapsContent.forEach((scrap, index) => {
+      const text = scrap.title + ' ' + (scrap.text || '');
+      
+      // 1. 브랜드명 먼저 추출
+      const brandPatterns = [
+        /누아트/g,
+        /SUMMIT/g,
+        /신지모루/g,
+        /ESR/g,
+        /링케|슈피겐|UAG|토르|엘라고|벨킨|다이소|아이패치|모모트/g,
+      ];
+      
+      brandPatterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+          const brand = match[0].trim();
+          if (!extractedBrands.includes(brand)) {
+            extractedBrands.push(brand);
+          }
+        }
+      });
+      
+      // 2. 제품명 전체 추출 (긴 제품명도 인식)
+      // 패턴 1: 브랜드명 + 여러 단어 + 제품 종류
+      const longProductPattern = /([가-힣A-Za-z]+)\s+([가-힣A-Za-z0-9\s]+?)\s*(케이스|카드\s*케이스|충전기|거치대|필름|액세서리)/g;
+      const longMatches = text.matchAll(longProductPattern);
+      for (const match of longMatches) {
+        const fullProduct = match[0].trim();
+        // 10자 이상 80자 이하의 제품명만 추출
+        if (fullProduct.length >= 10 && fullProduct.length <= 80 && !extractedProducts.includes(fullProduct)) {
+          extractedProducts.push(fullProduct);
+        }
+      }
+      
+      // 3. 제목에서 직접 추출 (가장 정확한 제품명)
+      if (scrap.title) {
+        // 제목 전체가 제품명인 경우
+        const titleCleaned = scrap.title.replace(/^(상품 리뷰|리뷰|후기)[\s:：]+/, '').trim();
+        if (titleCleaned.length >= 10 && titleCleaned.length <= 80 && !extractedProducts.includes(titleCleaned)) {
+          extractedProducts.push(titleCleaned);
+        }
+        
+        // 콜론 앞부분이 제품명인 경우
+        const titleMatch = scrap.title.match(/^([가-힣A-Za-z0-9\s]+)[:：]/);
+        if (titleMatch && titleMatch[1].trim().length >= 10) {
+          const productName = titleMatch[1].trim();
+          if (!extractedProducts.includes(productName)) {
+            extractedProducts.push(productName);
+          }
+        }
+      }
+    });
+    
+    Logger.info('[generateDraft] 추출된 제품명:', extractedProducts);
+    Logger.info('[generateDraft] 추출된 브랜드:', extractedBrands);
+    
+    // [신규] 리뷰 통계 추출 및 구조화
+    const productReviewStats = [];
+    linkedScrapsContent.forEach((scrap) => {
+      const text = scrap.text || '';
+      
+      // 리뷰 통계 패턴 매칭
+      const reviewCountMatch = text.match(/상품\s*리뷰\s*\n\s*(\d{1,5})/);
+      const satisfactionMatch = text.match(/최고\s*\n\s*(\d{1,3})%/);
+      const robustnessMatch = text.match(/견고함\s*\n\s*아주\s*견고해요\s*\n\s*(\d{1,3})%/);
+      const designMatch = text.match(/디자인\s*\n\s*아주만족해요\s*\n\s*(\d{1,3})%/);
+      
+      // 제품명 추출 (타이틀에서)
+      let productName = null;
+      for (const product of extractedProducts) {
+        if (scrap.title && scrap.title.includes(product.split(' ')[0])) {
+          productName = product;
+          break;
+        }
+      }
+      
+      if (reviewCountMatch && satisfactionMatch && productName) {
+        const stats = {
+          productName: productName,
+          reviewCount: parseInt(reviewCountMatch[1]),
+          satisfaction: parseInt(satisfactionMatch[1]),
+          robustness: robustnessMatch ? parseInt(robustnessMatch[1]) : null,
+          design: designMatch ? parseInt(designMatch[1]) : null
+        };
+        
+        // 중복 체크
+        const exists = productReviewStats.find(s => s.productName === productName);
+        if (!exists) {
+          productReviewStats.push(stats);
+          Logger.info('[generateDraft] 리뷰 통계 추출:', stats);
+        }
+      }
+    });
+    
+    // 구조화된 제품 정보 생성
+    let structuredProductInfo = '';
+    if (productReviewStats.length > 0) {
+      structuredProductInfo = '\n\n📊 **[중요] 참고 자료의 주요 제품 정보 (이 정보를 초안 전체에 반드시 활용하세요)**\n\n';
+      productReviewStats.forEach((stat, idx) => {
+        structuredProductInfo += `제품 ${idx + 1}: ${stat.productName}\n`;
+        structuredProductInfo += `  - 리뷰 개수: ${stat.reviewCount.toLocaleString()}개\n`;
+        structuredProductInfo += `  - 최고 평점: ${stat.satisfaction}%\n`;
+        if (stat.robustness) structuredProductInfo += `  - 견고함 만족도: ${stat.robustness}%\n`;
+        if (stat.design) structuredProductInfo += `  - 디자인 만족도: ${stat.design}%\n`;
+        structuredProductInfo += '\n';
+      });
+      structuredProductInfo += '⚠️ 초안 작성 시 위 제품들의 리뷰 통계를 본문 전체에 걸쳐 반복적으로 언급하세요.\n';
+      structuredProductInfo += '예시: "누아트 케이스는 1,656개의 리뷰에서 75%가 최고 평점을 주었습니다."\n\n';
+    }
 
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
@@ -2175,10 +2567,63 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const prompt = `
             ${systemPrompt}
             
+            ${linkedScrapsText || originalContentText ? `
+            ═══════════════════════════════════════════════════════════════
+            🚨 **[최우선 참고 자료 - 반드시 활용하세요]** 🚨
+            ═══════════════════════════════════════════════════════════════
+            
+            아래 참고 자료는 이번 초안 작성의 **핵심 근거**입니다.
+            
+            ${structuredProductInfo}
+            
+            ⚠️⚠️⚠️ **초안 작성 후 반드시 자가 점검** ⚠️⚠️⚠️
+            
+            초안을 모두 작성한 뒤, 아래 체크리스트로 스스로 확인하세요:
+            
+            ${productReviewStats.length > 0 ? `
+            ${productReviewStats.map((stat, i) => `
+            [ ] ${stat.productName}이 본문에 최소 2번 이상 등장했나?
+            [ ] ${stat.productName} 언급할 때 리뷰 숫자(${stat.reviewCount.toLocaleString()}개, ${stat.satisfaction}%)를 함께 썼나?`).join('\n            ')}
+            ` : ''}
+            
+            [ ] 초반/중반/후반 섹션 모두에 위 제품이 골고루 등장했나?
+            [ ] 일반론만 나열하고 제품을 마지막에만 짧게 언급하지 않았나?
+            [ ] 외부 비교 사이트(노써치, 다나와, ESR, 신지모루, 다이소)를 추천하지 않았나?
+            
+            ❌ 위 체크리스트 중 하나라도 X라면 → 해당 부분을 다시 작성하세요
+            
+            ${extractedProducts.length > 0 ? `
+            📌 **참고 자료에서 추출된 제품/브랜드 목록** (이 제품들만 추천하세요):
+            ${extractedProducts.map((p, i) => `   ${i + 1}. ${p}`).join('\n')}
+            ${extractedBrands.length > 0 ? `
+            🏷️ **추출된 브랜드**: ${extractedBrands.join(', ')}
+            ` : ''}
+            
+            ⛔ **절대 금지**:
+            - 리뷰 통계 없이 제품명만 언급 금지
+            - 외부 비교 사이트(노써치, 다나와) 제품 추천 금지
+            - 참고 자료에 없는 제품(ESR, 신지모루, 다이소) 메인 추천 금지
+            ` : ''}
+            
+            ❌ **절대 금지 사항** (다음 중 하나라도 위반 시 초안 전체 거부):
+            - 참고 자료에 **리뷰 통계가 없는 제품**을 메인 추천으로 사용 금지
+            - 외부 비교 사이트(노써치, 다나와 등)의 제품 비교표를 그대로 복사 금지
+            - "TPU는 탄성이 뛰어나" 같은 일반론만 나열 금지
+            - 참고 자료 제품을 마지막 섹션에만 짧게 언급하고 넘어가는 것 금지
+            - "노써치", "nosearch.com", "다나와" 같은 외부 사이트 이름/링크 언급 금지
+            
+            ${originalContentText}
+            ${linkedScrapsText}
+            
+            ═══════════════════════════════════════════════════════════════
+            ` : ''}
+            
             [현재 시점 정보]
             - 오늘 날짜: ${currentDateString}
             - **현재 연도: ${currentYear}년**
-            - 주의: 글을 작성할 때 반드시 **${currentYear}년**을 기준으로 최신 정보를 반영하고, 제목이나 본문에 연도가 들어갈 경우 **${currentYear}년**을 사용하세요. (과거 연도 사용 금지)
+            - **중요**: 년도는 꼭 필요한 경우에만 사용하세요. 
+              * 시간에 민감한 트렌드/최신 정보가 아니라면 년도를 생략하세요.
+              * 년도를 사용할 때는 반드시 **${currentYear}년**을 사용하세요. (과거 연도 사용 금지)
 
             [작성 요청]
             아래 정보를 바탕으로 블로그 포스트 초안을 작성해주세요.
@@ -2190,8 +2635,37 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
             ### 1-1. SEO 최적화된 실제 초안 제목 생성
             위 아이디어 제목을 참고하여, 검색 노출에 최적화되고 독자의 체류시간을 늘릴 수 있는 실제 초안 제목을 생성해주세요.
-            - **${currentYear}년**을 기준으로 최신 트렌드와 정보를 반영한 제목을 생성하세요.
-            - 제목에 연도가 들어갈 경우 반드시 **${currentYear}년**을 사용하세요. (예: "2023년" 같은 과거 연도 사용 금지)
+            
+            **[년도 사용 규칙 - CRITICAL - 엄격히 준수]**
+            - **기본 원칙 (최우선)**: 년도는 꼭 필요한 경우에만 사용하세요. 불필요하게 년도를 추가하지 마세요.
+            - **절대 규칙**: 아이디어 제목에 년도가 **명시적으로 포함되지 않았다면**, 초안 제목과 본문에도 년도를 절대 사용하지 마세요.
+            - **기본 가정**: 아이디어 제목 = "${ideaData.title}"에 년도가 없다면, 이 글은 시간에 민감하지 않은 주제입니다. 년도를 생략하세요.
+            
+            - **년도를 사용해야 하는 경우** (다음 조건을 **모두** 만족해야 함):
+              1. 아이디어 제목이나 핵심 요약에 **명시적으로 년도가 포함**되어 있거나
+              2. 글의 주제가 **명백히 시간에 민감한 정보**를 다루는 경우 (예: "2025년 트렌드", "2026년 전망", "올해의 신제품")
+              
+              **구체적인 허용 예시**:
+              - 아이디어 제목: "2025년 스마트폰 추천" → ✅ 제목에 년도 명시 → 사용 가능
+              - 아이디어 제목: "2026년 부동산 전망" → ✅ 제목에 년도 명시 → 사용 가능
+              - 아이디어 제목: "최신 갤럭시 S25 출시" → ✅ 최신 신제품 출시 정보 → 사용 가능
+            
+            - **년도를 사용하지 말아야 하는 경우** (대부분의 경우):
+              1. 아이디어 제목에 년도가 **없는** 경우 → ❌ 년도 사용 금지
+              2. 시간과 무관한 영구적인 가이드/방법 (예: "블로그 시작하는 법", "커피 내리는 방법") → ❌ 년도 사용 금지
+              3. 제품 리뷰 (제품명에 년도가 없는 경우) (예: "아이폰 사용 후기") → ❌ 년도 사용 금지
+              4. 개념/이론 설명 (예: "SEO란 무엇인가") → ❌ 년도 사용 금지
+              5. 설정 방법, 사용법, 튜토리얼 등 (예: "스마트싱스 설정 방법") → ❌ 년도 사용 금지
+              
+              **구체적인 금지 예시**:
+              - 아이디어 제목: "갤럭시 탭 사용법" → ❌ 제목에 년도 없음 → 년도 사용 금지
+              - 아이디어 제목: "스마트홈 구축 가이드" → ❌ 영구적 가이드 → 년도 사용 금지
+              - 아이디어 제목: "블로그 수익화 방법" → ❌ 시간 무관 방법론 → 년도 사용 금지
+            
+            - **년도를 사용할 때**: 반드시 **${currentYear}년**을 사용하세요. (과거 연도 사용 절대 금지)
+            - **판단 기준**: 이 글이 1년 후에도 유효한 정보인가? 그렇다면 년도를 사용하지 마세요.
+            
+            **[제목 생성 규칙]**
             - 검색 키워드를 자연스럽게 포함
             - 클릭을 유도하는 제목
             - 독자의 문제를 해결하거나 유용한 정보를 제공한다는 것을 명확히 표현
@@ -2223,10 +2697,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             3. **본문**: 서론 다음에 목차를 h2(## 제목) 섹션으로 작성해주세요.
                - 목차의 각 항목을 h2 태그로 사용하세요.
+               - **각 문단 제목(h2, h3)은 반드시 굵게(볼드) 표시하세요**: 마크다운 헤더 문법과 함께 **굵게** 처리를 병행하세요. 예: ## **섹션 제목**, ### **하위 제목**
                - 각 섹션에 충실한 내용을 작성하세요.
                - 하위 섹션이 필요하면 h3(### 제목)를 사용하세요.
             
             4. **결론**: 본문 마지막에 결론 섹션을 h2(## 결론)로 추가해주세요.
+               - 결론 제목도 반드시 굵게 표시하세요: ## **결론**
                - 글의 핵심 내용 요약
                - 독자에게 도움이 되는 마무리
             
@@ -2243,15 +2719,26 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 : '없음'
             }
             
-            ### 7. 추천 검색어 (독자들이 검색할 수 있는 키워드, 본문에 자연스럽게 활용해주세요)
+            ### 7. 추천 검색어 (자료 수집용 - 초안 작성에 필요한 추가 정보를 찾기 위한 검색어)
             ${
               recommendedSearches.length > 0
                 ? recommendedSearches.map((s, idx) => `${idx + 1}. ${s}`).join('\n')
                 : '없음'
             }
-
-            ### 8. 관련 참고 자료
-            ${originalContentText}${linkedScrapsText || '참고 자료 없음'}
+            
+            [추천 검색어 활용 규칙 - 매우 중요]
+            - 이 검색어들은 **초안 작성에 필요한 추가 자료를 수집하기 위한 목적**으로 생성되었습니다.
+            - 각 검색어는 통계, 사례, 비교 데이터, 최신 트렌드 등 특정 유형의 정보를 찾기 위해 최적화되어 있습니다.
+            - **활용 방법**:
+              1. 통계/데이터 검색어 → 본문에 신뢰성 있는 수치와 데이터를 포함할 때 활용
+              2. 가이드/방법 검색어 → 실용적인 팁이나 단계별 설명을 작성할 때 참고
+              3. 비교/분석 검색어 → 제품이나 서비스를 비교 분석하는 섹션에서 활용
+              4. 사례/후기 검색어 → 실제 사용 경험이나 사례 연구를 소개할 때 활용
+              5. 최신 트렌드 검색어 → 최신 동향이나 전망을 다루는 섹션에서 활용
+            - **중요**: 검색어를 단순히 본문에 나열하지 말고, 해당 검색어로 찾을 수 있는 정보의 '유형'을 이해하고 그에 맞는 콘텐츠를 작성하세요.
+            - 예시:
+              * 검색어: "스마트홈 시장 규모 2024" → 본문에 "2024년 글로벌 스마트홈 시장은 X조원 규모로 성장할 것으로 전망됩니다" 같은 통계 정보 포함
+              * 검색어: "스마트홈 설치 가이드" → 본문에 실제 설치 단계와 주의사항을 단계별로 설명
             
             ${
               myPastPostsText
@@ -2276,11 +2763,86 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 : ''
             }
             
-            [참고 자료 활용 규칙]
-            - 원본 본문이 제공된 경우(리뉴얼 아이디어), 그 내용을 바탕으로 팩트 기반으로 작성하되, 단순 복사가 아닌 새로운 관점이나 더 풍부한 정보로 발전시켜주세요.
-            - 참고 자료가 제공된 경우, 그 내용을 바탕으로 팩트 기반으로 작성해주세요.
-            - 참고 자료가 없는 경우, 일반적인 지식과 경험을 바탕으로 작성하되, 확실하지 않은 내용은 추측하지 마세요.
-            - 할루시네이션(허위 정보 생성)을 피하고, 확실한 정보만 포함해주세요.
+            [참고 자료 활용 규칙 - 절대 준수, 위반 시 초안 거부]
+            
+            ⚠️ **경고**: 참고 자료가 제공되었는데 본문에 전혀 활용하지 않으면 초안이 거부됩니다.
+            
+            - **원본 본문**(리뉴얼 아이디어)이 제공된 경우:
+              * 그 내용을 핵심 기반으로 삼아 팩트 기반 작성하되, 단순 복사가 아닌 새로운 관점이나 더 풍부한 정보로 발전시켜주세요.
+            
+            - **자료 연결(참고 자료)**이 제공된 경우 - 다음 규칙을 절대적으로 준수하세요:
+              
+              1. **제품명/브랜드 직접 언급 필수**:
+                 - 참고 자료에 특정 제품명이나 브랜드가 있다면, 본문에서 반드시 해당 제품명을 직접 언급하세요.
+                 - ❌ 나쁜 예: "이런 제품들이 있습니다", "다양한 케이스가 있습니다"
+                 - ✅ 좋은 예: "누아트 맥세이프 마그네틱 컬러 엣지 케이스는 1,656개의 리뷰에서 75%의 최고 평점을 받았습니다"
+              
+              2. **구체적인 수치와 통계 직접 인용**:
+                 - 참고 자료에 리뷰 개수, 평점, 만족도 등의 통계가 있다면 반드시 본문에 포함하세요.
+                 - 예: "2,000명 이상이 만족했으며, 견고함 78%, 디자인 83% 만족도를 기록했습니다"
+              
+              3. **실제 사용자 후기 내용 통합**:
+                 - 참고 자료에 사용자 리뷰가 있다면, 핵심 장단점을 본문에 자연스럽게 녹여주세요.
+                 - ✅ 좋은 예: "실제 사용자들은 '카드 2~3장을 수납할 수 있고, 500g의 강력한 자력으로 맥세이프 거치대에서 흔들림이 없다'고 평가했습니다"
+                 - ✅ 좋은 예: "다만 일부 사용자는 '풀커버라 화면에 지문이 많이 남고 유막 현상이 있다'는 점을 단점으로 지적했습니다"
+              
+              4. **참고 자료의 제품이 최우선**:
+                 - 참고 자료에 특정 제품 정보가 있다면, 그 제품을 본문의 추천/비교 대상으로 우선 활용하세요.
+                 - 참고 자료에 없는 제품을 임의로 추천하지 마세요.
+                 - ❌ 절대 금지: 참고 자료에 "누아트 케이스" 정보가 있는데, 본문에서 "ESR 케이스", "신지모루 케이스" 등 전혀 다른 제품 추천
+              
+              5. **기능과 스펙의 구체적 서술**:
+                 - 참고 자료에 제품 기능, 소재, 특징이 명시되어 있다면 본문에서 구체적으로 설명하세요.
+                 - ✅ 좋은 예: "PC와 TPU 이중 구조로 변색을 최소화하고, 카메라 보호 필름이 포함되어 있으며, 카드 1장 수납 시에도 내부 고정 클립으로 안전하게 고정됩니다"
+              
+              6. **자연스러운 통합, 나열 금지**:
+                 - 단순히 "참고 자료 1에 따르면...", "출처 2에서..." 같은 딱딱한 표현 금지
+                 - 본문의 흐름에 자연스럽게 녹여서 독자가 참고 자료 내용인지 모르게 작성하세요
+              
+              7. **참고 자료 우선순위 엄수**:
+                 - 참고 자료 > 일반 지식
+                 - 참고 자료에 정보가 있다면 절대 일반론으로 대체하지 마세요
+                 - 참고 자료가 비어있거나 관련 없는 내용일 때만 일반 지식을 활용하세요
+              
+              **[Before/After 예시 - 반드시 이 패턴을 따르세요]**
+              
+              📌 **예시 1: 제품 추천 섹션**
+              
+              ❌ 잘못된 작성 (참고 자료 무시):
+              "맥세이프 케이스를 고를 때는 ESR 할로락이나 신지모루 M-에어로핏 같은 제품이 좋습니다. 다양한 케이스가 시중에 나와 있으니 비교해보세요."
+              
+              ✅ 올바른 작성 (참고 자료 직접 활용):
+              "누아트 맥세이프 마그네틱 컬러 엣지 풀커버 케이스는 1,656개의 사용자 리뷰에서 75%가 최고 평점을 주었으며, 견고함 61%, 디자인 70%의 만족도를 기록했습니다. 실제 사용자들은 '케이스 자체가 카메라까지 모두 덮는 구조라 별도의 카메라 필름이 필요 없고, 500g의 강력한 자력으로 무선 충전에도 문제가 없다'고 평가했습니다.
+              
+              SUMMIT 맥세이프 카드 케이스 세트는 2,504개 리뷰에서 87%가 최고 평점을 주었으며, 2,000명 이상이 만족했다고 응답했습니다. 견고함 78%, 디자인 83%의 높은 만족도를 보였으며, '카드 2~3장을 수납할 수 있고, 카드 1장만 넣어도 내부 고정 클립으로 안전하게 고정된다'는 점이 장점입니다."
+              
+              📌 **예시 2: 장단점 섹션**
+              
+              ❌ 잘못된 작성 (일반론):
+              "맥세이프 케이스는 자력이 강해서 충전이 편리하지만, 때로는 케이스가 두꺼워질 수 있습니다."
+              
+              ✅ 올바른 작성 (실제 후기 기반):
+              "실제 사용자들이 꼽은 주요 장점은 다음과 같습니다. '맥세이프 충전기나 카드지갑을 붙였을 때 딱 하고 붙는 느낌이 확실하고, 흔들림 없이 안정적으로 고정된다'는 평가가 많았습니다. 특히 차량용 거치대나 무선 충전기에서도 흔들림 없이 안정적으로 사용할 수 있다는 점이 높이 평가받았습니다.
+              
+              다만 일부 사용자는 단점도 지적했습니다. 누아트 케이스의 경우 '풀커버 형태라 화면이 지저분해지고 손자국이 많이 남으며, 유막 현상이 있어 은근 거슬린다'는 의견이 있었습니다. SUMMIT 카드 케이스는 '카드 2장 이상 넣으면 손가락으로 밀어도 카드가 잘 안 빠진다'는 불편함이 있었습니다."
+              
+              📌 **예시 3: 제품 비교 표**
+              
+              ❌ 잘못된 작성:
+              "다양한 제품들을 비교해보세요."
+              
+              ✅ 올바른 작성:
+              "| 제품명 | 리뷰 수 | 최고 평점 비율 | 견고함 만족도 | 디자인 만족도 | 주요 특징 |
+              |--------|---------|---------------|--------------|--------------|-----------|
+              | 누아트 맥세이프 풀커버 | 1,656개 | 75% | 61% | 70% | 카메라 보호 필름 포함, 500g 강력 자력 |
+              | SUMMIT 카드 케이스 세트 | 2,504개 | 87% | 78% | 83% | 카드 2-3장 수납, 내부 고정 클립 |"
+              
+              **목표**: 독자가 참고 자료를 따로 읽지 않아도 이 초안만으로 참고 자료의 핵심 정보를 모두 얻을 수 있어야 합니다.
+            
+            - **참고 자료가 없는 경우**:
+              * 일반적인 지식과 경험을 바탕으로 작성하되, 확실하지 않은 내용은 추측하지 마세요.
+            
+            - **필수**: 할루시네이션(허위 정보 생성)을 피하고, 참고 자료에 있는 확실한 정보만 포함해주세요.
 
             [작성 규칙]
             1. **이모지 사용 제한**: 이모지나 이모티콘은 절대 사용하지 마세요. 텍스트만으로 작성하세요.
@@ -2288,6 +2850,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - 감정이나 강조는 텍스트 표현으로만 전달하세요.
             
             2. **제목 최적화**: SEO 최적화된 제목을 생성하고, 이 제목을 h1 태그로 문서의 맨 처음에 포함해주세요. 아이디어 제목과는 다를 수 있습니다.
+               - **년도 사용 원칙**: 위에서 명시한 년도 사용 규칙을 엄격히 따르세요. 꼭 필요한 경우에만 년도를 포함하세요.
                - **절대 금지**: 목차의 첫 번째 항목을 제목으로 사용하지 마세요. 제목은 별도로 생성해야 합니다.
                - 제목 다음에는 서론을 작성하고, 그 다음에 목차의 첫 번째 항목부터 본문 섹션으로 작성하세요.
             3. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
@@ -2295,8 +2858,11 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - 목차의 각 항목은 본문의 h2 섹션 제목으로만 사용하세요.
                - 서론과 결론은 목차에 포함되지 않으므로 별도로 작성하세요.
             5. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
-            6. '추천 검색어'를 참고하여 독자가 검색할 만한 키워드를 본문에 자연스럽게 포함해주세요.
+            6. '추천 검색어'는 초안 작성에 필요한 자료 수집을 위한 검색어입니다. 이 검색어들이 암시하는 정보 유형(통계, 가이드, 비교, 사례, 트렌드 등)을 이해하고, 해당 정보를 본문에 풍부하게 포함해주세요. 검색어 자체를 단순 나열하지 마세요.
             7. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
+            8. **하이라이트 텍스트는 span 태그 사용**: 중요한 텍스트를 강조할 때 mark 태그가 아닌 span 태그를 사용하세요.
+               - ❌ 금지: <mark style="...">텍스트</mark>
+               - ✅ 권장: <span style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">텍스트</span>
             8. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
             9. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
               - **매우 중요**: 이미지 프롬프트는 해당 위치의 콘텐츠 내용과 직접적으로 관련된 이미지여야 합니다.
@@ -2326,7 +2892,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - 자연스럽고 객관적인 톤으로 작성하세요. 독자가 AI가 쓴 글처럼 느껴지지 않도록 하세요.
 
             11. **제휴 마케팅 링크 (수익화) - [매우 중요]**:
-              아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 키워드나 구매 의도가 나타나는 문맥에 **자연스럽게** 제휴 링크를 삽입해주세요.
+              아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 상품이 **이 글의 실제 주제와 직접 연관된 경우에만** 자연스럽게 제휴 링크를 삽입해주세요.
 
               [제휴 링크 목록]
               ${affiliateLinks
@@ -2339,6 +2905,19 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 .join('\n              ')}
 
               [링크 삽입 규칙]
+              0. **[최우선 규칙] 글 주제와의 직접 연관성 확인 (Critical)**:
+                 - **절대 규칙**: 제휴 상품이 이 글의 주제, 목차, 핵심 내용과 **직접적으로 연관되지 않으면 링크를 삽입하지 마세요**.
+                 - **올바른 예시**:
+                   * 글 주제: "갤럭시 S24 리뷰" + 제휴 상품: "갤럭시 S24" → ✅ 삽입 가능
+                   * 글 주제: "스마트홈 구축 가이드" + 제휴 상품: "스마트 플러그" → ✅ 삽입 가능
+                   * 글 주제: "다이어트 방법" + 제휴 상품: "저칼로리 간식" → ✅ 삽입 가능
+                 - **잘못된 예시 (절대 금지)**:
+                   * 글 주제: "파리 여행 가이드" + 제휴 상품: "갤럭시 탭" → ❌ 연관성 없음, 삽입 금지
+                   * 글 주제: "스마트싱스 설정 방법" + 제휴 상품: "청소기" → ❌ 연관성 없음, 삽입 금지
+                   * 글 주제: "블로그 글쓰기 팁" + 제휴 상품: "다이슨 선풍기" → ❌ 연관성 없음, 삽입 금지
+                 - **판단 기준**: 이 글을 읽는 독자가 해당 제휴 상품을 실제로 찾거나 구매할 가능성이 있는가? 없다면 절대 삽입하지 마세요.
+                 - **중요**: 연관성이 없는 제휴 링크를 억지로 삽입하면 독자 신뢰도가 떨어지고 이탈률이 증가합니다.
+              
               1. **문맥 기반 자연스러운 삽입 (Context-Aware Injection)**: 
                  - 단순히 키워드를 링크로 바꾸지 마세요. 
                  - 독자가 해당 상품에 관심을 가질만한 타이밍(장점 설명, 추천, 필요성 언급 등)에 자연스럽게 배치하세요.
@@ -2369,6 +2948,24 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - 비교 분석 후 추천할 때
                  - 사용 방법이나 리뷰를 언급한 후
                  - "이런 기능이 필요하다면", "더 자세히 알고 싶다면" 같은 전환 문구와 함께 배치
+              
+              5-1. **외부 참고 링크와 제휴 링크 분리 규칙 (매우 중요)**:
+                 - **절대 규칙**: 외부 참고 자료 링크와 제휴 링크를 같은 단락에 혼합하지 마세요.
+                 - **잘못된 예시 (절대 금지)**:
+                   * "<a href='외부사이트'>참고자료</a>를 보면 ... <a href='제휴링크'>제품 구매하기</a>" ← 같은 단락에 두 링크가 혼재
+                   * 외부 링크를 언급한 직후 제휴 링크를 삽입하는 경우
+                 - **올바른 방법**:
+                   * 외부 참고 링크가 있는 단락: 정보 제공에만 집중, 제휴 링크 삽입 금지
+                   * 제휴 링크가 있는 단락: 제품/서비스 소개에만 집중, 외부 링크 언급 금지
+                   * 외부 링크와 제휴 링크는 최소 1~2개 단락 이상 떨어뜨려 배치하세요
+                 - **제휴 링크 삽입 위치 최적화**:
+                   * 제품/서비스의 구체적인 장점이나 혜택을 설명한 직후
+                   * 독자의 문제 해결 방법을 제시한 뒤
+                   * CTA 문구("자세한 정보 확인", "최저가 알아보기")와 함께 자연스럽게 배치
+                 - **올바른 예시**:
+                   * [단락 1] 외부 참고 링크로 정보 제공
+                   * [단락 2-3] 추가 설명 (링크 없음)
+                   * [단락 4] 제휴 링크로 제품 소개 및 구매 유도
 
               // ▼▼▼ [추가] 대가성 문구 필수 규칙 시작 ▼▼▼
               6. **[법적 필수] 대가성 문구(공정위 문구) 자동 삽입**: 
@@ -2451,10 +3048,11 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               ${thumbnailPromptGuide}
               
               // ▼▼▼ [추가] 제휴 상품 반영 필수 규칙 시작 ▼▼▼
-              [제휴 상품 반영 필수 규칙]
-              - 앞서 제공된 **'제휴 마케팅 링크 (수익화)' 목록에 상품이 있는 경우**, 3가지 썸네일 프롬프트(thumbnailPromptEn) 중 최소 2개에는 **해당 상품의 구체적인 외형이나 상품명을 반드시 포함**시켜야 합니다.
-              - 예: 글 주제가 '청소기 추천'이고 제휴 상품이 '다이슨 V15'라면, 프롬프트에 "Dyson V15 vacuum cleaner standing in a modern living room..."과 같이 구체적으로 명시하세요.
-              - 단순히 "Vacuum cleaner"라고 하지 말고 "Specific Product Name"을 포함하여 AI가 해당 제품과 최대한 유사한 이미지를 생성하도록 유도하세요.
+              [제휴 상품 반영 규칙 - 연관성 우선]
+              - 앞서 제공된 **'제휴 마케팅 링크 (수익화)' 목록에 상품이 있고**, **그 상품이 이 글의 주제와 직접 연관된 경우에만**, 3가지 썸네일 프롬프트(thumbnailPromptEn) 중 최소 2개에는 **해당 상품의 구체적인 외형이나 상품명을 포함**시켜주세요.
+              - **연관성 확인**: 글 주제가 "청소기 추천"이고 제휴 상품이 "다이슨 V15"라면 연관성 있음 → 프롬프트에 "Dyson V15 vacuum cleaner standing in a modern living room..."과 같이 구체적으로 명시.
+              - **중요**: 글 주제가 "파리 여행 가이드"인데 제휴 상품이 "갤럭시 탭"이라면 연관성 없음 → 썸네일에 상품을 포함하지 마세요. 대신 글 주제와 관련된 이미지(파리 풍경 등)를 생성하세요.
+              - 단순히 "Vacuum cleaner"라고 하지 말고 "Specific Product Name"을 포함하여 AI가 해당 제품과 최대한 유사한 이미지를 생성하도록 유도하세요 (연관성이 있는 경우에만).
               // ▲▲▲ [추가] 제휴 상품 반영 지침 끝 ▲▲▲
               
               각 컨셉의 특징:
@@ -3073,14 +3671,34 @@ ${defaultDescription}
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
       const shouldAutoInsert = typeof ideaOptIn === 'boolean' ? ideaOptIn : !!userAutoInsert;
 
-      if (shouldAutoInsert && Array.isArray(affiliateLinks) && affiliateLinks.length > 0) {
-        try {
-          formattedDraft = postProcessAffiliateHtml(formattedDraft, affiliateLinks, {
-            maxLinks: 3,
-          });
-        } catch (e) {
-          Logger.warn('[generateDraftFromIdea] postProcessAffiliateHtml failed:', e);
+      // Auto-insert links: affiliate, internal, reference
+      try {
+        const internalLinks = (typeof myPosts !== 'undefined' && Array.isArray(myPosts))
+          ? myPosts.map((p) => ({ title: p.title, url: p.fullLink || p.link, keywords: [] }))
+          : [];
+
+        const referenceLinks = (ideaData.linkedScrapsContent || [])
+          .filter((s) => s && s.url)
+          .map((s) => ({ title: s.title || '', url: s.url }));
+
+        const anyLinksAvailable =
+          (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) ||
+          internalLinks.length > 0 ||
+          referenceLinks.length > 0;
+
+        if (shouldAutoInsert && anyLinksAvailable) {
+          try {
+            formattedDraft = postProcessAffiliateHtml(formattedDraft, affiliateLinks || [], {
+              maxLinks: 3,
+              internalLinks,
+              referenceLinks,
+            });
+          } catch (e) {
+            Logger.warn('[generateDraftFromIdea] postProcessAffiliateHtml failed:', e);
+          }
         }
+      } catch (e) {
+        Logger.warn('[generateDraftFromIdea] 자동 링크 삽입 준비 실패:', e);
       }
     } catch (e) {
       Logger.warn('[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:', e);
@@ -3869,10 +4487,46 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       await persistProgress(70);
     }
 
-    // 일반 키워드/추천 검색어 생성
+    // 일반 키워드/추천 검색어 생성 (자료 수집 최적화)
     if (options.generateKeywords) {
-      Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작`);
-      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 반환해주세요. 예: ["#스마트홈", "#AI", "#IoT", "#홈오토메이션"]`;
+      Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작 (자료 수집 목적)`);
+      
+      // 자료 수집에 최적화된 프롬프트
+      const prompt = `"${contextText}" 주제로 블로그 초안을 작성하기 위해 필요한 자료를 수집할 때 사용할 검색어 10개를 추천해주세요.
+
+## 검색어 목적
+초안 작성 시 인용할 통계, 사례, 전문가 의견, 최신 트렌드, 비교 데이터 등을 찾기 위한 실용적인 검색어
+
+## 검색어 생성 원칙
+1. **구체성**: "아이폰케이스" 같은 단순 키워드가 아닌, "아이폰 15 케이스 보호력 비교"처럼 구체적인 정보를 찾을 수 있는 검색어
+2. **다양성**: 통계, 사례, 가이드, 비교, 리뷰, 최신 뉴스 등 다양한 자료 유형을 커버
+3. **실용성**: 실제로 검색 엔진에 입력했을 때 양질의 결과가 나올 검색어
+4. **관련성**: 주제와 직접 관련된 키워드 (너무 광범위하거나 무관한 키워드 제외)
+5. **단순 키워드 금지**: "아이폰케이스", "아이폰케이스추천" 같은 단순 키워드는 피하고, 반드시 "아이폰 15 케이스 보호력 비교 2024"처럼 구체적인 정보를 찾을 수 있는 문구로 작성
+
+## 검색어 유형 (균형있게 포함, 각 2개씩)
+- 통계/데이터 검색어 (예: "스마트홈 시장 규모 2024", "아이폰 케이스 판매량 순위")
+- 가이드/방법 검색어 (예: "스마트홈 설치 가이드 초보자용", "아이폰 케이스 선택 기준")
+- 비교/분석 검색어 (예: "구글홈 vs 아마존 에코 비교", "실리콘 vs 하드 케이스 장단점")
+- 사례/후기 검색어 (예: "스마트홈 구축 사례 집", "아이폰 케이스 장기 사용 후기")
+- 최신 트렌드 검색어 (예: "2024 스마트홈 트렌드", "아이폰 16 신기능 전망")
+
+## 잘못된 예시 (절대 금지)
+- ❌ "아이폰케이스" (너무 단순, 구체성 부족)
+- ❌ "아이폰케이스추천" (단순 키워드 나열)
+- ❌ "케이스디자인" (너무 광범위)
+- ❌ "폰케이스추천" (주제와 직접 관련 없음)
+
+## 올바른 예시
+- ✅ "아이폰 15 케이스 보호력 테스트 결과"
+- ✅ "아이폰 케이스 재질별 비교 분석"
+- ✅ "갤럭시 vs 아이폰 케이스 시장 점유율 2024"
+- ✅ "실리콘 케이스 내구성 분석 후기"
+- ✅ "아이폰 케이스 트렌드 변화 전망"
+
+JSON 배열 형식으로만 반환. 해시태그(#) 제외. 반드시 구체적인 문구로 작성.
+예: ["스마트홈 시장 규모 2024", "스마트홈 설치 가이드 초보자용", "IoT 기기 추천 순위 비교"]`;
+
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -3895,7 +4549,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           let keywordsArray = tryParseArray(res);
           if (!Array.isArray(keywordsArray)) {
             try {
-              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제에 적합한 추천 검색어(태그 형태) 10개를 JSON 배열 형식으로만 응답해주세요.`;
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제로 초안 작성에 필요한 자료를 수집하기 위한 실용적인 검색어 10개를 JSON 배열 형식으로만 응답해주세요. 해시태그(#) 제외.`;
               const retryRes = await callGeminiAPI(retryPrompt);
               keywordsArray = tryParseArray(retryRes);
             } catch (retryErr) {}
@@ -3915,21 +4569,21 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           }
 
           if (Array.isArray(keywordsArray)) {
-            // # 제거하고 태그 배열로 변환
+            // 자료 수집용 검색어로 저장 (해시태그 형태 변환 제거)
             updates.tags = keywordsArray
               .map((item) => {
                 let keyword =
                   typeof item === 'object' && item !== null
                     ? item.keyword || item.text || item.name || String(item)
                     : String(item);
-                // # 제거
-                keyword = keyword.replace(/^#+/, '').trim();
+                // 불필요한 기호 제거 및 정리
+                keyword = keyword.replace(/^[#\-*•]+/, '').trim();
                 return keyword;
               })
               .filter((item) => item && item.trim().length > 0)
               .slice(0, 10);
             Logger.info(
-              `[generateIdeaBriefing] 추천 검색어 생성 성공: ${updates.tags.length}개`,
+              `[generateIdeaBriefing] 자료 수집용 추천 검색어 생성 성공: ${updates.tags.length}개`,
               updates.tags
             );
           } else {

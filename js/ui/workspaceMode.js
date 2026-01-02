@@ -5,6 +5,7 @@ import {
   Logger,
   normalizeSeoTitle,
 } from '../utils.js';
+import { removeDuplicateYears } from '../services/aiService.js';
 import { getAffiliateLinks } from '../services/affiliateService.js';
 import { marked } from 'marked';
 import { openThumbnailMaker } from './thumbnailMaker.js';
@@ -12,32 +13,50 @@ import { selectBackgroundReferenceImages } from '../services/aiService.js';
 export function isMeaningfulDraft(d) {
   if (!d) return false;
 
-  // If the draft is a string, detect if it contains non-link/anchor meaningful text.
+  // If the draft is a string, detect if it contains non-link/anchor meaningful text, images, or HTML elements.
   function _stringCheck(s) {
     if (!s || typeof s !== 'string') return false;
 
-    // 1) Remove markdown images: ![alt](url)
-    s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+    // 1) Check for images (markdown or HTML) - these count as meaningful content
+    // Markdown images: ![alt](url)
+    if (/!\[[^\]]*\]\([^)]+\)/.test(s)) return true;
+    // HTML img tags: <img ...>
+    if (/<img\b[^>]*>/i.test(s)) return true;
 
-    // 2) Remove markdown links including link text: [text](url)
+    // 2) Remove markdown images for text check
+    let textOnly = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+
+    // 3) Remove markdown links including link text: [text](url)
     // The tests expect '[Example](https://example.com)' to be FALSE.
-    s = s.replace(/\[[^\]]*\]\([^)]*\)/g, '');
+    textOnly = textOnly.replace(/\[[^\]]*\]\([^)]*\)/g, '');
 
-    // 3) Remove HTML anchor tags entirely: <a ...>content</a> -- treat anchor content as non-meaningful
-    s = s.replace(/<a\b[^>]*>(?:.|\n|\r)*?<\/a>/gi, '');
+    // 4) Remove HTML anchor tags entirely: <a ...>content</a> -- treat anchor content as non-meaningful
+    textOnly = textOnly.replace(/<a\b[^>]*>(?:.|\n|\r)*?<\/a>/gi, '');
 
-    // 4) Remove leftover HTML tags
-    s = s.replace(/<[^>]*>/g, '');
+    // 5) Remove leftover HTML tags but keep the text
+    const strippedHtml = textOnly.replace(/<[^>]*>/g, '');
 
-    // 5) Remove URLs (http(s) or www.)
-    s = s.replace(/https?:\/\/\S+|www\.[^\s]+/g, '');
+    // 6) Remove URLs (http(s) or www.)
+    const cleanText = strippedHtml.replace(/https?:\/\/\S+|www\.[^\s]+/g, '');
 
     // normalize whitespace
-    s = s.replace(/\s+/g, ' ').trim();
+    const normalized = cleanText.replace(/\s+/g, ' ').trim();
 
     // Consider it meaningful if the remaining plain text is longer than threshold
     const THRESHOLD = 10; // characters
-    return s.length >= THRESHOLD;
+    if (normalized.length >= THRESHOLD) return true;
+
+    // 7) Check if original HTML has any non-empty elements (even if no significant text)
+    // This catches cases where user might have entered something but it's mostly HTML/whitespace
+    // Count non-whitespace HTML content (excluding common empty patterns)
+    const htmlContentCheck = s
+      .replace(/<p><br><\/p>/gi, '')
+      .replace(/<p><\/p>/gi, '')
+      .replace(/<br\s*\/?>/gi, '')
+      .replace(/\s+/g, '')
+      .trim();
+    
+    return htmlContentCheck.length > 0;
   }
 
   if (typeof d === 'string') return _stringCheck(d);
@@ -859,7 +878,13 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
 
   // ensure seoTitle is stored both top-level and inside publishInfo
   if (response.seoTitle) {
-    const safeSeo = normalizeSeoTitle(response.seoTitle, ideaData?.title);
+    let safeSeo = normalizeSeoTitle(response.seoTitle, ideaData?.title);
+    // 중복 년도 제거 추가
+    try {
+      safeSeo = removeDuplicateYears(String(safeSeo || ''));
+    } catch (e) {
+      Logger.warn('[applyDraftResponseToIdea] removeDuplicateYears failed:', e);
+    }
     ideaData.seoTitle = safeSeo;
     if (!ideaData.publishInfo) ideaData.publishInfo = {};
     ideaData.publishInfo.seoTitle = safeSeo;
@@ -2993,7 +3018,7 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     copyTagsBtn.addEventListener('click', () => {
       const tagsInput = publishInfoPanel.querySelector('#tags-input');
       if (tagsInput && tagsInput.value) {
-        navigator.clipboard.writeText(tagsInput.value).then(() => alert('📋 태그 복사 완료'));
+        navigator.clipboard.writeText(tagsInput.value).then(() => showToast('📋 태그가 클립보드에 복사되었습니다.'));
       }
     });
   }
@@ -3781,6 +3806,23 @@ export function renderWorkspace(container, ideaData) {
           window.__cp_workspace_idea_data.currentDraft = contentData;
           // Also update draftContent if used elsewhere
           window.__cp_workspace_idea_data.draftContent = contentData;
+          
+          // Update workspace.draft to ensure isMeaningfulDraft() can detect content
+          if (!window.__cp_workspace_idea_data.workspace) {
+            window.__cp_workspace_idea_data.workspace = {};
+          }
+          window.__cp_workspace_idea_data.workspace.draft = contentData;
+          
+          // Update action buttons to show/hide delete button based on content
+          try {
+            const workspaceEl = document.querySelector('.workspace-container');
+            if (workspaceEl && typeof updateWorkspaceActionButtons === 'function') {
+              const hasMeaningfulContent = isMeaningfulDraft(contentData);
+              updateWorkspaceActionButtons(workspaceEl, hasMeaningfulContent);
+            }
+          } catch (e) {
+            Logger.warn('[Workspace] Failed to update action buttons on content change:', e);
+          }
         } else {
           Logger.warn('[Workspace] content-changed: window.__cp_workspace_idea_data is missing!');
         }
@@ -4811,14 +4853,14 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               const html = `<a href="${link.url}" target="_blank" rel="nofollow noopener">${link.name}</a>`;
               if (editorIframe && editorIframe.contentWindow) {
                 editorIframe.contentWindow.postMessage(
-                  { action: 'insert-html', data: { html } },
+                  { action: 'insert-content', data: { content: html } },
                   '*'
                 );
                 showToast('✅ 텍스트 링크를 에디터에 삽입했습니다.');
               } else {
                 navigator.clipboard?.writeText?.(html);
                 showToast(
-                  'ℹ️ 에디터 감지 실패 — 카드 HTML을 클립보드에 복사했습니다. 붙여넣기 해주세요.'
+                  'ℹ️ 에디터 감지 실패 — 링크 HTML을 클립보드에 복사했습니다. 붙여넣기 해주세요.'
                 );
               }
             });
@@ -4831,68 +4873,73 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               if (!link || !link.cardData) return;
 
               const cd = link.cardData;
-              const payload = `
-                      <div style="border:1px solid #eee;border-radius:12px;padding:16px;display:flex;gap:16px;max-width:640px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,0.06);">
-                        <div style="width:128px;height:128px;border-radius:8px;overflow:hidden;background:#fafbfc;border:1px solid #eee;display:flex;align-items:center;justify-content:center;">
-                        ${
-                          cd.imageUrl
-                            ? `<img src="${cd.imageUrl}" style="width:100%;height:100%;object-fit:cover;"/>`
-                            : '<div style="color:#999;">이미지 없음</div>'
-                        }
-                        </div>
-                        <div style="flex:1;">
-                        <div style="font-weight:800;font-size:15px;color:#222;margin-bottom:8px;">${
-                          cd.productName || link.name
-                        }</div>
-                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                          <div style="font-weight:900;color:#ae0000;font-size:18px;">${
-                            cd.salePrice ? Number(cd.salePrice).toLocaleString() + '원' : ''
-                          }</div>
-                          ${
-                            cd.originalPrice && cd.originalPrice > cd.salePrice
-                              ? `<div style="text-decoration:line-through;color:#999;">${Number(
-                                  cd.originalPrice
-                                ).toLocaleString()}원</div>`
-                              : ''
-                          }
-                          ${
-                            cd.discountRate
-                              ? `<div style="color:#ae0000;font-weight:700;">${cd.discountRate}%</div>`
-                              : ''
-                          }
-                        </div>
-                        ${
-                          cd.badges && cd.badges.length
-                            ? `<div style="font-size:12px;color:#666;">${cd.badges.join(
-                                ', '
-                              )}</div>`
-                            : ''
-                        }
-                        <div style="margin-top:12px;"><a href="${
-                          link.url
-                        }" target="_blank" style="background:#007aff;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;">최저가 보러가기</a></div>
-                        </div>
-                      </div>
+              const cardHtml = `
+<figure data-type="affiliate-card" style="margin: 24px 0;">
+  <div style="border:1px solid #e5e7eb;border-radius:16px;padding:20px;display:flex;gap:20px;max-width:680px;background:#ffffff;box-shadow:0 4px 16px rgba(0,0,0,0.08);transition:transform 0.2s,box-shadow 0.2s;">
+    <div style="flex-shrink:0;width:140px;height:140px;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,#f3f4f6 0%,#e5e7eb 100%);display:flex;align-items:center;justify-content:center;">
+      ${
+        cd.imageUrl
+          ? `<img src="${cd.imageUrl}" alt="${cd.productName || link.name}" style="width:100%;height:100%;object-fit:cover;"/>`
+          : '<div style="color:#9ca3af;font-size:13px;text-align:center;">이미지<br/>없음</div>'
+      }
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;">
+      <div>
+        <div style="font-weight:700;font-size:16px;color:#111827;margin-bottom:12px;line-height:1.4;">${
+          cd.productName || link.name
+        }</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+          ${
+            cd.salePrice
+              ? `<span style="font-weight:800;color:#dc2626;font-size:24px;">${Number(
+                  cd.salePrice
+                ).toLocaleString()}<span style="font-size:16px;font-weight:600;">원</span></span>`
+              : ''
+          }
+          ${
+            cd.originalPrice && cd.originalPrice > cd.salePrice
+              ? `<span style="text-decoration:line-through;color:#9ca3af;font-size:14px;">${Number(
+                  cd.originalPrice
+                ).toLocaleString()}원</span>`
+              : ''
+          }
+          ${
+            cd.discountRate
+              ? `<span style="background:#fee2e2;color:#dc2626;font-weight:700;font-size:14px;padding:4px 10px;border-radius:6px;">${cd.discountRate}%</span>`
+              : ''
+          }
+        </div>
+      </div>
+      <div style="margin-top:auto;">
+        <a href="${
+          link.url
+        }" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:#ffffff;font-weight:600;font-size:14px;padding:12px 24px;border-radius:10px;text-decoration:none;box-shadow:0 2px 8px rgba(59,130,246,0.3);transition:transform 0.2s,box-shadow 0.2s;">
+          🛒 최저가 확인하기
+        </a>
+      </div>
+    </div>
+  </div>
+</figure>
                     `;
 
               if (editorIframe && editorIframe.contentWindow) {
                 editorIframe.contentWindow.postMessage(
-                  { action: 'insert-html', data: { html: payload } },
+                  { action: 'insert-content', data: { content: cardHtml } },
                   '*'
                 );
-                showToast('✅ 카드 HTML을 에디터에 삽입 요청했습니다.');
+                showToast('✅ 제휴 카드를 에디터에 삽입했습니다.');
               } else {
                 // fallback
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard
-                    .writeText(payload)
+                    .writeText(cardHtml)
                     .then(() =>
                       showToast(
                         'ℹ️ 에디터가 감지되지 않아 카드 HTML을 클립보드에 복사했습니다. 붙여넣기 해주세요.'
                       )
                     );
                 } else {
-                  window.prompt('에디터가 감지되지 않습니다. 아래 HTML을 복사하세요:', payload);
+                  window.prompt('에디터가 감지되지 않습니다. 아래 HTML을 복사하세요:', cardHtml);
                 }
               }
             });
@@ -5454,12 +5501,11 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
 
       if (!confirm('초안을 삭제하시겠습니까?')) return;
 
-      // 에디터 즉시 초기화
+      // 에디터 즉시 초기화 (개선됨)
       const editorIframe = workspaceEl.querySelector('#editor-iframe');
       if (editorIframe && editorIframe.contentWindow) {
-        let attemptCount = 0;
-        const clearEditor = () => {
-          attemptCount++;
+        // 에디터 내용을 즉시 초기화하고 포커스
+        const clearAndFocus = () => {
           try {
             editorIframe.contentWindow.postMessage(
               { action: 'set-content', data: { html: '' } },
@@ -5469,18 +5515,20 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             console.error('[Workspace] 에디터 초기화 오류:', err);
           }
         };
-        clearEditor();
-        setTimeout(clearEditor, 50);
-        setTimeout(clearEditor, 150);
-        setTimeout(clearEditor, 300);
-        setTimeout(clearEditor, 500);
+        
+        // 초기화 여러 번 시도하여 확실히 반영
+        clearAndFocus();
+        setTimeout(clearAndFocus, 100);
+        setTimeout(clearAndFocus, 300);
+        
+        // 마지막으로 포커스
         setTimeout(() => {
           try {
             editorIframe.contentWindow.postMessage({ action: 'focus' }, '*');
           } catch (err) {
             console.error('[Workspace] 에디터 포커스 오류:', err);
           }
-        }, 600);
+        }, 500);
       }
 
       // Firebase에서 초안과 발행 정보 모두 삭제
@@ -5491,6 +5539,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
         },
         (response) => {
           if (response && response.success) {
+            // 메모리 상태 초기화
             window.__cp_draft_deletion_block_time = Date.now();
             ideaData.draftContent = '';
             if (ideaData.workspace) ideaData.workspace.draft = '';
@@ -5504,6 +5553,8 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                 window.__cp_workspace_idea_data.publishInfo = {};
               window.__cp_workspace_idea_data.seoTitle = '';
             }
+            
+            // UI 즉시 업데이트
             const publishInfoArea = workspaceEl.querySelector('#publish-info-area');
             if (publishInfoArea) {
               const existingInfo = workspaceEl.querySelector('.publish-info-panel');
@@ -5511,11 +5562,20 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               const emptyInfoHtml = `<div class="publish-info-panel" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px;"><p style="color: #999; font-size: 13px;">발행 정보가 없습니다.</p></div>`;
               publishInfoArea.insertAdjacentHTML('beforeend', emptyInfoHtml);
             }
+            
+            // 썸네일 버튼 제거
             const thumbBtn = workspaceEl.querySelector('#btn-create-thumbnail');
             if (thumbBtn && thumbBtn.parentNode) thumbBtn.remove();
+            
+            // 삭제 버튼 제거
             if (deleteBtn && deleteBtn.parentNode) deleteBtn.remove();
-            updateWorkspaceActionButtons(workspaceEl, false);
-            showToast('✅ 초안과 발행 정보가 삭제되었습니다.');
+            
+            // 버튼 UI 업데이트 (삭제 완료 후 생성 버튼 표시)
+            setTimeout(() => {
+              updateWorkspaceActionButtons(workspaceEl, false).then(() => {
+                showToast('✅ 초안과 발행 정보가 삭제되었습니다.');
+              });
+            }, 100);
           } else {
             console.error('[Workspace] 초안 삭제 실패:', response);
             showToast(`❌ 초안 삭제에 실패했습니다: ${response?.error || '알 수 없는 오류'}`);
@@ -7184,6 +7244,19 @@ async function handleGenerateAction(btn, options) {
       btn.innerHTML = '⏳ 작업 중...';
     }
 
+    // [수정] 제휴 링크 로드 (AI가 글 주제와 관련된 링크만 사용할 수 있도록)
+    let affiliateLinks = ideaData.affiliateLinks || [];
+    if (!affiliateLinks || affiliateLinks.length === 0) {
+      try {
+        const links = await getAffiliateLinks();
+        if (links && links.length > 0) {
+          affiliateLinks = links;
+        }
+      } catch (err) {
+        console.warn('[Workspace] 제휴 링크 로딩 실패(무시함):', err);
+      }
+    }
+
     const baseDraftData = {
       ...ideaData, // ✅ [수정] ideaData를 맨 위로 올려야 합니다!
       title: title,
@@ -7192,6 +7265,7 @@ async function handleGenerateAction(btn, options) {
       outline: ideaData.outline || [],
       currentDraft: currentDraft || '',
       linkedScrapsContent: linkedScrapsContent, // ✅ 그래야 이 최신 데이터(URL 포함)가 덮어씌워지지 않고 유지됩니다.
+      affiliateLinks: affiliateLinks, // ✅ [추가] 제휴 링크 전달
       // ...ideaData, // ❌ (기존 위치) 여기에 있으면 linkedScrapsContent를 옛날 데이터(빈 URL)로 덮어버립니다. 지워주세요.
     };
 

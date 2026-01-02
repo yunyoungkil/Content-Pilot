@@ -1,7 +1,7 @@
 # 제휴 마케팅 링크 가이드
 
-> **최종 업데이트**: 2025-01-27  
-> **상태**: ✅ 최신
+> **최종 업데이트**: 2025-12-31  
+> **상태**: ✅ 최신 (최적화 완료)
 
 ## 📋 개요
 
@@ -18,10 +18,13 @@ Content Pilot의 제휴 마케팅 링크 기능은 AI가 글의 문맥을 이해
 - 문맥에 어울리는 매력적인 클릭 유도 문구 자동 생성
 - 예: "최저가 확인하기", "더 자세한 스펙 보기", "사용자 후기 모음", "현재 할인 가격 알아보기"
 
-### 3. 스마트 필터링
-- 글의 제목, 태그, 설명과 관련된 링크만 선별
-- 프롬프트 토큰 낭비 방지 및 정확도 향상
-- 최대 10개까지만 프롬프트에 포함
+### 3. 스마트 필터링 (최적화됨 ⚡)
+- **고급 스코어링 알고리즘**: 완전 일치, 부분 일치, 위치 기반 매칭
+- **다중 매칭 전략**: 키워드, 상품명, 설명 모두 활용
+- **역방향 매칭**: 제목의 토큰이 키워드에 포함되는 경우도 감지
+- **캐싱 메커니즘**: 5분 TTL로 반복 조회 성능 최적화
+- **품질 우선 선택**: 점수 차이가 큰 경우 상위 5개만 선택
+- 최대 10개까지만 프롬프트에 포함 (프롬프트 토큰 절약)
 
 ### 4. 품질 보장
 - 최대 3개까지만 삽입하여 글의 품질 유지
@@ -30,6 +33,64 @@ Content Pilot의 제휴 마케팅 링크 기능은 AI가 글의 문맥을 이해
 ### 5. 시각적 강조
 - 녹색 텍스트 스타일(`#2e7d32`)로 제휴 링크 강조
 - 독자의 시선을 자연스럽게 유도
+
+## 🚀 최적화 상세 내역
+
+### 매칭 알고리즘
+
+#### 1. 키워드 매칭 (계층적 스코어링)
+```javascript
+// 완전 일치 (최고 점수)
+if (contextLower === keywordLower) → +10점
+
+// 단어 단위 완전 일치
+if (contextTokens.includes(keywordLower)) → +8점
+
+// 부분 일치 (포함)
+if (contextLower.includes(keywordLower)) → +3점
+  // 위치 보너스
+  if (position === 0) → +2점 (시작 위치)
+  if (position < contextLength / 3) → +1점 (앞 1/3 구간)
+
+// 역방향 매칭
+if (keywordLower.includes(contextToken)) → +1점
+```
+
+#### 2. 상품명 매칭 (더 높은 가중치)
+```javascript
+// 완전 일치
+if (contextLower === productNameLower) → +20점
+
+// 포함
+if (contextLower.includes(productNameLower)) → +12점
+
+// 역방향
+if (productNameLower.includes(contextToken)) → +4점
+```
+
+#### 3. 설명 매칭 (보조적)
+```javascript
+// 토큰 단위 매칭
+for each matching token → +0.5점 (최대 3점)
+```
+
+#### 4. 추가 요소
+- **선호 ID 보너스**: +1000점 (최우선 선택)
+- **이미지 존재 보너스**: +0.5점 (시각적 소구력)
+
+### 캐시 메커니즘
+- **TTL**: 5분
+- **캐시 키**: `userId`
+- **무효화 함수**: `invalidateAffiliateLinkCache(userId)`
+  - 제휴 링크 추가/수정/삭제 시 호출 필요
+
+### 필터링 및 선택 로직
+1. **최소 스코어 임계값**: 0.5 이상만 허용
+2. **정렬**: 점수 내림차순 → 최신순
+3. **개수 제한**:
+   - 기본: 최대 10개
+   - 고품질 매칭 감지 시: 상위 5개만 선택
+   - 조건: `scored[0].score > scored[4].score * 2`
 
 ## 🗂️ 데이터 구조
 
@@ -80,17 +141,48 @@ affiliate_links/{userId}/{linkKey}
 
 ## 🔍 작동 원리
 
-### 1. 링크 조회 및 필터링
+### 1. 링크 조회 및 필터링 (최적화됨 ⚡)
 ```javascript
 // aiService.js 내부
 const contextForLinks = `${ideaData.title} ${(ideaData.tags || []).join(' ')} ${ideaData.description || ''}`;
-const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks);
+const affiliateLinks = await getRelevantAffiliateLinks(userId, contextForLinks, {
+  preferredAffiliateId: ideaData?.origin?.affiliateLinkId, // 선호 링크 우선 선택
+});
 ```
 
-**필터링 로직**:
-- 글의 제목, 태그, 설명에 키워드가 포함된 링크만 선택
-- `productName`도 매칭에 사용
-- 최대 10개까지만 반환 (프롬프트 과부하 방지)
+**고급 필터링 로직**:
+- **토큰 기반 분석**: 제목을 개별 토큰으로 분리하여 정교한 매칭
+- **계층적 스코어링**: 완전 일치 > 단어 일치 > 부분 일치 > 역방향 일치
+- **위치 가중치**: 키워드가 제목 앞쪽에 위치할수록 높은 점수
+- **다중 필드 매칭**: keywords, productName, description 모두 활용
+- **최소 임계값**: 스코어 0.5 미만은 자동 필터링
+- **캐싱**: 5분 TTL로 반복 조회 성능 최적화
+
+### 2. 스코어링 예시
+
+#### 예시 1: "아이폰 15 프로 리뷰"
+```javascript
+const mockLinks = [
+  { id: 'link1', keywords: ['아이폰15'], productName: '아이폰 15 프로', url: '...' },
+  // 점수: 키워드 부분 일치(+3) + 상품명 완전 일치(+20) = 23점
+  
+  { id: 'link2', keywords: ['스마트폰'], productName: '갤럭시', url: '...' },
+  // 점수: 0점 (매칭 없음, 필터링됨)
+];
+// 결과: link1만 선택됨
+```
+
+#### 예시 2: "무선 이어폰 추천 TOP 5"
+```javascript
+const mockLinks = [
+  { id: 'link1', keywords: ['무선이어폰'], url: '...' },
+  // 점수: 부분 일치(+3) + 위치 보너스(+2) = 5점
+  
+  { id: 'link2', keywords: ['이어폰'], url: '...' },
+  // 점수: 부분 일치(+3) = 3점
+];
+// 결과: 둘 다 선택되며, link1이 우선순위
+```
 
 ### 2. 프롬프트 주입
 ```javascript

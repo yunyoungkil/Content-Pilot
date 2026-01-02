@@ -254,18 +254,44 @@ export async function runDataMigration(userId, targetChannelId = null, options =
           }
 
           if (isSelected) {
-            itemsToMigrate.push({ type, status, id, card });
-            // Count distribution only for candidates
-            distribution[distKey][String(chId)] = (distribution[distKey][String(chId)] || 0) + 1;
-            // also track by status-specific distribution
-            if (status === 'in-progress') {
-              distribution.kanban_inprogress[String(chId)] =
-                (distribution.kanban_inprogress[String(chId)] || 0) + 1;
-            } else if (status === 'done') {
-              distribution.kanban_done[String(chId)] =
-                (distribution.kanban_done[String(chId)] || 0) + 1;
+            // [Fix] 호스트 매칭 조건 추가 - finalTargetChannelId가 있을 때만 호스트 매칭 체크
+            let shouldMigrate = true;
+            if (finalTargetChannelId && targetChannelHost) {
+              // 호스트가 있으면 호스트 매칭 체크
+              const hasMatchingHost = extractUrlsFromObject(card).some(
+                (u) => getHostFromUrlString(u) === targetChannelHost
+              );
+              shouldMigrate = hasMatchingHost;
+              
+              if (!shouldMigrate && debug) {
+                Logger.debug(
+                  `[Migration] Skipping ${type}: ${status}/${id} - no host match (channelId: ${chId})`
+                );
+              }
+            } else if (finalTargetChannelId && !targetChannelHost) {
+              // 타겟 채널 ID는 있지만 호스트 정보가 없으면 (단일 채널 등), 모두 마이그레이션
+              shouldMigrate = true;
+              if (debug) {
+                Logger.debug(
+                  `[Migration] Including ${type}: ${status}/${id} - single channel or no host info`
+                );
+              }
             }
-            totalItems++;
+
+            if (shouldMigrate) {
+              itemsToMigrate.push({ type, status, id, card });
+              // Count distribution only for candidates
+              distribution[distKey][String(chId)] = (distribution[distKey][String(chId)] || 0) + 1;
+              // also track by status-specific distribution
+              if (status === 'in-progress') {
+                distribution.kanban_inprogress[String(chId)] =
+                  (distribution.kanban_inprogress[String(chId)] || 0) + 1;
+              } else if (status === 'done') {
+                distribution.kanban_done[String(chId)] =
+                  (distribution.kanban_done[String(chId)] || 0) + 1;
+              }
+              totalItems++;
+            }
           } else {
             // collection not selected -> skip adding as itemToMigrate
           }
@@ -375,11 +401,31 @@ export async function runDataMigration(userId, targetChannelId = null, options =
         (distributionAll.scraps[String(scrapChannelId)] || 0) + 1;
       if (!scrapChannelId) {
         // [Fix] Only include if host matches target channel host (even for unassigned scraps)
-        const hasMatchingHost =
-          targetChannelHost &&
-          extractUrlsFromObject(scrap).some((u) => getHostFromUrlString(u) === targetChannelHost);
+        let shouldMigrate = false;
+        
+        if (finalTargetChannelId && targetChannelHost) {
+          // 호스트가 있으면 호스트 매칭 체크
+          const hasMatchingHost = extractUrlsFromObject(scrap).some(
+            (u) => getHostFromUrlString(u) === targetChannelHost
+          );
+          shouldMigrate = hasMatchingHost;
+          
+          if (!shouldMigrate && debug) {
+            Logger.debug(
+              `[Migration] Skipping scrap: scraps/${userId}/${id} - no host match (target: ${targetChannelHost})`
+            );
+          }
+        } else if (finalTargetChannelId && !targetChannelHost) {
+          // 타겟 채널 ID는 있지만 호스트 정보가 없으면 (단일 채널 등), 모두 마이그레이션
+          shouldMigrate = true;
+          if (debug) {
+            Logger.debug(
+              `[Migration] Including scrap: scraps/${userId}/${id} - single channel or no host info`
+            );
+          }
+        }
 
-        if (hasMatchingHost) {
+        if (shouldMigrate) {
           if (
             !Array.isArray(collections) ||
             collections.length === 0 ||
@@ -713,7 +759,12 @@ export async function runDataMigration(userId, targetChannelId = null, options =
           Logger.info(`[Migration] 진행률: ${progress}% (${processedCount}/${totalItems})`);
         }
       } catch (itemError) {
-        Logger.error(`[Migration] 개별 항목 처리 실패:`, itemError);
+        // 상세한 에러 정보 로깅
+        Logger.error(
+          `[Migration] 개별 항목 처리 실패: type=${item.type}, id=${item.id}, status=${item.status || 'N/A'}`,
+          itemError
+        );
+        Logger.error(`[Migration] 실패한 항목 상세:`, JSON.stringify(item, null, 2).substring(0, 500));
         failedCount++;
         processedCount++;
         // 개별 항목 실패는 계속 진행 (throw 제거)
@@ -722,9 +773,27 @@ export async function runDataMigration(userId, targetChannelId = null, options =
 
     Logger.info(`✅ [Migration] 완료: 총 ${updatedCount}개 성공, ${failedCount}개 실패`);
 
-    // 마이그레이션 완료 상태 저장 (일회성 실행 보장)
-    if (!dryRun) {
+    // 실패율 체크 (50% 이상 실패 시 경고)
+    const failureRate = totalItems > 0 ? (failedCount / totalItems) * 100 : 0;
+    if (failureRate > 50) {
+      Logger.error(
+        `[Migration] 경고: 실패율이 ${failureRate.toFixed(1)}%로 높습니다. 롤백을 권장합니다.`
+      );
+      // 실패율이 높으면 완료 플래그를 설정하지 않음
+      return {
+        success: false,
+        message: `마이그레이션 실패율이 너무 높습니다 (${failureRate.toFixed(1)}%). 롤백이 필요합니다.`,
+        updatedCount,
+        failedCount,
+        totalItems,
+      };
+    }
+
+    // 마이그레이션 완료 상태 저장 (일회성 실행 보장) - 성공률이 높을 때만
+    if (!dryRun && updatedCount > 0) {
       await chrome.storage.local.set({ migration_completed: true });
+      Logger.info('[Migration] 마이그레이션 완료 플래그 설정');
+      
       // [Fix] 마이그레이션 후 칸반 캐시 무효화 (UI 즉시 반영)
       try {
         await performanceOptimizer.invalidateCache('kanban');
@@ -796,6 +865,10 @@ export async function runDataMigration(userId, targetChannelId = null, options =
             await set(ref(getDb(), `scraps/${userId}`), backup.scraps);
             Logger.info('[Rollback] 스크랩 데이터 롤백 완료');
           }
+
+          // 마이그레이션 완료 플래그 제거 (재시도 가능하도록)
+          await chrome.storage.local.remove('migration_completed');
+          Logger.info('[Rollback] 마이그레이션 완료 플래그 제거');
 
           Logger.info('✅ [Rollback] 롤백 완료');
         }

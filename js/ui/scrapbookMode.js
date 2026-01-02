@@ -746,15 +746,15 @@ function renderDetailView(scrapId, container) {
   detailContainer.innerHTML = `
         <div style="display: flex; gap: 16px; width: 100%; align-items: flex-start;">
             <div class="scrapbook-detail-card" style="flex: 1; min-width: 300px; max-width: 420px; position: relative;">
-              <div style="display:flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <div style="display:flex; flex-direction: column; gap: 12px;">
                 <div style="flex: 1; min-width: 0;">
                   <div class="scrapbook-detail-title">${detailTitle}</div>
                 </div>
-                <div style="flex: 0 0 auto; display:flex; gap:8px;">
-                  <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="margin: 0 0 0 12px; padding: 8px 12px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
+                <div style="display:flex; gap:8px;">
+                  <button class="scrap-to-idea-btn" data-scrap-id="${scrap.id}" style="flex: 1; padding: 10px 12px; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.2s;">
                     💡 아이디어로 전환
                   </button>
-                  <button class="scrap-ideas-gemini-btn" data-scrap-id="${scrap.id}" style="margin: 0 0 0 0; padding: 8px 12px; background: #34a853; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: background 0.2s;">
+                  <button class="scrap-ideas-gemini-btn" data-scrap-id="${scrap.id}" style="flex: 1; padding: 10px 12px; background: #34a853; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.2s;">
                     ✨ 추천 아이디어 5개
                   </button>
                 </div>
@@ -1093,17 +1093,32 @@ function renderDetailView(scrapId, container) {
     });
   }
 
+  // 추천 아이디어 캐시 (스크랩 ID별로 저장)
+  if (!window.__cp_scrap_ideas_cache) {
+    window.__cp_scrap_ideas_cache = {};
+  }
+
   // 추천 아이디어 처리 함수 (공통) - renderDetailView 내부 최상위 레벨로 이동
-  async function recommendIdeasForScrap(scrap) {
+  async function recommendIdeasForScrap(scrap, forceRefresh = false) {
     if (!scrap) {
       showToast('스크랩을 찾을 수 없습니다.');
       return;
     }
+
+    // 캐시 확인 (강제 새로고침이 아닌 경우)
+    if (!forceRefresh && window.__cp_scrap_ideas_cache[scrap.id]) {
+      console.debug('[Scrapbook] Using cached ideas for scrap:', scrap.id);
+      showIdeasModal(scrap, window.__cp_scrap_ideas_cache[scrap.id]);
+      return;
+    }
+
     const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
     
     showLoadingToast('✨ 추천 아이디어를 요청 중입니다...');
     try {
       const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
+      
+      console.debug('[Scrapbook] Sending message to background...', { promptLength: prompt.length });
       
       // background script를 통해 Gemini API 호출 (초안 작성과 동일한 방식)
       const response = await chrome.runtime.sendMessage({
@@ -1111,110 +1126,160 @@ function renderDetailView(scrapId, container) {
         prompt: prompt
       });
       
+      console.debug('[Scrapbook] Response from background:', response);
+      
       if (!response || !response.success) {
-        throw new Error(response?.error || '아이디어 생성 실패');
+        const errorMsg = response?.error || '아이디어 생성 실패';
+        console.error('[Scrapbook] Error from background:', errorMsg);
+        throw new Error(errorMsg);
       }
       
       const res = response.result;
-        let arr = null;
-        try {
-          arr = JSON.parse(res);
-        } catch (e) {
-          const m = res.match(/\[[\s\S]*?\]/);
-          if (m) arr = JSON.parse(m[0]);
-          else {
-            const cb = res.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
-            if (cb) arr = JSON.parse(cb[1]);
+      console.debug('[Scrapbook] Result from Gemini:', { resultLength: res?.length });
+      
+      let arr = null;
+      
+      // 1단계: 코드 블록 제거 (```json ... ``` 또는 ``` ... ```)
+      let cleanRes = res;
+      const codeBlockMatch = res.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (codeBlockMatch) {
+        cleanRes = codeBlockMatch[1].trim();
+        console.debug('[Scrapbook] 코드 블록 제거 완료, 길이:', cleanRes.length);
+      }
+      
+      // 2단계: JSON 파싱 시도
+      try {
+        arr = JSON.parse(cleanRes);
+        console.debug('[Scrapbook] JSON.parse 성공, 아이템 수:', arr?.length);
+      } catch (e) {
+        console.debug('[Scrapbook] JSON.parse 실패, 배열 추출 시도:', e.message);
+        // 3단계: 배열만 추출
+        const arrayMatch = cleanRes.match(/\[[\s\S]*\]/);
+        if (arrayMatch) {
+          console.debug('[Scrapbook] 배열 패턴 발견, 파싱 시도');
+          try {
+            arr = JSON.parse(arrayMatch[0]);
+            console.debug('[Scrapbook] 배열 파싱 성공, 아이템 수:', arr?.length);
+          } catch (e2) {
+            console.error('[Scrapbook] 배열 파싱 실패:', e2.message);
+            console.error('[Scrapbook] 원본 데이터:', cleanRes.substring(0, 300));
           }
+        } else {
+          console.error('[Scrapbook] 배열 패턴을 찾을 수 없음');
         }
-        if (!Array.isArray(arr)) {
-          hideLoadingToast();
-          showToast('아이디어 생성 실패: 응답을 파싱할 수 없습니다.');
-          return;
-        }
+      }
+      
+      console.debug('[Scrapbook] 최종 파싱 결과:', { isArray: Array.isArray(arr), length: arr?.length });
+      
+      if (!Array.isArray(arr)) {
         hideLoadingToast();
+        showToast('아이디어 생성 실패: 응답을 파싱할 수 없습니다.');
+        return;
+      }
+      hideLoadingToast();
 
-        // modal 생성 (동일 로직 재사용)
-        let modal = document.getElementById('scrap-ideas-modal');
-        if (modal) modal.remove();
-        modal = document.createElement('div');
-        modal.id = 'scrap-ideas-modal';
-        modal.style.cssText =
-          'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:2147483646;padding:20px;';
-        modal.innerHTML = `<div style="background:#fff;padding:20px;border-radius:8px;max-width:800px;width:100%;max-height:80vh;overflow:auto;">
-          <h3 style="margin-top:0">추천 아이디어 (스크랩 기반)</h3>
-          <div id="scrap-ideas-list">${arr
-            .map((it, idx) => {
-              const title = typeof it === 'string' ? it : it.title || it.name || '';
-              const summary = typeof it === 'string' ? '' : it.summary || '';
-              const tags = it.tags && Array.isArray(it.tags) ? it.tags.join(', ') : '';
-              return `<div style="border-bottom:1px solid #eee;padding:12px 0;">
-                <div style="font-weight:600">${idx + 1}. ${escapeHtml(title)}</div>
-                <div style="color:#555;margin-top:6px">${escapeHtml(summary)}</div>
-                <div style="color:#888;font-size:12px;margin-top:6px">태그: ${escapeHtml(tags)}</div>
-                <div style="margin-top:8px;"><button class="scrap-idea-add-btn" data-idx="${idx}" style="padding:6px 10px;border-radius:6px;background:#4285f4;color:#fff;border:none;cursor:pointer">아이디어로 추가</button> <button class="scrap-idea-copy-btn" data-idx="${idx}" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;background:#fff;cursor:pointer">복사</button></div>
-              </div>`;
-            })
-            .join('')}</div>
-          <div style="text-align:right;margin-top:12px;"><button id="scrap-ideas-close" style="padding:8px 12px;border-radius:6px;border:none;background:#eee;cursor:pointer">닫기</button></div>
-        </div>`;
-        document.body.appendChild(modal);
-        modal.querySelector('#scrap-ideas-close').addEventListener('click', () => modal.remove());
-        modal.querySelectorAll('.scrap-idea-add-btn').forEach((b) => {
-          b.addEventListener('click', (e) => {
-            const idx = Number(b.dataset.idx);
-            const item = arr[idx];
-            const title = typeof item === 'string' ? item : item.title || '';
-            const description = typeof item === 'string' ? '' : item.summary || '';
-            const tags = item.tags && Array.isArray(item.tags) ? item.tags : [];
-            const ideaData2 = {
-              title: String(title).replace(/\s+/g, ' ').trim().substring(0, 200) || '아이디어',
-              description,
-              keywords: tags,
-              origin: { type: 'scrap', postUrl: scrap.url || '', sourceScrapId: scrap.id },
-            };
-            chrome.storage.local.get('activeChannelId', (res) => {
-              const activeChannelId = res.activeChannelId || null;
-              chrome.runtime.sendMessage(
-                { action: 'add_idea_to_kanban', data: JSON.stringify(ideaData2), channelId: activeChannelId },
-                (r) => {
-                  if (r && r.success) {
-                    showConfirmationToast('✅ 추천 아이디어가 추가되었습니다!', null);
-                    modal.remove();
-                    const host = document.getElementById('content-pilot-host');
-                    if (host && host.shadowRoot) {
-                      const mainArea = host.shadowRoot.querySelector('#cp-main-area');
-                      if (mainArea) {
-                        window.__cp_active_mode = 'kanban';
-                        renderKanban(mainArea);
-                        addKanbanEventListeners(mainArea);
-                        renderHeaderAndTabs(host.shadowRoot);
-                      }
-                    }
-                  } else {
-                    showToast('추가 실패: ' + (r && r.message ? r.message : '알 수 없는 오류'));
-                  }
-                }
-              );
-            });
-          });
-        });
-        modal.querySelectorAll('.scrap-idea-copy-btn').forEach((b) => {
-          b.addEventListener('click', () => {
-            const idx = Number(b.dataset.idx);
-            const item = arr[idx];
-            const txt =
-              typeof item === 'string'
-                ? item
-                : `${item.title || ''}\n\n${item.summary || ''}\n\n태그: ${(item.tags && item.tags.join(', ')) || ''}`;
-            navigator.clipboard?.writeText(txt);
-            showToast('클립보드에 복사되었습니다.');
-          });
-        });
+      // 캐시에 저장
+      window.__cp_scrap_ideas_cache[scrap.id] = arr;
+      
+      // 모달 표시
+      showIdeasModal(scrap, arr);
     } catch (err) {
       hideLoadingToast();
       showToast('아이디어 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
     }
+  }
+
+  // 추천 아이디어 모달 표시 함수
+  function showIdeasModal(scrap, arr) {
+    // modal 생성 - shadow root 안에 생성하여 Content Pilot 패널 위에 표시
+    const host = document.getElementById('content-pilot-host');
+    const targetRoot = (host && host.shadowRoot) || document.body;
+    
+    let modal = targetRoot.querySelector('#scrap-ideas-modal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'scrap-ideas-modal';
+    modal.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:2147483647;padding:20px;';
+    modal.innerHTML = `<div style="background:#fff;padding:20px;border-radius:8px;max-width:800px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0">추천 아이디어 (스크랩 기반)</h3>
+        <button id="scrap-ideas-refresh" style="padding:6px 12px;border-radius:6px;border:1px solid #4285f4;background:#fff;color:#4285f4;cursor:pointer;font-size:13px;">🔄 다시 생성</button>
+      </div>
+      <div id="scrap-ideas-list">${arr
+        .map((it, idx) => {
+          const title = typeof it === 'string' ? it : it.title || it.name || '';
+          const summary = typeof it === 'string' ? '' : it.summary || '';
+          const tags = it.tags && Array.isArray(it.tags) ? it.tags.join(', ') : '';
+          return `<div style="border-bottom:1px solid #eee;padding:12px 0;">
+            <div style="font-weight:600">${idx + 1}. ${escapeHtml(title)}</div>
+            <div style="color:#555;margin-top:6px">${escapeHtml(summary)}</div>
+            <div style="color:#888;font-size:12px;margin-top:6px">태그: ${escapeHtml(tags)}</div>
+            <div style="margin-top:8px;"><button class="scrap-idea-add-btn" data-idx="${idx}" style="padding:6px 10px;border-radius:6px;background:#4285f4;color:#fff;border:none;cursor:pointer">아이디어로 추가</button> <button class="scrap-idea-copy-btn" data-idx="${idx}" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;background:#fff;cursor:pointer">복사</button></div>
+          </div>`;
+        })
+        .join('')}</div>
+      <div style="text-align:right;margin-top:12px;"><button id="scrap-ideas-close" style="padding:8px 12px;border-radius:6px;border:none;background:#eee;cursor:pointer">닫기</button></div>
+    </div>`;
+    targetRoot.appendChild(modal);
+    
+    modal.querySelector('#scrap-ideas-close').addEventListener('click', () => modal.remove());
+    
+    // 다시 생성 버튼
+    modal.querySelector('#scrap-ideas-refresh').addEventListener('click', () => {
+      modal.remove();
+      recommendIdeasForScrap(scrap, true); // 강제 새로고침
+    });
+    
+    modal.querySelectorAll('.scrap-idea-add-btn').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        const idx = Number(b.dataset.idx);
+        const item = arr[idx];
+        const title = typeof item === 'string' ? item : item.title || '';
+        const description = typeof item === 'string' ? '' : item.summary || '';
+        const tags = item.tags && Array.isArray(item.tags) ? item.tags : [];
+        const ideaData2 = {
+          title: String(title).replace(/\s+/g, ' ').trim().substring(0, 200) || '아이디어',
+          description,
+          keywords: tags,
+          // 스크랩에서 생성된 아이디어는 postUrl을 포함하지 않음 (중복 체크 방지)
+          // sourceScrapId와 sourceUrl로 출처만 추적
+          origin: { type: 'scrap', sourceScrapId: scrap.id, sourceUrl: scrap.url || '' },
+        };
+        chrome.storage.local.get('activeChannelId', (res) => {
+          const activeChannelId = res.activeChannelId || null;
+          chrome.runtime.sendMessage(
+            { action: 'add_idea_to_kanban', data: JSON.stringify(ideaData2), channelId: activeChannelId },
+            (r) => {
+              if (r && r.success) {
+                showConfirmationToast('✅ 추천 아이디어가 추가되었습니다!', null);
+                // 모달을 닫지 않고, 추가된 항목만 비활성화 및 표시
+                b.disabled = true;
+                b.textContent = '✓ 추가됨';
+                b.style.background = '#34a853';
+                b.style.cursor = 'not-allowed';
+                b.style.opacity = '0.7';
+              } else {
+                showToast('추가 실패: ' + (r && r.message ? r.message : '알 수 없는 오류'));
+              }
+            }
+          );
+        });
+      });
+    });
+    
+    modal.querySelectorAll('.scrap-idea-copy-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const idx = Number(b.dataset.idx);
+        const item = arr[idx];
+        const txt =
+          typeof item === 'string'
+            ? item
+            : `${item.title || ''}\n\n${item.summary || ''}\n\n태그: ${(item.tags && item.tags.join(', ')) || ''}`;
+        navigator.clipboard?.writeText(txt);
+        showToast('클립보드에 복사되었습니다.');
+      });
+    });
   }
 
   // 이벤트 위임: detailContainer에서 버튼 클릭 처리 (한 번만 바인딩)

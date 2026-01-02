@@ -98,6 +98,57 @@ async function initTipTap(initialHtml = '') {
       const TextStyle = normalize(TextStyleModule, 'TextStyle');
       const Color = normalize(ColorModule, 'Color');
 
+      // Custom Affiliate Card Extension
+      let AffiliateCard = null;
+      try {
+        const { Node } = await import(/* webpackChunkName: "tiptap-core" */ '@tiptap/core');
+        AffiliateCard = Node.create({
+          name: 'affiliateCard',
+          group: 'block',
+          atom: true,
+          parseHTML() {
+            return [
+              {
+                tag: 'figure[data-type="affiliate-card"]',
+                getAttrs: (dom) => {
+                  return {
+                    html: dom.outerHTML,
+                  };
+                },
+              },
+            ];
+          },
+          addAttributes() {
+            return {
+              html: {
+                default: null,
+                parseHTML: (element) => element.outerHTML,
+              },
+            };
+          },
+          renderHTML({ node }) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = node.attrs.html || '';
+            return wrapper.firstChild || ['figure', { 'data-type': 'affiliate-card' }];
+          },
+          addNodeView() {
+            return ({ node }) => {
+              const wrapper = document.createElement('div');
+              wrapper.innerHTML = node.attrs.html || '';
+              const dom = wrapper.firstChild;
+              if (dom) {
+                dom.setAttribute('contenteditable', 'false');
+                return { dom };
+              }
+              return { dom: document.createElement('figure') };
+            };
+          },
+        });
+      } catch (e) {
+        console.error('AffiliateCard creation failed', e);
+        AffiliateCard = null;
+      }
+
       // Custom Image Extension with Resize
       let CustomImage = null;
       try {
@@ -337,6 +388,7 @@ async function initTipTap(initialHtml = '') {
           ...(Highlight ? [Highlight.configure({ multicolor: true })] : []),
           ...(TextStyle ? [TextStyle] : []),
           ...(Color ? [Color] : []),
+          ...(AffiliateCard ? [AffiliateCard] : []),
           // Table extension intentionally not included initially (lazy loaded)
         ],
         content: initialHtml || '<p></p>',
@@ -944,6 +996,36 @@ function initializeEditor() {
           } else {
             quillEditor.setContents([]);
             quillEditor.setText('');
+          }
+        }
+        break;
+      case 'insert-content':
+        // 워크스페이스에서 제휴 링크/카드 삽입 요청 처리
+        if (data && data.content) {
+          if (tiptapEditor) {
+            try {
+              // TipTap의 insertContent를 사용하되, 파싱 없이 원시 HTML로 삽입
+              tiptapEditor.commands.insertContent(data.content, {
+                parseOptions: {
+                  preserveWhitespace: true,
+                }
+              });
+              
+              // 삽입 후 내용 저장
+              setTimeout(() => {
+                window.parent.postMessage(
+                  {
+                    action: 'cp_save_draft',
+                    content: tiptapEditor.getHTML(),
+                  },
+                  '*'
+                );
+              }, 100);
+              
+              console.log('✅ [Editor] insert-content 처리 완료');
+            } catch (err) {
+              console.error('❌ [Editor] insert-content 처리 중 오류:', err);
+            }
           }
         }
         break;
