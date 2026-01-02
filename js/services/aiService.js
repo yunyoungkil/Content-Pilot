@@ -37,8 +37,14 @@ function removeDuplicateYears(title) {
       .replace(/\s*\/\s*/g, '/') // 슬래시 주변 정리
       .trim();
     // Punctuation normalization (commas no leading space, single trailing space)
-    s = s.replace(/\s*([,;:])\s*/g, '$1 ').replace(/\s*([–—-])\s*/g, ' - ').replace(/\s+([.?!])/g, '$1');
-    s = s.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+    s = s
+      .replace(/\s*([,;:])\s*/g, '$1 ')
+      .replace(/\s*([–—-])\s*/g, ' - ')
+      .replace(/\s+([.?!])/g, '$1');
+    s = s
+      .replace(/\s+,/g, ',')
+      .replace(/,\s*,/g, ',')
+      .replace(/\s{2,}/g, ' ');
     return s.trim();
   }
 
@@ -80,12 +86,18 @@ function removeDuplicateYears(title) {
     .trim();
 
   // remove any duplicated punctuation spacing issues
-  cleaned = cleaned.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+  cleaned = cleaned
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*,/g, ',')
+    .replace(/\s{2,}/g, ' ');
 
   return cleaned;
 
   // remove any duplicated punctuation spacing issues
-  cleaned = cleaned.replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+  cleaned = cleaned
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*,/g, ',')
+    .replace(/\s{2,}/g, ' ');
 
   return cleaned;
 }
@@ -502,14 +514,14 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
       // 가능한한 유의미한 오류 메시지 추출
       const body = await resp.json().catch(() => ({}));
       const msg = body?.error?.message || `HTTP ${resp.status}`;
-      
+
       // 403 오류 시 사용자 친화적인 메시지 제공
       if (resp.status === 403) {
         throw new Error(
           'Gemini API 키가 유효하지 않거나 권한이 없습니다. Google AI Studio(https://aistudio.google.com/app/apikey)에서 새 API 키를 발급받아 채널 설정에 입력해주세요.'
         );
       }
-      
+
       throw new Error(msg);
     }
 
@@ -1433,7 +1445,8 @@ async function getRelevantAffiliateLinks(userId, contextText, options = {}) {
 
               // 앞쪽에 위치할수록 더 관련성이 높음
               const position = contextLower.indexOf(keywordLower);
-              if (position === 0) score += 2; // 시작 위치
+              if (position === 0)
+                score += 2; // 시작 위치
               else if (position < contextLower.length / 3) score += 1; // 앞 1/3 구간
             }
             // 역방향 매칭: context 토큰이 키워드에 포함되는 경우
@@ -1758,7 +1771,8 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       // internalLinks: prefer using post title as anchor text if it fits; otherwise use matched phrase
       tryInsertLinks(normalizedInternals, (matchedText, link) => {
         // prefer full title if it contains matchedText or is short
-        if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase())) return link.title;
+        if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase()))
+          return link.title;
         if (link.title && link.title.split(' ').length <= 4) return link.title; // short title
         return matchedText;
       });
@@ -1800,21 +1814,21 @@ function findContextAroundKeyword(text, keyword, contextChars = 100) {
   const results = [];
   const lowerText = text.toLowerCase();
   const lowerKeyword = keyword.toLowerCase();
-  
+
   let index = 0;
   while ((index = lowerText.indexOf(lowerKeyword, index)) !== -1) {
     const start = Math.max(0, index - contextChars);
     const end = Math.min(text.length, index + keyword.length + contextChars);
     const snippet = text.substring(start, end).trim();
-    
+
     // 중복 제거
-    if (!results.some(r => r.includes(snippet) || snippet.includes(r))) {
+    if (!results.some((r) => r.includes(snippet) || snippet.includes(r))) {
       results.push(snippet);
     }
-    
+
     index += keyword.length;
   }
-  
+
   return results;
 }
 
@@ -1826,7 +1840,7 @@ function findContextAroundKeyword(text, keyword, contextChars = 100) {
 function splitKeywordIntoWords(keyword) {
   // 특수문자 제거하고 공백으로 분리
   const cleaned = keyword.replace(/[^\w\sㄱ-ㅎ가-힣0-9]/g, ' ');
-  const words = cleaned.split(/\s+/).filter(w => w.length >= 2); // 2글자 이상만
+  const words = cleaned.split(/\s+/).filter((w) => w.length >= 2); // 2글자 이상만
   return words;
 }
 
@@ -1840,42 +1854,42 @@ function searchRelevantContent(scrapsContent, searchTerms) {
   const allTerms = [
     ...(searchTerms.keywords || []),
     ...(searchTerms.longTail || []),
-    ...(searchTerms.searchQueries || [])
-  ].filter(t => t && t.trim());
-  
+    ...(searchTerms.searchQueries || []),
+  ].filter((t) => t && t.trim());
+
   if (allTerms.length === 0) {
     Logger.debug('[searchRelevantContent] 검색 키워드가 없습니다.');
     return [];
   }
-  
+
   // [CRITICAL DEBUG] 모든 키워드 출력
   console.log('🔍 [searchRelevantContent] 원본 키워드:', allTerms);
-  
+
   // [개선] 키워드를 단어로 분리하여 부분 매칭
   const expandedTerms = [];
   const termOrigins = new Map(); // 각 단어가 어떤 원본 키워드에서 왔는지 추적
-  
-  allTerms.forEach(term => {
+
+  allTerms.forEach((term) => {
     const words = splitKeywordIntoWords(term);
     console.log(`📝 "${term}" → [${words.join(', ')}]`);
-    
-    words.forEach(word => {
+
+    words.forEach((word) => {
       if (!expandedTerms.includes(word)) {
         expandedTerms.push(word);
         termOrigins.set(word, term);
       }
     });
   });
-  
+
   console.log('🔍 [searchRelevantContent] 확장된 검색어 (중복 제거):', expandedTerms);
-  
+
   const relevantSections = [];
-  const fullText = scrapsContent.map(s => s.text || '').join('\n\n');
-  
+  const fullText = scrapsContent.map((s) => s.text || '').join('\n\n');
+
   // [CRITICAL DEBUG] 연결 자료 샘플 출력
   console.log('📄 [searchRelevantContent] 연결 자료 텍스트 길이:', fullText.length);
   console.log('📄 [searchRelevantContent] 연결 자료 샘플 (첫 500자):', fullText.substring(0, 500));
-  
+
   expandedTerms.forEach((word, index) => {
     const matches = findContextAroundKeyword(fullText, word, 150);
     if (matches.length > 0) {
@@ -1883,15 +1897,19 @@ function searchRelevantContent(scrapsContent, searchTerms) {
       relevantSections.push({
         keyword: originKeyword, // 원본 키워드 유지
         searchWord: word, // 실제 검색된 단어
-        content: matches.slice(0, 3) // 각 단어당 최대 3개 매칭
+        content: matches.slice(0, 3), // 각 단어당 최대 3개 매칭
       });
-      console.log(`✅ [${index + 1}/${expandedTerms.length}] "${word}" (from "${originKeyword}") → 매칭 ${matches.length}개`);
+      console.log(
+        `✅ [${index + 1}/${expandedTerms.length}] "${word}" (from "${originKeyword}") → 매칭 ${matches.length}개`
+      );
     } else {
       console.warn(`❌ [${index + 1}/${expandedTerms.length}] "${word}" → 매칭 없음`);
     }
   });
-  
-  Logger.info(`[searchRelevantContent] 키워드 ${allTerms.length}개 → 검색어 ${expandedTerms.length}개로 확장하여 ${relevantSections.length}개 섹션 추출`);
+
+  Logger.info(
+    `[searchRelevantContent] 키워드 ${allTerms.length}개 → 검색어 ${expandedTerms.length}개로 확장하여 ${relevantSections.length}개 섹션 추출`
+  );
   return relevantSections;
 }
 
@@ -1903,7 +1921,7 @@ function searchRelevantContent(scrapsContent, searchTerms) {
 function extractKeywordsFromSection(sectionTitle) {
   // 숫자, 특수문자 제거하고 의미 있는 단어만 추출
   const cleaned = sectionTitle.replace(/^\d+\.\s*/, '').replace(/[^\w\sㄱ-ㅎ가-힣]/g, ' ');
-  const words = cleaned.split(/\s+/).filter(w => w.length >= 2);
+  const words = cleaned.split(/\s+/).filter((w) => w.length >= 2);
   return words;
 }
 
@@ -1918,38 +1936,41 @@ function structureByOutline(relevantSections, outline) {
     Logger.debug('[structureByOutline] 목차가 없습니다.');
     return {};
   }
-  
+
   Logger.info('[structureByOutline] 목차:', outline);
   Logger.info('[structureByOutline] 매칭할 섹션 수:', relevantSections.length);
-  
+
   const structured = {};
-  
+
   outline.forEach((section, index) => {
     const sectionNumber = index + 1;
     const sectionKeywords = extractKeywordsFromSection(section);
-    
+
     Logger.debug(`[structureByOutline] 섹션${sectionNumber} "${section}" 키워드:`, sectionKeywords);
-    
+
     // 이 섹션과 관련된 내용 필터링
-    const relatedContent = relevantSections.filter(item => 
-      sectionKeywords.some(kw => 
-        item.keyword.toLowerCase().includes(kw.toLowerCase()) ||
-        kw.toLowerCase().includes(item.keyword.toLowerCase())
+    const relatedContent = relevantSections.filter((item) =>
+      sectionKeywords.some(
+        (kw) =>
+          item.keyword.toLowerCase().includes(kw.toLowerCase()) ||
+          kw.toLowerCase().includes(item.keyword.toLowerCase())
       )
     );
-    
+
     Logger.debug(`[structureByOutline] 섹션${sectionNumber} 매칭된 내용:`, relatedContent.length);
-    
+
     if (relatedContent.length > 0) {
       structured[`섹션${sectionNumber}`] = {
         title: section,
         keywords: sectionKeywords,
-        relatedContent: relatedContent
+        relatedContent: relatedContent,
       };
     }
   });
-  
-  Logger.info(`[structureByOutline] ${outline.length}개 목차 중 ${Object.keys(structured).length}개 섹션에 내용 매칭`);
+
+  Logger.info(
+    `[structureByOutline] ${outline.length}개 목차 중 ${Object.keys(structured).length}개 섹션에 내용 매칭`
+  );
   return structured;
 }
 
@@ -2292,56 +2313,92 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
         // 스마트 텍스트 압축: 중요 키워드 주변 컨텍스트 유지
         // ✅ 외부 비교 사이트 컨텐츠 제거 (노써치, 다나와 등)
-        if (content.includes('노써치') || content.includes('nosearch') || content.includes('다나와')) {
+        if (
+          content.includes('노써치') ||
+          content.includes('nosearch') ||
+          content.includes('다나와')
+        ) {
           console.log('[aiService] 외부 비교 사이트 컨텐츠 감지, 필터링 수행');
-          
+
           // 1. 비교표 섹션 제거 (예: "추천 & 리뷰 : 인기 TOP 8")
-          content = content.replace(/[^\n]*추천\s*&\s*리뷰\s*[:：]\s*인기\s*TOP\s*\d+[^\n]*[\s\S]*?(?=상품\s*리뷰|$)/gi, '');
-          
+          content = content.replace(
+            /[^\n]*추천\s*&\s*리뷰\s*[:：]\s*인기\s*TOP\s*\d+[^\n]*[\s\S]*?(?=상품\s*리뷰|$)/gi,
+            ''
+          );
+
           // 2. 파워링크 광고 섹션 제거
           content = content.replace(/파워링크[\s\S]*?(?=상품\s*리뷰|$)/gi, '');
-          
+
           // 3. 베스트픽/가성비픽 섹션 제거
-          content = content.replace(/[①②③\d]+\s*\n[^\n]*베스트픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi, '');
-          content = content.replace(/[①②③\d]+\s*\n[^\n]*가성비픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi, '');
-          
+          content = content.replace(
+            /[①②③\d]+\s*\n[^\n]*베스트픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi,
+            ''
+          );
+          content = content.replace(
+            /[①②③\d]+\s*\n[^\n]*가성비픽[①②③\d]*[^\n]*\n[\s\S]*?(?=\n\n|\d+\s*\n|$)/gi,
+            ''
+          );
+
           console.log('[aiService] 외부 비교 사이트 필터링 완료');
         }
-        
+
         // 스마트 텍스트 압축
         if (content.length > 3500) {
           // 제품 관련 키워드 찾기
-          const productKeywords = ['리뷰', '평점', '만족도', '사용자', '후기', '장점', '단점', '가격', '품질', '디자인', '기능', '성능', '추천'];
+          const productKeywords = [
+            '리뷰',
+            '평점',
+            '만족도',
+            '사용자',
+            '후기',
+            '장점',
+            '단점',
+            '가격',
+            '품질',
+            '디자인',
+            '기능',
+            '성능',
+            '추천',
+          ];
           const keywordPositions = [];
-          
-          productKeywords.forEach(keyword => {
+
+          productKeywords.forEach((keyword) => {
             let pos = content.indexOf(keyword);
             while (pos !== -1) {
               keywordPositions.push(pos);
               pos = content.indexOf(keyword, pos + 1);
             }
           });
-          
+
           if (keywordPositions.length > 0) {
             // 키워드 주변 컨텍스트 추출 (각 키워드 전후 300자)
             keywordPositions.sort((a, b) => a - b);
             const chunks = [];
             let lastEnd = 0;
-            
-            keywordPositions.forEach(pos => {
-              if (pos - lastEnd > 100) { // 겹치지 않는 경우만
+
+            keywordPositions.forEach((pos) => {
+              if (pos - lastEnd > 100) {
+                // 겹치지 않는 경우만
                 const start = Math.max(0, pos - 300);
                 const end = Math.min(content.length, pos + 300);
                 chunks.push(content.substring(start, end));
                 lastEnd = end;
               }
             });
-            
+
             // 앞부분 1000자 + 키워드 주변 컨텍스트
-            content = content.substring(0, 1000) + '\n\n' + chunks.join('\n...\n') + '\n\n' + content.substring(content.length - 500);
+            content =
+              content.substring(0, 1000) +
+              '\n\n' +
+              chunks.join('\n...\n') +
+              '\n\n' +
+              content.substring(content.length - 500);
           } else {
             // 키워드가 없으면 기존 방식
-            content = content.substring(0, 2500) + '\n...(중략)...\n' + content.substring(content.length - 500);
+            content =
+              content.substring(0, 2500) +
+              '\n...(중략)...\n' +
+              content.substring(content.length - 500);
           }
         }
 
@@ -2355,10 +2412,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // [신규] 참고 자료에서 제품명/브랜드 추출
     const extractedProducts = [];
     const extractedBrands = [];
-    
+
     linkedScrapsContent.forEach((scrap, index) => {
       const text = scrap.title + ' ' + (scrap.text || '');
-      
+
       // 1. 브랜드명 먼저 추출
       const brandPatterns = [
         /누아트/g,
@@ -2367,8 +2424,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         /ESR/g,
         /링케|슈피겐|UAG|토르|엘라고|벨킨|다이소|아이패치|모모트/g,
       ];
-      
-      brandPatterns.forEach(pattern => {
+
+      brandPatterns.forEach((pattern) => {
         const matches = text.matchAll(pattern);
         for (const match of matches) {
           const brand = match[0].trim();
@@ -2377,27 +2434,36 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           }
         }
       });
-      
+
       // 2. 제품명 전체 추출 (긴 제품명도 인식)
       // 패턴 1: 브랜드명 + 여러 단어 + 제품 종류
-      const longProductPattern = /([가-힣A-Za-z]+)\s+([가-힣A-Za-z0-9\s]+?)\s*(케이스|카드\s*케이스|충전기|거치대|필름|액세서리)/g;
+      const longProductPattern =
+        /([가-힣A-Za-z]+)\s+([가-힣A-Za-z0-9\s]+?)\s*(케이스|카드\s*케이스|충전기|거치대|필름|액세서리)/g;
       const longMatches = text.matchAll(longProductPattern);
       for (const match of longMatches) {
         const fullProduct = match[0].trim();
         // 10자 이상 80자 이하의 제품명만 추출
-        if (fullProduct.length >= 10 && fullProduct.length <= 80 && !extractedProducts.includes(fullProduct)) {
+        if (
+          fullProduct.length >= 10 &&
+          fullProduct.length <= 80 &&
+          !extractedProducts.includes(fullProduct)
+        ) {
           extractedProducts.push(fullProduct);
         }
       }
-      
+
       // 3. 제목에서 직접 추출 (가장 정확한 제품명)
       if (scrap.title) {
         // 제목 전체가 제품명인 경우
         const titleCleaned = scrap.title.replace(/^(상품 리뷰|리뷰|후기)[\s:：]+/, '').trim();
-        if (titleCleaned.length >= 10 && titleCleaned.length <= 80 && !extractedProducts.includes(titleCleaned)) {
+        if (
+          titleCleaned.length >= 10 &&
+          titleCleaned.length <= 80 &&
+          !extractedProducts.includes(titleCleaned)
+        ) {
           extractedProducts.push(titleCleaned);
         }
-        
+
         // 콜론 앞부분이 제품명인 경우
         const titleMatch = scrap.title.match(/^([가-힣A-Za-z0-9\s]+)[:：]/);
         if (titleMatch && titleMatch[1].trim().length >= 10) {
@@ -2408,21 +2474,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         }
       }
     });
-    
+
     Logger.info('[generateDraft] 추출된 제품명:', extractedProducts);
     Logger.info('[generateDraft] 추출된 브랜드:', extractedBrands);
-    
+
     // [신규] 리뷰 통계 추출 및 구조화
     const productReviewStats = [];
     linkedScrapsContent.forEach((scrap) => {
       const text = scrap.text || '';
-      
+
       // 리뷰 통계 패턴 매칭
       const reviewCountMatch = text.match(/상품\s*리뷰\s*\n\s*(\d{1,5})/);
       const satisfactionMatch = text.match(/최고\s*\n\s*(\d{1,3})%/);
       const robustnessMatch = text.match(/견고함\s*\n\s*아주\s*견고해요\s*\n\s*(\d{1,3})%/);
       const designMatch = text.match(/디자인\s*\n\s*아주만족해요\s*\n\s*(\d{1,3})%/);
-      
+
       // 제품명 추출 (타이틀에서)
       let productName = null;
       for (const product of extractedProducts) {
@@ -2431,29 +2497,30 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           break;
         }
       }
-      
+
       if (reviewCountMatch && satisfactionMatch && productName) {
         const stats = {
           productName: productName,
           reviewCount: parseInt(reviewCountMatch[1]),
           satisfaction: parseInt(satisfactionMatch[1]),
           robustness: robustnessMatch ? parseInt(robustnessMatch[1]) : null,
-          design: designMatch ? parseInt(designMatch[1]) : null
+          design: designMatch ? parseInt(designMatch[1]) : null,
         };
-        
+
         // 중복 체크
-        const exists = productReviewStats.find(s => s.productName === productName);
+        const exists = productReviewStats.find((s) => s.productName === productName);
         if (!exists) {
           productReviewStats.push(stats);
           Logger.info('[generateDraft] 리뷰 통계 추출:', stats);
         }
       }
     });
-    
+
     // 구조화된 제품 정보 생성
     let structuredProductInfo = '';
     if (productReviewStats.length > 0) {
-      structuredProductInfo = '\n\n📊 **[중요] 참고 자료의 주요 제품 정보 (이 정보를 초안 전체에 반드시 활용하세요)**\n\n';
+      structuredProductInfo =
+        '\n\n📊 **[중요] 참고 자료의 주요 제품 정보 (이 정보를 초안 전체에 반드시 활용하세요)**\n\n';
       productReviewStats.forEach((stat, idx) => {
         structuredProductInfo += `제품 ${idx + 1}: ${stat.productName}\n`;
         structuredProductInfo += `  - 리뷰 개수: ${stat.reviewCount.toLocaleString()}개\n`;
@@ -2462,58 +2529,64 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         if (stat.design) structuredProductInfo += `  - 디자인 만족도: ${stat.design}%\n`;
         structuredProductInfo += '\n';
       });
-      structuredProductInfo += '⚠️ 초안 작성 시 위 제품들의 리뷰 통계를 본문 전체에 걸쳐 반복적으로 언급하세요.\n';
-      structuredProductInfo += '예시: "누아트 케이스는 1,656개의 리뷰에서 75%가 최고 평점을 주었습니다."\n\n';
+      structuredProductInfo +=
+        '⚠️ 초안 작성 시 위 제품들의 리뷰 통계를 본문 전체에 걸쳐 반복적으로 언급하세요.\n';
+      structuredProductInfo +=
+        '예시: "누아트 케이스는 1,656개의 리뷰에서 75%가 최고 평점을 주었습니다."\n\n';
     }
 
     // [신규] 키워드 기반 검색 및 목차별 구조화
     let structuredByOutlineText = '';
     try {
       Logger.info('[RAG] 연결 자료 개수:', linkedScrapsContent.length);
-      
+
       // 브리핑 메타데이터 추출 (키워드가 배열일 수도 있고 문자열일 수도 있음)
       let keywordsArray = [];
       if (ideaData.keywords) {
         if (Array.isArray(ideaData.keywords)) {
-          keywordsArray = ideaData.keywords.map(k => String(k).trim());
+          keywordsArray = ideaData.keywords.map((k) => String(k).trim());
         } else if (typeof ideaData.keywords === 'string') {
-          keywordsArray = ideaData.keywords.split(',').map(k => k.trim());
+          keywordsArray = ideaData.keywords.split(',').map((k) => k.trim());
         }
       }
-      
+
       const searchTerms = {
         keywords: keywordsArray,
         longTail: Array.isArray(ideaData.longTailKeywords) ? ideaData.longTailKeywords : [],
         searchQueries: Array.isArray(ideaData.searchQueries) ? ideaData.searchQueries : [],
-        outline: Array.isArray(ideaData.outline) ? ideaData.outline : []
+        outline: Array.isArray(ideaData.outline) ? ideaData.outline : [],
       };
-      
+
       Logger.info('[RAG] 브리핑 메타데이터:', {
         keywords: searchTerms.keywords.length,
         keywordsSample: searchTerms.keywords.slice(0, 3),
         longTail: searchTerms.longTail.length,
         searchQueries: searchTerms.searchQueries.length,
-        outline: searchTerms.outline.length
+        outline: searchTerms.outline.length,
       });
-      
+
       // 키워드가 있고 연결 자료가 있을 때만 실행
-      if ((searchTerms.keywords.length > 0 || searchTerms.longTail.length > 0) && linkedScrapsContent.length > 0) {
+      if (
+        (searchTerms.keywords.length > 0 || searchTerms.longTail.length > 0) &&
+        linkedScrapsContent.length > 0
+      ) {
         Logger.info('[RAG] 조건 통과 - 키워드 기반 검색 시작');
         // 1. 키워드 기반 검색
         const relevantSections = searchRelevantContent(linkedScrapsContent, searchTerms);
-        
+
         // 2. 목차별 구조화 (목차가 있는 경우)
         if (searchTerms.outline.length > 0 && relevantSections.length > 0) {
           const structured = structureByOutline(relevantSections, searchTerms.outline);
-          
+
           if (Object.keys(structured).length > 0) {
-            structuredByOutlineText = '\n\n📚 **섹션별 참고 자료 (각 섹션 작성 시 반드시 활용하세요)**\n\n';
-            
+            structuredByOutlineText =
+              '\n\n📚 **섹션별 참고 자료 (각 섹션 작성 시 반드시 활용하세요)**\n\n';
+
             Object.entries(structured).forEach(([sectionKey, data]) => {
               structuredByOutlineText += `### ${sectionKey}: ${data.title}\n`;
               structuredByOutlineText += `관련 키워드: ${data.keywords.join(', ')}\n\n`;
               structuredByOutlineText += `참고할 내용:\n`;
-              
+
               data.relatedContent.forEach((item) => {
                 structuredByOutlineText += `▪ [${item.keyword}]\n`;
                 item.content.forEach((snippet) => {
@@ -2521,10 +2594,10 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 });
                 structuredByOutlineText += '\n';
               });
-              
+
               structuredByOutlineText += '\n';
             });
-            
+
             Logger.info('[RAG] 목차별 구조화 완료:', Object.keys(structured).length + '개 섹션');
           } else {
             Logger.debug('[RAG] 구조화 결과 없음');
@@ -2533,7 +2606,12 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           Logger.debug('[RAG] 목차가 없거나 관련 섹션이 없음');
         }
       } else {
-        Logger.warn('[RAG] 조건 미충족 - keywords:', searchTerms.keywords.length, 'linkedScraps:', linkedScrapsContent.length);
+        Logger.warn(
+          '[RAG] 조건 미충족 - keywords:',
+          searchTerms.keywords.length,
+          'linkedScraps:',
+          linkedScrapsContent.length
+        );
       }
     } catch (ragError) {
       Logger.error('[RAG] 키워드 기반 검색 실패:', ragError);
@@ -2805,7 +2883,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const prompt = `
             ${systemPrompt}
             
-            ${linkedScrapsText || originalContentText ? `
+            ${
+              linkedScrapsText || originalContentText
+                ? `
             ═══════════════════════════════════════════════════════════════
             🚨 **[최우선 참고 자료 - 반드시 활용하세요]** 🚨
             ═══════════════════════════════════════════════════════════════
@@ -2820,11 +2900,19 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             초안을 모두 작성한 뒤, 아래 체크리스트로 스스로 확인하세요:
             
-            ${productReviewStats.length > 0 ? `
-            ${productReviewStats.map((stat, i) => `
+            ${
+              productReviewStats.length > 0
+                ? `
+            ${productReviewStats
+              .map(
+                (stat, i) => `
             [ ] ${stat.productName}이 본문에 최소 2번 이상 등장했나?
-            [ ] ${stat.productName} 언급할 때 리뷰 숫자(${stat.reviewCount.toLocaleString()}개, ${stat.satisfaction}%)를 함께 썼나?`).join('\n            ')}
-            ` : ''}
+            [ ] ${stat.productName} 언급할 때 리뷰 숫자(${stat.reviewCount.toLocaleString()}개, ${stat.satisfaction}%)를 함께 썼나?`
+              )
+              .join('\n            ')}
+            `
+                : ''
+            }
             
             [ ] 초반/중반/후반 섹션 모두에 위 제품이 골고루 등장했나?
             [ ] 일반론만 나열하고 제품을 마지막에만 짧게 언급하지 않았나?
@@ -2832,18 +2920,26 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             ❌ 위 체크리스트 중 하나라도 X라면 → 해당 부분을 다시 작성하세요
             
-            ${extractedProducts.length > 0 ? `
+            ${
+              extractedProducts.length > 0
+                ? `
             📌 **참고 자료에서 추출된 제품/브랜드 목록** (이 제품들만 추천하세요):
             ${extractedProducts.map((p, i) => `   ${i + 1}. ${p}`).join('\n')}
-            ${extractedBrands.length > 0 ? `
+            ${
+              extractedBrands.length > 0
+                ? `
             🏷️ **추출된 브랜드**: ${extractedBrands.join(', ')}
-            ` : ''}
+            `
+                : ''
+            }
             
             ⛔ **절대 금지**:
             - 리뷰 통계 없이 제품명만 언급 금지
             - 외부 비교 사이트(노써치, 다나와) 제품 추천 금지
             - 참고 자료에 없는 제품(ESR, 신지모루, 다이소) 메인 추천 금지
-            ` : ''}
+            `
+                : ''
+            }
             
             ❌ **절대 금지 사항** (다음 중 하나라도 위반 시 초안 전체 거부):
             - 참고 자료에 **리뷰 통계가 없는 제품**을 메인 추천으로 사용 금지
@@ -2856,7 +2952,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ${linkedScrapsText}
             
             ═══════════════════════════════════════════════════════════════
-            ` : ''}
+            `
+                : ''
+            }
             
             [현재 시점 정보]
             - 오늘 날짜: ${currentDateString}
@@ -3963,9 +4061,10 @@ ${defaultDescription}
 
       // Auto-insert links: affiliate, internal, reference
       try {
-        const internalLinks = (typeof myPosts !== 'undefined' && Array.isArray(myPosts))
-          ? myPosts.map((p) => ({ title: p.title, url: p.fullLink || p.link, keywords: [] }))
-          : [];
+        const internalLinks =
+          typeof myPosts !== 'undefined' && Array.isArray(myPosts)
+            ? myPosts.map((p) => ({ title: p.title, url: p.fullLink || p.link, keywords: [] }))
+            : [];
 
         const referenceLinks = (ideaData.linkedScrapsContent || [])
           .filter((s) => s && s.url)
@@ -4780,7 +4879,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     // 일반 키워드/추천 검색어 생성 (자료 수집 최적화)
     if (options.generateKeywords) {
       Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작 (자료 수집 목적)`);
-      
+
       // 자료 수집에 최적화된 프롬프트
       const prompt = `"${contextText}" 주제로 블로그 초안을 작성하기 위해 필요한 자료를 수집할 때 사용할 검색어 10개를 추천해주세요.
 
