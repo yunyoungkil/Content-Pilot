@@ -1790,6 +1790,121 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 // 더 이상 이 함수는 사용되지 않으며 OffscreenService로 대체됨
 
 /**
+ * 키워드 주변의 컨텍스트를 포함하여 텍스트에서 검색합니다.
+ * @param {string} text - 검색할 텍스트
+ * @param {string} keyword - 검색 키워드
+ * @param {number} contextChars - 앞뒤로 포함할 문자 수 (기본 100자)
+ * @returns {Array<string>} 매칭된 텍스트 조각 배열
+ */
+function findContextAroundKeyword(text, keyword, contextChars = 100) {
+  const results = [];
+  const lowerText = text.toLowerCase();
+  const lowerKeyword = keyword.toLowerCase();
+  
+  let index = 0;
+  while ((index = lowerText.indexOf(lowerKeyword, index)) !== -1) {
+    const start = Math.max(0, index - contextChars);
+    const end = Math.min(text.length, index + keyword.length + contextChars);
+    const snippet = text.substring(start, end).trim();
+    
+    // 중복 제거
+    if (!results.some(r => r.includes(snippet) || snippet.includes(r))) {
+      results.push(snippet);
+    }
+    
+    index += keyword.length;
+  }
+  
+  return results;
+}
+
+/**
+ * 연결 자료에서 키워드 기반으로 관련 내용을 검색합니다.
+ * @param {Array} scrapsContent - 연결된 자료 배열
+ * @param {Object} searchTerms - 검색 키워드 객체 {keywords, longTail, searchQueries}
+ * @returns {Array} 키워드별 매칭된 내용 배열
+ */
+function searchRelevantContent(scrapsContent, searchTerms) {
+  const allTerms = [
+    ...(searchTerms.keywords || []),
+    ...(searchTerms.longTail || []),
+    ...(searchTerms.searchQueries || [])
+  ].filter(t => t && t.trim());
+  
+  if (allTerms.length === 0) {
+    Logger.debug('[searchRelevantContent] 검색 키워드가 없습니다.');
+    return [];
+  }
+  
+  const relevantSections = [];
+  const fullText = scrapsContent.map(s => s.text || '').join('\n\n');
+  
+  allTerms.forEach(term => {
+    const matches = findContextAroundKeyword(fullText, term, 150);
+    if (matches.length > 0) {
+      relevantSections.push({
+        keyword: term,
+        content: matches.slice(0, 3) // 각 키워드당 최대 3개 매칭
+      });
+    }
+  });
+  
+  Logger.info(`[searchRelevantContent] 키워드 ${allTerms.length}개로 검색하여 ${relevantSections.length}개 섹션 추출`);
+  return relevantSections;
+}
+
+/**
+ * 목차에서 키워드를 추출합니다.
+ * @param {string} sectionTitle - 섹션 제목
+ * @returns {Array<string>} 추출된 키워드 배열
+ */
+function extractKeywordsFromSection(sectionTitle) {
+  // 숫자, 특수문자 제거하고 의미 있는 단어만 추출
+  const cleaned = sectionTitle.replace(/^\d+\.\s*/, '').replace(/[^\w\sㄱ-ㅎ가-힣]/g, ' ');
+  const words = cleaned.split(/\s+/).filter(w => w.length >= 2);
+  return words;
+}
+
+/**
+ * 목차별로 관련 내용을 구조화합니다.
+ * @param {Array} relevantSections - 키워드별 매칭된 내용
+ * @param {Array} outline - 목차 배열
+ * @returns {Object} 목차별 구조화된 내용
+ */
+function structureByOutline(relevantSections, outline) {
+  if (!outline || outline.length === 0) {
+    Logger.debug('[structureByOutline] 목차가 없습니다.');
+    return {};
+  }
+  
+  const structured = {};
+  
+  outline.forEach((section, index) => {
+    const sectionNumber = index + 1;
+    const sectionKeywords = extractKeywordsFromSection(section);
+    
+    // 이 섹션과 관련된 내용 필터링
+    const relatedContent = relevantSections.filter(item => 
+      sectionKeywords.some(kw => 
+        item.keyword.toLowerCase().includes(kw.toLowerCase()) ||
+        kw.toLowerCase().includes(item.keyword.toLowerCase())
+      )
+    );
+    
+    if (relatedContent.length > 0) {
+      structured[`섹션${sectionNumber}`] = {
+        title: section,
+        keywords: sectionKeywords,
+        relatedContent: relatedContent
+      };
+    }
+  });
+  
+  Logger.info(`[structureByOutline] ${outline.length}개 목차 중 ${Object.keys(structured).length}개 섹션에 내용 매칭`);
+  return structured;
+}
+
+/**
  * [내부 헬퍼] 초안 중간 저장 함수
  * AI 생성 과정 중 데이터 유실 방지를 위해 중간 결과를 Firebase에 저장합니다.
  */
@@ -2302,6 +2417,60 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       structuredProductInfo += '예시: "누아트 케이스는 1,656개의 리뷰에서 75%가 최고 평점을 주었습니다."\n\n';
     }
 
+    // [신규] 키워드 기반 검색 및 목차별 구조화
+    let structuredByOutlineText = '';
+    try {
+      // 브리핑 메타데이터 추출
+      const searchTerms = {
+        keywords: ideaData.keywords ? ideaData.keywords.split(',').map(k => k.trim()) : [],
+        longTail: ideaData.longTailKeywords || [],
+        searchQueries: ideaData.searchQueries || [],
+        outline: ideaData.outline || []
+      };
+      
+      Logger.info('[RAG] 브리핑 메타데이터:', {
+        keywords: searchTerms.keywords.length,
+        longTail: searchTerms.longTail.length,
+        searchQueries: searchTerms.searchQueries.length,
+        outline: searchTerms.outline.length
+      });
+      
+      // 키워드가 있고 연결 자료가 있을 때만 실행
+      if ((searchTerms.keywords.length > 0 || searchTerms.longTail.length > 0) && linkedScrapsContent.length > 0) {
+        // 1. 키워드 기반 검색
+        const relevantSections = searchRelevantContent(linkedScrapsContent, searchTerms);
+        
+        // 2. 목차별 구조화 (목차가 있는 경우)
+        if (searchTerms.outline.length > 0 && relevantSections.length > 0) {
+          const structured = structureByOutline(relevantSections, searchTerms.outline);
+          
+          if (Object.keys(structured).length > 0) {
+            structuredByOutlineText = '\n\n📚 **섹션별 참고 자료 (각 섹션 작성 시 반드시 활용하세요)**\n\n';
+            
+            Object.entries(structured).forEach(([sectionKey, data]) => {
+              structuredByOutlineText += `### ${sectionKey}: ${data.title}\n`;
+              structuredByOutlineText += `관련 키워드: ${data.keywords.join(', ')}\n\n`;
+              structuredByOutlineText += `참고할 내용:\n`;
+              
+              data.relatedContent.forEach((item) => {
+                structuredByOutlineText += `▪ [${item.keyword}]\n`;
+                item.content.forEach((snippet) => {
+                  structuredByOutlineText += `  "${snippet.substring(0, 200)}..."\n`;
+                });
+                structuredByOutlineText += '\n';
+              });
+              
+              structuredByOutlineText += '\n';
+            });
+            
+            Logger.info('[RAG] 목차별 구조화 완료:', Object.keys(structured).length + '개 섹션');
+          }
+        }
+      }
+    } catch (ragError) {
+      Logger.warn('[RAG] 키워드 기반 검색 실패:', ragError);
+    }
+
     // 3. 원본 본문 참조: origin.fullContent가 있으면 참고 자료에 추가
     let originalContentText = '';
     if (ideaData.origin?.fullContent && ideaData.origin.fullContent.length > 0) {
@@ -2575,6 +2744,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             아래 참고 자료는 이번 초안 작성의 **핵심 근거**입니다.
             
             ${structuredProductInfo}
+            
+            ${structuredByOutlineText}
             
             ⚠️⚠️⚠️ **초안 작성 후 반드시 자가 점검** ⚠️⚠️⚠️
             
