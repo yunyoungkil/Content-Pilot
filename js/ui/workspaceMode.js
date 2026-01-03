@@ -3229,6 +3229,20 @@ function getActiveChannelId(cb) {
 
 // 완전한 HTML 생성 함수 (JSON-LD 포함)
 function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
+  // mark 태그를 span 태그로 변환
+  let processedHtml = contentHtml;
+  if (processedHtml) {
+    // mark 태그를 span 태그로 변환 (속성 유지)
+    processedHtml = processedHtml.replace(
+      /<mark([^>]*)>/gi,
+      '<span$1>'
+    );
+    processedHtml = processedHtml.replace(
+      /<\/mark>/gi,
+      '</span>'
+    );
+  }
+
   // JSON-LD 스크립트 태그 생성
   let jsonLdScript = '';
   if (jsonLdSchema) {
@@ -3293,7 +3307,7 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
   <title>${title || '제목 없음'}</title>${descriptionMeta}${jsonLdScript}
 </head>
 <body>
-${contentHtml}
+${processedHtml}
 </body>
 </html>`;
 

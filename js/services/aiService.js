@@ -3196,15 +3196,15 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - 텍스트와 URL이 분리되지 않은 경우 → 초안 작성 불가
                
                **[🚨 CRITICAL - 색상 통일 규칙]**:
-               - **절대 규칙**: 내부 링크, 외부 참고 링크 모두 **#2e7d32 (초록색)**으로 통일하세요
-               - HTML 형식으로 변환 시: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">링크텍스트</a></span>
+               - **절대 규칙**: 내부 링크, 외부 참고 링크 모두 **#1a73e8 (파란색, rgb(26, 115, 232))**으로 통일하세요
+               - HTML 형식으로 변환 시: <a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">링크텍스트</a>
                - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
-               - ✅ 올바른 예시: <span style="color: #2e7d32;"><a href="https://example.com/article" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">관련 글 보기</a></span>
-               - ❌ 잘못된 예시 1: <a href="..." style="color: rgb(26, 115, 232);">링크</a> (파란색 사용 금지)
-               - ❌ 잘못된 예시 2: <a href="..." style="color: #1a73e8;">링크</a> (파란색 사용 금지)
+               - ✅ 올바른 예시: <a href="https://example.com/article" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a>
+               - ❌ 잘못된 예시 1: <a href="..." style="color: #2e7d32;">링크</a> (녹색 사용 금지)
+               - ❌ 잘못된 예시 2: <a href="..." style="color: rgb(46, 125, 50);">링크</a> (녹색 사용 금지)
                - ❌ 잘못된 예시 3: <a href="...">링크</a> (색상 미지정 금지)
-               - ❌ 잘못된 예시 4: <a href="..." style="color: #2e7d32;">링크</a> (밑줄 제거 속성 누락)
-               - **중요**: 제휴 링크와 동일한 색상(#2e7d32)을 사용하여 브랜드 통일성 유지
+               - ❌ 잘못된 예시 4: <a href="..." style="color: rgb(26, 115, 232);">링크</a> (밑줄 제거 속성 누락)
+               - **중요**: 모든 일반 링크(내부, 외부)는 파란색 #1a73e8 사용, 제휴 링크만 녹색 사용
             
             3. **내부 링크는 아래 제공된 "내 과거 포스팅 목록"에서만 선택**
                - 목록에 없는 URL 사용 → 초안 작성 불가
@@ -3740,9 +3740,15 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  * "대부분의 사용자가 만족합니다" (모호한 표현)
                - **출처가 없는 수치는 사용하지 마세요**: 참고 자료에 없는 통계를 창작하거나 추측하지 마세요
                - **대안 표현**: 출처를 알 수 없는 경우 "많은 사용자", "상당수", "일부" 같은 일반적 표현을 사용하세요
-            9. **하이라이트 텍스트는 span 태그 사용**: 중요한 텍스트를 강조할 때 mark 태그가 아닌 span 태그를 사용하세요.
-               - ❌ 금지: <mark style="...">텍스트</mark>
-               - ✅ 권장: <span style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">텍스트</span>
+            9. **본문 강조 하이라이트 사용 (mark 태그) - 필수 3~5개**: 본문의 중요한 텍스트를 강조할 때 mark 태그를 사용하세요.
+               - ✅ **권장 형식** (본문 강조용): <mark style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">중요한 핵심 내용</mark>
+               - 📊 **필수 개수 (🚨 CRITICAL)**: 글 전체에서 **반드시 3~5개**의 핵심 문장이나 구절에 하이라이트를 적용하세요. 1~2개만 사용하면 부족하고, 6개 이상은 과도합니다.
+               - 📝 **사용 위치 (각 섹션에 골고루 분산)**: 독자가 꼭 기억해야 할 핵심 정보, 중요한 주의사항, 강조할 팁, 결론적 문장 등
+               - 💡 **사용 예시 (섹션별 배치 권장)**: 
+                 * 섹션 1-2: "이 방법이 가장 효과적입니다" (결론적 강조) 1개
+                 * 섹션 3-4: "반드시 24시간 이내에 사용하세요" (중요한 주의사항) 2개
+                 * 섹션 5 또는 결론: "3가지 핵심 요소를 기억하세요" (핵심 정보) 1~2개
+               - ⚠️ **주의**: 이 노란 배경 스타일은 본문 강조에만 사용하고, 이미지 생성 프롬프트에는 절대 사용 금지 (이미지 프롬프트는 녹색 텍스트 스타일 사용)
             8. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
             9. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
               - **매우 중요**: 이미지 프롬프트는 해당 위치의 콘텐츠 내용과 직접적으로 관련된 이미지여야 합니다.
@@ -3860,13 +3866,17 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               **5. 시각적 강조 & 링크 색상 통일 (필수)**:
                  - **절대 규칙**: 제휴 링크는 녹색 span 태그로 감싸고, 내부에 a 태그 포함
                  - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
-                 - **색상 통일 규칙 (🚨 CRITICAL)**: 모든 링크(제휴 링크, 내부 링크, 외부 참고 링크)는 **#2e7d32 (초록색)**으로 통일하세요
-                   * ✅ 제휴 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">제품 보기</a></span>
-                   * ✅ 내부 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">관련 글 보기</a></span>
-                   * ✅ 외부 참고 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">자료 출처</a></span>
-                   * ❌ 잘못된 예시 1: <a href="..." style="color: #1a73e8;">링크</a> (파란색 사용 금지)
-                   * ❌ 잘못된 예시 2: <a href="...">링크</a> (색상 지정 없음, 기본 색상 사용 금지)
-                   * ❌ 잘못된 예시 3: <a href="..." style="color: #2e7d32;">링크</a> (밑줄 제거 속성 누락)
+                 - **색상 통일 규칙 (🚨 CRITICAL)**: 
+                   * **제휴 링크**: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(46, 125, 50);">제품 보기</a></span> (녹색)
+                   * **내부/외부 링크**: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a> (파란색)
+                 - ✅ 올바른 예시:
+                   * 제휴 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(46, 125, 50);">제품 확인하기</a></span>
+                   * 내부 링크: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a>
+                   * 외부 참고 링크: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">자료 출처</a>
+                 - ❌ 잘못된 예시:
+                   * <a href="...">링크</a> (색상 미지정 금지)
+                   * <a href="..." style="color: rgb(26, 115, 232);">링크</a> (밑줄 제거 속성 누락)
+                   * 내부 링크에 녹색 사용하거나 제휴 링크에 파란색 사용 (색상 혼동 금지)
                  - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">CTA 문구</a></span>
                  - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">아이폰 15 케이스 최저가 확인하기</a></span>
                  - ❌ 잘못된 형식 1: [CTA 문구](URL) (span 태그 없음)
