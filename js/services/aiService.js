@@ -3134,13 +3134,26 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                     링크1: [케이스 관리법](https://example.com/case-tips)
                     링크2: [액세서리 추천](https://example.com/accessories) ← 다른 URL
             
-            2. **내부 링크 형식 (절대 엄수): [링크텍스트](전체URL)**
+            2. **내부 링크 형식 & 색상 (절대 엄수)**
+               **[형식 규칙]**:
+               - 마크다운 형식: [링크텍스트](전체URL)
                - ✅ 올바른 예시: [투명 케이스 변색 막는 법](https://costcatcher.k-posting.info/entry/clear-case-yellowing-prevention-tips)
                - ❌ 틀린 예시: 투명 케이스 변색 막는 법https://costcatcher.k-posting.info/entry/... (URL이 텍스트 옆에 붙음)
                - ❌ 틀린 예시: [투명 케이스 변색 막는 법] (URL 없음)
                - **필수**: 대괄호 [ ] 안에 링크 텍스트, 소괄호 ( ) 안에 전체 URL
                - URL 없는 링크 → 초안 작성 불가
                - 텍스트와 URL이 분리되지 않은 경우 → 초안 작성 불가
+               
+               **[🚨 CRITICAL - 색상 통일 규칙]**:
+               - **절대 규칙**: 내부 링크, 외부 참고 링크 모두 **#2e7d32 (초록색)**으로 통일하세요
+               - HTML 형식으로 변환 시: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">링크텍스트</a></span>
+               - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
+               - ✅ 올바른 예시: <span style="color: #2e7d32;"><a href="https://example.com/article" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">관련 글 보기</a></span>
+               - ❌ 잘못된 예시 1: <a href="..." style="color: rgb(26, 115, 232);">링크</a> (파란색 사용 금지)
+               - ❌ 잘못된 예시 2: <a href="..." style="color: #1a73e8;">링크</a> (파란색 사용 금지)
+               - ❌ 잘못된 예시 3: <a href="...">링크</a> (색상 미지정 금지)
+               - ❌ 잘못된 예시 4: <a href="..." style="color: #2e7d32;">링크</a> (밑줄 제거 속성 누락)
+               - **중요**: 제휴 링크와 동일한 색상(#2e7d32)을 사용하여 브랜드 통일성 유지
             
             3. **내부 링크는 아래 제공된 "내 과거 포스팅 목록"에서만 선택**
                - 목록에 없는 URL 사용 → 초안 작성 불가
@@ -3332,13 +3345,36 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             4. **결론**: 본문 마지막에 결론 섹션을 h2(## 결론)로 추가해주세요.
                - 결론 제목도 반드시 굵게 표시하세요: ## **결론**
                - 글의 핵심 내용 요약
+               - **독자 행동 유도(CTA) 필수**: 결론에는 반드시 독자의 구체적 행동을 유도하는 문구를 포함하세요
+                 * ✅ 좋은 예시:
+                   - "지금 바로 케이스를 점검해보세요!"
+                   - "여러분은 어떤 방법으로 유막을 해결하셨나요? 댓글로 경험을 공유해주세요!"
+                   - "이 글이 도움이 되셨다면 공유 버튼을 눌러주세요."
+                   - "지금 당장 실천할 수 있는 3가지 방법 중 하나를 선택해보세요."
+                 * ❌ 나쁜 예시:
+                   - "이상으로 마치겠습니다" (행동 유도 없음)
+                   - "도움이 되셨기를 바랍니다" (수동적 표현)
                - 독자에게 도움이 되는 마무리
             
             [작성 순서]
-            h1 제목 → 서론(일반 텍스트) → 본문(h2 섹션들) → 결론(h2)
+            h1 제목 → 서론 → 본문(h2 섹션들) → 결론(h2)
 
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
             ${tags.length > 0 ? tags.map((t) => `- ${t.replace(/^#/, '')}`).join('\n') : '없음'}
+            
+            **[키워드 중복 방지 규칙 - SEO 최적화]**:
+            - **메인 키워드 (주요 타겟 키워드) 사용 빈도**: 전체 초안에서 **3~5회**만 사용하세요
+            - 과도한 키워드 반복(9회 이상)은 구글에서 키워드 스터핑으로 감지되어 검색 순위가 하락합니다
+            - **동의어 활용 필수**: 메인 키워드를 그대로 반복하지 말고, 자연스러운 변형어를 사용하세요
+              * ✅ 좋은 예시 (동의어 활용):
+                - 메인 키워드: "아이폰 15 맥세이프 케이스 유막현상"
+                - 동의어 1: "케이스 유막 문제"
+                - 동의어 2: "맥세이프 얼룩 증상"
+                - 동의어 3: "유막 이슈"
+                - 제목과 서론에서 메인 키워드 2회 사용 → 본문에서는 동의어로 대체 → 결론에서 메인 키워드 1회 재언급
+              * ❌ 나쁜 예시 (과도한 반복):
+                - "아이폰 15 맥세이프 케이스 유막현상"을 매 섹션마다 반복 (9회 이상)
+            - **균형 잡힌 배치**: 제목 1회 + 서론 1회 + 본문 1~2회 + 결론 1회 = 총 4~5회 권장
 
             ### 6. 롱테일 키워드 (🚨 SEO Critical - 본문에 자연스럽게 2-3회 반복 필수)
             ${
@@ -3637,13 +3673,23 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - **절대 금지**: 목차의 첫 번째 항목을 제목으로 사용하지 마세요. 제목은 별도로 생성해야 합니다.
                - 제목 다음에는 서론을 작성하고, 그 다음에 목차의 첫 번째 항목부터 본문 섹션으로 작성하세요.
             3. '현재까지 작성된 초안'이 비어있지 않다면, 그 내용을 존중하여 이어서 작성하거나 내용을 더 풍부하게 만들어주세요.
-            4. **문서 구조**: 제목(h1) → 구분선(---) → 서론 → 본문(h2 섹션들, 목차 기반) → 결론(h2) 순서로 작성하세요.
+            4. **문서 구조**: 제목(h1) → 서론 → 본문(h2 섹션들, 목차 기반) → 결론(h2) 순서로 작성하세요.
                - 목차의 각 항목은 본문의 h2 섹션 제목으로만 사용하세요.
                - 서론과 결론은 목차에 포함되지 않으므로 별도로 작성하세요.
             5. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
             6. '추천 검색어'는 초안 작성에 필요한 자료 수집을 위한 검색어입니다. 이 검색어들이 암시하는 정보 유형(통계, 가이드, 비교, 사례, 트렌드 등)을 이해하고, 해당 정보를 본문에 풍부하게 포함해주세요. 검색어 자체를 단순 나열하지 마세요.
             7. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
-            8. **하이라이트 텍스트는 span 태그 사용**: 중요한 텍스트를 강조할 때 mark 태그가 아닌 span 태그를 사용하세요.
+            8. **통계 및 수치 사용 규칙 (신뢰도 강화)**:
+               - 참고 자료에서 가져온 구체적 통계(%, 개수, 비율 등)를 사용할 때는 **반드시 출처를 명시**하세요
+               - ✅ 올바른 예시:
+                 * "SUMMIT 맥세이프 케이스 2,504개 리뷰에서 87%가 최고 평점을 주었습니다" (출처: 제품 리뷰 데이터)
+                 * "누아트 케이스 사용자 1,656명 중 70%가 디자인에 만족했다고 응답했습니다" (출처: 사용자 설문)
+               - ❌ 잘못된 예시:
+                 * "87%가 만족했습니다" (출처 없이 수치만 나열)
+                 * "대부분의 사용자가 만족합니다" (모호한 표현)
+               - **출처가 없는 수치는 사용하지 마세요**: 참고 자료에 없는 통계를 창작하거나 추측하지 마세요
+               - **대안 표현**: 출처를 알 수 없는 경우 "많은 사용자", "상당수", "일부" 같은 일반적 표현을 사용하세요
+            9. **하이라이트 텍스트는 span 태그 사용**: 중요한 텍스트를 강조할 때 mark 태그가 아닌 span 태그를 사용하세요.
                - ❌ 금지: <mark style="...">텍스트</mark>
                - ✅ 권장: <span style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">텍스트</span>
             8. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
@@ -3760,12 +3806,22 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - 추천 문구: "최저가 확인하기", "상품 상세보기", "사용자 후기 모음 보기", "현재 할인 가격 알아보기", "지금 구매하기", "다양한 옵션 비교하기"
                  - ❌ 피해야 할 표현: "클릭", "여기", "링크" 같은 애매한 단어만 사용
               
-              **5. 시각적 강조 (필수)**:
+              **5. 시각적 강조 & 링크 색상 통일 (필수)**:
                  - **절대 규칙**: 제휴 링크는 녹색 span 태그로 감싸고, 내부에 a 태그 포함
-                 - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">CTA 문구</a></span>
-                 - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer">아이폰 15 케이스 최저가 확인하기</a></span>
+                 - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
+                 - **색상 통일 규칙 (🚨 CRITICAL)**: 모든 링크(제휴 링크, 내부 링크, 외부 참고 링크)는 **#2e7d32 (초록색)**으로 통일하세요
+                   * ✅ 제휴 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">제품 보기</a></span>
+                   * ✅ 내부 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">관련 글 보기</a></span>
+                   * ✅ 외부 참고 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">자료 출처</a></span>
+                   * ❌ 잘못된 예시 1: <a href="..." style="color: #1a73e8;">링크</a> (파란색 사용 금지)
+                   * ❌ 잘못된 예시 2: <a href="...">링크</a> (색상 지정 없음, 기본 색상 사용 금지)
+                   * ❌ 잘못된 예시 3: <a href="..." style="color: #2e7d32;">링크</a> (밑줄 제거 속성 누락)
+                 - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">CTA 문구</a></span>
+                 - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">아이폰 15 케이스 최저가 확인하기</a></span>
                  - ❌ 잘못된 형식 1: [CTA 문구](URL) (span 태그 없음)
                  - ❌ 잘못된 형식 2: <a href="URL"><span style="color: #2e7d32;">CTA</span></a> (순서 반대)
+                 - ❌ 잘못된 형식 3: <a href="URL" style="color: blue;">CTA</a> (다른 색상 사용)
+                 - ❌ 잘못된 형식 4: <a href="URL" style="color: #2e7d32;">CTA</a> (밑줄 제거 속성 누락)
               
               **6. 외부 링크와 분리 (매우 중요)**:
                  - **절대 규칙**: 외부 참고 자료 링크와 제휴 링크를 같은 단락에 혼합하지 마세요
@@ -3949,22 +4005,37 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 * 콘텍스트의 매력을 가장 잘 느낄 수 있게 이미지 생성 텍스트 프롬프트로 작성해주세요.
                 * 제목과 핵심 내용을 반영하여 시각적으로 강렬하고 매력적인 썸네일을 생성할 수 있도록 구체적이고 생동감 있는 묘사를 포함해주세요.
                 * 예: "High-quality, eye-catching background image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay."
-            14. **참고 자료 링크 통합 방법 (매우 중요):**
+            14. **참고 자료 링크 통합 방법 & 색상 통일 (매우 중요):**
+               **[링크 내용 규칙]**:
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
                - 링크는 문맥에 완전히 녹아들어야 하며, 독자가 자연스럽게 클릭하고 싶게 만들어주세요.
-               - 좋은 예시들:
-                 * "세탁기 고장 예방을 위해서는 [올바른 세제 사용법](URL)을 숙지하는 것이 중요합니다."
-                 * "이러한 증상이 나타난다면 전문가의 [자가 진단 가이드](URL)를 확인해보시기 바랍니다."
-                 * "더 자세한 내용은 [가전제품 A/S 정책 안내](URL)에서 확인할 수 있습니다."
-                 * "실제 사용자들의 경험담은 [고장 사례 모음](URL)에서 볼 수 있습니다."
-               - 나쁜 예시들 (절대 사용 금지):
+               
+               **[🚨 CRITICAL - 색상 통일 규칙]**:
+               - **절대 규칙**: 참고 자료 링크(외부 링크)도 **#2e7d32 (초록색)**으로 통일하세요
+               - HTML 형식: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">링크텍스트</a></span>
+               - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
+               - ✅ 올바른 예시: <span style="color: #2e7d32;"><a href="https://example.com/guide" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">올바른 세제 사용법</a></span>
+               - ❌ 잘못된 예시 1: <a href="..." style="color: rgb(26, 115, 232);">링크</a> (파란색 #1a73e8 사용 금지)
+               - ❌ 잘못된 예시 2: <a href="..." style="color: blue;">링크</a> (파란색 사용 금지)
+               - ❌ 잘못된 예시 3: <a href="...">링크</a> (색상 미지정 금지)
+               - ❌ 잘못된 예시 4: <a href="..." style="color: #2e7d32;">링크</a> (밑줄 제거 속성 누락)
+               - **중요**: 제휴 링크, 내부 링크와 동일한 색상(#2e7d32)을 사용하여 브랜드 통일성 유지
+               
+               **[좋은 예시들]**:
+                 * "세탁기 고장 예방을 위해서는 <span style=\"color: #2e7d32;\"><a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration: none;\">올바른 세제 사용법</a></span>을 숙지하는 것이 중요합니다."
+                 * "이러한 증상이 나타난다면 전문가의 <span style=\"color: #2e7d32;\"><a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration: none;\">자가 진단 가이드</a></span>를 확인해보시기 바랍니다."
+                 * "더 자세한 내용은 <span style=\"color: #2e7d32;\"><a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration: none;\">가전제품 A/S 정책 안내</a></span>에서 확인할 수 있습니다."
+                 * "실제 사용자들의 경험담은 <span style=\"color: #2e7d32;\"><a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration: none;\">고장 사례 모음</a></span>에서 볼 수 있습니다."
+               
+               **[나쁜 예시들 (절대 사용 금지)]**:
                  * "참고 자료 1에 따르면..." (번호 표기 - 절대 금지)
                  * "(참고 자료 2)" (번호 표기 - 절대 금지)
                  * "참고 자료 3에서..." (번호 표기 - 절대 금지)
                  * "자세한 내용은 [여기](URL)를 참고하시기 바랍니다." (모호한 표현)
                  * "관련 자료: [제목](URL)" (나열식)
+                 * <a href="..." style="color: #1a73e8;">링크</a> (파란색 사용 - 절대 금지)
             
             ${
               myPastPostsText
