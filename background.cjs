@@ -349,6 +349,63 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // === [System] 블로그 수준 조회 ===
+  if (msg.action === 'get_blog_level') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const db = getDb();
+        
+        // [1단계] 애널리틱스 데이터 확인
+        const analyticsSnapshot = await get(ref(db, `analytics/${userId}`));
+        if (analyticsSnapshot.exists()) {
+          const analyticsData = analyticsSnapshot.val();
+          let totalPageviews = 0;
+          Object.values(analyticsData).forEach(post => {
+            if (post.pageviews) totalPageviews += post.pageviews;
+          });
+          
+          let level = 'beginner';
+          if (totalPageviews >= 1000) level = 'advanced';
+          else if (totalPageviews >= 100) level = 'intermediate';
+          
+          return { success: true, level, monthlyVisitors: totalPageviews, source: 'analytics' };
+        }
+        
+        // [2단계] 수동 입력 확인
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+        if (activeChannelId) {
+          const channelSnapshot = await get(ref(db, `channels/${userId}/${activeChannelId}`));
+          if (channelSnapshot.exists()) {
+            const channelData = channelSnapshot.val();
+            const manualVisitors = channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
+            if (manualVisitors && manualVisitors > 0) {
+              let level = 'beginner';
+              if (manualVisitors >= 1000) level = 'advanced';
+              else if (manualVisitors >= 100) level = 'intermediate';
+              
+              return { success: true, level, monthlyVisitors: manualVisitors, source: 'manual' };
+            }
+          }
+        }
+        
+        // [3단계] 포스팅 개수로 추정
+        const publishedSnapshot = await get(ref(db, `kanban/${userId}/published`));
+        if (publishedSnapshot.exists()) {
+          const publishedCount = Object.keys(publishedSnapshot.val()).length;
+          let level = 'beginner';
+          if (publishedCount > 20) level = 'advanced';
+          else if (publishedCount > 5) level = 'intermediate';
+          
+          return { success: true, level, monthlyVisitors: 0, source: 'post_count', note: `발행 ${publishedCount}개` };
+        }
+        
+        // [기본값]
+        return { success: true, level: 'beginner', monthlyVisitors: 0, source: 'default' };
+      })()
+    );
+  }
+
   // === [Collector Service] 데이터 수집 ===
   if (msg.action === 'fetch_all_channel_data') return handleAsync(fetchAllChannelData());
   if (msg.action === 'refresh_channel_data')
@@ -1825,6 +1882,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         Logger.info(
           `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
         );
+        
+        // [DEBUG] channel_content 상세 데이터 출력
+        console.log('[CHANNEL_CONTENT DEBUG] ===== 시작 =====');
+        console.log('[CHANNEL_CONTENT DEBUG] blogs 총 개수:', blogs.length);
+        console.log('[CHANNEL_CONTENT DEBUG] youtubes 총 개수:', youtubes.length);
+        if (blogs.length > 0) {
+          console.log('[CHANNEL_CONTENT DEBUG] 첫 번째 블로그 포스트 샘플:', {
+            title: blogs[0].title,
+            sourceId: blogs[0].sourceId,
+            fullLink: blogs[0].fullLink,
+            publishedAt: blogs[0].publishedAt
+          });
+          console.log('[CHANNEL_CONTENT DEBUG] 모든 블로그 sourceId 목록:', [...new Set(blogs.map(b => b.sourceId))]);
+          console.log('[CHANNEL_CONTENT DEBUG] 전체 포스트 제목 목록:');
+          blogs.slice(0, 10).forEach((blog, idx) => {
+            console.log(`  ${idx + 1}. ${blog.title} (sourceId: ${blog.sourceId})`);
+          });
+          if (blogs.length > 10) {
+            console.log(`  ... 외 ${blogs.length - 10}개`);
+          }
+        }
+        console.log('[CHANNEL_CONTENT DEBUG] ===== 끝 =====');
 
         // 디버깅: null/undefined로 필터링된 항목 확인
         if (blogsRawCount > blogs.length) {

@@ -1116,9 +1116,46 @@ function renderDetailView(scrapId, container) {
     
     showLoadingToast('✨ 추천 아이디어를 요청 중입니다...');
     try {
-      const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요. 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다. 스크랩 내용: ${content}`;
+      // [핵심 추가] 블로그 수준 정보 요청 (background에서 처리)
+      let blogLevelInfo = '';
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: 'get_blog_level'
+        });
+        
+        if (response && response.success) {
+          const level = response.level;
+          const visitors = response.monthlyVisitors || 0;
+          
+          if (level === 'beginner') {
+            blogLevelInfo = `\n\n[블로그 수준: 신규 (월 ${visitors}명)]\n권장 전략: 롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축\n롱테일 예시: 4-6단어 이상 구체적 질문 형태 (월 검색량 50-200회)`;
+          } else if (level === 'intermediate') {
+            blogLevelInfo = `\n\n[블로그 수준: 성장 중 (월 ${visitors}명)]\n권장 전략: 롱테일 70% + 미들테일 30% - 점진적 경쟁 키워드 진입\n롱테일 예시: 4-6단어 이상 구체적 질문\n미들테일 예시: 2-3단어 조합 (월 검색량 500-1,000회)`;
+          } else {
+            blogLevelInfo = `\n\n[블로그 수준: 성숙 (월 ${visitors}명)]\n권장 전략: 미들테일 60% + 헤드 키워드 40% - 경쟁 키워드 적극 공략\n미들테일 예시: 2-3단어 조합 (월 검색량 500-1,000회)`;
+          }
+        } else {
+          blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
+        }
+      } catch (e) {
+        console.warn('[Scrapbook] 블로그 수준 분석 실패:', e);
+        blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
+      }
       
-      console.debug('[Scrapbook] Sending message to background...', { promptLength: prompt.length });
+      const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요.
+      
+각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다.
+
+[아이디어 선정 시 필수 고려사항]
+1. SEO 최적화: 제목(title)에 검색 의도가 명확한 키워드 포함
+2. 블로그 수준에 맞는 키워드 난이도 선택 (아래 참고)
+3. 구체적이고 실용적인 주제 우선 (추상적 개념 지양)
+4. 독자가 검색할 법한 질문 형태 고려
+${blogLevelInfo}
+
+스크랩 내용: ${content}`;
+      
+      console.debug('[Scrapbook] Sending message to background...', { promptLength: prompt.length, blogLevelInfo });
       
       // background script를 통해 Gemini API 호출 (초안 작성과 동일한 방식)
       const response = await chrome.runtime.sendMessage({

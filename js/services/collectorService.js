@@ -702,7 +702,12 @@ export async function fetchImageAsBase64(url) {
 
     if (!res.ok) {
       const errorMsg = `HTTP ${res.status} ${res.statusText}`;
-      console.error('[collectorService] Fetch failed:', errorMsg);
+      // HTTP 410 Gone은 예상 가능한 에러이므로 warn 대신 info 레벨로 처리
+      if (res.status === 410 || res.status === 404) {
+        console.info('[collectorService] Image not available:', errorMsg);
+      } else {
+        console.error('[collectorService] Fetch failed:', errorMsg);
+      }
       throw new Error(errorMsg);
     }
 
@@ -729,8 +734,13 @@ export async function fetchImageAsBase64(url) {
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    console.error('[collectorService] fetchImageAsBase64 exception:', e);
-    Logger.warn('[fetchImageAsBase64] fetch 실패:', e.message);
+    // HTTP 410/404는 조용히 처리
+    if (e.message.includes('410') || e.message.includes('404')) {
+      console.info('[collectorService] Image permanently unavailable:', e.message);
+    } else {
+      console.error('[collectorService] fetchImageAsBase64 exception:', e);
+      Logger.warn('[fetchImageAsBase64] fetch 실패:', e.message);
+    }
 
     // 폴백: img 태그 사용 (Service Worker에서는 불가)
     if (!isServiceWorker) {

@@ -1533,8 +1533,35 @@ function generateSimilarIdea(cardId, status, cardData) {
 
   showToast('🤖 AI가 유사 아이디어를 생성 중입니다...');
 
-  // 카드 정보를 기반으로 AI에게 유사 아이디어 생성 요청
-  const prompt = `
+  // [핵심 추가] 블로그 수준 분석 후 프롬프트 생성
+  (async () => {
+    let blogLevelInfo = '';
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'get_blog_level'
+      });
+      
+      if (response && response.success) {
+        const level = response.level;
+        const visitors = response.monthlyVisitors || 0;
+        
+        if (level === 'beginner') {
+          blogLevelInfo = `\n\n[블로그 수준: 신규 (월 ${visitors}명)]\n권장 전략: 롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축\n제목 예시: 4-6단어 이상 구체적 질문 형태 (예: "아이폰 케이스 카드 수납 스티커 꼭 필요한가")`;
+        } else if (level === 'intermediate') {
+          blogLevelInfo = `\n\n[블로그 수준: 성장 중 (월 ${visitors}명)]\n권장 전략: 롱테일 70% + 미들테일 30% - 점진적 경쟁 키워드 진입\n제목 예시:\n- 롱테일: 4-6단어 이상 구체적 질문\n- 미들테일: 2-3단어 조합 (예: "아이폰 케이스 추천 2026")`;
+        } else {
+          blogLevelInfo = `\n\n[블로그 수준: 성숙 (월 ${visitors}명)]\n권장 전략: 미들테일 60% + 헤드 키워드 40% - 경쟁 키워드 적극 공략\n제목 예시: 2-3단어 조합으로 검색량 높은 키워드 (예: "아이폰 케이스")`;
+        }
+      } else {
+        blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
+      }
+    } catch (e) {
+      console.warn('[Kanban] 블로그 수준 분석 실패:', e);
+      blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
+    }
+
+    // 카드 정보를 기반으로 AI에게 유사 아이디어 생성 요청
+    const prompt = `
 당신은 블로그 콘텐츠 전략가입니다. 아래 기존 콘텐츠를 기반으로 유사하지만 차별화된 새로운 아이디어를 제안해주세요.
 
 [기존 콘텐츠]
@@ -1545,18 +1572,20 @@ function generateSimilarIdea(cardId, status, cardData) {
 [요청]
 - 기존 콘텐츠와 유사한 주제이지만 다른 각도나 접근 방식으로 차별화된 아이디어 3개를 제안해주세요.
 - 스핀오프, 후속편, 심화 버전 등 다양한 형태로 제안 가능합니다.
+- **중요**: 제목(title)에 SEO 키워드를 포함하고, 블로그 수준에 맞는 키워드 난이도로 작성하세요.
+${blogLevelInfo}
 
 [출력 형식]
 반드시 다음 JSON 배열 형식으로만 응답해주세요:
 [
   {
-    "title": "아이디어 제목",
+    "title": "아이디어 제목 (SEO 키워드 포함)",
     "description": "이 아이디어가 기존 콘텐츠와 어떻게 차별화되는지 설명"
   }
 ]
 `;
 
-  chrome.runtime.sendMessage(
+    chrome.runtime.sendMessage(
     {
       action: 'call_gemini',
       prompt: prompt,
@@ -1627,6 +1656,7 @@ function generateSimilarIdea(cardId, status, cardData) {
       }
     }
   );
+  })(); // async IIFE 종료
 }
 
 /**

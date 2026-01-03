@@ -474,6 +474,29 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
           ? prompt.substring(0, 200)
           : Object.prototype.toString.call(prompt)
       );
+      
+      // 내부 링크 디버깅: 프롬프트에 내부 링크 섹션이 포함되어 있는지 확인
+      if (typeof prompt === 'string') {
+        const hasInternalLinkSection = prompt.includes('절대 규칙 1순위') || prompt.includes('내 과거 포스팅 목록');
+        const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록');
+        
+        console.log('[INTERNAL LINK DEBUG] 프롬프트 내부 링크 포함 여부:', {
+          hasInternalLinkSection,
+          hasMyPastPosts,
+          promptLength: prompt.length,
+        });
+        
+        // 내부 링크 섹션만 추출해서 로깅
+        if (hasMyPastPosts) {
+          const startIdx = prompt.indexOf('[내 과거 포스팅 목록');
+          const endIdx = prompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
+          if (startIdx >= 0 && endIdx > startIdx) {
+            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', prompt.substring(startIdx, endIdx));
+          }
+        } else {
+          console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다!');
+        }
+      }
     } catch (e) {}
     // [수정] 멀티모달 입력을 위한 parts 구성
     const parts = [];
@@ -1622,6 +1645,13 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
   if (!Array.isArray(internalLinks)) internalLinks = [];
   if (!Array.isArray(referenceLinks)) referenceLinks = [];
 
+  // [신규] 모든 링크가 비어있으면 조기 반환
+  const totalLinks = affiliateLinks.length + internalLinks.length + referenceLinks.length;
+  if (totalLinks === 0) {
+    Logger.debug('[postProcessAffiliateHtml] 삽입할 링크가 없어 원본 HTML 반환');
+    return html;
+  }
+
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -1631,6 +1661,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       url: (l.url || '').trim(),
       productName: l.productName || '',
       keywords: Array.isArray(l.keywords) ? l.keywords : [],
+      platform: l.platform || '',
     }));
 
     // Normalize internal links (posts)
@@ -1650,7 +1681,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
     const findAffiliateByHref = (href) => {
       if (!href) return null;
       const hrefNorm = href.trim();
-      return normalized.find((a) => hrefNorm === a.url || hrefNorm.startsWith(a.url));
+      return normalizedAffiliates.find((a) => hrefNorm === a.url || hrefNorm.startsWith(a.url));
     };
 
     // 1) Ensure existing anchors that match affiliate links are wrapped/styled
@@ -1706,18 +1737,35 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       // Helper to escape regex
       const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-      // A function to attempt insertion for a set of link objects
-      const tryInsertLinks = (links, makeAnchorText) => {
+      // [개선] 링크 삽입 함수 - 더 유연한 매칭 전략
+      const tryInsertLinks = (links, makeAnchorText, linkType = 'general') => {
+        Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 삽입 시도: ${links.length}개`);
+        
         for (const link of links) {
-          if (insertedCount >= maxLinks) return;
+          if (insertedCount >= maxLinks) {
+            Logger.debug(`[postProcessAffiliateHtml] 최대 링크 개수(${maxLinks}) 도달`);
+            return;
+          }
           const targetUrl = link.url;
           if (!targetUrl || usedUrls.has(targetUrl)) continue;
 
+          // [개선] 더 많은 매칭 후보 생성
           const candidates = [
             ...(link.keywords || []),
             link.productName || link.title || '',
+            link.platform || '',
           ].filter(Boolean);
-          if (candidates.length === 0) continue;
+          
+          // [신규] 제품명을 단어로 분리하여 부분 매칭도 시도
+          if (link.productName) {
+            const words = link.productName.split(/\s+/).filter(w => w.length >= 2);
+            candidates.push(...words);
+          }
+          
+          if (candidates.length === 0) {
+            Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 매칭 후보 없음:`, targetUrl);
+            continue;
+          }
 
           // Sort candidates by length desc to prefer longer, more specific phrases
           candidates.sort((a, b) => b.length - a.length);
@@ -1726,11 +1774,15 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
           let matched = false;
           for (const tnode of textNodes) {
             const txt = tnode.textContent;
-            for (const pattern of patterns) {
+            for (let i = 0; i < patterns.length; i++) {
+              const pattern = patterns[i];
               const m = txt.match(pattern);
               if (m) {
+                const matchedPhrase = m[0];
+                Logger.debug(`[postProcessAffiliateHtml] 매칭 성공: "${matchedPhrase}" -> ${targetUrl}`);
+                
                 // Use matched phrase as anchor text to preserve context
-                const anchorText = makeAnchorText ? makeAnchorText(m[0], link) : m[0];
+                const anchorText = makeAnchorText ? makeAnchorText(matchedPhrase, link) : matchedPhrase;
 
                 const span = doc.createElement('span');
                 span.setAttribute('style', 'color: #2e7d32;');
@@ -1743,7 +1795,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 
                 // Replace only the first match occurrence inside this text node
                 const before = txt.slice(0, m.index);
-                const after = txt.slice(m.index + m[0].length);
+                const after = txt.slice(m.index + matchedPhrase.length);
                 const frag = doc.createDocumentFragment();
                 if (before) frag.appendChild(doc.createTextNode(before));
                 frag.appendChild(span);
@@ -1751,19 +1803,27 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 
                 if (tnode.parentNode) {
                   tnode.parentNode.replaceChild(frag, tnode);
+                  insertedCount += 1;
+                  usedUrls.add(targetUrl);
+                  Logger.info(`[postProcessAffiliateHtml] ✅ ${linkType} 링크 삽입 성공 (${insertedCount}/${maxLinks}): "${anchorText}"`);
+                  matched = true;
+                  break;
                 } else {
                   Logger.warn(
                     '[postProcessAffiliateHtml] 텍스트 노드의 parentNode가 존재하지 않아 대체 작업을 건너뜁니다.',
                     tnode
                   );
                 }
-                insertedCount += 1;
-                usedUrls.add(targetUrl);
-                matched = true;
-                break;
               }
             }
             if (matched) break;
+          }
+          
+          if (!matched) {
+            Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 매칭 실패:`, {
+              url: targetUrl,
+              candidates: candidates.slice(0, 3),
+            });
           }
         }
       };
@@ -1775,10 +1835,12 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
           return link.title;
         if (link.title && link.title.split(' ').length <= 4) return link.title; // short title
         return matchedText;
-      });
+      }, 'internal');
 
       // reference links: use matched phrase
-      if (insertedCount < maxLinks) tryInsertLinks(normalizedRefs, (m) => m);
+      if (insertedCount < maxLinks) {
+        tryInsertLinks(normalizedRefs, (m) => m, 'reference');
+      }
 
       // affiliate links: use matched phrase; fallback to productName + CTA if matched phrase is too generic
       if (insertedCount < maxLinks) {
@@ -1787,7 +1849,33 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
           const isGeneric = genericWords.some((w) => matchedText.toLowerCase().includes(w));
           if (isGeneric && link.productName) return `${link.productName} 최저가 확인하기`;
           return matchedText;
-        });
+        }, 'affiliate');
+      }
+      
+      // [신규] 삽입 결과 로깅 및 최소 개수 검증
+      const minRequiredLinks = 2;
+      Logger.info(`[postProcessAffiliateHtml] 링크 삽입 완료: ${insertedCount}/${maxLinks}개`);
+      
+      if (totalLinks > 0 && insertedCount < minRequiredLinks) {
+        Logger.warn(
+          `[postProcessAffiliateHtml] ⚠️ 제휴 링크 최소 개수 미달: ${insertedCount}개 (최소 ${minRequiredLinks}개 필요)`,
+          {
+            affiliateLinksAvailable: affiliateLinks.length,
+            internalLinksAvailable: internalLinks.length,
+            referenceLinksAvailable: referenceLinks.length,
+          }
+        );
+        
+        // [선택] 사용자에게 경고 알림
+        try {
+          chrome.runtime.sendMessage({
+            action: 'show_notification',
+            title: '제휴 링크 삽입 부족',
+            message: `제휴 링크가 ${insertedCount}개만 삽입되었습니다. 최소 ${minRequiredLinks}개 이상 필요합니다.`,
+          }).catch(() => {});
+        } catch (e) {
+          // 알림 실패 무시
+        }
       }
     }
 
@@ -1894,14 +1982,19 @@ function searchRelevantContent(scrapsContent, searchTerms) {
     const matches = findContextAroundKeyword(fullText, word, 150);
     if (matches.length > 0) {
       const originKeyword = termOrigins.get(word);
+      const selectedMatches = matches.slice(0, 3);
       relevantSections.push({
         keyword: originKeyword, // 원본 키워드 유지
         searchWord: word, // 실제 검색된 단어
-        content: matches.slice(0, 3), // 각 단어당 최대 3개 매칭
+        content: selectedMatches, // 각 단어당 최대 3개 매칭
       });
       console.log(
         `✅ [${index + 1}/${expandedTerms.length}] "${word}" (from "${originKeyword}") → 매칭 ${matches.length}개`
       );
+      // [NEW] 실제 매칭된 텍스트 샘플 출력
+      selectedMatches.forEach((match, i) => {
+        console.log(`   📌 샘플 ${i + 1}: "${match.substring(0, 100)}..."`);
+      });
     } else {
       console.warn(`❌ [${index + 1}/${expandedTerms.length}] "${word}" → 매칭 없음`);
     }
@@ -2245,12 +2338,47 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     }
 
     // 6. 시스템 프롬프트 생성
-    const systemPrompt = builder.buildSystemPrompt();
+    let systemPrompt = builder.buildSystemPrompt();
+    
+    // [신규] 현재 날짜와 시즌 컨텍스트 추가
+    const now = new Date();
+    const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentYear = now.getFullYear();
+    
+    // 시즌 판단
+    let currentSeason = '';
+    if (currentMonth >= 3 && currentMonth <= 5) currentSeason = '봄';
+    else if (currentMonth >= 6 && currentMonth <= 8) currentSeason = '여름';
+    else if (currentMonth >= 9 && currentMonth <= 11) currentSeason = '가을';
+    else currentSeason = '겨울';
+    
+    // 시즌별 주의사항
+    const seasonWarnings = {
+      '봄': '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
+      '여름': '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
+      '가을': '크리스마스는 너무 이르며, 여름 관련 콘텐츠는 부적절합니다.',
+      '겨울': '여름휴가, 휴가철 관련 콘텐츠는 부적절합니다. (단, 12월은 크리스마스 시즌으로 적절)'
+    };
+    
+    const dateContext = `
+
+📅 **[중요] 현재 날짜 및 시즌 정보**:
+- 작성 일자: ${currentYear}년 ${currentMonth}월 (${currentDate})
+- 현재 시즌: ${currentSeason}
+- ⚠️ **시즌 부적합 콘텐츠 주의**: ${seasonWarnings[currentSeason]}
+- **절대 규칙**: 현재 시즌과 맞지 않는 이벤트, 상품, 트렌드를 언급하지 마세요.
+  * 예: 1월에 "크리스마스 시즌을 맞아..." 같은 표현 금지
+  * 예: 여름에 "겨울 난방 팁" 같은 주제 금지
+- 연도를 언급할 때는 반드시 ${currentYear}년을 사용하세요.
+`;
+    
+    systemPrompt += dateContext;
 
     // 로깅
     Logger.biz(
       `🎭 [Persona Build]`,
-      `Type: ${builder.getPersonaName()}, Custom Tone: ${ideaData.tone || builder.getToneName()}`
+      `Type: ${builder.getPersonaName()}, Custom Tone: ${ideaData.tone || builder.getToneName()}, Date: ${currentDate} (${currentSeason})`
     );
 
     // 데이터 준비: 필요 시 analytics data를 불러올 수 있지만 현재는 사용하지 않습니다.
@@ -2286,7 +2414,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     const compressText = (text) => {
       if (!text) return '';
       return text
-        .replace(/\n\s*\n/g, '\n') // 여러 줄 공백을 한 줄로 축소
+        .replace(/\n+/g, ' ') // 모든 줄바꿈을 공백으로 변환
         .replace(/[ \t]+/g, ' ') // 연속된 스페이스/탭을 하나로 축소
         .replace(/URL 복사 이웃추가 본문 기타 기능/g, '') // 네이버 블로그 상단 노이즈 제거
         .trim();
@@ -2571,8 +2699,15 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         linkedScrapsContent.length > 0
       ) {
         Logger.info('[RAG] 조건 통과 - 키워드 기반 검색 시작');
-        // 1. 키워드 기반 검색
-        const relevantSections = searchRelevantContent(linkedScrapsContent, searchTerms);
+        
+        // [FIX] 압축된 텍스트를 담은 객체 배열로 변환 (compressText 적용됨)
+        const compressedScraps = linkedScrapsContent.map((scrap, index) => ({
+          ...scrap,
+          text: compressText(scrap.text || ''),
+        }));
+        
+        // 1. 키워드 기반 검색 (압축된 텍스트 사용)
+        const relevantSections = searchRelevantContent(compressedScraps, searchTerms);
 
         // 2. 목차별 구조화 (목차가 있는 경우)
         if (searchTerms.outline.length > 0 && relevantSections.length > 0) {
@@ -2627,49 +2762,121 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
       )}\n\n`;
     }
 
-    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회 (수정됨)
+    // 4. [스마트 내부 링크] 내 과거 포스팅 목록 조회 (수정됨 - 발행된 포스팅 포함)
     let myPastPostsText = '';
     try {
       const userId = await getCurrentUserId();
+      
+      // [개선] 두 곳에서 포스팅 수집: channel_content (외부 수집) + published (직접 발행)
       const contentSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
+      const publishedSnap = await get(ref(getDb(), `kanban/${userId}/published`));
+      
       const allBlogs = contentSnap?.val() || {};
-
-      // 현재 채널의 글만 필터링
-      const myPosts = Object.values(allBlogs)
+      const publishedPosts = publishedSnap?.val() || {};
+      
+      // 디버깅: 원본 데이터 확인
+      console.log('[Internal Link DEBUG] channel_content 원본 키 개수:', Object.keys(allBlogs).length);
+      console.log('[Internal Link DEBUG] channel_content 샘플 데이터:', Object.keys(allBlogs).slice(0, 3));
+      console.log('[Internal Link DEBUG] published 원본 키 개수:', Object.keys(publishedPosts).length);
+      console.log('[Internal Link DEBUG] ideaData.channelId:', ideaData.channelId);
+      console.log('[Internal Link DEBUG] targetSourceId:', targetSourceId);
+      
+      // 외부 수집 콘텐츠
+      const externalPosts = Object.values(allBlogs)
         .filter((item) => item !== null && item.title && item.fullLink)
+        .map(item => ({
+          title: item.title,
+          url: item.fullLink || item.link,
+          description: item.description || item.cleanText?.substring(0, 100) || '',
+          publishedAt: item.publishedAt || item.createdAt || 0,
+          sourceId: item.sourceId, // 채널 필터링용
+          source: 'external'
+        }));
+      
+      console.log('[Internal Link DEBUG] externalPosts 필터 후:', externalPosts.length);
+      if (externalPosts.length > 0) {
+        console.log('[Internal Link DEBUG] externalPosts 첫 번째 sourceId:', externalPosts[0].sourceId);
+      }
+      
+      // 직접 발행한 포스팅 (publishedUrl이 있는 것만)
+      const myPublishedPosts = Object.values(publishedPosts)
+        .filter((item) => item !== null && item.title && item.publishedUrl)
+        .map(item => ({
+          title: item.title,
+          url: item.publishedUrl,
+          description: item.description || item.seoDescription || '',
+          publishedAt: item.publishedAt || item.updatedAt || item.createdAt || 0,
+          source: 'published'
+        }));
+      
+      // 두 목록 합치기
+      const allPosts = [...externalPosts, ...myPublishedPosts];
+      
+      // 아이디어 키워드 추출 (제목 + 설명에서)
+      const ideaKeywords = [];
+      if (ideaData.title) {
+        ideaKeywords.push(...ideaData.title.toLowerCase().split(/\s+/).filter(w => w.length > 1));
+      }
+      if (ideaData.description) {
+        ideaKeywords.push(...ideaData.description.toLowerCase().split(/\s+/).filter(w => w.length > 1));
+      }
+      
+      console.log('[Internal Link DEBUG] 아이디어 키워드:', ideaKeywords.slice(0, 10));
+      
+      // 채널 필터링 + 관련성 점수 계산
+      const myPosts = allPosts
         .filter((item) => {
-          // channelId가 지정되지 않은 카드는 모든 글을 포함
+          // 직접 발행한 포스팅은 모두 포함
+          if (item.source === 'published') return true;
+          
+          // 외부 콘텐츠는 채널 필터링
           if (!ideaData.channelId) return true;
-
-          // [핵심 수정] 변환된 ID(targetSourceId)와 비교
           if (targetSourceId && item.sourceId === targetSourceId) return true;
-
-          // 기존 방식 호환 (혹시 모를 구버전 데이터 대응)
           if (item.sourceId === ideaData.channelId) return true;
-
+          
           return false;
         })
-        .sort((a, b) => {
-          // 최신순 정렬
-          const dateA = a.publishedAt || a.createdAt || 0;
-          const dateB = b.publishedAt || b.createdAt || 0;
-          return dateB - dateA;
+        .map(item => {
+          // 관련성 점수 계산
+          const postText = `${item.title} ${item.description}`.toLowerCase();
+          let relevanceScore = 0;
+          
+          for (const keyword of ideaKeywords.slice(0, 20)) { // 상위 20개 키워드만 사용
+            if (postText.includes(keyword)) {
+              relevanceScore++;
+            }
+          }
+          
+          return { ...item, relevanceScore };
         })
-        .slice(0, 20); // 최근 20개
+        .filter(item => item.relevanceScore > 0) // 관련성 0인 글 제외
+        .sort((a, b) => {
+          // 관련성 우선, 그 다음 최신순
+          if (b.relevanceScore !== a.relevanceScore) {
+            return b.relevanceScore - a.relevanceScore;
+          }
+          return b.publishedAt - a.publishedAt;
+        })
+        .slice(0, 15); // 관련성 높은 상위 15개 (다양한 링크 선택 위해 증가)
 
-      Logger.debug(`[Internal Link] 최종 매칭된 내 글 개수: ${myPosts.length}개`);
+      Logger.debug(`[Internal Link] 외부 수집: ${externalPosts.length}개, 직접 발행: ${myPublishedPosts.length}개, 최종 매칭: ${myPosts.length}개`);
+      console.log('[Internal Link DEBUG] 관련성 점수:', myPosts.map(p => `${p.title.substring(0, 30)}... (${p.relevanceScore}점)`));
 
       if (myPosts.length > 0) {
         myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
         myPastPostsText += myPosts
           .map((post, idx) => {
             const title = post.title || '제목 없음';
-            const url = post.fullLink || post.link || '';
+            const url = post.url || post.fullLink || post.link || '';
             const description = post.description || post.cleanText?.substring(0, 100) || '';
             return `${idx + 1}. 제목: ${title}\n   URL: ${url}\n   설명: ${description}\n`;
           })
           .join('\n');
         myPastPostsText += '\n';
+        
+        console.log('[Internal Link DEBUG] myPastPostsText 생성 완료:', myPastPostsText.substring(0, 500));
+      } else {
+        console.log('[Internal Link DEBUG] myPosts.length === 0, 내부 링크 목록 생성 안 됨');
       }
     } catch (error) {
       Logger.warn('[generateDraftFromIdea] 내 과거 포스팅 조회 실패:', error);
@@ -2682,9 +2889,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     // 6. 프롬프트 구성
     // performanceInfo prepared but not used directly in prompt at this time
 
-    // [추가] 현재 날짜 및 연도 정보 생성
+    // [추가] 현재 날짜 문자열 생성 (currentYear는 이미 위에서 선언됨)
     const today = new Date();
-    const currentYear = today.getFullYear();
     const currentDateString = today.toLocaleDateString('ko-KR', {
       year: 'numeric',
       month: 'long',
@@ -2884,6 +3090,62 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ${systemPrompt}
             
             ${
+              myPastPostsText
+                ? `
+            🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+            
+            ⛔ **[절대 규칙 1순위 - 이 규칙을 어기면 초안 작성 불가]** ⛔
+            
+            당신은 지금부터 초안을 작성하기 전에 반드시 다음을 확인해야 합니다:
+            
+            1. **내부 링크 4-5개를 본문 H2 섹션에 삽입**
+               - 3개 이하 → 초안 작성 불가
+               - 결론에만 배치 → 초안 작성 불가
+               - 본문 H2 섹션에 최소 3개 배치 필수
+               - **⛔ 절대 금지**: 같은 URL을 2번 이상 사용
+                 ❌ 잘못된 예: 
+                    링크1: [케이스 관리법](https://example.com/case-tips)
+                    링크2: [변색 방지](https://example.com/case-tips) ← 같은 URL 중복!
+                 ✅ 올바른 예:
+                    링크1: [케이스 관리법](https://example.com/case-tips)
+                    링크2: [액세서리 추천](https://example.com/accessories) ← 다른 URL
+            
+            2. **내부 링크 형식 (절대 엄수): [링크텍스트](전체URL)**
+               - ✅ 올바른 예시: [투명 케이스 변색 막는 법](https://costcatcher.k-posting.info/entry/clear-case-yellowing-prevention-tips)
+               - ❌ 틀린 예시: 투명 케이스 변색 막는 법https://costcatcher.k-posting.info/entry/... (URL이 텍스트 옆에 붙음)
+               - ❌ 틀린 예시: [투명 케이스 변색 막는 법] (URL 없음)
+               - **필수**: 대괄호 [ ] 안에 링크 텍스트, 소괄호 ( ) 안에 전체 URL
+               - URL 없는 링크 → 초안 작성 불가
+               - 텍스트와 URL이 분리되지 않은 경우 → 초안 작성 불가
+            
+            3. **내부 링크는 아래 제공된 "내 과거 포스팅 목록"에서만 선택**
+               - 목록에 없는 URL 사용 → 초안 작성 불가
+            
+            4. **작성 순서 (반드시 준수)**:
+               STEP 1: 과거 포스팅 목록에서 관련 글 4-5개 선정
+               STEP 1-1: ⚠️ 선정한 URL 리스트 작성 (중복 체크용)
+               STEP 1-2: ⚠️ 같은 URL이 2개 이상 있으면 다른 글로 교체
+               STEP 2: H2 섹션 3개에 각각 1개씩 배치 계획
+               STEP 3: 결론에 1개 배치 계획
+               STEP 4: 본문 작성 시 계획대로 삽입
+               STEP 5: 작성 후 4-5개 모두 삽입되었는지 확인
+            
+            ${myPastPostsText}
+            
+            ⚠️ **작성 후 필수 자가검사**:
+            □ 본문 H2 섹션에 내부 링크 3개 이상 삽입했는가?
+            □ 모든 링크에 전체 URL이 포함되어 있는가?
+            □ 링크된 글이 현재 주제와 관련이 있는가?
+            □ 총 4개의 내부 링크를 삽입했는가?
+            
+            위 체크리스트를 모두 통과하지 못하면 초안 작성을 다시 시작하세요.
+            
+            🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+            `
+                : ''
+            }
+            
+            ${
               linkedScrapsText || originalContentText
                 ? `
             ═══════════════════════════════════════════════════════════════
@@ -3050,12 +3312,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
             ${tags.length > 0 ? tags.map((t) => `- ${t.replace(/^#/, '')}`).join('\n') : '없음'}
 
-            ### 6. 롱테일 키워드 (SEO 최적화를 위해 본문에 자연스럽게 통합해주세요)
+            ### 6. 롱테일 키워드 (🚨 SEO Critical - 본문에 자연스럽게 2-3회 반복 필수)
             ${
               longTailKeywords.length > 0
                 ? longTailKeywords.map((k) => `- ${k}`).join('\n')
                 : '없음'
             }
+            
+            **[롱테일 키워드 사용 규칙 - 필수]**:
+            - 각 롱테일 키워드를 본문에 **최소 2회 이상** 자연스럽게 반복해서 사용하세요
+            - 단순 나열이 아닌, 문장 안에 자연스럽게 녹여서 사용
+            - ✅ 예: "카드 수납 케이스 스티커 꼭 필요한가"라는 키워드를
+              * 서론: "카드 수납 케이스 스티커 꼭 필요한가요? 이 질문에 답하기 전에..."
+              * 본문: "많은 분들이 카드 수납 케이스 스티커 꼭 필요한가 고민하시는데..."
+              * 결론: "결론적으로, 카드 수납 케이스 스티커 꼭 필요한가는 개인의 사용 패턴에 달려있습니다"
+            - 롱테일 키워드가 본문에 1회만 등장하거나 아예 없으면 SEO 점수 크게 하락
             
             ### 7. 추천 검색어 (자료 수집용 - 초안 작성에 필요한 추가 정보를 찾기 위한 검색어)
             ${
@@ -3190,6 +3461,65 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             - 섹션2~4 (본문): 위트 있는 비유 + 감정 자극 표현 + 실패담 교훈 활용
             - 섹션5 (결론): 대비/반전 + 행동 유도
             
+            **[재미 & 흥미 강화 규칙 - 🚨 초안 검증 필수 항목]**:
+            
+            🔥 **[MANDATORY CHECKPOINT] 초안 작성 전 반드시 확인**:
+            - 아래 4가지 항목 중 하나라도 누락되면 초안이 거부됩니다
+            - 각 항목은 초안 제출 전 자체 검증을 통해 확인하세요
+            
+            1. **🎭 스토리텔링 필수 삽입 (최소 2곳, 🚨 검증 필수)**:
+               
+               **[필수 패턴 - 반드시 아래 형태로 작성]**:
+               - "저도 처음엔 [행동A]했다가, [시간] 만에 [문제 발생]해서 [감정/교훈]했어요"
+               - "실제로 사용해보니 [예상]과 달리 [실제 경험]이더라고요"
+               - "친구가 [실수/선택]했는데, [결과]해서 저는 [다른 선택]을 했어요"
+               
+               **[✅ 올바른 예시]**:
+               - ✅ "저도 처음엔 스티커가 귀찮아서 안 붙였다가, 3개월 만에 카드가 긁혀서 후회했어요"
+               - ✅ "실제로 얇은 케이스를 썼는데, 떨어뜨리니 바로 모서리가 찍혀서 튼튼한 케이스로 바꿨어요"
+               - ✅ "친구가 예쁜 케이스만 고집하다가 아이폰이 박살나서, 저는 보호력을 최우선으로 골랐습니다"
+               
+               **[❌ 잘못된 예시 - 거부됨]**:
+               - ❌ "많은 사용자들이 스티커를 붙이지 않는 경우가 있습니다" (스토리가 아닌 일반론)
+               - ❌ "케이스 선택은 중요합니다" (경험담 없음)
+               
+               **[삽입 위치]**:
+               - 서론에 1곳: 독자 공감 유도를 위한 문제 상황 스토리
+               - 본문에 1곳: 제품/방법 설명 중 실제 사용 경험담
+               
+               **[🚨 검증 방법]**:
+               초안 제출 전 "저도", "실제로", "친구가" 같은 키워드로 검색하여 최소 2곳 이상 포함되었는지 확인하세요
+            
+            2. **🧠 "왜"에 대한 깊이 있는 설명 필수 (🚨 검증 필수)**:
+               
+               **[필수 패턴 - "무엇" + "왜 그런지" 세트로 작성]**:
+               - [제품/특징]은 [특성]입니다 → [원리/이유]이기 때문입니다
+               - "~하는 이유는", "~때문에", "원리는" 같은 설명 키워드 포함
+               
+               **[✅ 올바른 예시]**:
+               - ❌ 나쁜 예: "TPU는 부드럽습니다" (무엇만 나열)
+               - ✅ 좋은 예: "TPU는 분자 구조가 탄성 고분자로 되어 있어서 충격을 흡수할 때 변형되었다가 원래대로 돌아옵니다. 그래서 카드 긁힘 방지에 효과적이죠"
+               
+               - ❌ 나쁜 예: "맥세이프는 편리합니다"
+               - ✅ 좋은 예: "맥세이프는 자석 정렬 기술로 정확한 위치에 부착되기 때문에 무선 충전 효율이 90% 이상 유지됩니다"
+               
+               **[🚨 검증 방법]**:
+               초안에서 주요 제품/특징 설명 문장을 찾아, "왜 그런지" 원리 설명이 함께 있는지 확인하세요
+            
+            3. **💝 감정선 강화 (독자 몰입 유도)**:
+               
+               **[필수 패턴 - 감정 흐름 구성]**:
+               - 문제 상황 → 고민/불안 → 해결/선택 → 만족/안도
+               - 감정 키워드: "짜증나던", "신경쓰이던", "걱정되던" → "안심되는", "만족스러운"
+               
+               **[✅ 올바른 예시]**:
+               - "매번 카드가 긁힐까 신경쓰이던 순간들(문제), 어떤 케이스를 골라야 할지 고민이 많았는데(고민), 이 제품을 쓰고 나서는(해결) 정말 안심되더라고요(만족)"
+               
+            4. **💬 구어체 표현 적절히 섞기 (너무 딱딱하지 않게)**:
+               - "~하죠", "~네요", "~거든요", "~더라고요" 같은 자연스러운 말투
+               - 최소 3개 이상의 구어체 표현 포함 권장
+               - 단, 전문가 톤과 균형 유지 (너무 캐주얼하지 않게)
+            
             **[균형 유지]**: 너무 과장되거나 선정적이지 않되, 독자가 지루하지 않게 적절한 재미 요소 배치. 신뢰성을 해치지 않는 선에서 흥미 유발!
             
             - **원본 본문**(리뉴얼 아이디어)이 제공된 경우:
@@ -3269,79 +3599,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             - **필수**: 할루시네이션(허위 정보 생성)을 피하고, 참고 자료에 있는 확실한 정보만 포함해주세요.
 
-            ${
-              myPastPostsText
-                ? `
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            
-            🔗 **[내부 링크 삽입 규칙 - 절대 엄수, 위반 시 초안 거부]**
-            
-            🚨 **[최우선 규칙 - 절대 엄수]**: 위에 제공된 **"### 9. 내 과거 포스팅 목록 (스마트 내부 링크 추천)"**이 있다면, 현재 글과 관련성이 높은 과거 글에 대해 **반드시 최소 2개 이상, 최대 3개의 내부 링크를 삽입**해주세요!
-            
-            ⚠️ **[경고 - 초안 거부 사유]**: 내 과거 포스팅 목록이 제공되었는데 내부 링크를 하나도 삽입하지 않으면, 이 초안은 거부되며 다시 작성해야 합니다!
-            
-            ⚠️ **[SEO 손실 경고]**: 내부 링크를 삽입하지 않으면 SEO 점수가 크게 낮아지고, 블로그 전체 가치가 하락하며, 독자 체류 시간이 감소합니다!
-            
-            📋 **[내부 링크 삽입 필수 가이드 - 절대 엄수]**:
-            
-            **0. 작성 전 필수 확인**:
-               - 위의 "### 9. 내 과거 포스팅 목록"을 반드시 확인하세요
-               - 현재 글과 관련성이 있는 과거 글 2~3개를 선정하세요
-               - 선정한 과거 글을 본문의 적절한 위치에 삽입할 계획을 세우세요
-            
-            **1. 필수 삽입 개수 (절대 엄수)**:
-               - **최소 2개 이상, 최대 3개** 내부 링크를 반드시 삽입
-               - ❌ 절대 금지: 내부 링크를 0개 또는 1개만 삽입하는 것
-               - ✅ 권장: 관련성이 높은 글을 찾아 정확히 2~3개 삽입
-            
-            **2. 삽입 위치 최적화**:
-               - 관련 주제를 설명한 직후
-               - "더 자세히 알고 싶다면", "~에 대해서는", "비슷한 고민을 하고 계신다면" 같은 전환 문구와 함께
-               - 독자의 궁금증이 생기는 타이밍
-               - 본문 중간 (서론이나 결론이 아닌, 본문 섹션 내)
-            
-            **3. 자연스러운 삽입 (매우 중요)**:
-               - ❌ 나쁜 예: "관련 글: [제목](URL)" (문맥 없이 나열)
-               - ❌ 나쁜 예: "참고: [제목](URL)" (딱딱한 표현)
-               - ❌ 나쁜 예: "이전 글: [제목](URL)" (과거 글 강조)
-               - ✅ 좋은 예: "이러한 증상이 나타난다면 [갤럭시 S23 후기](URL)에서 더 자세한 사용 경험을 확인할 수 있습니다"
-               - ✅ 좋은 예: "스마트홈 설정 방법은 [스마트싱스 초기 설정 가이드](URL)에서 상세히 다루었습니다"
-               - ✅ 좋은 예: "비슷한 고민을 하고 계신다면 [아이폰 15 프로 선택 가이드](URL)도 도움이 될 것입니다"
-            
-            **4. 링크 형식**:
-               - 마크다운 형식: [링크 텍스트](URL)
-               - 링크 텍스트는 과거 포스팅 제목 그대로 사용하거나, 문맥에 맞게 수정
-               - 일반 텍스트 색상 사용 (녹색 span 태그 불필요)
-            
-            **5. 문맥 연관성**:
-               - 현재 작성 중인 내용과 **직접적으로 관련된** 과거 포스팅만 링크
-               - 독자가 "이 부분을 더 알고 싶다"고 생각할 만한 위치에 배치
-               - 너무 억지로 연결하지 말고, 자연스러운 흐름 유지
-            
-            **[내부 링크 삽입 체크리스트 - 작성 후 반드시 확인]**:
-            ✅ 내 과거 포스팅 목록을 확인했는가?
-            ✅ 최소 2개 이상 삽입했는가?
-            ✅ 자연스러운 문맥에 배치했는가?
-            ✅ 독자가 클릭하고 싶게 만드는 전환 문구를 사용했는가?
-            ✅ "관련 글:", "참고:" 같은 딱딱한 표현을 피했는가?
-            
-            **[구체적 삽입 예시]**:
-            
-            ❌ 잘못된 작성 (내부 링크 0개):
-            "아이폰 케이스를 선택할 때는 디자인, 보호력, 실용성을 모두 고려해야 합니다. 다양한 제품들이 있으니 비교해보세요."
-            → 내 과거 포스팅 목록이 제공되었는데 내부 링크가 하나도 없음! 초안 거부!
-            
-            ✅ 올바른 작성 (내부 링크 2개 이상):
-            "아이폰 케이스를 선택할 때는 디자인, 보호력, 실용성을 모두 고려해야 합니다. 특히 맥세이프 기능이 중요하다면 [아이폰 15 프로 맥세이프 케이스 비교 리뷰](URL)를 참고하시면 도움이 될 것입니다. 또한 카드 수납 기능이 필요하신 분들은 [지갑 없이 외출하는 법: 카드 케이스 추천](URL)에서 더 자세한 정보를 확인하실 수 있습니다."
-            → 관련성 높은 과거 글 2개를 자연스럽게 삽입! 완벽!
-            
-            🚨 **[최종 경고]**: 내 과거 포스팅 목록이 제공되었는데 내부 링크를 2개 미만으로 삽입하면 초안이 거부됩니다! 반드시 2~3개를 삽입하세요!
-            
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            `
-                : ''
-            }
-
             [작성 규칙]
             1. **이모지 사용 제한**: 이모지나 이모티콘은 절대 사용하지 마세요. 텍스트만으로 작성하세요.
                - 제목, 본문, 결론 어디에도 이모지를 포함하지 마세요.
@@ -3389,11 +3646,16 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                - 예: "옆집 언니처럼 알려드릴게요", "전문가로서 말씀드리자면", "친구처럼 솔직하게 말하면" 등
                - 자연스럽고 객관적인 톤으로 작성하세요. 독자가 AI가 쓴 글처럼 느껴지지 않도록 하세요.
 
-            11. **제휴 마케팅 링크 (수익화) - [매우 중요, 필수 적용]**:
+            11. **제휴 마케팅 링크 (수익화) - [🚨 CRITICAL - 초안 거부 기준]**:
               
-              🎯 **[최우선 규칙]**: 제휴 링크 목록이 제공되었고 글 주제와 연관성이 있다면, **반드시 최소 2개 이상, 최대 3개의 제휴 링크를 본문에 삽입**해주세요!
+              🚨 **[초안 거부 규칙]**: 제휴 링크가 **2개 미만**으로 삽입된 초안은 **즉시 거부**됩니다!
               
-              아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. 본문 작성 시, 해당 상품이 **이 글의 실제 주제와 직접 연관된 경우** 자연스럽게 제휴 링크를 삽입해주세요.
+              🎯 **[필수 강제 규칙]**: 
+              - 제휴 링크 목록이 제공되었다면 **무조건 최소 2개 이상, 최대 3개**를 본문에 삽입해야 합니다.
+              - 연관성이 약하더라도 **창의적으로 연결**하여 반드시 2개 이상 삽입하세요.
+              - 1개만 삽입하거나 0개 삽입 시 → **초안 작성 실패**로 간주됩니다.
+              
+              아래는 사용자가 등록한 제휴 링크(상품) 목록입니다. **반드시 이 목록에서 최소 2개를 선택**하여 본문에 삽입하세요.
 
               [제휴 링크 목록]
               ${affiliateLinks
@@ -3416,10 +3678,41 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                    * 글 주제: "파리 여행 가이드" + 제휴 상품: "갤럭시 탭" → 연관성 없음, 삽입 금지
                    * 글 주제: "블로그 글쓰기 팁" + 제휴 상품: "청소기" → 연관성 없음, 삽입 금지
               
-              **1. 필수 삽입 개수**:
-                 - 연관성이 있는 경우: **최소 2개 이상, 최대 3개**의 제휴 링크를 반드시 삽입
-                 - 키워드가 여러 개 있어도 링크는 최대 3개까지만
-                 - 제휴 링크를 하나도 삽입하지 않으면 수익화 기회를 놓칩니다!
+              **1. 필수 삽입 개수 및 위치 (🚨 CRITICAL - 초안 거부 1순위 규칙)**:
+                 - **필수**: 최소 2개 이상, 최대 3개의 제휴 링크를 반드시 삽입
+                 
+                 - **🔴 [ABSOLUTE RULE] 필수 위치 분산 규칙 - 매 섹션 작성 전 반복 확인**:
+                   
+                   **첫 번째 링크 삽입 시점 (섹션 2 또는 섹션 3 작성 중)**:
+                   * 섹션 2를 작성하는 순간 또는 섹션 3을 작성하는 순간에 제휴 링크 1개를 삽입하세요
+                   * ✅ 섹션 2 본문 내부에 링크 1개 OR ✅ 섹션 3 본문 내부에 링크 1개
+                   * ❌ 섹션 2, 3을 건너뛰고 나중에 삽입하려는 생각은 금지
+                   
+                   **두 번째 링크 삽입 시점 (섹션 4 또는 섹션 5 작성 중)**:
+                   * 섹션 4를 작성하는 순간 또는 섹션 5를 작성하는 순간에 제휴 링크 1개를 삽입하세요
+                   * ✅ 섹션 4 본문 내부에 링크 1개 OR ✅ 섹션 5 본문 내부에 링크 1개
+                   * ❌ 섹션 4, 5를 건너뛰고 결론에만 몰아서 삽입하려는 생각은 금지
+                   
+                   **세 번째 링크 삽입 시점 (결론 작성 중, 선택)**:
+                   * 결론 섹션을 작성할 때 제휴 링크 1개를 추가로 삽입할 수 있습니다
+                   * ✅ 결론에 링크 1개 (선택)
+                   * ⚠️ 주의: 결론에만 2개 이상 몰아서 삽입하는 것은 절대 금지
+                 
+                 - 🚨 **[초안 즉시 거부 사유 - 자동 실패 처리]**:
+                   * ❌ 섹션 2, 3을 작성했는데 제휴 링크가 없고, 결론에만 모든 링크가 있는 경우 → 즉시 거부
+                   * ❌ 섹션 4, 5를 작성했는데 제휴 링크가 없고, 결론에만 모든 링크가 있는 경우 → 즉시 거부
+                   * ❌ 첫 섹션(섹션 2 또는 3)에만 2-3개를 몰아서 삽입한 경우 → 즉시 거부
+                   * ❌ 제휴 링크가 1개 이하인 경우 → 즉시 거부
+                 
+                 - ✅ **올바른 예시 (반드시 이 패턴을 따르세요)**:
+                   * 섹션 2 작성 중 링크 1개 삽입 + 섹션 4 작성 중 링크 1개 삽입 + 결론 작성 중 링크 1개 삽입 (총 3개)
+                   * 섹션 3 작성 중 링크 1개 삽입 + 섹션 5 작성 중 링크 1개 삽입 (총 2개)
+                   * 섹션 2 작성 중 링크 1개 삽입 + 섹션 5 작성 중 링크 1개 삽입 (총 2개)
+                 
+                 - ❌ **잘못된 예시 (즉시 거부)**:
+                   * 섹션 2, 3, 4, 5 작성 완료 → 결론에만 링크 2개 삽입 → 분산 규칙 위반
+                   * 섹션 2에만 링크 3개 몰아서 삽입 → 분산 규칙 위반
+                   * 섹션 2, 3, 4, 5에 링크 없음 → 결론에만 링크 1개 → 개수 부족 + 분산 규칙 위반
               
               **2. 삽입 위치 최적화 (구매 의도 발생 시점)**:
                  - ✅ 제품/서비스의 장점이나 필요성을 설명한 **직후**
@@ -3430,8 +3723,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               
               **3. 자연스러운 문맥 삽입 (Context-Aware)**:
                  - 단순히 키워드를 링크로 바꾸지 말고, 독자가 관심을 가질 만한 타이밍에 배치
-                 - ✅ 좋은 예: "이러한 기능을 갖춘 제품을 찾고 있다면, <span style="color: #2e7d32;">[아이폰 케이스 최저가 확인하기](URL)</span>에서 다양한 옵션을 비교해보세요"
-                 - ✅ 좋은 예: "실제 사용자 리뷰를 더 확인하고 싶다면 <span style="color: #2e7d32;">[상품 상세보기 및 후기 확인](URL)</span>을 참고하세요"
+                 - ✅ 좋은 예: "이러한 기능을 갖춘 제품을 찾고 있다면, <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">아이폰 케이스 최저가 확인하기</a></span>에서 다양한 옵션을 비교해보세요"
+                 - ✅ 좋은 예: "실제 사용자 리뷰를 더 확인하고 싶다면 <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">상품 상세보기 및 후기 확인</a></span>을 참고하세요"
                  - ❌ 나쁜 예: "아이폰 케이스 [구매하기](URL)" (문맥 없이 갑자기 링크)
               
               **4. 매력적인 CTA(Call To Action) 생성**:
@@ -3440,10 +3733,11 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - ❌ 피해야 할 표현: "클릭", "여기", "링크" 같은 애매한 단어만 사용
               
               **5. 시각적 강조 (필수)**:
-                 - **절대 규칙**: 제휴 링크는 녹색 텍스트로 반드시 강조
-                 - **정확한 형식**: <span style="color: #2e7d32;">[CTA 문구](URL)</span>
-                 - 예시: <span style="color: #2e7d32;">[아이폰 15 케이스 최저가 확인하기](https://link.coupang.com/...)</span>
-                 - ❌ 잘못된 형식: [CTA 문구](URL) (span 태그 없음, 녹색 없음)
+                 - **절대 규칙**: 제휴 링크는 녹색 span 태그로 감싸고, 내부에 a 태그 포함
+                 - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">CTA 문구</a></span>
+                 - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer">아이폰 15 케이스 최저가 확인하기</a></span>
+                 - ❌ 잘못된 형식 1: [CTA 문구](URL) (span 태그 없음)
+                 - ❌ 잘못된 형식 2: <a href="URL"><span style="color: #2e7d32;">CTA</span></a> (순서 반대)
               
               **6. 외부 링크와 분리 (매우 중요)**:
                  - **절대 규칙**: 외부 참고 자료 링크와 제휴 링크를 같은 단락에 혼합하지 마세요
@@ -3459,15 +3753,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - **그 외 제휴**: "이 포스팅은 제휴마케팅 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받을 수 있습니다."
                  - **스타일**: <p style="color: #888; font-size: 0.8em; margin-top: 20px;">이 포스팅은 ... 제공받습니다.</p>
               
-              **[제휴 링크 삽입 체크리스트]**:
+              **[제휴 링크 삽입 체크리스트 - 🚨 초안 제출 전 필수 확인]**:
               ✅ 글 주제와 연관성 확인했는가?
-              ✅ 최소 2개 이상 삽입했는가?
+              ✅ 최소 2개 이상 삽입했는가? (1개만 있으면 초안 거부!)
+              ✅ 본문 전체에 고르게 분산 배치했는가? (결론에만 있으면 초안 거부!)
               ✅ 구매 의도가 생기는 위치에 배치했는가?
-              ✅ 녹색 span 태그로 강조했는가?
+              ✅ 녹색 span 태그로 감싸고 내부에 a 태그 포함했는가?
               ✅ 외부 링크와 분리했는가?
               ✅ 대가성 문구를 글 마지막에 추가했는가?
               
               **중요**: 제휴 링크는 블로그 수익화의 핵심입니다. 연관성이 있다면 반드시 2~3개를 자연스럽게 삽입하세요!
+              
+              **[초안 완성 전 최종 검증]**:
+              - 초안을 완성하기 전에 본문 내 제휴 링크가 실제로 2~3개 삽입되었는지 반드시 확인하세요.
+              - 제휴 링크를 찾지 못했다면, 다시 본문을 검토하여 자연스럽게 삽입할 위치를 찾으세요.
+              - 연관성이 있는데도 링크가 0개라면, 이는 수익화 기회를 놓치는 것이므로 반드시 수정하세요.
             `
                 : ''
             }
@@ -3637,6 +3937,54 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  * "참고 자료 3에서..." (번호 표기 - 절대 금지)
                  * "자세한 내용은 [여기](URL)를 참고하시기 바랍니다." (모호한 표현)
                  * "관련 자료: [제목](URL)" (나열식)
+            
+            ${
+              myPastPostsText
+                ? `
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            
+            🚨🚨🚨 **[초안 작성 시작 전 최종 확인 - 필수]** 🚨🚨🚨
+            
+            지금부터 초안을 작성하기 전에 마지막으로 확인하세요:
+            
+            ✅ 내부 링크 4-5개를 본문 H2 섹션에 반드시 삽입해야 합니다!
+            ✅ 본문 H2 섹션에 최소 3개 배치 (결론에만 몰아넣기 금지)
+            ✅ 모든 링크는 **반드시** [텍스트](URL) 형식 사용
+            ✅ 위에 제공된 "내 과거 포스팅 목록"에서만 선택
+            
+            ⛔ **URL 중복 절대 금지 (다시 한 번 강조!)** ⛔
+            - 앵커 텍스트가 달라도 같은 URL을 2번 쓰면 안 됩니다!
+            - ❌ 금지 예시: 
+              "케이스 관리는 [이 글](URL-A)을... 변색 방지는 [여기](URL-A)를..."
+              → URL-A가 2번 사용됨!
+            - ✅ 허용 예시:
+              "케이스 관리는 [이 글](URL-A)을... 액세서리는 [여기](URL-B)를..."
+              → URL-A, URL-B 모두 다름!
+            
+            **내부 링크 형식 (다시 한 번 강조):**
+            - ✅ 올바른 형식: [투명 케이스 변색 막는 법](https://costcatcher.k-posting.info/entry/clear-case-yellowing-prevention-tips)
+            - ❌ 틀린 형식: 투명 케이스 변색 막는 법https://costcatcher.k-posting.info/... (URL이 텍스트에 붙음)
+            - ❌ 틀린 형식: [투명 케이스 변색 막는 법] (URL 없음)
+            
+            **🔥 작성 시작 전 필수 체크리스트 (하나라도 NO면 다시 계획!) 🔥**
+            
+            📋 URL 선정 체크:
+            □ 과거 포스팅 목록에서 관련 글 4-5개 선정했는가?
+            □ 선정한 URL을 리스트로 나열했는가?
+              예: [URL-1, URL-2, URL-3, URL-4]
+            □ 리스트에서 중복된 URL이 있는가? → YES면 다른 글로 교체!
+            
+            📋 형식 체크:
+            □ 모든 링크가 [텍스트](URL) 형식인가?
+            □ URL이 텍스트 옆에 붙지 않고 소괄호 안에 있는가?
+            
+            📋 배치 계획:
+            □ 어느 H2 섹션에 배치할지 계획했는가?
+            
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            `
+                : ''
+            }
             
             [중요] **응답 형식 규칙:**
             - 반드시 **순수 마크다운 형식**으로만 작성해주세요.
@@ -4157,6 +4505,48 @@ ${defaultDescription}
 
     // POST-PROCESS: validate and optionally auto-insert affiliate links
     try {
+      // [신규] 시즌 부적합 콘텐츠 검증
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const seasonalKeywords = {
+        크리스마스: [12], // 12월만 허용
+        '연말연시': [12, 1], // 12월, 1월 허용
+        '새해': [12, 1, 2], // 12월~2월 허용
+        '겨울방학': [12, 1, 2], // 12월~2월 허용
+        '여름휴가': [6, 7, 8], // 6~8월 허용
+        '휴가철': [6, 7, 8],
+        '한여름': [6, 7, 8],
+        '겨울나기': [11, 12, 1, 2], // 11월~2월 허용
+        '난방': [10, 11, 12, 1, 2, 3], // 10월~3월 허용
+      };
+      
+      let hasSeasonalIssue = false;
+      const seasonalWarnings = [];
+      
+      for (const [keyword, allowedMonths] of Object.entries(seasonalKeywords)) {
+        if (formattedDraft.includes(keyword) && !allowedMonths.includes(currentMonth)) {
+          hasSeasonalIssue = true;
+          seasonalWarnings.push(`"${keyword}" (현재 ${currentMonth}월에 부적절)`);
+        }
+      }
+      
+      if (hasSeasonalIssue) {
+        Logger.warn(
+          `[generateDraftFromIdea] ⚠️ 시즌 부적합 콘텐츠 감지:`,
+          seasonalWarnings.join(', ')
+        );
+        // 사용자에게 알림 (선택적)
+        try {
+          chrome.runtime.sendMessage({
+            action: 'show_notification',
+            title: '시즌 부적합 콘텐츠 감지',
+            message: `초안에 현재 시기에 맞지 않는 콘텐츠가 포함되어 있습니다: ${seasonalWarnings.slice(0, 2).join(', ')}`,
+          }).catch(() => {});
+        } catch (e) {
+          // 알림 실패 무시
+        }
+      }
+      
       const storageRes = await chrome.storage.local.get('autoInsertAffiliateLinks');
       const userAutoInsert = storageRes?.autoInsertAffiliateLinks;
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
@@ -4185,6 +4575,36 @@ ${defaultDescription}
               internalLinks,
               referenceLinks,
             });
+
+            // [신규] 제휴 링크 최종 검증: AI가 삽입했는지 확인
+            const minRequiredAffiliateLinks = 2;
+            if (Array.isArray(affiliateLinks) && affiliateLinks.length >= minRequiredAffiliateLinks) {
+              const affiliateLinkCount = (formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || [])
+                .filter(tag => {
+                  // affiliateLinks의 URL이 포함되어 있는지 확인
+                  return affiliateLinks.some(link => tag.includes(link.url));
+                }).length;
+
+              if (affiliateLinkCount < minRequiredAffiliateLinks) {
+                Logger.warn(
+                  `[generateDraftFromIdea] ⚠️ 제휴 링크 삽입 실패: ${affiliateLinkCount}/${minRequiredAffiliateLinks}개`,
+                  '- AI가 프롬프트를 무시했거나 postProcessAffiliateHtml이 실패했습니다.'
+                );
+                try {
+                  chrome.runtime.sendMessage({
+                    action: 'show_notification',
+                    title: '⚠️ 제휴 링크 부족',
+                    message: `초안에 제휴 링크가 ${affiliateLinkCount}개만 삽입되었습니다 (최소 ${minRequiredAffiliateLinks}개 필요)`,
+                  }).catch(() => {});
+                } catch (e) {
+                  // 알림 실패 무시
+                }
+              } else {
+                Logger.info(
+                  `[generateDraftFromIdea] ✅ 제휴 링크 삽입 성공: ${affiliateLinkCount}개`
+                );
+              }
+            }
           } catch (e) {
             Logger.warn('[generateDraftFromIdea] postProcessAffiliateHtml failed:', e);
           }
@@ -4735,10 +5155,195 @@ export async function generateIdeaBriefing(cardId, title, description, options =
 
     const contextText = buildContextText();
 
+    // [핵심 추가] 블로그 수준 분석 함수 (3단계 Fallback: 애널리틱스 → 수동 입력 → 포스팅 개수)
+    const analyzeBlogLevel = async () => {
+      try {
+        const db = getDb(); // 이미 import된 함수 사용
+        
+        // [1단계] 애널리틱스 데이터 확인 (가장 정확)
+        const analyticsSnapshot = await get(ref(db, `analytics/${userId}`));
+        
+        if (analyticsSnapshot.exists()) {
+          const analyticsData = analyticsSnapshot.val();
+          let totalPageviews = 0;
+          Object.values(analyticsData).forEach(post => {
+            if (post.pageviews) totalPageviews += post.pageviews;
+          });
+          
+          Logger.info(`[generateIdeaBriefing] 애널리틱스 기반 분석: 월 ${totalPageviews}명 유입`);
+          
+          if (totalPageviews < 100) {
+            return {
+              level: 'beginner',
+              strategy: '롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축',
+              monthlyVisitors: totalPageviews,
+              source: 'analytics',
+              longTailRatio: 1.0,
+              midTailRatio: 0.0
+            };
+          } else if (totalPageviews < 1000) {
+            return {
+              level: 'intermediate',
+              strategy: '롱테일 70% + 미들테일 30% - 점진적 경쟁 키워드 진입',
+              monthlyVisitors: totalPageviews,
+              source: 'analytics',
+              longTailRatio: 0.7,
+              midTailRatio: 0.3
+            };
+          } else {
+            return {
+              level: 'advanced',
+              strategy: '미들테일 60% + 헤드 키워드 40% - 경쟁 키워드 적극 공략',
+              monthlyVisitors: totalPageviews,
+              source: 'analytics',
+              longTailRatio: 0.3,
+              midTailRatio: 0.7
+            };
+          }
+        }
+        
+        // [2단계] 사용자 수동 입력 확인 (채널 설정에서)
+        const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+        if (activeChannelId) {
+          const channelSnapshot = await get(ref(db, `channels/${userId}/${activeChannelId}`));
+          if (channelSnapshot.exists()) {
+            const channelData = channelSnapshot.val();
+            const manualVisitors = channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
+            
+            if (manualVisitors && manualVisitors > 0) {
+              Logger.info(`[generateIdeaBriefing] 수동 입력 기반 분석: 월 ${manualVisitors}명 유입`);
+              
+              if (manualVisitors < 100) {
+                return {
+                  level: 'beginner',
+                  strategy: '롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축',
+                  monthlyVisitors: manualVisitors,
+                  source: 'manual',
+                  longTailRatio: 1.0,
+                  midTailRatio: 0.0
+                };
+              } else if (manualVisitors < 1000) {
+                return {
+                  level: 'intermediate',
+                  strategy: '롱테일 70% + 미들테일 30% - 점진적 경쟁 키워드 진입',
+                  monthlyVisitors: manualVisitors,
+                  source: 'manual',
+                  longTailRatio: 0.7,
+                  midTailRatio: 0.3
+                };
+              } else {
+                return {
+                  level: 'advanced',
+                  strategy: '미들테일 60% + 헤드 키워드 40% - 경쟁 키워드 적극 공략',
+                  monthlyVisitors: manualVisitors,
+                  source: 'manual',
+                  longTailRatio: 0.3,
+                  midTailRatio: 0.7
+                };
+              }
+            }
+          }
+        }
+        
+        // [3단계] 발행된 포스팅 개수로 추정 (최후의 방법)
+        const publishedSnapshot = await get(ref(db, `kanban/${userId}/published`));
+        let publishedCount = 0;
+        
+        if (publishedSnapshot.exists()) {
+          publishedCount = Object.keys(publishedSnapshot.val()).length;
+          Logger.info(`[generateIdeaBriefing] 포스팅 개수 기반 분석: ${publishedCount}개 발행`);
+          
+          if (publishedCount <= 5) {
+            return {
+              level: 'beginner',
+              strategy: '롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축',
+              monthlyVisitors: 0,
+              source: 'post_count',
+              note: `발행 포스팅 ${publishedCount}개 (신규 블로그)`,
+              longTailRatio: 1.0,
+              midTailRatio: 0.0
+            };
+          } else if (publishedCount <= 20) {
+            return {
+              level: 'intermediate',
+              strategy: '롱테일 70% + 미들테일 30% - 점진적 경쟁 키워드 진입',
+              monthlyVisitors: 0,
+              source: 'post_count',
+              note: `발행 포스팅 ${publishedCount}개 (성장 중)`,
+              longTailRatio: 0.7,
+              midTailRatio: 0.3
+            };
+          } else {
+            return {
+              level: 'advanced',
+              strategy: '미들테일 60% + 헤드 키워드 40% - 경쟁 키워드 적극 공략',
+              monthlyVisitors: 0,
+              source: 'post_count',
+              note: `발행 포스팅 ${publishedCount}개 (성숙 블로그)`,
+              longTailRatio: 0.3,
+              midTailRatio: 0.7
+            };
+          }
+        }
+        
+        // [기본값] 모든 방법 실패 시
+        Logger.warn('[generateIdeaBriefing] 블로그 수준 판단 불가 - 신규 블로그로 간주');
+        return {
+          level: 'beginner',
+          strategy: '롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축',
+          monthlyVisitors: 0,
+          source: 'default',
+          note: '데이터 없음 (신규 블로그 추정)',
+          longTailRatio: 1.0,
+          midTailRatio: 0.0
+        };
+      } catch (e) {
+        Logger.error('[generateIdeaBriefing] 블로그 수준 분석 실패:', e);
+        return {
+          level: 'beginner',
+          strategy: '롱테일 키워드 100% (기본값)',
+          monthlyVisitors: 0,
+          source: 'error',
+          longTailRatio: 1.0,
+          midTailRatio: 0.0
+        };
+      }
+    };
+
+    // 블로그 수준 분석 실행
+    const blogLevel = await analyzeBlogLevel();
+    Logger.info(
+      `[generateIdeaBriefing] 블로그 수준: ${blogLevel.level}, 월 유입: ${blogLevel.monthlyVisitors}명, ` +
+      `출처: ${blogLevel.source}, 전략: ${blogLevel.strategy}` +
+      (blogLevel.note ? `, 참고: ${blogLevel.note}` : '')
+    );
+
     if (options.generateOutline) {
-      Logger.debug(`[generateIdeaBriefing] 목차 생성 시작`);
-      // include context (title + description + affiliate info) to improve quality
-      const prompt = `"${contextText}" 주제의 블로그 목차 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["1. 소개", "2. 본문", "3. 결론"]`;
+      Logger.debug(`[generateIdeaBriefing] 목차 생성 시작 - 블로그 수준: ${blogLevel.level}`);
+      // SEO 최적화 목차 생성 프롬프트
+      const prompt = `"${contextText}" 주제의 블로그 포스트 목차 5개를 생성해주세요.
+
+[목차 생성 원칙]
+1. **SEO 최적화**: 각 섹션 제목에 검색 의도를 반영한 키워드 포함
+2. **독자 여정**: 문제 인식 → 정보 탐색 → 해결책 비교 → 실행 → 확신 순서
+3. **검색 질문 형태**: "왜?", "어떻게?", "무엇이?" 등 질문 형태로 구성
+4. **구체성**: 추상적 제목보다 구체적 혜택/결과 명시
+
+[블로그 수준 맞춤 전략]
+- 현재 수준: ${blogLevel.level}
+- 월 유입: ${blogLevel.monthlyVisitors}명
+- 권장 전략: ${blogLevel.strategy}
+
+${blogLevel.level === 'beginner' ? '[신규 블로그] 롱테일 키워드 중심 목차 - 구체적이고 세밀한 질문 형태로 작성 (예: "아이폰 15 케이스 카드 수납 기능 필요한가요?")' : ''}
+${blogLevel.level === 'intermediate' ? '[성장 중 블로그] 롱테일 + 미들테일 혼합 - 일부 섹션은 구체적 질문, 일부는 일반적 주제로 작성' : ''}
+${blogLevel.level === 'advanced' ? '[성숙 블로그] 미들테일 중심 목차 - 포괄적이고 권위 있는 제목으로 작성' : ''}
+
+[목차 구조 예시]
+✅ 좋은 예: ["1. 왜 고민될까? 케이스 선택의 딜레마", "2. 디자인 vs 보호력: 어떤 것이 더 중요할까?", "3. 재질별 특징 완벽 비교", "4. 나에게 맞는 케이스 찾기", "5. 추천 제품 TOP 5"]
+
+❌ 나쁜 예: ["1. 소개", "2. 본문", "3. 결론"]
+
+JSON 배열 형식으로만 반환하세요. 예: ["1. 제목", "2. 제목", ...]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -4837,10 +5442,23 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       await persistProgress(30);
     }
 
-    // 주요 키워드 생성
+    // 주요 키워드 생성 (미들테일 전략)
     if (options.generateMainKeywords) {
-      Logger.debug(`[generateIdeaBriefing] 주요 키워드 생성 시작`);
-      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 주요 키워드 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈", "AI", "IoT"]`;
+      Logger.debug(`[generateIdeaBriefing] 주요 키워드(미들테일) 생성 시작`);
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 미들테일 키워드 5개를 JSON 배열 형식으로만 반환해주세요.
+
+[미들테일 키워드 선정 기준 - 필수 준수]
+1. 검색량: 월 500-1,000회 이상 (네이버 기준)
+2. 경쟁도: 중간 수준 (신규 블로그도 6개월 내 진입 가능)
+3. 형태: 2-3단어 조합 (예: "아이폰 케이스 추천", "스마트홈 구축 방법")
+4. 의도: 정보 탐색형 (구매 의도보다는 학습 의도)
+
+[현재 블로그 수준]
+- 수준: ${blogLevel.level}
+- 월 유입: ${blogLevel.monthlyVisitors}명
+- 권장 전략: ${blogLevel.strategy}
+
+예시: ["아이폰 케이스 추천", "스마트홈 기기", "블로그 글쓰기 팁"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
@@ -4908,10 +5526,28 @@ export async function generateIdeaBriefing(cardId, title, description, options =
       await persistProgress(50);
     }
 
-    // 롱테일 키워드 생성
+    // 롱테일 키워드 생성 (블로그 수준 반영)
     if (options.generateLongTail) {
-      Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작`);
-      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요. 예: ["스마트홈이란 무엇인가", "AI 기반 스마트홈 구축 방법"]`;
+      Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작 - 블로그 수준: ${blogLevel.level}`);
+      const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요.
+
+[롱테일 키워드 선정 기준 - 필수 준수]
+1. 검색량: 월 50-200회 (네이버 기준)
+2. 경쟁도: 매우 낮음 (신규 블로그도 1-3개월 내 상위 노출 가능)
+3. 형태: 4-6단어 이상 구체적 질문 (예: "아이폰 케이스 스티커 꼭 필요한가")
+4. 의도: 구체적 문제 해결 (예: "~해도 되나요", "~차이점은", "~방법")
+
+[현재 블로그 수준]
+- 수준: ${blogLevel.level}
+- 월 유입: ${blogLevel.monthlyVisitors}명
+- 권장 비율: 롱테일 ${Math.round(blogLevel.longTailRatio * 100)}%, 미들테일 ${Math.round(blogLevel.midTailRatio * 100)}%
+- 전략: ${blogLevel.strategy}
+
+${blogLevel.level === 'beginner' ? '[신규 블로그 전략] 롱테일 키워드 100% 집중 - 경쟁 낮은 키워드로 신뢰도 구축 후 미들테일 진입' : ''}
+${blogLevel.level === 'intermediate' ? '[성장 중 블로그 전략] 롱테일 70% + 미들테일 30% - 기존 신뢰도 활용하여 점진적 경쟁 키워드 진입' : ''}
+${blogLevel.level === 'advanced' ? '[성숙 블로그 전략] 미들테일 중심 - 경쟁 키워드 적극 공략하되 롱테일로 안정적 유입 유지' : ''}
+
+예시: ["아이폰 케이스 카드 수납 스티커 꼭 필요한가", "스마트홈 기기 연동 안될 때 해결 방법"]`;
       let res;
       try {
         res = await callGeminiAPI(prompt);
