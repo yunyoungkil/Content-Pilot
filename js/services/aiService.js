@@ -3730,24 +3730,29 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             5. '롱테일 키워드'를 본문에 자연스럽게 통합하여 SEO를 최적화해주세요. 키워드 스터핑은 피하고, 문맥에 맞게 사용해주세요.
             6. '추천 검색어'는 초안 작성에 필요한 자료 수집을 위한 검색어입니다. 이 검색어들이 암시하는 정보 유형(통계, 가이드, 비교, 사례, 트렌드 등)을 이해하고, 해당 정보를 본문에 풍부하게 포함해주세요. 검색어 자체를 단순 나열하지 마세요.
             7. '관련 참고 자료'의 내용을 활용할 때는 단순히 나열하거나 요약하지 말고, 본문의 흐름에 자연스럽게 녹여서 작성해주세요. 자료의 핵심 정보를 재해석하거나 독자의 이해를 돕는 방식으로 통합해주세요.
-            8. **통계 및 수치 사용 규칙 (신뢰도 강화)**:
-               - 참고 자료에서 가져온 구체적 통계(%, 개수, 비율 등)를 사용할 때는 **반드시 출처를 명시**하세요
-               - ✅ 올바른 예시:
-                 * "SUMMIT 맥세이프 케이스 2,504개 리뷰에서 87%가 최고 평점을 주었습니다" (출처: 제품 리뷰 데이터)
-                 * "누아트 케이스 사용자 1,656명 중 70%가 디자인에 만족했다고 응답했습니다" (출처: 사용자 설문)
-               - ❌ 잘못된 예시:
-                 * "87%가 만족했습니다" (출처 없이 수치만 나열)
+            8. **통계 및 수치 사용 규칙 (🚨 CRITICAL - 신뢰도 강화)**:
+               - **절대 규칙**: 참고 자료에서 가져온 구체적 통계(%, 개수, 비율 등)를 사용할 때는 **100% 출처를 명시**하세요
+               - ✅ 올바른 예시 (출처 명시 필수):
+                 * "쿠팡 리뷰 2,504개 중 87%가 최고 평점을 주었습니다"
+                 * "제품 상세페이지 기준 1,656명의 구매자 중 70%가 디자인에 만족했습니다"
+                 * "7,022명의 사용자 리뷰에 따르면 견고함 78점, 디자인 83점을 기록했습니다"
+                 * "13,738개의 구매 후기 분석 결과 만족도 84%를 보였습니다"
+               - ❌ 절대 금지 예시:
+                 * "87%가 만족했습니다" (출처 없이 수치만 나열 - 절대 금지)
+                 * "2,504개 리뷰에서 87%가..." (출처 불명확 - 금지)
                  * "대부분의 사용자가 만족합니다" (모호한 표현)
-               - **출처가 없는 수치는 사용하지 마세요**: 참고 자료에 없는 통계를 창작하거나 추측하지 마세요
+               - **출처가 없는 수치는 절대 사용 금지**: 참고 자료에 없는 통계를 창작하거나 추측하지 마세요
                - **대안 표현**: 출처를 알 수 없는 경우 "많은 사용자", "상당수", "일부" 같은 일반적 표현을 사용하세요
-            9. **본문 강조 하이라이트 사용 (mark 태그) - 필수 3~5개**: 본문의 중요한 텍스트를 강조할 때 mark 태그를 사용하세요.
+               - **출처 표기 방법**: "쿠팡 리뷰 기준", "제품 상세페이지 기준", "사용자 후기 분석", "구매자 평가" 등
+            9. **본문 강조 하이라이트 사용 (mark 태그) - 필수 5~7개**: 본문의 중요한 텍스트를 강조할 때 mark 태그를 사용하세요.
                - ✅ **권장 형식** (본문 강조용): <mark style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">중요한 핵심 내용</mark>
-               - 📊 **필수 개수 (🚨 CRITICAL)**: 글 전체에서 **반드시 3~5개**의 핵심 문장이나 구절에 하이라이트를 적용하세요. 1~2개만 사용하면 부족하고, 6개 이상은 과도합니다.
-               - 📝 **사용 위치 (각 섹션에 골고루 분산)**: 독자가 꼭 기억해야 할 핵심 정보, 중요한 주의사항, 강조할 팁, 결론적 문장 등
-               - 💡 **사용 예시 (섹션별 배치 권장)**: 
-                 * 섹션 1-2: "이 방법이 가장 효과적입니다" (결론적 강조) 1개
-                 * 섹션 3-4: "반드시 24시간 이내에 사용하세요" (중요한 주의사항) 2개
-                 * 섹션 5 또는 결론: "3가지 핵심 요소를 기억하세요" (핵심 정보) 1~2개
+               - 📊 **필수 개수 (🚨 CRITICAL)**: 글 전체에서 **반드시 5~7개**의 핵심 문장이나 구절에 하이라이트를 적용하세요. 3개 이하는 부족하고, 8개 이상은 과도합니다.
+               - 📝 **사용 위치 (각 섹션에 골고루 분산 필수)**: 독자가 꼭 기억해야 할 핵심 정보, 중요한 주의사항, 강조할 팁, 결론적 문장 등
+               - 💡 **사용 예시 (섹션별 배치 권장 - 총 5~7개)**: 
+                 * 서론 또는 섹션 1: "가장 중요한 포인트입니다" (핵심 강조) 1개
+                 * 섹션 2-3: "반드시 확인해야 할 사항입니다", "이 방법이 가장 효과적입니다" (중요 정보) 2~3개
+                 * 섹션 4-5: "24시간 이내 사용 권장", "3가지 핵심을 기억하세요" (주의사항/요약) 2~3개
+                 * 결론: "지금 바로 실천해보세요" (행동 유도) 1개
                - ⚠️ **주의**: 이 노란 배경 스타일은 본문 강조에만 사용하고, 이미지 생성 프롬프트에는 절대 사용 금지 (이미지 프롬프트는 녹색 텍스트 스타일 사용)
             8. 각 섹션은 독자가 이해하기 쉽고, 실용적인 정보를 제공하도록 작성해주세요. 독자의 체류시간을 늘리고 유용한 정보를 제공하는 데 집중해주세요.
             9. **이미지 생성 프롬프트 삽입**: 본문에서 이미지를 삽입할 적절한 위치를 찾아서 텍스트로 이미지 생성 프롬프트를 삽입해주세요. 
@@ -3864,19 +3869,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - ❌ 피해야 할 표현: "클릭", "여기", "링크" 같은 애매한 단어만 사용
               
               **5. 시각적 강조 & 링크 색상 통일 (필수)**:
-                 - **절대 규칙**: 제휴 링크는 녹색 span 태그로 감싸고, 내부에 a 태그 포함
+                 - **절대 규칙 (🚨 CRITICAL)**: 모든 링크(제휴, 내부, 외부)는 **파란색 rgb(26, 115, 232)** 통일
                  - **밑줄 제거 필수**: 모든 링크에 text-decoration: none 스타일 속성 추가
-                 - **색상 통일 규칙 (🚨 CRITICAL)**: 
-                   * **제휴 링크**: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(46, 125, 50);">제품 보기</a></span> (녹색)
-                   * **내부/외부 링크**: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a> (파란색)
-                 - ✅ 올바른 예시:
-                   * 제휴 링크: <span style="color: #2e7d32;"><a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(46, 125, 50);">제품 확인하기</a></span>
-                   * 내부 링크: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a>
-                   * 외부 참고 링크: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">자료 출처</a>
-                 - ❌ 잘못된 예시:
-                   * <a href="...">링크</a> (색상 미지정 금지)
+                 - **색상 통일 규칙**: 
+                   * **제휴 링크**: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">제품 보기</a> (파란색)
+                   * **내부 링크**: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a> (파란색)
+                   * **외부 링크**: <a href="..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">자료 출처</a> (파란색)
+                 - ✅ 올바른 예시 (모두 파란색):
+                   * 제휴 링크: <a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">제품 확인하기</a>
+                   * 내부 링크: <a href="https://example.com/article" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">관련 글 보기</a>
+                   * 외부 참고: <a href="https://source.com" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: rgb(26, 115, 232);">출처 보기</a>
+                 - ❌ 절대 금지:
+                   * <a href="...">링크</a> (색상 미지정)
+                   * <a href="..." style="color: #2e7d32;">링크</a> (녹색 사용 금지)
+                   * <a href="..." style="color: rgb(46, 125, 50);">링크</a> (녹색 사용 금지)
                    * <a href="..." style="color: rgb(26, 115, 232);">링크</a> (밑줄 제거 속성 누락)
-                   * 내부 링크에 녹색 사용하거나 제휴 링크에 파란색 사용 (색상 혼동 금지)
                  - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">CTA 문구</a></span>
                  - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer" style="text-decoration: none;">아이폰 15 케이스 최저가 확인하기</a></span>
                  - ❌ 잘못된 형식 1: [CTA 문구](URL) (span 태그 없음)
