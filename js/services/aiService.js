@@ -23,9 +23,6 @@ import { generateThumbnailTexts } from './thumbnailService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
-// One-time flag to avoid repeating the same INTERNAL LINK missing warning
-let warnedMissingInternalLink = false;
-
 // [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수 (강화)
 function removeDuplicateYears(title) {
   if (!title) return title;
@@ -471,22 +468,6 @@ export async function getEmergingTopics(channelContext) {
   return await callGeminiAPI(prompt);
 }
 
-// Ensure prompt contains internal link section; returns { prompt, hadInternalLinks, addedPlaceholder }
-export function ensureInternalLinkSection(prompt) {
-  if (typeof prompt !== 'string') return { prompt, hadInternalLinks: false, addedPlaceholder: false };
-  const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록') || prompt.includes('내 과거 포스팅 목록');
-  if (hasMyPastPosts) {
-    return { prompt, hadInternalLinks: true, addedPlaceholder: false };
-  }
-  const placeholder = '\n\n[내 과거 포스팅 목록 (내부 링크 추천용)]\n내 과거 포스팅 없음. 관련 내부 링크를 추천해 주세요.\n';
-  const newPrompt = prompt + placeholder;
-  if (!warnedMissingInternalLink) {
-    console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다! placeholder를 추가합니다.');
-    warnedMissingInternalLink = true;
-  }
-  return { prompt: newPrompt, hadInternalLinks: false, addedPlaceholder: true };
-}
-
 // Gemini 텍스트 모델 호출 유틸
 // Gemini 텍스트 모델 호출 유틸
 export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = []) {
@@ -510,31 +491,27 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
           : Object.prototype.toString.call(prompt)
       );
       
-      // 내부 링크 디버깅: ensure internal link section (may add placeholder)
+      // 내부 링크 디버깅: 프롬프트에 내부 링크 섹션이 포함되어 있는지 확인
       if (typeof prompt === 'string') {
-        const { prompt: finalPrompt, hadInternalLinks, addedPlaceholder } = ensureInternalLinkSection(prompt);
-        const hasInternalLinkSection = hadInternalLinks || addedPlaceholder;
-        const hasMyPastPosts = hadInternalLinks;
-
+        const hasInternalLinkSection = prompt.includes('절대 규칙 1순위') || prompt.includes('내 과거 포스팅 목록');
+        const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록');
+        
         console.log('[INTERNAL LINK DEBUG] 프롬프트 내부 링크 포함 여부:', {
           hasInternalLinkSection,
           hasMyPastPosts,
-          promptLength: finalPrompt.length,
+          promptLength: prompt.length,
         });
-
+        
+        // 내부 링크 섹션만 추출해서 로깅
         if (hasMyPastPosts) {
-          const startIdx = finalPrompt.indexOf('[내 과거 포스팅 목록');
-          const endIdx = finalPrompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
+          const startIdx = prompt.indexOf('[내 과거 포스팅 목록');
+          const endIdx = prompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
           if (startIdx >= 0 && endIdx > startIdx) {
-            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', finalPrompt.substring(startIdx, endIdx));
+            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', prompt.substring(startIdx, endIdx));
           }
-        } else if (addedPlaceholder) {
-          // placeholder was added; short log
-          console.log('[INTERNAL LINK DEBUG] placeholder added to prompt.');
+        } else {
+          console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다!');
         }
-
-        // replace prompt variable with finalPrompt for sending and further logging
-        prompt = finalPrompt;
       }
     } catch (e) {}
     // [수정] 멀티모달 입력을 위한 parts 구성
@@ -1961,7 +1938,28 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       }
     }
 
-    return doc.body.innerHTML || html;
+    // Add standardized affiliate disclosure HTML when affiliate candidates exist
+      try {
+        var disclosureText = '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
+        var desiredHtml = '<p style="text-align: center;" data-ke-size="size16"><span style="color: #9d9d9d;">' + disclosureText + '</span></p>';
+        var bodyHtml = doc.body.innerHTML || '';
+        var disclosureRegex = /이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다\./;
+
+        var hasAffiliateCandidates = (affiliateLinks && affiliateLinks.length > 0) || insertedCount > 0;
+        if (hasAffiliateCandidates) {
+          if (disclosureRegex.test(bodyHtml)) {
+            doc.body.innerHTML = bodyHtml.replace(disclosureRegex, desiredHtml);
+            Logger.debug('[postProcessAffiliateHtml] 기존 대가성 문구를 표준 스타일로 대체했습니다.');
+          } else {
+            doc.body.innerHTML = bodyHtml + desiredHtml;
+            Logger.debug('[postProcessAffiliateHtml] 대가성 문구(쿠팡 파트너스)를 본문 마지막에 추가했습니다.');
+          }
+        }
+      } catch (e) {
+        Logger.debug('[postProcessAffiliateHtml] 대가성 문구 추가 실패:', e);
+      }
+
+      return doc.body.innerHTML || html;
   } catch (e) {
     // If anything fails, return original HTML and log
     Logger.warn('[postProcessAffiliateHtml] 처리 실패, 원본 HTML 반환:', e);

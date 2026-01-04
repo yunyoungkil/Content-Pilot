@@ -39,4 +39,11 @@ describe('postProcessAffiliateHtml context-aware insertion', () => {
     expect(out).toContain('<pre>무선이어폰 설치 코드 예시 무선이어폰</pre>');
     expect(out).toContain('<a');
   });
+
+  it('adds standardized affiliate disclosure HTML when affiliates exist', () => {
+    const html = '<p>제품 리뷰</p>';
+    const affiliates = [{ url: 'https://shop.example/aff1', keywords: ['제품'] }];
+    const out = postProcessAffiliateHtml(html, affiliates, { maxLinks: 1 });
+    expect(out).toContain('<p style="text-align: center;" data-ke-size="size16"><span style="color: #9d9d9d;">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</span></p>');
+  });
 });
