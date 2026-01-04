@@ -163,6 +163,22 @@ function computeThumbnailTextForCompose(selectedThumbnail = {}, seoTitle = '', i
   return sanitizeThumbnailText(selectedThumbnail.thumbnailText || '', fallback);
 }
 
+// Link rules builder (returns a plain string to embed into prompts)
+function buildLinkRules(myPastPostsText, affiliateLinks = [], linkedScrapsText) {
+  if (!myPastPostsText) return '';
+  const affiliateCount = (affiliateLinks || []).length;
+  const hasScraps = !!linkedScrapsText;
+  return [
+    '[INTERNAL LINKS - REQUIRED]',
+    '- Select 4–5 internal posts only from the provided "내 과거 포스팅 목록 (내부 링크 추천용)" block below.',
+    '- Use Markdown link format [Text](FullURL). Do not repeat the same URL.',
+    '- Distribute internal links across H2 sections (avoid placing all links in the conclusion).',
+    affiliateCount > 0 ? '- If affiliate links are provided, insert 2 (minimum) and up to 3 affiliate links naturally in the body.' : '',
+    hasScraps ? '- If connected scraps exist, insert 2–3 natural external reference links.' : '',
+    'After writing, add a short checklist line: "CHECK: Internal:N / Affiliate:M / External:K"'
+  ].filter(Boolean).join('\n');
+}
+
 // Try to replace title-like fallback with an AI generated slogan (async helper)
 async function selectSloganIfTitleFallback(
   selectedThumbnail = {},
@@ -1637,7 +1653,7 @@ export { removeDuplicateYears };
  * @returns {string} modified HTML
  */
 export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options = {}) {
-  const { maxLinks = 3, internalLinks = [], referenceLinks = [] } = options || {};
+  const { maxLinks = 3, internalLinks = [], referenceLinks = [], internalMin = 4 } = options || {};
   if (!html) return html;
 
   // If no links at all, return early
@@ -1728,13 +1744,25 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
         if (node.textContent && node.textContent.trim()) textNodes.push(node);
       }
 
+      // H2-first text nodes (prefer inserting internal links near H2 headings)
+      const h2TextNodes = [];
+      const h2s = Array.from(doc.querySelectorAll('h2')) || [];
+      for (const h2 of h2s) {
+        const h2Walker = doc.createTreeWalker(h2, NodeFilter.SHOW_TEXT, null, false);
+        let hn;
+        while ((hn = h2Walker.nextNode())) {
+          if (hn.textContent && hn.textContent.trim()) h2TextNodes.push(hn);
+        }
+      }
+
       // Helper to escape regex
       const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
       // [개선] 링크 삽입 함수 - 더 유연한 매칭 전략
-      const tryInsertLinks = (links, makeAnchorText, linkType = 'general') => {
+      const tryInsertLinks = (links, makeAnchorText, linkType = 'general', textNodesParam = null) => {
         Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 삽입 시도: ${links.length}개`);
         
+        const nodesToUse = Array.isArray(textNodesParam) && textNodesParam.length > 0 ? textNodesParam : textNodes;
         for (const link of links) {
           if (insertedCount >= maxLinks) {
             Logger.debug(`[postProcessAffiliateHtml] 최대 링크 개수(${maxLinks}) 도달`);
@@ -1766,7 +1794,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
           const patterns = candidates.map((c) => new RegExp(escapeReg(c), 'i'));
 
           let matched = false;
-          for (const tnode of textNodes) {
+          for (const tnode of nodesToUse) {
             const txt = tnode.textContent;
             for (let i = 0; i < patterns.length; i++) {
               const pattern = patterns[i];
@@ -1828,6 +1856,22 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
         return matchedText;
       }, 'internal');
 
+      // If internal links remain insufficient, attempt targeted insertion into H2 sections first
+      const existingInternalAnchors = (Array.from(doc.querySelectorAll('a[href]')) || []).filter((el) => {
+        const href = el.getAttribute('href') || '';
+        return normalizedInternals.some((il) => href.includes(il.url));
+      }).length;
+
+      if (existingInternalAnchors < internalMin) {
+        const missing = internalMin - existingInternalAnchors;
+        Logger.info('[postProcessAffiliateHtml] 내부 링크 부족 감지, 자동 보완 시도:', { existingInternalAnchors, missing });
+        tryInsertLinks(normalizedInternals, (matchedText, link) => {
+          if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase())) return link.title;
+          if (link.title && link.title.split(' ').length <= 4) return link.title;
+          return matchedText;
+        }, 'internal', h2TextNodes);
+      }
+
       // reference links: use matched phrase
       if (insertedCount < maxLinks) {
         tryInsertLinks(normalizedRefs, (m) => m, 'reference');
@@ -1846,7 +1890,31 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       // [신규] 삽입 결과 로깅 및 최소 개수 검증
       const minRequiredLinks = 2;
       Logger.info(`[postProcessAffiliateHtml] 링크 삽입 완료: ${insertedCount}/${maxLinks}개`);
-      
+
+      // Update any CHECK: Internal/ Affiliate/ External lines in the document
+      try {
+        const recalcTotals = () => {
+          const totalAnchors = (doc.querySelectorAll('a[href]') || []).length;
+          const affiliateAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedAffiliates.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
+          const internalAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedInternals.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
+          const referenceAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedRefs.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
+          return { totalAnchors, affiliateAnchorCount, internalAnchorCount, referenceAnchorCount };
+        };
+
+        const totals = recalcTotals();
+        const checkRegex = /CHECK:\s*Internal:\s*\d+\s*\/\s*Affiliate:\s*\d+\s*\/\s*External:\s*\d+/i;
+        const walker2 = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
+        let tn2;
+        while ((tn2 = walker2.nextNode())) {
+          if (tn2.textContent && tn2.textContent.match(checkRegex)) {
+            tn2.textContent = `CHECK: Internal:${totals.internalAnchorCount} / Affiliate:${totals.affiliateAnchorCount} / External:${totals.referenceAnchorCount}`;
+            Logger.info('[postProcessAffiliateHtml] CHECK 라인 자동 갱신:', tn2.textContent);
+          }
+        }
+      } catch (e) {
+        Logger.debug('[postProcessAffiliateHtml] CHECK 라인 갱신 실패:', e);
+      }
+
       if (totalLinks > 0 && insertedCount < minRequiredLinks) {
         Logger.warn(
           `[postProcessAffiliateHtml] ⚠️ 제휴 링크 최소 개수 미달: ${insertedCount}개 (최소 ${minRequiredLinks}개 필요)`,
@@ -3083,92 +3151,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             ${
               myPastPostsText
                 ? `
-            �🚫🚫 **[CRITICAL WARNING - 작업 중단 경고]** 🚫🚫🚫
-            
-            ‼️‼️‼️ 내부 링크 2개 또는 3개만 삽입하면 즉시 작업 중단! ‼️‼️‼️
-            
-            - 2개 삽입 = 통과 불가 (작업 중단)
-            - 3개 삽입 = 통과 불가 (작업 중단)
-            - 4-5개 삽입 = 통과 (작업 계속)
-            
-            ‼️ 링크 개수를 세 번 확인하세요:
-            1차 확인: 계획 단계에서 4-5개 선정했는가?
-            2차 확인: 작성 중 4-5개를 삽입하고 있는가?
-            3차 확인: 작성 완료 후 총 4-5개가 맞는가?
-            
-            �🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
-            
-            ⛔⛔⛔ **[최우선 절대 규칙 - 이것부터 실행하세요!]** ⛔⛔⛔
-            
-            🚨🚨🚨 **초안 작성 시작 전 필수 작업** 🚨🚨🚨
-            
-            **STEP 0 (가장 먼저): 내부 링크 선정 및 배치 계획 수립**
-            - 아래 "내 과거 포스팅 목록"에서 이 글과 관련된 포스팅 4-5개를 먼저 선택하세요
-            - 어느 H2 섹션에 어떤 링크를 넣을지 미리 계획하세요
-            - 계획을 세운 후에야 본문 작성을 시작하세요
-            
-            1. **‼️ 내부 링크 반드시 4-5개를 본문 H2 섹션에 삽입 (필수 강제 규칙)**
-               - 🔴 **CRITICAL**: 내부 링크 0개 = 초안 즉시 거부
-               - 🔴 **CRITICAL**: 내부 링크 1-3개 = 초안 즉시 거부
-               - ✅ **필수**: 4개 이상 삽입 (3개 이하는 절대 불가!)
-               - ✅ **최적**: 5개 삽입
-               - 본문 H2 섹션에 최소 3개 배치 필수 (결론에만 몰아넣기 금지)
-               
-               ❌ **잘못된 예 (절대 금지!):**
-               - 2개만 삽입: H2섹션에 링킬2개 → 나머지 내용... → 불합격!
-               - 3개만 삽입: H2섹션에 링킬3개 → 결론 → 불합격!
-               
-               ✅ **올바른 예:**
-               - 4개 삽입: H2섹션 3개에 링킬3개 + 결론에 링킬1개 = 4개 → 합격!
-               - 5개 삽입: H2섹션 4개에 링킬4개 + 결론에 링킬1개 = 5개 → 최적!
-               
-               - **⛔ 절대 금지**: 같은 URL을 2번 이상 사용
-                 ❌ 잘못된 예: 
-                    링크1: [케이스 관리법](https://example.com/case-tips)
-                    링크2: [변색 방지](https://example.com/case-tips) ← 같은 URL 중복!
-                 ✅ 올바른 예:
-                    링크1: [케이스 관리법](https://example.com/case-tips)
-                    링크2: [액세서리 추천](https://example.com/accessories) ← 다른 URL
-            
-            2. **내부 링크 형식 (절대 엄수): [링크텍스트](전체URL)**
-               - ✅ 올바른 예시: [투명 케이스 변색 막는 법](https://costcatcher.k-posting.info/entry/clear-case-yellowing-prevention-tips)
-               - ❌ 틀린 예시: 투명 케이스 변색 막는 법https://costcatcher.k-posting.info/entry/... (URL이 텍스트 옆에 붙음)
-               - ❌ 틀린 예시: [투명 케이스 변색 막는 법] (URL 없음)
-               - **필수**: 대괄호 [ ] 안에 링크 텍스트, 소괄호 ( ) 안에 전체 URL
-               - URL 없는 링크 → 초안 작성 불가
-               - 텍스트와 URL이 분리되지 않은 경우 → 초안 작성 불가
-            
-            3. **내부 링크는 아래 제공된 "내 과거 포스팅 목록"에서만 선택**
-               - 목록에 없는 URL 사용 → 초안 작성 불가
-               - ⚠️ **주의**: 목록이 비어있거나 관련 글이 없으면 이 규칙은 적용되지 않습니다
-            
-            4. **작성 순서 (반드시 준수)**:
-               STEP 0: 📊 **가장 먼저! 링크 개수 결정**
-                 → 몇 개를 삽입할 건가? 4개? 5개?
-                 → 2개 또는 3개는 절대 안 됨!
-               STEP 1: 과거 포스팅 목록에서 관련 글 4-5개 선정
-               STEP 1-1: ⚠️ 선정한 URL 리스트 작성 (중복 체크용)
-               STEP 1-2: ⚠️ 같은 URL이 2개 이상 있으면 다른 글로 교체
-               STEP 2: H2 섹션 3개에 각각 1개씩 배치 계획
-               STEP 3: 결론에 1개 배치 계획
-               STEP 3-1: 📊 총 링크 수 카운트: 3(본문) + 1(결론) = 4개 이상인가?
-               STEP 4: 본문 작성 시 계획대로 삽입
-               STEP 5: ‼️ 작성 후 링크 개수 재확인 (4개 이상이어야 함!)
-            
-            ${myPastPostsText}
-            
-            ⚠️ **작성 후 필수 자가검사 (반드시 수행)**:
-            □ **[CRITICAL]** 내부 링크가 4개 이상인가? (0-3개면 즉시 실패)
-            □ 본문 H2 섹션에 내부 링크 3개 이상 삽입했는가?
-            □ 모든 링크에 전체 URL이 포함되어 있는가? ([텍스트](URL) 형식)
-            □ 링크된 글이 현재 주제와 관련이 있는가?
-            □ 같은 URL을 2번 이상 사용하지 않았는가?
-            
-            🚨 위 체크리스트를 통과하지 못하면 초안이 자동으로 거부됩니다!
-            🚨 특히 첫 번째 항목(4개 이상)은 절대 조건입니다!
-            
-            🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
-            `
+${buildLinkRules(myPastPostsText, affiliateLinks, linkedScrapsText)}
+
+${myPastPostsText}`
                 : ''
             }
             
@@ -3970,9 +3955,6 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             �🚫🚫 **[CRITICAL WARNING - 작업 중단 경고]** 🚫🚫🚫
             
-            ‼️‼️‼️ 내부 링크 2개 또는 3개만 삽입하면 즉시 작업 중단! ‼️‼️‼️
-            
-            - 2개 삽입 = 통과 불가 (작업 중단)
             - 3개 삽입 = 통과 불가 (작업 중단)
             - 4-5개 삽입 = 통과 (작업 계속)
             
@@ -3987,15 +3969,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             지금부터 초안을 작성하기 전에 마지막으로 확인하세요:
             
-            ‼️ 내부 링크 4-5개를 본문 H2 섹션에 반드시 삽입해야 합니다!
-            ❌ 2개만 삽입 = 초안 불합격 (절대 금지!)
-            ❌ 3개만 삽입 = 초안 불합격 (최소 4개 필수!)
-            ✅ 4개 삽입 = 합격 (최소 조건 충족)
-            ✅ 5개 삽입 = 최적 (가장 이상적!)
-            
-            ✅ 본문 H2 섹션에 최소 3개 배치 (결론에만 몰아넣기 금지)
-            ✅ 모든 링크는 **반드시** [텍스트](URL) 형식 사용
-            ✅ 위에 제공된 "내 과거 포스팅 목록"에서만 선택
+${buildLinkRules(myPastPostsText, affiliateLinks, linkedScrapsText)}
+
+${myPastPostsText}
             
             ⛔ **URL 중복 절대 금지 (다시 한 번 강조!)** ⛔
             - 앵커 텍스트가 달라도 같은 URL을 2번 쓰면 안 됩니다!
@@ -4011,34 +3987,9 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             - ❌ 틀린 형식: 투명 케이스 변색 막는 법https://costcatcher.k-posting.info/... (URL이 텍스트에 붙음)
             - ❌ 틀린 형식: [투명 케이스 변색 막는 법] (URL 없음)
             
-            **🔥 작성 시작 전 필수 체크리스트 (하나라도 NO면 다시 계획!) 🔥**
-            
-            � 링크 개수 체크 (4-5개 필수!):
-            □ 선정한 링크가 총 몇 개인가? (필수: 4개 이상)
-            □ 2개만 선정했는가? → YES면 절대 금지! 2개 더 추가!
-            □ 3개만 선정했는가? → YES면 불합격! 1-2개 더 추가!
-            □ 4-5개 선정했는가? → YES면 합격! 계속 진행!
-            
-            📋 URL 선정 체크:
-            □ 과거 포스팅 목록에서 관련 글 4-5개 선정했는가?
-            □ 선정한 URL을 리스트로 나열했는가?
-              예: [URL-1, URL-2, URL-3, URL-4]
-            □ 리스트에서 중복된 URL이 있는가? → YES면 다른 글로 교체!
-            
-            📋 형식 체크:
-            □ 모든 링크가 [텍스트](URL) 형식인가?
-            □ URL이 텍스트 옆에 붙지 않고 소괄호 안에 있는가?
-            
-            📋 배치 계획:
-            □ 어느 H2 섹션에 배치할지 계획했는가?
-            
-            ‼️ **최종 확인: 링크 총개수가 4개 이상인가?** ‼️
-            → NO면 ❌ 다시 계획! YES면 ✅ 작성 시작!
-            
-            ‼️ **최종 확인: 링크 총개수가 4개 이상인가?** ‼️
-            → NO면 다시 계획! YES면 작성 시작!
-            
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            ${buildLinkRules(myPastPostsText, affiliateLinks, linkedScrapsText)}
+
+
             `
                 : ''
             }
@@ -4636,6 +4587,7 @@ ${defaultDescription}
               maxLinks: 3,
               internalLinks,
               referenceLinks,
+              internalMin: 4,
             });
 
             // [신규] 제휴 링크 최종 검증: AI가 삽입했는지 확인
@@ -4676,6 +4628,20 @@ ${defaultDescription}
       }
     } catch (e) {
       Logger.warn('[generateDraftFromIdea] 자동 제휴 삽입 설정 확인 실패:', e);
+    }
+
+    // Debug: count anchor tags and matched link types
+    try {
+      const totalAnchors = (formattedDraft.match(/<a\s+[^>]*href=["'][^"']+["'][^>]*>/gi) || []).length;
+      const affiliateAnchorCount = (formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || [])
+        .filter(tag => Array.isArray(affiliateLinks) && affiliateLinks.some(link => tag.includes(link.url))).length;
+      const internalAnchorCount = (formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || [])
+        .filter(tag => Array.isArray(internalLinks) && internalLinks.some(il => tag.includes(il.url))).length;
+      const referenceAnchorCount = (formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || [])
+        .filter(tag => Array.isArray(referenceLinks) && referenceLinks.some(r => tag.includes(r.url))).length;
+      Logger.debug('[generateDraftFromIdea] Link counts - total:', totalAnchors, 'affiliate:', affiliateAnchorCount, 'internal:', internalAnchorCount, 'reference:', referenceAnchorCount);
+    } catch (e) {
+      Logger.debug('[generateDraftFromIdea] link counting failed:', e);
     }
 
     Logger.info(
