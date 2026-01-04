@@ -3284,6 +3284,19 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
     descriptionMeta = `\n  <meta name="description" content="${String(jsonLdSchema.description).replace(/"/g, '&quot;')}">`;
   }
 
+  // <mark> 태그를 <span> 태그로 변환 (스타일 유지)
+  let processedContent = contentHtml;
+  if (contentHtml) {
+    // <mark> 태그를 <span> 태그로 변환하면서 스타일 속성 유지
+    processedContent = contentHtml.replace(
+      /<mark([^>]*)>/gi,
+      '<span$1>'
+    ).replace(
+      /<\/mark>/gi,
+      '</span>'
+    );
+  }
+
   // 완전한 HTML 문서 생성
   const fullHtml = `<!DOCTYPE html>
 <html lang="ko">
@@ -3293,7 +3306,7 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
   <title>${title || '제목 없음'}</title>${descriptionMeta}${jsonLdScript}
 </head>
 <body>
-${contentHtml}
+${processedContent}
 </body>
 </html>`;
 

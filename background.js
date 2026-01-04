@@ -1034,7 +1034,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'sanitize_html') {
     Logger.debug('[Router] sanitize_html 요청 수신');
     return handleAsync(
-      sanitizeHtmlInOffscreen(msg.rawText || msg.data?.rawText || '')
+      sanitizeHtmlInOffscreen(msg.rawText || msg.data?.rawText || '', msg.data?.options || {})
         .then((cleanedHtml) => {
           Logger.debug('[Router] sanitize_html 정제 완료');
           return { success: true, cleanedHtml };

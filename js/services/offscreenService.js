@@ -975,11 +975,11 @@ async function sendToOffscreen(action, data, timeout = 30000) {
  * @param {string} rawText - 정제할 원본 HTML 텍스트
  * @returns {Promise<string>} 정제된 HTML
  */
-export async function sanitizeHtmlInOffscreen(rawText) {
+export async function sanitizeHtmlInOffscreen(rawText, options = {}) {
   try {
     const startTime = performance.now();
-    Logger.debug('[OffscreenService] HTML 정제 요청 시작');
-    const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 60000);
+    Logger.debug('[OffscreenService] HTML 정제 요청 시작', { options });
+    const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText, options }, 60000);
     const elapsed = Math.round(performance.now() - startTime);
     Logger.info(`⚡ [OffscreenService] HTML 정제 완료 (${elapsed}ms)`);
     return response.cleanedHtml;
@@ -994,7 +994,7 @@ export async function sanitizeHtmlInOffscreen(rawText) {
       // 문서 ID 리셋 후 재시도
       offscreenDocumentId = null;
       try {
-        const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText }, 30000);
+        const response = await sendToOffscreen('sanitize_html_in_offscreen', { rawText, options }, 30000);
         return response.cleanedHtml;
       } catch (retryError) {
         Logger.error('[OffscreenService] 재시도 실패:', retryError);

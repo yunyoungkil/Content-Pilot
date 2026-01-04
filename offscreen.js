@@ -23,7 +23,7 @@ let activeOffscreenPort = null;
  * @param {string} text - 정제할 원본 텍스트
  * @returns {Promise<string>} 정제 및 포매팅된 HTML
  */
-async function sanitizeAndFormatHtml(text) {
+async function sanitizeAndFormatHtml(text, options = {}) {
   if (!text) return '';
 
   // 0. 썸네일 정보 태그 제거 (본문에 포함되지 않도록 먼저 제거)
@@ -63,7 +63,6 @@ async function sanitizeAndFormatHtml(text) {
       'h6',
       'p',
       'br',
-      'hr',
       'ul',
       'ol',
       'li',
@@ -112,25 +111,7 @@ async function sanitizeAndFormatHtml(text) {
   // 3.1 링크 스타일링 및 보안 속성 추가
   body.querySelectorAll('a').forEach((a) => {
     a.style.textDecoration = 'none';
-
-    // [수정] 제휴 링크 스타일 보존: 부모 span에 녹색 스타일이 있으면 유지
-    const parentSpan = a.closest('span[style*="#2e7d32"], span[style*="rgb(46, 125, 50)"]');
-
-    if (parentSpan) {
-      // 제휴 링크인 경우: 부모 span의 스타일을 링크에 직접 적용
-      const spanStyle = parentSpan.getAttribute('style') || '';
-      const colorMatch = spanStyle.match(/color:\s*(#[0-9a-fA-F]{6}|rgb\([^)]+\))/);
-      if (colorMatch) {
-        a.style.color = colorMatch[1];
-      } else {
-        a.style.color = '#2e7d32'; // 기본 녹색
-      }
-      // span의 스타일이 링크에 적용되었으므로 span은 제거하지 않고 유지 (시각적 강조)
-    } else {
-      // 제휴 링크가 아니면 기본 파란색 적용
-      a.style.color = '#1a73e8';
-    }
-
+    a.style.color = '#1a73e8'; // 모든 링크를 파란색으로 통일
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noopener noreferrer'); // 보안 강화
   });
@@ -146,14 +127,16 @@ async function sanitizeAndFormatHtml(text) {
   }
 
   // 3.3 중요 문장 하이라이팅 (<mark> 태그가 없는 경우 자동 적용)
-  // 문단 전체가 아닌 중요한 문장만 하이라이팅
-  if (!body.querySelector('mark')) {
+  // 옵션: 하이라이트 비활성화 가능 (options.disableHighlights)
+  // 문단 전체가 아닌 중요한 문장만 하이라이팅 (최대 N개)
+  if (!options?.disableHighlights && !body.querySelector('mark')) {
     const importantKeywords = ['중요', '핵심', '요약', '결론', '주의', '필수', '반드시', '꼭'];
     let markCount = 0;
 
+    const maxHighlights = Number(options?.maxHighlights) || 5;
     // <p> 태그 내의 텍스트를 문장 단위로 하이라이팅
     body.querySelectorAll('p').forEach((p) => {
-      if (markCount >= 2) return;
+      if (markCount >= maxHighlights) return;
 
       // 이미 다른 태그가 복잡하게 섞인 경우 건너뜀
       const innerHTML = p.innerHTML;
@@ -169,8 +152,7 @@ async function sanitizeAndFormatHtml(text) {
       if (text.length < 20 || text.length > 500) return;
 
       for (const keyword of importantKeywords) {
-        if (markCount >= 2) break;
-        if (!text.includes(keyword)) continue;
+        if (markCount >= maxHighlights) break;
 
         // 키워드가 포함된 문장 찾기 (마침표, 느낌표, 물음표로 구분)
         // 정규식으로 문장 경계 찾기
@@ -210,7 +192,9 @@ async function sanitizeAndFormatHtml(text) {
           const newHTML = innerHTML.replace(regex, (match) => {
             // 이미 태그로 감싸져 있지 않은 경우만
             if (!match.includes('<mark') && !match.includes('</mark>')) {
-              return `<mark style="background-color: rgba(255, 255, 204, 0.5); padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
+              const defaultHighlightStyle = 'background-color: rgba(255, 255, 204, 0.6); padding: 2px 6px; border-radius: 3px; color: inherit;';
+              const highlightStyle = options?.highlightStyle || defaultHighlightStyle;
+              return `<mark style="${highlightStyle}">${match}</mark>`;
             }
             return match;
           });
@@ -225,12 +209,7 @@ async function sanitizeAndFormatHtml(text) {
     });
   }
 
-  // 3.4 <hr> 태그 스타일링
-  body.querySelectorAll('hr').forEach((hr) => {
-    hr.style.border = 'none';
-    hr.style.borderTop = '2px solid #e0e0e0';
-    hr.style.margin = '24px 0 32px 0';
-  });
+  // 3.4 <hr> 태그 스타일링 - <hr> 사용을 제거했으므로 별도 스타일링 불필요
 
   return body.innerHTML;
 }
@@ -919,7 +898,7 @@ function handleRequest(request, sendReply) {
       return false;
     }
 
-    sanitizeAndFormatHtml(request.rawText)
+    sanitizeAndFormatHtml(request.rawText, request.options)
       .then((cleanedHtml) => {
         sendFinalResponse({
           action: 'sanitize_html_in_offscreen_response',

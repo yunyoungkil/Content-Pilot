@@ -1692,16 +1692,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       if (match && insertedCount < maxLinks) {
         // Wrap with span color style if not already
         const parent = a.parentElement;
-        if (
-          !parent ||
-          parent.tagName.toLowerCase() !== 'span' ||
-          !parent.getAttribute('style')?.includes('#2e7d32')
-        ) {
-          const span = doc.createElement('span');
-          span.setAttribute('style', 'color: #2e7d32;');
-          a.replaceWith(span);
-          span.appendChild(a);
-        }
+        // 제휴 링크도 일반 링크와 동일하게 처리 (녹색 span 제거)
         // ensure target and rel are safe
         try {
           a.setAttribute('target', '_blank');
@@ -1719,9 +1710,12 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
     // 2) If we need more, attempt deterministic insertion: internalLinks -> referenceLinks -> affiliateLinks
     if (insertedCount < maxLinks) {
       const usedUrls = new Set(
-        Array.from(doc.querySelectorAll("span[style*='#2e7d32'] a[href]")).map((el) =>
-          el.getAttribute('href')
-        )
+        Array.from(doc.querySelectorAll('a[href]'))
+          .filter((el) => {
+            const href = el.getAttribute('href') || '';
+            return affiliateUrls.some((affUrl) => href.includes(affUrl));
+          })
+          .map((el) => el.getAttribute('href'))
       );
 
       const textNodes = [];
@@ -1784,21 +1778,18 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
                 // Use matched phrase as anchor text to preserve context
                 const anchorText = makeAnchorText ? makeAnchorText(matchedPhrase, link) : matchedPhrase;
 
-                const span = doc.createElement('span');
-                span.setAttribute('style', 'color: #2e7d32;');
                 const a = doc.createElement('a');
                 a.setAttribute('href', targetUrl);
                 a.setAttribute('target', '_blank');
                 a.setAttribute('rel', 'noopener noreferrer');
                 a.textContent = anchorText;
-                span.appendChild(a);
 
                 // Replace only the first match occurrence inside this text node
                 const before = txt.slice(0, m.index);
                 const after = txt.slice(m.index + matchedPhrase.length);
                 const frag = doc.createDocumentFragment();
                 if (before) frag.appendChild(doc.createTextNode(before));
-                frag.appendChild(span);
+                frag.appendChild(a);
                 if (after) frag.appendChild(doc.createTextNode(after));
 
                 if (tnode.parentNode) {
@@ -3107,16 +3098,21 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             �🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
             
-            ⛔ **[절대 규칙 1순위 - 이 규칙을 어기면 초안 작성 불가]** ⛔
+            ⛔⛔⛔ **[최우선 절대 규칙 - 이것부터 실행하세요!]** ⛔⛔⛔
             
-            당신은 지금부터 초안을 작성하기 전에 반드시 다음을 확인해야 합니다:
+            🚨🚨🚨 **초안 작성 시작 전 필수 작업** 🚨🚨🚨
             
-            1. **‼️ 내부 링크 반드시 4-5개를 본문 H2 섹션에 삽입 (4개 최소, 5개 최적)**
-               - ❌ 절대 금지: 2개만 삽입 → 초안 불합격
-               - ❌ 절대 금지: 3개만 삽입 → 초안 불합격
-               - ✅ 필수: 4개 이상 삽입 (3개 이하는 절대 불가!)
-               - 결론에만 배치 → 초안 작성 불가
-               - 본문 H2 섹션에 최소 3개 배치 필수
+            **STEP 0 (가장 먼저): 내부 링크 선정 및 배치 계획 수립**
+            - 아래 "내 과거 포스팅 목록"에서 이 글과 관련된 포스팅 4-5개를 먼저 선택하세요
+            - 어느 H2 섹션에 어떤 링크를 넣을지 미리 계획하세요
+            - 계획을 세운 후에야 본문 작성을 시작하세요
+            
+            1. **‼️ 내부 링크 반드시 4-5개를 본문 H2 섹션에 삽입 (필수 강제 규칙)**
+               - 🔴 **CRITICAL**: 내부 링크 0개 = 초안 즉시 거부
+               - 🔴 **CRITICAL**: 내부 링크 1-3개 = 초안 즉시 거부
+               - ✅ **필수**: 4개 이상 삽입 (3개 이하는 절대 불가!)
+               - ✅ **최적**: 5개 삽입
+               - 본문 H2 섹션에 최소 3개 배치 필수 (결론에만 몰아넣기 금지)
                
                ❌ **잘못된 예 (절대 금지!):**
                - 2개만 삽입: H2섹션에 링킬2개 → 나머지 내용... → 불합격!
@@ -3144,6 +3140,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             3. **내부 링크는 아래 제공된 "내 과거 포스팅 목록"에서만 선택**
                - 목록에 없는 URL 사용 → 초안 작성 불가
+               - ⚠️ **주의**: 목록이 비어있거나 관련 글이 없으면 이 규칙은 적용되지 않습니다
             
             4. **작성 순서 (반드시 준수)**:
                STEP 0: 📊 **가장 먼저! 링크 개수 결정**
@@ -3160,13 +3157,15 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
             
             ${myPastPostsText}
             
-            ⚠️ **작성 후 필수 자가검사**:
+            ⚠️ **작성 후 필수 자가검사 (반드시 수행)**:
+            □ **[CRITICAL]** 내부 링크가 4개 이상인가? (0-3개면 즉시 실패)
             □ 본문 H2 섹션에 내부 링크 3개 이상 삽입했는가?
-            □ 모든 링크에 전체 URL이 포함되어 있는가?
+            □ 모든 링크에 전체 URL이 포함되어 있는가? ([텍스트](URL) 형식)
             □ 링크된 글이 현재 주제와 관련이 있는가?
-            □ **‼️ 총 4-5개의 내부 링크를 삽입했는가? (3개 이하 금지!)**
+            □ 같은 URL을 2번 이상 사용하지 않았는가?
             
-            위 체크리스트를 모두 통과하지 못하면 초안 작성을 다시 시작하세요.
+            🚨 위 체크리스트를 통과하지 못하면 초안이 자동으로 거부됩니다!
+            🚨 특히 첫 번째 항목(4개 이상)은 절대 조건입니다!
             
             🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
             `
@@ -3751,8 +3750,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               
               **3. 자연스러운 문맥 삽입 (Context-Aware)**:
                  - 단순히 키워드를 링크로 바꾸지 말고, 독자가 관심을 가질 만한 타이밍에 배치
-                 - ✅ 좋은 예: "이러한 기능을 갖춘 제품을 찾고 있다면, <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">아이폰 케이스 최저가 확인하기</a></span>에서 다양한 옵션을 비교해보세요"
-                 - ✅ 좋은 예: "실제 사용자 리뷰를 더 확인하고 싶다면 <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">상품 상세보기 및 후기 확인</a></span>을 참고하세요"
+                 - ✅ 좋은 예: "이러한 기능을 갖춘 제품을 찾고 있다면, <a href="URL" target="_blank" rel="noopener noreferrer">아이폰 케이스 최저가 확인하기</a>에서 다양한 옵션을 비교해보세요"
+                 - ✅ 좋은 예: "실제 사용자 리뷰를 더 확인하고 싶다면 <a href="URL" target="_blank" rel="noopener noreferrer">상품 상세보기 및 후기 확인</a>을 참고하세요"
                  - ❌ 나쁜 예: "아이폰 케이스 [구매하기](URL)" (문맥 없이 갑자기 링크)
               
               **4. 매력적인 CTA(Call To Action) 생성**:
@@ -3761,11 +3760,8 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                  - ❌ 피해야 할 표현: "클릭", "여기", "링크" 같은 애매한 단어만 사용
               
               **5. 시각적 강조 (필수)**:
-                 - **절대 규칙**: 제휴 링크는 녹색 span 태그로 감싸고, 내부에 a 태그 포함
-                 - **정확한 형식**: <span style="color: #2e7d32;"><a href="URL" target="_blank" rel="noopener noreferrer">CTA 문구</a></span>
-                 - 예시: <span style="color: #2e7d32;"><a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer">아이폰 15 케이스 최저가 확인하기</a></span>
-                 - ❌ 잘못된 형식 1: [CTA 문구](URL) (span 태그 없음)
-                 - ❌ 잘못된 형식 2: <a href="URL"><span style="color: #2e7d32;">CTA</span></a> (순서 반대)
+                 - **링크 형식**: <a href="URL" target="_blank" rel="noopener noreferrer">CTA 문구</a>
+                 - 예시: <a href="https://link.coupang.com/..." target="_blank" rel="noopener noreferrer">아이폰 15 케이스 최저가 확인하기</a>
               
               **6. 외부 링크와 분리 (매우 중요)**:
                  - **절대 규칙**: 외부 참고 자료 링크와 제휴 링크를 같은 단락에 혼합하지 마세요
@@ -3786,7 +3782,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
               ✅ 최소 2개 이상 삽입했는가? (1개만 있으면 초안 거부!)
               ✅ 본문 전체에 고르게 분산 배치했는가? (결론에만 있으면 초안 거부!)
               ✅ 구매 의도가 생기는 위치에 배치했는가?
-              ✅ 녹색 span 태그로 감싸고 내부에 a 태그 포함했는가?
+              ✅ 적절한 링크 형식(<a href="URL">CTA</a>)을 사용했는가?
               ✅ 외부 링크와 분리했는가?
               ✅ 대가성 문구를 글 마지막에 추가했는가?
               
@@ -3951,6 +3947,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
                 * 예: "High-quality, eye-catching background image showcasing [핵심 주제], vibrant colors, professional composition, modern design, compelling visual narrative that captures the essence of [주제], 16:9 aspect ratio, photorealistic style. IMPORTANT: Do NOT include any text, letters, or words in the image. Keep the background clean for text overlay."
             14. **참고 자료 링크 통합 방법 (매우 중요):**
                - **절대 금지**: "(참고 자료 1)", "(참고 자료 2)", "참고 자료 1에 따르면", "참고 자료 3에서", "참고 자료 4" 같은 번호 표기는 절대 사용하지 마세요. 이런 표현이 발견되면 전체 초안이 거부됩니다.
+               - **외부 참고 링크 필수**: 연결된 스크랩 자료가 있다면 최소 2-3개의 외부 링크를 본문에 자연스럽게 삽입하세요
                - 참고 자료를 언급할 때는 해당 자료의 제목이나 핵심 내용을 자연스러운 문장의 일부로 만들어 링크로 연결해주세요.
                - "참고하시기 바랍니다", "참고 자료에 따르면" 같은 딱딱한 표현도 피해주세요.
                - 링크는 문맥에 완전히 녹아들어야 하며, 독자가 자연스럽게 클릭하고 싶게 만들어주세요.
@@ -4151,7 +4148,12 @@ ${defaultDescription}
       // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
       Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
       try {
-        formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft);
+        const sanitizeOptions = {
+          disableHighlights: !!options.disableHighlights,
+          maxHighlights: options.maxHighlights,
+          highlightStyle: options.highlightStyle,
+        };
+        formattedDraft = await sanitizeHtmlInOffscreen(cleanedDraft, sanitizeOptions);
       } catch (sanitizationError) {
         Logger.error(
           '[generateDraftFromIdea] HTML 정제 실패, 원본 텍스트 사용 (위험):',
