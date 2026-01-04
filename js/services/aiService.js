@@ -23,6 +23,9 @@ import { generateThumbnailTexts } from './thumbnailService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
+// One-time flag to avoid repeating the same INTERNAL LINK missing warning
+let warnedMissingInternalLink = false;
+
 // [신규] 제목에서 중복 년도를 제거하는 헬퍼 함수 (강화)
 function removeDuplicateYears(title) {
   if (!title) return title;
@@ -468,6 +471,22 @@ export async function getEmergingTopics(channelContext) {
   return await callGeminiAPI(prompt);
 }
 
+// Ensure prompt contains internal link section; returns { prompt, hadInternalLinks, addedPlaceholder }
+export function ensureInternalLinkSection(prompt) {
+  if (typeof prompt !== 'string') return { prompt, hadInternalLinks: false, addedPlaceholder: false };
+  const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록') || prompt.includes('내 과거 포스팅 목록');
+  if (hasMyPastPosts) {
+    return { prompt, hadInternalLinks: true, addedPlaceholder: false };
+  }
+  const placeholder = '\n\n[내 과거 포스팅 목록 (내부 링크 추천용)]\n내 과거 포스팅 없음. 관련 내부 링크를 추천해 주세요.\n';
+  const newPrompt = prompt + placeholder;
+  if (!warnedMissingInternalLink) {
+    console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다! placeholder를 추가합니다.');
+    warnedMissingInternalLink = true;
+  }
+  return { prompt: newPrompt, hadInternalLinks: false, addedPlaceholder: true };
+}
+
 // Gemini 텍스트 모델 호출 유틸
 // Gemini 텍스트 모델 호출 유틸
 export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = []) {
@@ -491,27 +510,31 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
           : Object.prototype.toString.call(prompt)
       );
       
-      // 내부 링크 디버깅: 프롬프트에 내부 링크 섹션이 포함되어 있는지 확인
+      // 내부 링크 디버깅: ensure internal link section (may add placeholder)
       if (typeof prompt === 'string') {
-        const hasInternalLinkSection = prompt.includes('절대 규칙 1순위') || prompt.includes('내 과거 포스팅 목록');
-        const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록');
-        
+        const { prompt: finalPrompt, hadInternalLinks, addedPlaceholder } = ensureInternalLinkSection(prompt);
+        const hasInternalLinkSection = hadInternalLinks || addedPlaceholder;
+        const hasMyPastPosts = hadInternalLinks;
+
         console.log('[INTERNAL LINK DEBUG] 프롬프트 내부 링크 포함 여부:', {
           hasInternalLinkSection,
           hasMyPastPosts,
-          promptLength: prompt.length,
+          promptLength: finalPrompt.length,
         });
-        
-        // 내부 링크 섹션만 추출해서 로깅
+
         if (hasMyPastPosts) {
-          const startIdx = prompt.indexOf('[내 과거 포스팅 목록');
-          const endIdx = prompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
+          const startIdx = finalPrompt.indexOf('[내 과거 포스팅 목록');
+          const endIdx = finalPrompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
           if (startIdx >= 0 && endIdx > startIdx) {
-            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', prompt.substring(startIdx, endIdx));
+            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', finalPrompt.substring(startIdx, endIdx));
           }
-        } else {
-          console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다!');
+        } else if (addedPlaceholder) {
+          // placeholder was added; short log
+          console.log('[INTERNAL LINK DEBUG] placeholder added to prompt.');
         }
+
+        // replace prompt variable with finalPrompt for sending and further logging
+        prompt = finalPrompt;
       }
     } catch (e) {}
     // [수정] 멀티모달 입력을 위한 parts 구성
