@@ -35,7 +35,6 @@ import { createAndShowPanel, isPanelVisible } from './js/ui/panel.js';
 import { showRecentScrapPreview } from './js/ui/preview.js';
 import { showToast, Logger, showConfirmationToast } from './js/utils.js';
 import { renderDashboard } from './js/ui/dashboardMode.js';
-import './css/sns-post-modal.css';
 
 // 전역 TUI 에디터 리스너 강제 등록 (workspaceMode.js 모듈 로드)
 import './js/ui/workspaceMode.js';
