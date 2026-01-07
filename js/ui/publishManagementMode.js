@@ -28,17 +28,17 @@ function injectDataTablesCss(shadowRoot) {
     cssLink.rel = 'stylesheet';
     cssLink.dataset.datatablesCss = 'true';
     cssLink.href = 'https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css';
-    
+
     cssLink.onload = () => {
       console.log('[PublishManagement] DataTables CSS loaded successfully');
       resolve();
     };
-    
+
     cssLink.onerror = () => {
       console.error('[PublishManagement] Failed to load DataTables CSS');
       resolve(); // 실패해도 계속 진행
     };
-    
+
     shadowRoot.appendChild(cssLink);
     console.log('[PublishManagement] DataTables CSS injected into Shadow Root');
   });
@@ -46,7 +46,7 @@ function injectDataTablesCss(shadowRoot) {
 
 export function renderPublishManagement(container) {
   container.innerHTML = '';
-  
+
   // 테이블 새로고침 함수를 container에 등록 (snsPostModal에서 사용)
   container.__refreshPublishTable = () => renderPublishManagement(container);
 
@@ -84,31 +84,31 @@ export function renderPublishManagement(container) {
   if (oldHandler) {
     container.removeEventListener('click', oldHandler);
   }
-  
+
   const newHandler = async (e) => {
     // SNS 공유 버튼 처리
     const shareBtn = e.target.closest('.pm-share-btn:not(.pm-share-copy)');
     if (shareBtn) {
       e.preventDefault();
       e.stopPropagation();
-      
+
       const shareDiv = e.target.closest('.pm-share-buttons');
       const url = shareDiv?.dataset.url;
       const title = shareDiv?.dataset.title;
       const itemId = shareDiv?.dataset.itemId;
       const platform = shareBtn.dataset.platform;
-      
+
       if (!url || !platform) return;
-      
+
       console.log('[PublishManagement] Opening SNS modal for platform:', platform);
-      
+
       // 기존 모달이 있으면 제거
       const existingModal = document.querySelector('.sns-post-modal-overlay');
       if (existingModal) {
         existingModal.remove();
         console.log('[PublishManagement] Removed existing modal');
       }
-      
+
       // AI 게시글 생성 모달 표시
       showSnsPostModal(platform, title, url, itemId, container);
       return;
@@ -118,11 +118,14 @@ export function renderPublishManagement(container) {
       const shareDiv = e.target.closest('.pm-share-buttons');
       const url = shareDiv?.dataset.url;
       if (url) {
-        navigator.clipboard.writeText(url).then(() => {
-          showToast('✅ 링크가 클립보드에 복사되었습니다.');
-        }).catch(() => {
-          showToast('⚠️ 링크 복사에 실패했습니다.');
-        });
+        navigator.clipboard
+          .writeText(url)
+          .then(() => {
+            showToast('✅ 링크가 클립보드에 복사되었습니다.');
+          })
+          .catch(() => {
+            showToast('⚠️ 링크 복사에 실패했습니다.');
+          });
       }
       return;
     }
@@ -137,35 +140,42 @@ export function renderPublishManagement(container) {
       refreshBtn.textContent = '🔄 새로고침 중...';
 
       // Fetch all published items (single large page) then request force refresh for them
-      chrome.runtime.sendMessage({ action: 'get_paginated_performance_data', page: 1, pageSize: 10000 }, (resp) => {
-        if (resp && resp.success) {
-          const allItems = resp.data || [];
-          const items = allItems.map((it) => ({ id: it.id, status: it.status, forceRefresh: true }));
+      chrome.runtime.sendMessage(
+        { action: 'get_paginated_performance_data', page: 1, pageSize: 10000 },
+        (resp) => {
+          if (resp && resp.success) {
+            const allItems = resp.data || [];
+            const items = allItems.map((it) => ({
+              id: it.id,
+              status: it.status,
+              forceRefresh: true,
+            }));
 
-          // Request background to refresh metrics for these cards
-          chrome.runtime.sendMessage({ action: 'get_performance_for_cards', items }, (res2) => {
+            // Request background to refresh metrics for these cards
+            chrome.runtime.sendMessage({ action: 'get_performance_for_cards', items }, (res2) => {
+              refreshBtn.disabled = false;
+              refreshBtn.textContent = '🔄 새로고침';
+              if (res2 && res2.success) {
+                showToast('✅ 발행 성과가 최신화되었습니다.');
+                // Re-render table to reflect refreshed metrics
+                renderPublishManagement(container);
+              } else {
+                showToast('⚠️ 발행 성과 갱신에 실패했습니다. (부분적 오류)');
+                renderPublishManagement(container);
+              }
+            });
+          } else {
             refreshBtn.disabled = false;
             refreshBtn.textContent = '🔄 새로고침';
-            if (res2 && res2.success) {
-              showToast('✅ 발행 성과가 최신화되었습니다.');
-              // Re-render table to reflect refreshed metrics
-              renderPublishManagement(container);
-            } else {
-              showToast('⚠️ 발행 성과 갱신에 실패했습니다. (부분적 오류)');
-              renderPublishManagement(container);
-            }
-          });
-        } else {
-          refreshBtn.disabled = false;
-          refreshBtn.textContent = '🔄 새로고침';
-          showToast('⚠️ 발행 목록을 가져오지 못했습니다.');
+            showToast('⚠️ 발행 목록을 가져오지 못했습니다.');
+          }
         }
-      });
+      );
 
       return;
     }
   };
-  
+
   // 새 핸들러 저장 및 등록
   container.__publishManagementHandler = newHandler;
   container.addEventListener('click', newHandler);
@@ -180,36 +190,47 @@ function loadPublishedData(container, page = 1, pageSize = 50, accum = []) {
     contentEl.innerHTML = '<div class="pm-loading">발행된 콘텐츠를 불러오는 중...</div>';
   }
 
-  chrome.runtime.sendMessage({ action: 'get_paginated_performance_data', page, pageSize }, async (response) => {
-    console.log('[PublishManagement] Response received:', response);
-    
-    if (response && response.success) {
-      const { data, hasMore } = response;
-      accum = accum.concat(data);
-      
-      console.log('[PublishManagement] Page', page, '- data length:', data.length, 'hasMore:', hasMore, 'total accum:', accum.length);
+  chrome.runtime.sendMessage(
+    { action: 'get_paginated_performance_data', page, pageSize },
+    async (response) => {
+      console.log('[PublishManagement] Response received:', response);
 
-      if (hasMore) {
-        setTimeout(() => loadPublishedData(container, page + 1, pageSize, accum), 100);
-        return;
-      }
+      if (response && response.success) {
+        const { data, hasMore } = response;
+        accum = accum.concat(data);
 
-      // 모든 데이터 수신 완료
-      console.log('[PublishManagement] All data loaded, total items:', accum.length);
-      
-      if (accum.length === 0) {
-        contentEl.innerHTML = `
+        console.log(
+          '[PublishManagement] Page',
+          page,
+          '- data length:',
+          data.length,
+          'hasMore:',
+          hasMore,
+          'total accum:',
+          accum.length
+        );
+
+        if (hasMore) {
+          setTimeout(() => loadPublishedData(container, page + 1, pageSize, accum), 100);
+          return;
+        }
+
+        // 모든 데이터 수신 완료
+        console.log('[PublishManagement] All data loaded, total items:', accum.length);
+
+        if (accum.length === 0) {
+          contentEl.innerHTML = `
           <div class="pm-empty" style="text-align:center;padding:40px;">
             <div style="font-size:28px;">📭</div>
             <h3>발행된 콘텐츠가 없습니다</h3>
             <p>발행된 콘텐츠가 있으면 여기서 성과를 확인할 수 있습니다.</p>
           </div>
         `;
-        return;
-      }
+          return;
+        }
 
-      // 테이블 마크업 생성
-      contentEl.innerHTML = `
+        // 테이블 마크업 생성
+        contentEl.innerHTML = `
         <div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
           <div style="font-size:13px;color:#666">총 ${accum.length}개</div>
           <div></div>
@@ -232,23 +253,32 @@ function loadPublishedData(container, page = 1, pageSize = 50, accum = []) {
         </table>
       `;
 
-      // 데이터 준비
-      const rows = accum.map((item, index) => {
-        const publishedAt = item.createdAt ? new Date(item.createdAt) : null;
-        const publishedDate = publishedAt ? publishedAt.toLocaleDateString('ko-KR').replace(/\.$/, '') : '-'; // 마지막 점 제거
-        
-        // SEO 제목 우선, 없으면 아이디어 제목 표시
-        const seoTitle = item.seoTitle || item.title || '제목 없음';
-        const url = item.publishedUrl || '#';
-        const perf = item.performance || {};
-        
-        // 홍보 횟수 가져오기
-        const shareCount = item.shareCount || {};
-        const totalShares = (shareCount.twitter || 0) + (shareCount.threads || 0) + (shareCount.facebook || 0) + 
-                            (shareCount.pinterest || 0) + (shareCount.linkedin || 0) + (shareCount.reddit || 0);
-        
-        // SNS 공유 버튼 생성
-        const shareButtons = url && url !== '#' ? `
+        // 데이터 준비
+        const rows = accum.map((item, index) => {
+          const publishedAt = item.createdAt ? new Date(item.createdAt) : null;
+          const publishedDate = publishedAt
+            ? publishedAt.toLocaleDateString('ko-KR').replace(/\.$/, '')
+            : '-'; // 마지막 점 제거
+
+          // SEO 제목 우선, 없으면 아이디어 제목 표시
+          const seoTitle = item.seoTitle || item.title || '제목 없음';
+          const url = item.publishedUrl || '#';
+          const perf = item.performance || {};
+
+          // 홍보 횟수 가져오기
+          const shareCount = item.shareCount || {};
+          const totalShares =
+            (shareCount.twitter || 0) +
+            (shareCount.threads || 0) +
+            (shareCount.facebook || 0) +
+            (shareCount.pinterest || 0) +
+            (shareCount.linkedin || 0) +
+            (shareCount.reddit || 0);
+
+          // SNS 공유 버튼 생성
+          const shareButtons =
+            url && url !== '#'
+              ? `
           <div class="pm-share-buttons" data-url="${escapeHtml(url)}" data-title="${escapeHtml(seoTitle)}" data-item-id="${item.id || ''}">
             <button class="pm-share-btn pm-share-twitter" title="트위터 공유" data-platform="twitter">
               X${shareCount.twitter ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.twitter})</span>` : ''}
@@ -271,142 +301,147 @@ function loadPublishedData(container, page = 1, pageSize = 50, accum = []) {
             <button class="pm-share-btn pm-share-copy" title="링크 복사">🔗</button>
             ${totalShares > 0 ? `<span style="font-size:11px;color:#666;margin-left:4px;">총 ${totalShares}회</span>` : ''}
           </div>
-        ` : '-';
-        
-        // 순위 (1부터 시작)
-        const rank = index + 1;
-        
-        // 참여율
-        const engagementRate = (perf.engagementRate || 0) * 100;
-        
-        // 노출 (impressions)
-        const impressions = perf.impressions || 0;
-        
-        // 클릭률 (CTR)
-        const clicks = perf.clicks || 0;
-        const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
-        
-        // 체류 (평균 체류 시간, 초 단위)
-        const avgTimeOnPage = perf.avgTimeOnPage || perf.averageSessionDuration || 0;
-        const dwellTimeFormatted = avgTimeOnPage > 0 ? formatDuration(avgTimeOnPage) : '-';
-        
-        // 기기분포 (desktop, mobile, tablet)
-        const deviceMetrics = perf.deviceMetrics || {};
-        const desktop = deviceMetrics.desktop || 0;
-        const mobile = deviceMetrics.mobile || 0;
-        const tablet = deviceMetrics.tablet || 0;
-        const total = desktop + mobile + tablet;
-        
-        let deviceDist = '-';
-        if (total > 0) {
-          const dPct = ((desktop / total) * 100).toFixed(0);
-          const mPct = ((mobile / total) * 100).toFixed(0);
-          const tPct = ((tablet / total) * 100).toFixed(0);
-          deviceDist = `🖥️${dPct}% 📱${mPct}% 📲${tPct}%`;
-        }
+        `
+              : '-';
 
-        return [
-          shareButtons,
-          publishedDate,
-          `<a href="${url}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(seoTitle)}">${escapeHtml(seoTitle)}</a>`,
-          rank,
-          engagementRate ? engagementRate.toFixed(1) + '%' : '-',
-          impressions.toLocaleString(),
-          ctr ? ctr.toFixed(2) + '%' : '-',
-          dwellTimeFormatted,
-          deviceDist,
-        ];
-      });
+          // 순위 (1부터 시작)
+          const rank = index + 1;
 
-      // 기존 인스턴스가 있으면 제거
-      if (window.__cp_publish_dt) {
-        try {
-          window.__cp_publish_dt.destroy();
-        } catch (e) {}
-        window.__cp_publish_dt = null;
-      }
+          // 참여율
+          const engagementRate = (perf.engagementRate || 0) * 100;
 
-      // DataTable 초기화
-      try {
-        console.log('[PublishManagement] Initializing DataTable with', rows.length, 'rows');
-        console.log('[PublishManagement] jQuery version:', $.fn.jquery);
-        console.log('[PublishManagement] DataTables available:', typeof $.fn.DataTable);
-        
-        // Shadow Root 컨텍스트에서 테이블 찾기
-        const shadowRoot = contentEl.getRootNode();
-        const tableElement = shadowRoot.querySelector('#publish-management-table');
-        console.log('[PublishManagement] Shadow Root:', shadowRoot);
-        console.log('[PublishManagement] Table element:', tableElement);
-        console.log('[PublishManagement] First 3 rows:', rows.slice(0, 3));
-        
-        if (!tableElement) {
-          throw new Error('Table element not found in Shadow Root');
-        }
-        
-        // jQuery를 Shadow Root 컨텍스트로 호출
-        const table = $(tableElement).DataTable({
-          data: rows,
-          columns: [
-            { title: 'SNS', orderable: false },
-            { title: '발행날짜' },
-            { title: 'SEO 제목' },
-            { title: '순위' },
-            { title: '참여율' },
-            { title: '노출' },
-            { title: '클릭률' },
-            { title: '체류' },
-            { title: '기기분포' },
-          ],
-          order: [[1, 'desc']], // 발행날짜 기준 정렬
-          pageLength: 20,
-          lengthMenu: [10, 20, 50, 100],
-          columnDefs: [
-            { className: 'dt-center', targets: [0, 3, 4, 5, 6, 7, 8] }, // SNS와 숫자/통계 컬럼 가운데 정렬
-          ],
-          language: {
-            lengthMenu: '_MENU_ 페이지당 항목',
-            search: '검색:',
-            info: '_TOTAL_개 중 _START_-_END_ 표시',
-            infoEmpty: '항목 없음',
-            infoFiltered: '(전체 _MAX_개 중 필터링)',
-            paginate: {
-              first: '처음',
-              last: '마지막',
-              next: '다음',
-              previous: '이전'
-            },
-            zeroRecords: '검색 결과가 없습니다',
-            emptyTable: '데이터가 없습니다'
-          },
+          // 노출 (impressions)
+          const impressions = perf.impressions || 0;
+
+          // 클릭률 (CTR)
+          const clicks = perf.clicks || 0;
+          const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+
+          // 체류 (평균 체류 시간, 초 단위)
+          const avgTimeOnPage = perf.avgTimeOnPage || perf.averageSessionDuration || 0;
+          const dwellTimeFormatted = avgTimeOnPage > 0 ? formatDuration(avgTimeOnPage) : '-';
+
+          // 기기분포 (desktop, mobile, tablet)
+          const deviceMetrics = perf.deviceMetrics || {};
+          const desktop = deviceMetrics.desktop || 0;
+          const mobile = deviceMetrics.mobile || 0;
+          const tablet = deviceMetrics.tablet || 0;
+          const total = desktop + mobile + tablet;
+
+          let deviceDist = '-';
+          if (total > 0) {
+            const dPct = ((desktop / total) * 100).toFixed(0);
+            const mPct = ((mobile / total) * 100).toFixed(0);
+            const tPct = ((tablet / total) * 100).toFixed(0);
+            deviceDist = `🖥️${dPct}% 📱${mPct}% 📲${tPct}%`;
+          }
+
+          return [
+            shareButtons,
+            publishedDate,
+            `<a href="${url}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(seoTitle)}">${escapeHtml(seoTitle)}</a>`,
+            rank,
+            engagementRate ? engagementRate.toFixed(1) + '%' : '-',
+            impressions.toLocaleString(),
+            ctr ? ctr.toFixed(2) + '%' : '-',
+            dwellTimeFormatted,
+            deviceDist,
+          ];
         });
-        
-        window.__cp_publish_dt = table;
-        
-        console.log('[PublishManagement] DataTable initialized successfully');
-        console.log('[PublishManagement] Table rows count:', table.rows().count());
-        console.log('[PublishManagement] Table data count:', table.data().length);
-        
-        // tbody가 비어있는지 확인
-        const tbody = shadowRoot.querySelector('#publish-management-table tbody');
-        console.log('[PublishManagement] tbody children count:', tbody ? tbody.children.length : 'tbody not found');
-        
-        if (tbody && tbody.children.length === 0) {
-          console.error('[PublishManagement] DataTable initialized but tbody is empty!');
+
+        // 기존 인스턴스가 있으면 제거
+        if (window.__cp_publish_dt) {
+          try {
+            window.__cp_publish_dt.destroy();
+          } catch (e) {}
+          window.__cp_publish_dt = null;
+        }
+
+        // DataTable 초기화
+        try {
+          console.log('[PublishManagement] Initializing DataTable with', rows.length, 'rows');
+          console.log('[PublishManagement] jQuery version:', $.fn.jquery);
+          console.log('[PublishManagement] DataTables available:', typeof $.fn.DataTable);
+
+          // Shadow Root 컨텍스트에서 테이블 찾기
+          const shadowRoot = contentEl.getRootNode();
+          const tableElement = shadowRoot.querySelector('#publish-management-table');
+          console.log('[PublishManagement] Shadow Root:', shadowRoot);
+          console.log('[PublishManagement] Table element:', tableElement);
+          console.log('[PublishManagement] First 3 rows:', rows.slice(0, 3));
+
+          if (!tableElement) {
+            throw new Error('Table element not found in Shadow Root');
+          }
+
+          // jQuery를 Shadow Root 컨텍스트로 호출
+          const table = $(tableElement).DataTable({
+            data: rows,
+            columns: [
+              { title: 'SNS', orderable: false },
+              { title: '발행날짜' },
+              { title: 'SEO 제목' },
+              { title: '순위' },
+              { title: '참여율' },
+              { title: '노출' },
+              { title: '클릭률' },
+              { title: '체류' },
+              { title: '기기분포' },
+            ],
+            order: [[1, 'desc']], // 발행날짜 기준 정렬
+            pageLength: 20,
+            lengthMenu: [10, 20, 50, 100],
+            columnDefs: [
+              { className: 'dt-center', targets: [0, 3, 4, 5, 6, 7, 8] }, // SNS와 숫자/통계 컬럼 가운데 정렬
+            ],
+            language: {
+              lengthMenu: '_MENU_ 페이지당 항목',
+              search: '검색:',
+              info: '_TOTAL_개 중 _START_-_END_ 표시',
+              infoEmpty: '항목 없음',
+              infoFiltered: '(전체 _MAX_개 중 필터링)',
+              paginate: {
+                first: '처음',
+                last: '마지막',
+                next: '다음',
+                previous: '이전',
+              },
+              zeroRecords: '검색 결과가 없습니다',
+              emptyTable: '데이터가 없습니다',
+            },
+          });
+
+          window.__cp_publish_dt = table;
+
+          console.log('[PublishManagement] DataTable initialized successfully');
+          console.log('[PublishManagement] Table rows count:', table.rows().count());
+          console.log('[PublishManagement] Table data count:', table.data().length);
+
+          // tbody가 비어있는지 확인
+          const tbody = shadowRoot.querySelector('#publish-management-table tbody');
+          console.log(
+            '[PublishManagement] tbody children count:',
+            tbody ? tbody.children.length : 'tbody not found'
+          );
+
+          if (tbody && tbody.children.length === 0) {
+            console.error('[PublishManagement] DataTable initialized but tbody is empty!');
+            // 폴백: 간단한 표 렌더링
+            renderSimpleTable(contentEl, accum);
+            showToast('⚠️ 데이터 테이블 렌더링에 실패했습니다. 간단한 표로 표시합니다.');
+          }
+        } catch (error) {
+          console.error('[PublishManagement] DataTable initialization failed:', error);
+          Logger.error('[PublishManagement] DataTable 초기화 실패:', error);
           // 폴백: 간단한 표 렌더링
           renderSimpleTable(contentEl, accum);
-          showToast('⚠️ 데이터 테이블 렌더링에 실패했습니다. 간단한 표로 표시합니다.');
+          showToast('⚠️ 데이터 테이블 초기화에 실패했습니다. 간단한 표로 표시합니다.');
         }
-      } catch (error) {
-        console.error('[PublishManagement] DataTable initialization failed:', error);
-        Logger.error('[PublishManagement] DataTable 초기화 실패:', error);
-        // 폴백: 간단한 표 렌더링
-        renderSimpleTable(contentEl, accum);
-        showToast('⚠️ 데이터 테이블 초기화에 실패했습니다. 간단한 표로 표시합니다.');
+      } else {
+        contentEl.innerHTML = '<div class="pm-loading">데이터를 불러올 수 없습니다.</div>';
       }
-    } else {
-      contentEl.innerHTML = '<div class="pm-loading">데이터를 불러올 수 없습니다.</div>';
     }
-  });
+  );
 }
 
 // 간단한 표 렌더링 폴백
@@ -437,7 +472,7 @@ function renderSimpleTable(containerEl, items) {
     const seoTitle = item.seoTitle || item.title || '제목 없음';
     const url = item.publishedUrl || '#';
     const perf = item.performance || {};
-    
+
     const rank = index + 1;
     const engagementRate = (perf.engagementRate || 0) * 100;
     const impressions = perf.impressions || 0;
@@ -445,13 +480,13 @@ function renderSimpleTable(containerEl, items) {
     const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
     const avgTimeOnPage = perf.avgTimeOnPage || perf.averageSessionDuration || 0;
     const dwellTimeFormatted = avgTimeOnPage > 0 ? formatDuration(avgTimeOnPage) : '-';
-    
+
     const deviceMetrics = perf.deviceMetrics || {};
     const desktop = deviceMetrics.desktop || 0;
     const mobile = deviceMetrics.mobile || 0;
     const tablet = deviceMetrics.tablet || 0;
     const total = desktop + mobile + tablet;
-    
+
     let deviceDist = '-';
     if (total > 0) {
       const dPct = ((desktop / total) * 100).toFixed(0);
@@ -461,7 +496,9 @@ function renderSimpleTable(containerEl, items) {
     }
 
     // SNS 공유 버튼
-    const shareButtonsHtml = url && url !== '#' ? `
+    const shareButtonsHtml =
+      url && url !== '#'
+        ? `
       <div class="pm-share-buttons" data-url="${escapeHtml(url)}" data-title="${escapeHtml(seoTitle)}" style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
         <button class="pm-share-btn pm-share-twitter" title="트위터 공유" style="cursor:pointer;border:none;background:#000;color:white;border-radius:4px;width:32px;height:32px;font-size:14px;font-weight:bold;display:flex;align-items:center;justify-content:center;">X</button>
         <button class="pm-share-btn pm-share-threads" title="쓰레드 공유" style="cursor:pointer;border:none;background:#000;color:white;border-radius:4px;width:32px;height:32px;font-size:14px;font-weight:bold;display:flex;align-items:center;justify-content:center;">⓪</button>
@@ -471,7 +508,8 @@ function renderSimpleTable(containerEl, items) {
         <button class="pm-share-btn pm-share-reddit" title="레딧 공유" style="cursor:pointer;border:none;background:#FF4500;color:white;border-radius:4px;width:32px;height:32px;font-size:14px;font-weight:bold;display:flex;align-items:center;justify-content:center;">R</button>
         <button class="pm-share-btn pm-share-copy" title="링크 복사" style="cursor:pointer;border:none;background:#6c757d;color:white;border-radius:4px;width:32px;height:32px;font-size:16px;display:flex;align-items:center;justify-content:center;">🔗</button>
       </div>
-    ` : '-';
+    `
+        : '-';
 
     const tr = document.createElement('tr');
     tr.innerHTML = `

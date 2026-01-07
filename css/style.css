@@ -2077,7 +2077,7 @@
 }
 
 .pm-share-facebook {
-  background: #1877F2;
+  background: #1877f2;
 }
 
 .pm-share-facebook:hover {
@@ -2085,7 +2085,7 @@
 }
 
 .pm-share-pinterest {
-  background: #E60023;
+  background: #e60023;
 }
 
 .pm-share-pinterest:hover {
@@ -2093,7 +2093,7 @@
 }
 
 .pm-share-linkedin {
-  background: #0077B5;
+  background: #0077b5;
 }
 
 .pm-share-linkedin:hover {
@@ -2101,7 +2101,7 @@
 }
 
 .pm-share-reddit {
-  background: #FF4500;
+  background: #ff4500;
 }
 
 .pm-share-reddit:hover {
@@ -2205,7 +2205,7 @@
 
 /* DataTables 페이징 스타일 */
 .publish-management-container .dataTables_wrapper .dataTables_paginate,
-.publish-management-container nav[aria-label="pagination"] {
+.publish-management-container nav[aria-label='pagination'] {
   padding-top: 12px;
   display: flex;
   gap: 4px;
@@ -2371,7 +2371,7 @@
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.publish-management-container .dt-input[type="search"] {
+.publish-management-container .dt-input[type='search'] {
   min-width: 250px;
 }
 

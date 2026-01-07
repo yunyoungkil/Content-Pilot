@@ -88,7 +88,7 @@ export function setupHighlighter() {
       chrome.storage.local.set({ highlightToggleState: highlightToggleState }, () => {
         const statusText = highlightToggleState ? 'ON' : 'OFF';
         showToast(`🔍 스크랩 하이라이터: ${statusText}`);
-        
+
         // OFF 상태가 되면 현재 하이라이트 제거
         if (!highlightToggleState) {
           clearHighlight();

@@ -1538,13 +1538,13 @@ function generateSimilarIdea(cardId, status, cardData) {
     let blogLevelInfo = '';
     try {
       const response = await chrome.runtime.sendMessage({
-        action: 'get_blog_level'
+        action: 'get_blog_level',
       });
-      
+
       if (response && response.success) {
         const level = response.level;
         const visitors = response.monthlyVisitors || 0;
-        
+
         if (level === 'beginner') {
           blogLevelInfo = `\n\n[블로그 수준: 신규 (월 ${visitors}명)]\n권장 전략: 롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축\n제목 예시: 4-6단어 이상 구체적 질문 형태 (예: "아이폰 케이스 카드 수납 스티커 꼭 필요한가")`;
         } else if (level === 'intermediate') {
@@ -1564,15 +1564,15 @@ function generateSimilarIdea(cardId, status, cardData) {
     let existingIdeasList = '';
     try {
       const allTitles = [];
-      ['ideas', 'inProgress', 'done'].forEach(columnStatus => {
+      ['ideas', 'inProgress', 'done'].forEach((columnStatus) => {
         const cards = window.__cp_kanbanCards?.[columnStatus] || [];
-        cards.forEach(card => {
+        cards.forEach((card) => {
           if (card && card.title && card.id !== cardId) {
             allTitles.push(card.title);
           }
         });
       });
-      
+
       if (allTitles.length > 0) {
         existingIdeasList = `\n[내 기존 아이디어 목록]\n${allTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n⚠️ 위 목록과 중복되지 않도록 차별화된 아이디어를 제안하세요.\n`;
         console.debug('[Kanban] 기존 아이디어 목록 추가:', allTitles.length, '개');
@@ -1607,76 +1607,76 @@ ${blogLevelInfo}
 `;
 
     chrome.runtime.sendMessage(
-    {
-      action: 'call_gemini',
-      prompt: prompt,
-    },
-    (response) => {
-      if (
-        response &&
-        response.text &&
-        !response.text.trim().startsWith('오류:') &&
-        !response.text.trim().startsWith('오류：')
-      ) {
-        try {
-          // JSON 파싱
-          let ideasText = response.text.trim();
-          if (ideasText.startsWith('```json')) {
-            ideasText = ideasText
-              .replace(/```json\n?/g, '')
-              .replace(/```\n?/g, '')
-              .trim();
-          } else if (ideasText.startsWith('```')) {
-            ideasText = ideasText.replace(/```\n?/g, '').trim();
-          }
-          const ideas = JSON.parse(ideasText);
+      {
+        action: 'call_gemini',
+        prompt: prompt,
+      },
+      (response) => {
+        if (
+          response &&
+          response.text &&
+          !response.text.trim().startsWith('오류:') &&
+          !response.text.trim().startsWith('오류：')
+        ) {
+          try {
+            // JSON 파싱
+            let ideasText = response.text.trim();
+            if (ideasText.startsWith('```json')) {
+              ideasText = ideasText
+                .replace(/```json\n?/g, '')
+                .replace(/```\n?/g, '')
+                .trim();
+            } else if (ideasText.startsWith('```')) {
+              ideasText = ideasText.replace(/```\n?/g, '').trim();
+            }
+            const ideas = JSON.parse(ideasText);
 
-          if (Array.isArray(ideas) && ideas.length > 0) {
-            // 첫 번째 아이디어를 자동으로 추가
-            const firstIdea = ideas[0];
-            const ideaData = {
-              title: firstIdea.title || '유사 아이디어',
-              description: firstIdea.description || '',
-              keywords: [...(cardData.tags || []), '#유사-아이디어'],
-              createdAt: Date.now(),
-            };
-            // 명시적으로 origin 정보 추가 (AI 생성)
-            ideaData.origin = ideaData.origin || {};
-            ideaData.origin.type = 'ai_generated';
-            ideaData.origin.meta = { reason: 'similar_idea_from_ui', sourceCardId: cardId };
+            if (Array.isArray(ideas) && ideas.length > 0) {
+              // 첫 번째 아이디어를 자동으로 추가
+              const firstIdea = ideas[0];
+              const ideaData = {
+                title: firstIdea.title || '유사 아이디어',
+                description: firstIdea.description || '',
+                keywords: [...(cardData.tags || []), '#유사-아이디어'],
+                createdAt: Date.now(),
+              };
+              // 명시적으로 origin 정보 추가 (AI 생성)
+              ideaData.origin = ideaData.origin || {};
+              ideaData.origin.type = 'ai_generated';
+              ideaData.origin.meta = { reason: 'similar_idea_from_ui', sourceCardId: cardId };
 
-            // [수정] 활성 채널 ID를 가져와서 함께 전송
-            chrome.storage.local.get('activeChannelId', (res) => {
-              const activeChannelId = res.activeChannelId || null;
+              // [수정] 활성 채널 ID를 가져와서 함께 전송
+              chrome.storage.local.get('activeChannelId', (res) => {
+                const activeChannelId = res.activeChannelId || null;
 
-              chrome.runtime.sendMessage(
-                {
-                  action: 'add_idea_to_kanban',
-                  data: JSON.stringify(ideaData),
-                  status: 'ideas',
-                  channelId: activeChannelId, // 👈 추가됨
-                },
-                (addResponse) => {
-                  if (addResponse && addResponse.success) {
-                    showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
-                  } else {
-                    showToast('❌ 아이디어 추가에 실패했습니다.');
+                chrome.runtime.sendMessage(
+                  {
+                    action: 'add_idea_to_kanban',
+                    data: JSON.stringify(ideaData),
+                    status: 'ideas',
+                    channelId: activeChannelId, // 👈 추가됨
+                  },
+                  (addResponse) => {
+                    if (addResponse && addResponse.success) {
+                      showToast(`✅ "${firstIdea.title}" 아이디어가 추가되었습니다!`);
+                    } else {
+                      showToast('❌ 아이디어 추가에 실패했습니다.');
+                    }
                   }
-                }
-              );
-            });
-          } else {
-            showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
+                );
+              });
+            } else {
+              showToast('❌ 생성된 아이디어 형식이 올바르지 않습니다.');
+            }
+          } catch (e) {
+            console.error('아이디어 파싱 오류:', e);
+            showToast('❌ AI 응답을 파싱하는 중 오류가 발생했습니다.');
           }
-        } catch (e) {
-          console.error('아이디어 파싱 오류:', e);
-          showToast('❌ AI 응답을 파싱하는 중 오류가 발생했습니다.');
+        } else {
+          showToast('❌ AI 아이디어 생성에 실패했습니다.');
         }
-      } else {
-        showToast('❌ AI 아이디어 생성에 실패했습니다.');
       }
-    }
-  );
+    );
   })(); // async IIFE 종료
 }
 

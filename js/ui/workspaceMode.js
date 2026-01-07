@@ -55,7 +55,7 @@ export function isMeaningfulDraft(d) {
       .replace(/<br\s*\/?>/gi, '')
       .replace(/\s+/g, '')
       .trim();
-    
+
     return htmlContentCheck.length > 0;
   }
 
@@ -89,7 +89,10 @@ export function applyThumbnailInfoUpdate(ideaData, newThumbnailInfo) {
         let cloned = item && typeof item === 'object' ? { ...item } : item;
         if (idx === selectedIndex) {
           // If the update includes a bgImage, maintain a per-concept history array `bgImages` (latest first)
-          if (Object.prototype.hasOwnProperty.call(infoToUpdate, 'bgImage') && infoToUpdate.bgImage) {
+          if (
+            Object.prototype.hasOwnProperty.call(infoToUpdate, 'bgImage') &&
+            infoToUpdate.bgImage
+          ) {
             const newUrl = infoToUpdate.bgImage;
             const existingBgImages = Array.isArray(cloned?.bgImages) ? cloned.bgImages.slice() : [];
             // Ensure latest-first and remove duplicates
@@ -154,7 +157,10 @@ if (typeof window !== 'undefined' && typeof window.__cp_force_save_title !== 'fu
 
       // If we couldn't find a live publish container, try a best-effort background save
       // using any recorded pending title (this covers rapid re-render cases).
-      const pending = __lastPendingTitle || (typeof window !== 'undefined' && window.__cp_last_pending_title) || null;
+      const pending =
+        __lastPendingTitle ||
+        (typeof window !== 'undefined' && window.__cp_last_pending_title) ||
+        null;
       if (pending && pending.id && pending.pending) {
         try {
           chrome.runtime.sendMessage(
@@ -168,7 +174,9 @@ if (typeof window !== 'undefined' && typeof window.__cp_force_save_title !== 'fu
             },
             () => {
               __lastPendingTitle = null;
-              try { window.__cp_last_pending_title = null; } catch (e) {}
+              try {
+                window.__cp_last_pending_title = null;
+              } catch (e) {}
             }
           );
         } catch (e) {
@@ -198,7 +206,8 @@ function showDebugPromptModal(type = 'prompt', prompt = '') {
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'ai-debug-prompt-modal';
-      modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);z-index:2147483646;padding:20px;';
+      modal.style.cssText =
+        'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);z-index:2147483646;padding:20px;';
       modal.innerHTML = `
         <div id="ai-debug-prompt-inner" style="background:#fff;color:#111;max-width:900px;width:100%;max-height:80vh;overflow:auto;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #eee;">
@@ -270,7 +279,12 @@ function hideDebugPromptModal() {
 
 // Attach runtime onMessage listener to receive debug_show_prompt actions
 try {
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage && typeof chrome.runtime.onMessage.addListener === 'function') {
+  if (
+    typeof chrome !== 'undefined' &&
+    chrome.runtime &&
+    chrome.runtime.onMessage &&
+    typeof chrome.runtime.onMessage.addListener === 'function'
+  ) {
     chrome.runtime.onMessage.addListener(function debugPromptListener(message) {
       try {
         if (message && message.action === 'debug_show_prompt') {
@@ -322,8 +336,10 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
   if (!imageGalleryArea) return;
   // debug: log incoming scraps for test diagnostics
   // eslint-disable-next-line no-console
-  console.log('[GALLERY UPDATE] allScraps length=' + (Array.isArray(allScraps) ? allScraps.length : 'none'), allScraps && allScraps.slice ? allScraps.slice(0,3) : allScraps);
-
+  console.log(
+    '[GALLERY UPDATE] allScraps length=' + (Array.isArray(allScraps) ? allScraps.length : 'none'),
+    allScraps && allScraps.slice ? allScraps.slice(0, 3) : allScraps
+  );
 
   // 헤더 HTML이 이미 갤러리 필터 탭을 포함하고 있으므로 유지
   if (!imageGalleryArea.querySelector('.image-gallery-header')) {
@@ -396,7 +412,8 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
           url: u,
           thumbnail: u,
           originData: scrap,
-          usedInDraft: scrap.usedInDraft || (scrap.originData && scrap.originData.usedInDraft) || false,
+          usedInDraft:
+            scrap.usedInDraft || (scrap.originData && scrap.originData.usedInDraft) || false,
           timestamp: scrap.timestamp || Date.now(),
         });
       });
@@ -453,7 +470,12 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
         if (response && response.success && Array.isArray(response.images)) {
           if (response.images.length > 0) {
             allImageData = response.images;
-            renderFilteredImages(allImageData, currentFilter, isDraftFilterActive, draftContentText);
+            renderFilteredImages(
+              allImageData,
+              currentFilter,
+              isDraftFilterActive,
+              draftContentText
+            );
             // 데이터 로드 후 그리드 조정
             setTimeout(adjustGridColumns, 100);
           } else {
@@ -461,7 +483,9 @@ function updateImageGalleryFromAllScraps(resourceLibrary, allScraps, sendCommand
             // overwriting with an empty list. This avoids flicker/regression in tests
             // that intentionally return an empty unified gallery.
             // eslint-disable-next-line no-console
-            console.log('[Gallery] get_unified_gallery returned empty; preserving existing gallery');
+            console.log(
+              '[Gallery] get_unified_gallery returned empty; preserving existing gallery'
+            );
           }
         } else {
           console.warn('[Gallery] 통합 갤러리 응답 실패:', response);
@@ -896,7 +920,9 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
   if (response.metaDescription) {
     if (!ideaData.publishInfo) ideaData.publishInfo = {};
     ideaData.publishInfo.description = response.metaDescription;
-    console.debug('[DIAG applyDraftResponseToIdea] applied metaDescription to publishInfo.description');
+    console.debug(
+      '[DIAG applyDraftResponseToIdea] applied metaDescription to publishInfo.description'
+    );
 
     // Persist description to Firebase immediately
     try {
@@ -923,7 +949,10 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
         );
       }
     } catch (e) {
-      Logger.debug('[applyDraftResponseToIdea] failed to send update_kanban_card for description:', e);
+      Logger.debug(
+        '[applyDraftResponseToIdea] failed to send update_kanban_card for description:',
+        e
+      );
     }
   }
 
@@ -931,7 +960,10 @@ export function applyDraftResponseToIdea(ideaData = {}, response = {}) {
   if (response.thumbnailPrompts) {
     if (!ideaData.publishInfo) ideaData.publishInfo = {};
     ideaData.publishInfo.thumbnailPrompts = response.thumbnailPrompts;
-    console.debug('[DIAG applyDraftResponseToIdea] thumbnailPrompts set:', response.thumbnailPrompts);
+    console.debug(
+      '[DIAG applyDraftResponseToIdea] thumbnailPrompts set:',
+      response.thumbnailPrompts
+    );
   }
 
   if (response.thumbnailInfo) {
@@ -1266,7 +1298,10 @@ function renderThumbnailButton(workspaceEl, ideaData) {
 
         // Mark the thumbnail as used in this draft so it shows a badge in the gallery
         try {
-          chrome.runtime.sendMessage({ action: 'mark_thumbnail_used', data: { url: dataUrl, cardId: ideaData?.id } }, () => {});
+          chrome.runtime.sendMessage(
+            { action: 'mark_thumbnail_used', data: { url: dataUrl, cardId: ideaData?.id } },
+            () => {}
+          );
         } catch (e) {
           // ignore send errors
         }
@@ -1275,7 +1310,6 @@ function renderThumbnailButton(workspaceEl, ideaData) {
         showToast('❌ 에디터를 찾을 수 없습니다.');
       }
     };
-
 
     const onSave = (newThumbnailInfo) => {
       // Helper to apply updates and persist to Firebase
@@ -2009,7 +2043,12 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
   const ideaTitle = ideaData?.title || '';
   const safeIdeaTitle = escapeHtml(ideaTitle);
   // Only use publishInfo.description when present. Do NOT fall back to top-level description when creating a new idea.
-  const description = (ideaData && ideaData.publishInfo && Object.prototype.hasOwnProperty.call(ideaData.publishInfo, 'description')) ? ideaData.publishInfo.description : '';
+  const description =
+    ideaData &&
+    ideaData.publishInfo &&
+    Object.prototype.hasOwnProperty.call(ideaData.publishInfo, 'description')
+      ? ideaData.publishInfo.description
+      : '';
   const safeDescription = escapeHtml(description);
   const safeSeoTitle = escapeHtml(seoTitle);
   const safePermalink = escapeHtml(permalink);
@@ -2179,7 +2218,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             if (response && response.success) {
               // Clear any recorded pending title now that save succeeded
               __lastPendingTitle = null;
-              try { window.__cp_last_pending_title = null; } catch (e) {}
+              try {
+                window.__cp_last_pending_title = null;
+              } catch (e) {}
               ideaData.title = newTitle;
               // update header display text
               // header element removed — rely on publish panel and kanban card updates
@@ -2555,16 +2596,20 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     // Defensive attach: if the dataset flag is present but the per-area helper methods are missing
     // (possible in some test runs or racey re-render situations), re-attach handlers to ensure
     // save hooks exist. This prevents cases where handlers have been removed but the flag remains.
-    const needAttach = !publishInfoArea.dataset.cpPublishHandlersAttached ||
+    const needAttach =
+      !publishInfoArea.dataset.cpPublishHandlersAttached ||
       typeof publishInfoArea._doSaveTitle !== 'function' ||
       typeof publishInfoArea._doSaveSeoTitle !== 'function';
 
     if (needAttach) {
       // If handlers already exist (from a previous attach), remove them first to avoid duplicate
       try {
-        if (publishInfoArea._handler_input) publishInfoArea.removeEventListener('input', publishInfoArea._handler_input);
-        if (publishInfoArea._handler_blur) publishInfoArea.removeEventListener('blur', publishInfoArea._handler_blur, true);
-        if (publishInfoArea._handler_click) publishInfoArea.removeEventListener('click', publishInfoArea._handler_click);
+        if (publishInfoArea._handler_input)
+          publishInfoArea.removeEventListener('input', publishInfoArea._handler_input);
+        if (publishInfoArea._handler_blur)
+          publishInfoArea.removeEventListener('blur', publishInfoArea._handler_blur, true);
+        if (publishInfoArea._handler_click)
+          publishInfoArea.removeEventListener('click', publishInfoArea._handler_click);
       } catch (e) {
         // ignore
       }
@@ -2590,7 +2635,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             } catch (e) {}
           } catch (e) {
             __lastPendingTitle = null;
-            try { window.__cp_last_pending_title = null; } catch (e) {}
+            try {
+              window.__cp_last_pending_title = null;
+            } catch (e) {}
           }
           return;
         }
@@ -2622,7 +2669,8 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         const targ = ev.target;
         if (!targ || !targ.id) return;
         if (targ.id === 'apply-suggested-desc-btn') {
-          const suggested = publishInfoPanel.querySelector('#ai-suggested-desc-text')?.textContent || '';
+          const suggested =
+            publishInfoPanel.querySelector('#ai-suggested-desc-text')?.textContent || '';
           if (suggested) {
             try {
               const descInput = publishInfoPanel.querySelector('#seo-description-input');
@@ -2819,9 +2867,15 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
         try {
           const maybe = chrome.storage.local.get('composeThumbnailText');
           if (maybe && typeof maybe.then === 'function') {
-            maybe.then((s) => { input.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+            maybe
+              .then((s) => {
+                input.checked = !!(s && s.composeThumbnailText);
+              })
+              .catch(() => {});
           } else if (typeof chrome.storage.local.get === 'function') {
-            chrome.storage.local.get('composeThumbnailText', (s) => { input.checked = !!(s && s.composeThumbnailText); });
+            chrome.storage.local.get('composeThumbnailText', (s) => {
+              input.checked = !!(s && s.composeThumbnailText);
+            });
           }
         } catch (e) {
           // ignore
@@ -2868,9 +2922,15 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
             try {
               const maybe = chrome.storage.local.get('composeThumbnailText');
               if (maybe && typeof maybe.then === 'function') {
-                maybe.then((s) => { fallbackInput.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+                maybe
+                  .then((s) => {
+                    fallbackInput.checked = !!(s && s.composeThumbnailText);
+                  })
+                  .catch(() => {});
               } else if (typeof chrome.storage.local.get === 'function') {
-                chrome.storage.local.get('composeThumbnailText', (s) => { fallbackInput.checked = !!(s && s.composeThumbnailText); });
+                chrome.storage.local.get('composeThumbnailText', (s) => {
+                  fallbackInput.checked = !!(s && s.composeThumbnailText);
+                });
               }
             } catch (e) {}
             fallbackInput.addEventListener('change', (e) => {
@@ -2936,9 +2996,15 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
           try {
             const maybe = chrome.storage.local.get('composeThumbnailText');
             if (maybe && typeof maybe.then === 'function') {
-              maybe.then((s) => { input.checked = !!(s && s.composeThumbnailText); }).catch(() => {});
+              maybe
+                .then((s) => {
+                  input.checked = !!(s && s.composeThumbnailText);
+                })
+                .catch(() => {});
             } else if (typeof chrome.storage.local.get === 'function') {
-              chrome.storage.local.get('composeThumbnailText', (s) => { input.checked = !!(s && s.composeThumbnailText); });
+              chrome.storage.local.get('composeThumbnailText', (s) => {
+                input.checked = !!(s && s.composeThumbnailText);
+              });
             }
           } catch (e) {
             // ignore
@@ -3018,7 +3084,9 @@ function showPublishInfo(workspaceEl, permalink, tags, seoTitle, ideaData) {
     copyTagsBtn.addEventListener('click', () => {
       const tagsInput = publishInfoPanel.querySelector('#tags-input');
       if (tagsInput && tagsInput.value) {
-        navigator.clipboard.writeText(tagsInput.value).then(() => showToast('📋 태그가 클립보드에 복사되었습니다.'));
+        navigator.clipboard
+          .writeText(tagsInput.value)
+          .then(() => showToast('📋 태그가 클립보드에 복사되었습니다.'));
       }
     });
   }
@@ -3288,13 +3356,9 @@ function generateCompleteHtml(contentHtml, jsonLdSchema, title) {
   let processedContent = contentHtml;
   if (contentHtml) {
     // <mark> 태그를 <span> 태그로 변환하면서 스타일 속성 유지
-    processedContent = contentHtml.replace(
-      /<mark([^>]*)>/gi,
-      '<span$1>'
-    ).replace(
-      /<\/mark>/gi,
-      '</span>'
-    );
+    processedContent = contentHtml
+      .replace(/<mark([^>]*)>/gi, '<span$1>')
+      .replace(/<\/mark>/gi, '</span>');
   }
 
   // 완전한 HTML 문서 생성
@@ -3341,7 +3405,9 @@ export async function updateWorkspaceActionButtons(workspaceEl, hasDraft) {
     if (maybe && typeof maybe.then === 'function') {
       storage = await maybe;
     } else if (typeof chrome.storage.local.get === 'function') {
-      storage = await new Promise((resolve) => chrome.storage.local.get('composeThumbnailText', (s) => resolve(s || {})));
+      storage = await new Promise((resolve) =>
+        chrome.storage.local.get('composeThumbnailText', (s) => resolve(s || {}))
+      );
     }
     composeThumbnailText = !!(storage && storage.composeThumbnailText);
   } catch (e) {
@@ -3819,13 +3885,13 @@ export function renderWorkspace(container, ideaData) {
           window.__cp_workspace_idea_data.currentDraft = contentData;
           // Also update draftContent if used elsewhere
           window.__cp_workspace_idea_data.draftContent = contentData;
-          
+
           // Update workspace.draft to ensure isMeaningfulDraft() can detect content
           if (!window.__cp_workspace_idea_data.workspace) {
             window.__cp_workspace_idea_data.workspace = {};
           }
           window.__cp_workspace_idea_data.workspace.draft = contentData;
-          
+
           // Update action buttons to show/hide delete button based on content
           try {
             const workspaceEl = document.querySelector('.workspace-container');
@@ -5545,12 +5611,12 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
             console.error('[Workspace] 에디터 초기화 오류:', err);
           }
         };
-        
+
         // 초기화 여러 번 시도하여 확실히 반영
         clearAndFocus();
         setTimeout(clearAndFocus, 100);
         setTimeout(clearAndFocus, 300);
-        
+
         // 마지막으로 포커스
         setTimeout(() => {
           try {
@@ -5583,7 +5649,7 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
                 window.__cp_workspace_idea_data.publishInfo = {};
               window.__cp_workspace_idea_data.seoTitle = '';
             }
-            
+
             // UI 즉시 업데이트
             const publishInfoArea = workspaceEl.querySelector('#publish-info-area');
             if (publishInfoArea) {
@@ -5592,14 +5658,14 @@ export function addWorkspaceEventListeners(workspaceEl, ideaData, container = nu
               const emptyInfoHtml = `<div class="publish-info-panel" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px;"><p style="color: #999; font-size: 13px;">발행 정보가 없습니다.</p></div>`;
               publishInfoArea.insertAdjacentHTML('beforeend', emptyInfoHtml);
             }
-            
+
             // 썸네일 버튼 제거
             const thumbBtn = workspaceEl.querySelector('#btn-create-thumbnail');
             if (thumbBtn && thumbBtn.parentNode) thumbBtn.remove();
-            
+
             // 삭제 버튼 제거
             if (deleteBtn && deleteBtn.parentNode) deleteBtn.remove();
-            
+
             // 버튼 UI 업데이트 (삭제 완료 후 생성 버튼 표시)
             setTimeout(() => {
               updateWorkspaceActionButtons(workspaceEl, false).then(() => {

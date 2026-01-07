@@ -356,40 +356,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const userId = await getCurrentUserId();
         const db = getDb();
         const { get, ref } = require('firebase/database');
-        
+
         // [1단계] 애널리틱스 데이터 확인
         const analyticsSnapshot = await get(ref(db, `analytics/${userId}`));
         if (analyticsSnapshot.exists()) {
           const analyticsData = analyticsSnapshot.val();
           let totalPageviews = 0;
-          Object.values(analyticsData).forEach(post => {
+          Object.values(analyticsData).forEach((post) => {
             if (post.pageviews) totalPageviews += post.pageviews;
           });
-          
+
           let level = 'beginner';
           if (totalPageviews >= 1000) level = 'advanced';
           else if (totalPageviews >= 100) level = 'intermediate';
-          
+
           return { success: true, level, monthlyVisitors: totalPageviews, source: 'analytics' };
         }
-        
+
         // [2단계] 수동 입력 확인
         const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
         if (activeChannelId) {
           const channelSnapshot = await get(ref(db, `channels/${userId}/${activeChannelId}`));
           if (channelSnapshot.exists()) {
             const channelData = channelSnapshot.val();
-            const manualVisitors = channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
+            const manualVisitors =
+              channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
             if (manualVisitors && manualVisitors > 0) {
               let level = 'beginner';
               if (manualVisitors >= 1000) level = 'advanced';
               else if (manualVisitors >= 100) level = 'intermediate';
-              
+
               return { success: true, level, monthlyVisitors: manualVisitors, source: 'manual' };
             }
           }
         }
-        
+
         // [3단계] 포스팅 개수로 추정
         const publishedSnapshot = await get(ref(db, `kanban/${userId}/published`));
         if (publishedSnapshot.exists()) {
@@ -397,10 +398,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           let level = 'beginner';
           if (publishedCount > 20) level = 'advanced';
           else if (publishedCount > 5) level = 'intermediate';
-          
-          return { success: true, level, monthlyVisitors: 0, source: 'post_count', note: `발행 ${publishedCount}개` };
+
+          return {
+            success: true,
+            level,
+            monthlyVisitors: 0,
+            source: 'post_count',
+            note: `발행 ${publishedCount}개`,
+          };
         }
-        
+
         // [기본값]
         return { success: true, level: 'beginner', monthlyVisitors: 0, source: 'default' };
       })()
@@ -415,55 +422,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const db = getDb();
         const { get, ref } = require('firebase/database');
         const { channelId, limit = 20 } = msg;
-        
+
         if (!channelId) {
           return { success: false, error: '채널 ID가 필요합니다.' };
         }
-        
+
         // [1] channel_content에서 외부 수집 콘텐츠 조회
         const contentSnap = await get(ref(db, `channel_content/${userId}/blogs`));
         const allBlogs = contentSnap?.val() || {};
-        
+
         const externalContent = Object.values(allBlogs)
-          .filter(item => item !== null && item.title && item.fullLink)
-          .filter(item => item.sourceId === channelId)
+          .filter((item) => item !== null && item.title && item.fullLink)
+          .filter((item) => item.sourceId === channelId)
           .sort((a, b) => (b.publishedAt || b.createdAt || 0) - (a.publishedAt || a.createdAt || 0))
           .slice(0, limit)
-          .map(item => ({
+          .map((item) => ({
             title: item.title,
             url: item.fullLink || item.link,
-            publishedAt: item.publishedAt || item.createdAt
+            publishedAt: item.publishedAt || item.createdAt,
           }));
-        
+
         // [2] published에서 직접 발행한 포스팅 조회
         const publishedSnap = await get(ref(db, `kanban/${userId}/published`));
         const publishedPosts = publishedSnap?.val() || {};
-        
+
         const myPublished = Object.values(publishedPosts)
-          .filter(item => item !== null && item.title && item.publishedUrl)
+          .filter((item) => item !== null && item.title && item.publishedUrl)
           .sort((a, b) => (b.publishedAt || b.updatedAt || 0) - (a.publishedAt || a.updatedAt || 0))
           .slice(0, limit)
-          .map(item => ({
+          .map((item) => ({
             title: item.title,
             url: item.publishedUrl,
-            publishedAt: item.publishedAt || item.updatedAt
+            publishedAt: item.publishedAt || item.updatedAt,
           }));
-        
+
         // [3] 두 목록 합치고 최신순 정렬
         const allContent = [...externalContent, ...myPublished]
           .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))
           .slice(0, limit);
-        
-        Logger.debug(`[get_channel_content] 채널 ${channelId}: 외부 ${externalContent.length}개, 발행 ${myPublished.length}개, 총 ${allContent.length}개`);
-        
+
+        Logger.debug(
+          `[get_channel_content] 채널 ${channelId}: 외부 ${externalContent.length}개, 발행 ${myPublished.length}개, 총 ${allContent.length}개`
+        );
+
         return {
           success: true,
           content: allContent,
           stats: {
             external: externalContent.length,
             published: myPublished.length,
-            total: allContent.length
-          }
+            total: allContent.length,
+          },
         };
       })()
     );
@@ -688,7 +697,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(() => {});
     return handleAsync(resultPromise);
   }
-  
+
   // Gemini API 호출 (스크랩 추천용)
   if (msg.action === 'call_gemini_api') {
     return handleAsync(
@@ -704,7 +713,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })()
     );
   }
-  
+
   if (msg.action === 'generate_idea_briefing') {
     // Support callers that send payload either top-level or under `data`. Normalize options so both
     // top-level flags and nested `options` are accepted.
@@ -1213,7 +1222,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
                 if (!objectPath) return u; // cannot determine -> keep
                 const uid = await getCurrentUserId();
-                const deleted = await (typeof isThumbnailDeleted === 'function' ? isThumbnailDeleted(uid, objectPath) : false);
+                const deleted = await (typeof isThumbnailDeleted === 'function'
+                  ? isThumbnailDeleted(uid, objectPath)
+                  : false);
                 return deleted ? null : u;
               } catch (e) {
                 return u; // on error, keep original to avoid accidental loss
@@ -1276,7 +1287,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             updates.publishInfo = pub;
           }
         } catch (sanitizeErr) {
-          Logger.warn('[update_kanban_card] publishInfo sanitation failed:', sanitizeErr && sanitizeErr.message);
+          Logger.warn(
+            '[update_kanban_card] publishInfo sanitation failed:',
+            sanitizeErr && sanitizeErr.message
+          );
         }
 
         // 데이터 정제 (undefined → null)
@@ -1837,20 +1851,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           const { COLLECTIONS } = require('./js/constants.js');
           const cardRef = `${COLLECTIONS.users}/${userId}/${COLLECTIONS.kanban}/${itemId}`;
-          
+
           // 현재 shareCount 가져오기
           const cardSnapshot = await get(ref(realtimeDb, cardRef));
           const cardData = cardSnapshot.val() || {};
           const shareCount = cardData.shareCount || {};
-          
+
           // 플랫폼별 횟수 증가
           shareCount[platform] = (shareCount[platform] || 0) + 1;
-          
+
           // Firebase 업데이트
           await update(ref(realtimeDb, cardRef), { shareCount });
-          
+
           Logger.info(`[increment_share_count] ${platform} 공유 횟수 증가: ${itemId}`);
-          
+
           return { success: true, shareCount };
         } catch (error) {
           Logger.error('[increment_share_count] Error:', error);
@@ -1880,7 +1894,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             try {
               await updateSinglePerformanceMetric({ id, path, url: card.publishedUrl });
             } catch (e) {
-              Logger.warn('[get_performance_for_cards] force refresh failed for', id, e?.message || e);
+              Logger.warn(
+                '[get_performance_for_cards] force refresh failed for',
+                id,
+                e?.message || e
+              );
             }
           }
 
@@ -1996,12 +2014,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           const userId = await getCurrentUserId();
           Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
-          
+
           // userId가 기본값인 경우 경고
           if (userId === CONSTANTS.USER_ID) {
             Logger.warn(`[get_channel_content] 기본 USER_ID 사용 중 - 로그인 필요할 수 있음`);
           }
-          
+
           const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
             get(ref(getDb(), `${COLLECTIONS.CHANNEL_CONTENT}/${userId}`)),
             get(ref(getDb(), `${COLLECTIONS.CHANNEL_META}/${userId}`)),
@@ -2027,7 +2045,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
           );
 
-          const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
+          const blogs = Object.values(blogsRaw).filter(
+            (item) => item !== null && item !== undefined
+          );
           const youtubes = Object.values(youtubesRaw).filter(
             (item) => item !== null && item !== undefined
           );
@@ -2037,7 +2057,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           Logger.info(
             `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
           );
-          
+
           // [DEBUG] channel_content 상세 데이터 출력
           console.log('[CHANNEL_CONTENT DEBUG] ===== 시작 =====');
           console.log('[CHANNEL_CONTENT DEBUG] blogs 총 개수:', blogs.length);
@@ -2047,9 +2067,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               title: blogs[0].title,
               sourceId: blogs[0].sourceId,
               fullLink: blogs[0].fullLink,
-              publishedAt: blogs[0].publishedAt
+              publishedAt: blogs[0].publishedAt,
             });
-            console.log('[CHANNEL_CONTENT DEBUG] 모든 블로그 sourceId 목록:', [...new Set(blogs.map(b => b.sourceId))]);
+            console.log('[CHANNEL_CONTENT DEBUG] 모든 블로그 sourceId 목록:', [
+              ...new Set(blogs.map((b) => b.sourceId)),
+            ]);
             console.log('[CHANNEL_CONTENT DEBUG] 전체 포스트 제목 목록:');
             blogs.slice(0, 10).forEach((blog, idx) => {
               console.log(`  ${idx + 1}. ${blog.title} (sourceId: ${blog.sourceId})`);
@@ -3607,26 +3629,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const kanbanDataBroad = kanbanSnapBroad?.val() || {};
 
                 try {
-                  chrome.runtime.sendMessage({ action: 'kanban_data_updated', data: kanbanDataBroad });
+                  chrome.runtime.sendMessage({
+                    action: 'kanban_data_updated',
+                    data: kanbanDataBroad,
+                  });
                 } catch (e) {
-                  Logger.debug('[delete_storage_image_by_url] broadcast runtime.sendMessage failed:', e && e.message);
+                  Logger.debug(
+                    '[delete_storage_image_by_url] broadcast runtime.sendMessage failed:',
+                    e && e.message
+                  );
                 }
 
                 try {
                   chrome.tabs.query({}, (tabs) => {
                     tabs.forEach((tab) => {
-                      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://') && !tab.url.startsWith('about:')) {
+                      if (
+                        tab.id &&
+                        tab.url &&
+                        !tab.url.startsWith('chrome://') &&
+                        !tab.url.startsWith('edge://') &&
+                        !tab.url.startsWith('about:')
+                      ) {
                         try {
-                          chrome.tabs.sendMessage(tab.id, { action: 'kanban_data_updated', data: kanbanDataBroad }, () => {});
+                          chrome.tabs.sendMessage(
+                            tab.id,
+                            { action: 'kanban_data_updated', data: kanbanDataBroad },
+                            () => {}
+                          );
                         } catch (ignored) {}
                       }
                     });
                   });
                 } catch (e) {
-                  Logger.debug('[delete_storage_image_by_url] tabs broadcast failed:', e && e.message);
+                  Logger.debug(
+                    '[delete_storage_image_by_url] tabs broadcast failed:',
+                    e && e.message
+                  );
                 }
               } catch (e) {
-                Logger.debug('[delete_storage_image_by_url] preparing broadcast failed:', e && e.message);
+                Logger.debug(
+                  '[delete_storage_image_by_url] preparing broadcast failed:',
+                  e && e.message
+                );
               }
             } catch (e) {}
 
@@ -3915,11 +3959,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const url = String(msg.data.url || '');
           const cardId = msg.data.cardId || null;
           const userId = await getCurrentUserId();
-          Logger.info(`[mark_thumbnail_used] 시작 - url: ${url.substring(0, 100)}, cardId: ${cardId}, userId: ${userId}`);
+          Logger.info(
+            `[mark_thumbnail_used] 시작 - url: ${url.substring(0, 100)}, cardId: ${cardId}, userId: ${userId}`
+          );
 
           const list = await getUploadedImagesLog();
-          Logger.info(`[mark_thumbnail_used] 업로드 로그 조회 완료 - ${list ? list.length : 0}개 항목`);
-          
+          Logger.info(
+            `[mark_thumbnail_used] 업로드 로그 조회 완료 - ${list ? list.length : 0}개 항목`
+          );
+
           // Helper: normalizeUrlForDeletion
           const normalizeUrlForDeletion = (u) => {
             if (!u) return '';
@@ -3973,7 +4021,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const ts = Date.now();
           let didUpdateThumbnailImage = false;
           if (match) {
-            Logger.info(`[mark_thumbnail_used] thumbnail_images 업데이트 시작 - imageId: ${match.id}`);
+            Logger.info(
+              `[mark_thumbnail_used] thumbnail_images 업데이트 시작 - imageId: ${match.id}`
+            );
             await update(`thumbnail_images/${userId}/${match.id}`, {
               usedInDraft: true,
               usedInDraftAt: ts,
@@ -3988,7 +4038,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // Also update the card's publishInfo.thumbnailInfo entry when cardId is provided
           let didUpdateKanban = false;
           if (cardId) {
-            Logger.info(`[mark_thumbnail_used] kanban publishInfo.thumbnailInfo 업데이트 시작 - cardId: ${cardId}`);
+            Logger.info(
+              `[mark_thumbnail_used] kanban publishInfo.thumbnailInfo 업데이트 시작 - cardId: ${cardId}`
+            );
             try {
               const kanbanSnap = await get(ref(getDb(), `kanban/${userId}`));
               const kanban = kanbanSnap && kanbanSnap.val ? kanbanSnap.val() : {};
@@ -4005,7 +4057,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
                 const providedUrl = url;
                 const downloadToCompare = match ? match.downloadURL : providedUrl;
-                const storageToCompare = match && match.storagePath ? match.storagePath : (providedUrl && providedUrl.startsWith('gs://') ? providedUrl : null);
+                const storageToCompare =
+                  match && match.storagePath
+                    ? match.storagePath
+                    : providedUrl && providedUrl.startsWith('gs://')
+                      ? providedUrl
+                      : null;
 
                 if (Array.isArray(tinfo)) {
                   newTinfo = tinfo.map((it) => {
@@ -4013,8 +4070,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     const bg = it.bgImage || '';
                     const bgs = Array.isArray(it.bgImages) ? it.bgImages : [];
 
-                    const matchesDownload = downloadToCompare ? (matchUrlLoose(bg, downloadToCompare) || bgs.some((u) => matchUrlLoose(u, downloadToCompare))) : false;
-                    const matchesStorage = storageToCompare ? (bg === storageToCompare || bgs.some((u) => u === storageToCompare)) : false;
+                    const matchesDownload = downloadToCompare
+                      ? matchUrlLoose(bg, downloadToCompare) ||
+                        bgs.some((u) => matchUrlLoose(u, downloadToCompare))
+                      : false;
+                    const matchesStorage = storageToCompare
+                      ? bg === storageToCompare || bgs.some((u) => u === storageToCompare)
+                      : false;
 
                     if (matchesDownload || matchesStorage) {
                       const copy = { ...it };
@@ -4029,17 +4091,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 } else if (tinfo && typeof tinfo === 'object') {
                   const bg = tinfo.bgImage || '';
                   const bgs = Array.isArray(tinfo.bgImages) ? tinfo.bgImages : [];
-                  const matchesDownload = downloadToCompare ? (matchUrlLoose(bg, downloadToCompare) || bgs.some((u) => matchUrlLoose(u, downloadToCompare))) : false;
-                  const matchesStorage = storageToCompare ? (bg === storageToCompare || bgs.some((u) => u === storageToCompare)) : false;
+                  const matchesDownload = downloadToCompare
+                    ? matchUrlLoose(bg, downloadToCompare) ||
+                      bgs.some((u) => matchUrlLoose(u, downloadToCompare))
+                    : false;
+                  const matchesStorage = storageToCompare
+                    ? bg === storageToCompare || bgs.some((u) => u === storageToCompare)
+                    : false;
                   if (matchesDownload || matchesStorage) {
-                    newTinfo = { ...tinfo, usedInDraft: true, usedInDraftAt: ts, usedInDraftCardId: cardId || null };
+                    newTinfo = {
+                      ...tinfo,
+                      usedInDraft: true,
+                      usedInDraftAt: ts,
+                      usedInDraftCardId: cardId || null,
+                    };
                     changed = true;
                   }
                 }
 
                 if (changed) {
                   const updates = { ...(publishInfo || {}), thumbnailInfo: newTinfo };
-                  Logger.info(`[mark_thumbnail_used] kanban 카드 업데이트 - status: ${statusKey}, cardId: ${cardId}`);
+                  Logger.info(
+                    `[mark_thumbnail_used] kanban 카드 업데이트 - status: ${statusKey}, cardId: ${cardId}`
+                  );
                   await update(`kanban/${userId}/${statusKey}/${cardId}`, { publishInfo: updates });
                   didUpdateKanban = true;
                   Logger.info(`[mark_thumbnail_used] kanban 카드 업데이트 완료`);
@@ -4051,14 +4125,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     usedInDraftAt: ts,
                     usedInDraftCardId: cardId || null,
                   };
-                  
+
                   // Add bgImage from match or provided URL
                   if (match && match.downloadURL) {
                     newEntry.bgImage = match.downloadURL;
                   } else if (providedUrl) {
                     newEntry.bgImage = providedUrl;
                   }
-                  
+
                   // Append to array or create new array
                   if (Array.isArray(tinfo)) {
                     newTinfo = [...tinfo, newEntry];
@@ -4067,7 +4141,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   } else {
                     newTinfo = [newEntry];
                   }
-                  
+
                   const updates = { ...(publishInfo || {}), thumbnailInfo: newTinfo };
                   Logger.info(`[mark_thumbnail_used] 새 항목 추가하여 kanban 카드 업데이트`);
                   await update(`kanban/${userId}/${statusKey}/${cardId}`, { publishInfo: updates });
@@ -4078,16 +4152,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 break;
               }
             } catch (e) {
-              Logger.warn('[Background] mark_thumbnail_used: failed to update card publishInfo', e && e.message);
+              Logger.warn(
+                '[Background] mark_thumbnail_used: failed to update card publishInfo',
+                e && e.message
+              );
             }
           }
 
           if (!didUpdateThumbnailImage && !didUpdateKanban) {
-            Logger.warn(`[mark_thumbnail_used] 업데이트 실패 - thumbnail_images 매치: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`);
+            Logger.warn(
+              `[mark_thumbnail_used] 업데이트 실패 - thumbnail_images 매치: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`
+            );
             return { success: false, error: 'not_found' };
           }
 
-          Logger.info(`[mark_thumbnail_used] 완료 - thumbnail_images 업데이트: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`);
+          Logger.info(
+            `[mark_thumbnail_used] 완료 - thumbnail_images 업데이트: ${didUpdateThumbnailImage}, kanban 업데이트: ${didUpdateKanban}`
+          );
           return { success: true, updatedId: match ? match.id : null };
         } catch (e) {
           return { success: false, error: e && e.message ? e.message : String(e) };

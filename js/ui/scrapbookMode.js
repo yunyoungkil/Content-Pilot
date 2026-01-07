@@ -1,5 +1,11 @@
 // js/ui/scrapbookMode.js (필터링 로직 분리)
-import { shortenLink, showConfirmationToast, showToast, showLoadingToast, hideLoadingToast } from '../utils.js';
+import {
+  shortenLink,
+  showConfirmationToast,
+  showToast,
+  showLoadingToast,
+  hideLoadingToast,
+} from '../utils.js';
 import { renderKanban, addKanbanEventListeners } from './kanbanMode.js';
 import { renderHeaderAndTabs } from './header.js';
 
@@ -1113,20 +1119,20 @@ function renderDetailView(scrapId, container) {
     }
 
     const content = `${scrap.title || ''}\n\n${scrap.text || ''}\n\nURL: ${scrap.url || ''}`;
-    
+
     showLoadingToast('✨ 추천 아이디어를 요청 중입니다...');
     try {
       // [핵심 추가] 블로그 수준 정보 요청 (background에서 처리)
       let blogLevelInfo = '';
       try {
         const response = await chrome.runtime.sendMessage({
-          action: 'get_blog_level'
+          action: 'get_blog_level',
         });
-        
+
         if (response && response.success) {
           const level = response.level;
           const visitors = response.monthlyVisitors || 0;
-          
+
           if (level === 'beginner') {
             blogLevelInfo = `\n\n[블로그 수준: 신규 (월 ${visitors}명)]\n권장 전략: 롱테일 키워드 100% - 경쟁 낮은 키워드로 신뢰도 구축\n롱테일 예시: 4-6단어 이상 구체적 질문 형태 (월 검색량 50-200회)`;
           } else if (level === 'intermediate') {
@@ -1141,7 +1147,7 @@ function renderDetailView(scrapId, container) {
         console.warn('[Scrapbook] 블로그 수준 분석 실패:', e);
         blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
       }
-      
+
       // [중복 방지] 내 채널의 기존 콘텐츠 목록 수집
       let myContentList = '';
       try {
@@ -1150,14 +1156,14 @@ function renderDetailView(scrapId, container) {
           const contentResponse = await chrome.runtime.sendMessage({
             action: 'get_channel_content',
             channelId: activeChannelId,
-            limit: 20
+            limit: 20,
           });
-          
+
           if (contentResponse && contentResponse.success && contentResponse.content) {
             const titles = contentResponse.content
-              .map(item => item.title)
-              .filter(title => title);
-            
+              .map((item) => item.title)
+              .filter((title) => title);
+
             if (titles.length > 0) {
               myContentList = `\n\n[내 채널의 기존 콘텐츠 목록]\n${titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n⚠️ 위 목록과 중복되거나 유사한 주제는 피하고, 새로운 각도의 아이디어를 제안하세요.`;
               console.debug('[Scrapbook] 기존 콘텐츠 목록 추가:', titles.length, '개');
@@ -1167,7 +1173,7 @@ function renderDetailView(scrapId, container) {
       } catch (e) {
         console.warn('[Scrapbook] 기존 콘텐츠 목록 조회 실패:', e);
       }
-      
+
       const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요.
       
 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다.
@@ -1181,28 +1187,31 @@ ${myContentList}
 ${blogLevelInfo}
 
 스크랩 내용: ${content}`;
-      
-      console.debug('[Scrapbook] Sending message to background...', { promptLength: prompt.length, blogLevelInfo });
-      
+
+      console.debug('[Scrapbook] Sending message to background...', {
+        promptLength: prompt.length,
+        blogLevelInfo,
+      });
+
       // background script를 통해 Gemini API 호출 (초안 작성과 동일한 방식)
       const response = await chrome.runtime.sendMessage({
         action: 'call_gemini_api',
-        prompt: prompt
+        prompt: prompt,
       });
-      
+
       console.debug('[Scrapbook] Response from background:', response);
-      
+
       if (!response || !response.success) {
         const errorMsg = response?.error || '아이디어 생성 실패';
         console.error('[Scrapbook] Error from background:', errorMsg);
         throw new Error(errorMsg);
       }
-      
+
       const res = response.result;
       console.debug('[Scrapbook] Result from Gemini:', { resultLength: res?.length });
-      
+
       let arr = null;
-      
+
       // 1단계: 코드 블록 제거 (```json ... ``` 또는 ``` ... ```)
       let cleanRes = res;
       const codeBlockMatch = res.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -1210,7 +1219,7 @@ ${blogLevelInfo}
         cleanRes = codeBlockMatch[1].trim();
         console.debug('[Scrapbook] 코드 블록 제거 완료, 길이:', cleanRes.length);
       }
-      
+
       // 2단계: JSON 파싱 시도
       try {
         arr = JSON.parse(cleanRes);
@@ -1232,9 +1241,12 @@ ${blogLevelInfo}
           console.error('[Scrapbook] 배열 패턴을 찾을 수 없음');
         }
       }
-      
-      console.debug('[Scrapbook] 최종 파싱 결과:', { isArray: Array.isArray(arr), length: arr?.length });
-      
+
+      console.debug('[Scrapbook] 최종 파싱 결과:', {
+        isArray: Array.isArray(arr),
+        length: arr?.length,
+      });
+
       if (!Array.isArray(arr)) {
         hideLoadingToast();
         showToast('아이디어 생성 실패: 응답을 파싱할 수 없습니다.');
@@ -1244,12 +1256,14 @@ ${blogLevelInfo}
 
       // 캐시에 저장
       window.__cp_scrap_ideas_cache[scrap.id] = arr;
-      
+
       // 모달 표시
       showIdeasModal(scrap, arr);
     } catch (err) {
       hideLoadingToast();
-      showToast('아이디어 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err)));
+      showToast(
+        '아이디어 생성 중 오류가 발생했습니다: ' + (err && err.message ? err.message : String(err))
+      );
     }
   }
 
@@ -1258,7 +1272,7 @@ ${blogLevelInfo}
     // modal 생성 - shadow root 안에 생성하여 Content Pilot 패널 위에 표시
     const host = document.getElementById('content-pilot-host');
     const targetRoot = (host && host.shadowRoot) || document.body;
-    
+
     let modal = targetRoot.querySelector('#scrap-ideas-modal');
     if (modal) modal.remove();
     modal = document.createElement('div');
@@ -1286,15 +1300,15 @@ ${blogLevelInfo}
       <div style="text-align:right;margin-top:12px;"><button id="scrap-ideas-close" style="padding:8px 12px;border-radius:6px;border:none;background:#eee;cursor:pointer">닫기</button></div>
     </div>`;
     targetRoot.appendChild(modal);
-    
+
     modal.querySelector('#scrap-ideas-close').addEventListener('click', () => modal.remove());
-    
+
     // 다시 생성 버튼
     modal.querySelector('#scrap-ideas-refresh').addEventListener('click', () => {
       modal.remove();
       recommendIdeasForScrap(scrap, true); // 강제 새로고침
     });
-    
+
     modal.querySelectorAll('.scrap-idea-add-btn').forEach((b) => {
       b.addEventListener('click', (e) => {
         const idx = Number(b.dataset.idx);
@@ -1313,7 +1327,11 @@ ${blogLevelInfo}
         chrome.storage.local.get('activeChannelId', (res) => {
           const activeChannelId = res.activeChannelId || null;
           chrome.runtime.sendMessage(
-            { action: 'add_idea_to_kanban', data: JSON.stringify(ideaData2), channelId: activeChannelId },
+            {
+              action: 'add_idea_to_kanban',
+              data: JSON.stringify(ideaData2),
+              channelId: activeChannelId,
+            },
             (r) => {
               if (r && r.success) {
                 showConfirmationToast('✅ 추천 아이디어가 추가되었습니다!', null);
@@ -1331,7 +1349,7 @@ ${blogLevelInfo}
         });
       });
     });
-    
+
     modal.querySelectorAll('.scrap-idea-copy-btn').forEach((b) => {
       b.addEventListener('click', () => {
         const idx = Number(b.dataset.idx);
@@ -1352,7 +1370,9 @@ ${blogLevelInfo}
       try {
         const btn = ev.target.closest && ev.target.closest('.scrap-ideas-gemini-btn');
         if (btn) {
-          console.debug('[Scrapbook] scrap-ideas-gemini-btn clicked', { scrapId: btn.dataset.scrapId });
+          console.debug('[Scrapbook] scrap-ideas-gemini-btn clicked', {
+            scrapId: btn.dataset.scrapId,
+          });
           showToast('✨ 추천 아이디어를 요청 중입니다...');
           const scrapId = btn.dataset.scrapId;
           const scrap = allScraps.find((s) => s.id === scrapId);

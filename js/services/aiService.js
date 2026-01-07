@@ -139,7 +139,10 @@ export async function normalizeKeywordsToTags(keywords = []) {
       // remove common leading bullets/hashtag chars and trim
       keyword = keyword.replace(/^[#\-\*•]+/, '').trim();
       // collapse whitespace and strip surrounding punctuation
-      keyword = keyword.replace(/\s+/g, ' ').replace(/^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/gu, '').trim();
+      keyword = keyword
+        .replace(/\s+/g, ' ')
+        .replace(/^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/gu, '')
+        .trim();
       if (!keyword) continue;
 
       // enforce limits
@@ -150,7 +153,9 @@ export async function normalizeKeywordsToTags(keywords = []) {
           const extracted = await extractKeywords(keyword);
           if (Array.isArray(extracted) && extracted.length > 0) {
             // choose first suitable candidate
-            const candidate = extracted.find((k) => k && k.split(/\s+/).length <= 3 && String(k).length <= 30);
+            const candidate = extracted.find(
+              (k) => k && k.split(/\s+/).length <= 3 && String(k).length <= 30
+            );
             if (candidate) keyword = candidate;
             else keyword = String(extracted[0]).split(/\s+/).slice(0, 3).join(' ').substring(0, 30);
           } else {
@@ -213,10 +218,14 @@ function buildLinkRules(myPastPostsText, affiliateLinks = [], linkedScrapsText) 
     '- Select 4–5 internal posts only from the provided "내 과거 포스팅 목록 (내부 링크 추천용)" block below.',
     '- Use Markdown link format [Text](FullURL). Do not repeat the same URL.',
     '- Distribute internal links across H2 sections (avoid placing all links in the conclusion).',
-    affiliateCount > 0 ? '- If affiliate links are provided, insert 2 (minimum) and up to 3 affiliate links naturally in the body.' : '',
+    affiliateCount > 0
+      ? '- If affiliate links are provided, insert 2 (minimum) and up to 3 affiliate links naturally in the body.'
+      : '',
     hasScraps ? '- If connected scraps exist, insert 2–3 natural external reference links.' : '',
-    'After writing, add a short checklist line in Korean: "확인: 내부링크:N개 / 제휴링크:M개 / 외부링크:K개"'
-  ].filter(Boolean).join('\n');
+    'After writing, add a short checklist line in Korean: "확인: 내부링크:N개 / 제휴링크:M개 / 외부링크:K개"',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 // Try to replace title-like fallback with an AI generated slogan (async helper)
@@ -530,24 +539,28 @@ export async function callGeminiAPI(prompt, model = AI_MODELS.TEXT, images = [])
           ? prompt.substring(0, 200)
           : Object.prototype.toString.call(prompt)
       );
-      
+
       // 내부 링크 디버깅: 프롬프트에 내부 링크 섹션이 포함되어 있는지 확인
       if (typeof prompt === 'string') {
-        const hasInternalLinkSection = prompt.includes('절대 규칙 1순위') || prompt.includes('내 과거 포스팅 목록');
+        const hasInternalLinkSection =
+          prompt.includes('절대 규칙 1순위') || prompt.includes('내 과거 포스팅 목록');
         const hasMyPastPosts = prompt.includes('[내 과거 포스팅 목록');
-        
+
         console.log('[INTERNAL LINK DEBUG] 프롬프트 내부 링크 포함 여부:', {
           hasInternalLinkSection,
           hasMyPastPosts,
           promptLength: prompt.length,
         });
-        
+
         // 내부 링크 섹션만 추출해서 로깅
         if (hasMyPastPosts) {
           const startIdx = prompt.indexOf('[내 과거 포스팅 목록');
           const endIdx = prompt.indexOf('설명:', startIdx) + 200; // 첫 번째 포스팅 샘플까지만
           if (startIdx >= 0 && endIdx > startIdx) {
-            console.log('[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:', prompt.substring(startIdx, endIdx));
+            console.log(
+              '[INTERNAL LINK DEBUG] 내 과거 포스팅 목록 샘플:',
+              prompt.substring(startIdx, endIdx)
+            );
           }
         } else {
           console.warn('[INTERNAL LINK DEBUG] ⚠️ 내부 링크 섹션이 프롬프트에 없습니다!');
@@ -790,9 +803,12 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
         .split(',')
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0 && tag.length <= 15);
-      
-      Logger.info(`[processDraftResponse] AI 생성 발행 태그 ${publishTags.length}개 추출:`, publishTags);
-      
+
+      Logger.info(
+        `[processDraftResponse] AI 생성 발행 태그 ${publishTags.length}개 추출:`,
+        publishTags
+      );
+
       // Remove the tags from the draft
       cleanedDraft = cleanedDraft.replace(/<PUBLISH_TAGS>[\s\S]*?<\/PUBLISH_TAGS>/gi, '').trim();
     } else {
@@ -1822,10 +1838,16 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       const escapeReg = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
       // [개선] 링크 삽입 함수 - 더 유연한 매칭 전략
-      const tryInsertLinks = (links, makeAnchorText, linkType = 'general', textNodesParam = null) => {
+      const tryInsertLinks = (
+        links,
+        makeAnchorText,
+        linkType = 'general',
+        textNodesParam = null
+      ) => {
         Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 삽입 시도: ${links.length}개`);
-        
-        const nodesToUse = Array.isArray(textNodesParam) && textNodesParam.length > 0 ? textNodesParam : textNodes;
+
+        const nodesToUse =
+          Array.isArray(textNodesParam) && textNodesParam.length > 0 ? textNodesParam : textNodes;
         for (const link of links) {
           if (insertedCount >= maxLinks) {
             Logger.debug(`[postProcessAffiliateHtml] 최대 링크 개수(${maxLinks}) 도달`);
@@ -1840,13 +1862,13 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
             link.productName || link.title || '',
             link.platform || '',
           ].filter(Boolean);
-          
+
           // [신규] 제품명을 단어로 분리하여 부분 매칭도 시도
           if (link.productName) {
-            const words = link.productName.split(/\s+/).filter(w => w.length >= 2);
+            const words = link.productName.split(/\s+/).filter((w) => w.length >= 2);
             candidates.push(...words);
           }
-          
+
           if (candidates.length === 0) {
             Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 매칭 후보 없음:`, targetUrl);
             continue;
@@ -1864,10 +1886,14 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
               const m = txt.match(pattern);
               if (m) {
                 const matchedPhrase = m[0];
-                Logger.debug(`[postProcessAffiliateHtml] 매칭 성공: "${matchedPhrase}" -> ${targetUrl}`);
-                
+                Logger.debug(
+                  `[postProcessAffiliateHtml] 매칭 성공: "${matchedPhrase}" -> ${targetUrl}`
+                );
+
                 // Use matched phrase as anchor text to preserve context
-                const anchorText = makeAnchorText ? makeAnchorText(matchedPhrase, link) : matchedPhrase;
+                const anchorText = makeAnchorText
+                  ? makeAnchorText(matchedPhrase, link)
+                  : matchedPhrase;
 
                 const a = doc.createElement('a');
                 a.setAttribute('href', targetUrl);
@@ -1887,7 +1913,9 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
                   tnode.parentNode.replaceChild(frag, tnode);
                   insertedCount += 1;
                   usedUrls.add(targetUrl);
-                  Logger.info(`[postProcessAffiliateHtml] ✅ ${linkType} 링크 삽입 성공 (${insertedCount}/${maxLinks}): "${anchorText}"`);
+                  Logger.info(
+                    `[postProcessAffiliateHtml] ✅ ${linkType} 링크 삽입 성공 (${insertedCount}/${maxLinks}): "${anchorText}"`
+                  );
                   matched = true;
                   break;
                 } else {
@@ -1900,7 +1928,7 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
             }
             if (matched) break;
           }
-          
+
           if (!matched) {
             Logger.debug(`[postProcessAffiliateHtml] ${linkType} 링크 매칭 실패:`, {
               url: targetUrl,
@@ -1911,28 +1939,43 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       };
 
       // internalLinks: prefer using post title as anchor text if it fits; otherwise use matched phrase
-      tryInsertLinks(normalizedInternals, (matchedText, link) => {
-        // prefer full title if it contains matchedText or is short
-        if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase()))
-          return link.title;
-        if (link.title && link.title.split(' ').length <= 4) return link.title; // short title
-        return matchedText;
-      }, 'internal');
+      tryInsertLinks(
+        normalizedInternals,
+        (matchedText, link) => {
+          // prefer full title if it contains matchedText or is short
+          if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase()))
+            return link.title;
+          if (link.title && link.title.split(' ').length <= 4) return link.title; // short title
+          return matchedText;
+        },
+        'internal'
+      );
 
       // If internal links remain insufficient, attempt targeted insertion into H2 sections first
-      const existingInternalAnchors = (Array.from(doc.querySelectorAll('a[href]')) || []).filter((el) => {
-        const href = el.getAttribute('href') || '';
-        return normalizedInternals.some((il) => href.includes(il.url));
-      }).length;
+      const existingInternalAnchors = (Array.from(doc.querySelectorAll('a[href]')) || []).filter(
+        (el) => {
+          const href = el.getAttribute('href') || '';
+          return normalizedInternals.some((il) => href.includes(il.url));
+        }
+      ).length;
 
       if (existingInternalAnchors < internalMin) {
         const missing = internalMin - existingInternalAnchors;
-        Logger.info('[postProcessAffiliateHtml] 내부 링크 부족 감지, 자동 보완 시도:', { existingInternalAnchors, missing });
-        tryInsertLinks(normalizedInternals, (matchedText, link) => {
-          if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase())) return link.title;
-          if (link.title && link.title.split(' ').length <= 4) return link.title;
-          return matchedText;
-        }, 'internal', h2TextNodes);
+        Logger.info('[postProcessAffiliateHtml] 내부 링크 부족 감지, 자동 보완 시도:', {
+          existingInternalAnchors,
+          missing,
+        });
+        tryInsertLinks(
+          normalizedInternals,
+          (matchedText, link) => {
+            if (link.title && link.title.toLowerCase().includes(matchedText.toLowerCase()))
+              return link.title;
+            if (link.title && link.title.split(' ').length <= 4) return link.title;
+            return matchedText;
+          },
+          'internal',
+          h2TextNodes
+        );
       }
 
       // reference links: use matched phrase
@@ -1942,14 +1985,18 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
 
       // affiliate links: use matched phrase; fallback to productName + CTA if matched phrase is too generic
       if (insertedCount < maxLinks) {
-        tryInsertLinks(normalizedAffiliates, (matchedText, link) => {
-          const genericWords = ['제품', '상품', '구매', '자세히'];
-          const isGeneric = genericWords.some((w) => matchedText.toLowerCase().includes(w));
-          if (isGeneric && link.productName) return `${link.productName} 최저가 확인하기`;
-          return matchedText;
-        }, 'affiliate');
+        tryInsertLinks(
+          normalizedAffiliates,
+          (matchedText, link) => {
+            const genericWords = ['제품', '상품', '구매', '자세히'];
+            const isGeneric = genericWords.some((w) => matchedText.toLowerCase().includes(w));
+            if (isGeneric && link.productName) return `${link.productName} 최저가 확인하기`;
+            return matchedText;
+          },
+          'affiliate'
+        );
       }
-      
+
       // [신규] 삽입 결과 로깅 및 최소 개수 검증
       const minRequiredLinks = 2;
       Logger.info(`[postProcessAffiliateHtml] 링크 삽입 완료: ${insertedCount}/${maxLinks}개`);
@@ -1958,14 +2005,21 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
       try {
         const recalcTotals = () => {
           const totalAnchors = (doc.querySelectorAll('a[href]') || []).length;
-          const affiliateAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedAffiliates.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
-          const internalAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedInternals.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
-          const referenceAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter(tag => normalizedRefs.some(link => (tag.getAttribute('href') || '').includes(link.url))).length;
+          const affiliateAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter((tag) =>
+            normalizedAffiliates.some((link) => (tag.getAttribute('href') || '').includes(link.url))
+          ).length;
+          const internalAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter((tag) =>
+            normalizedInternals.some((link) => (tag.getAttribute('href') || '').includes(link.url))
+          ).length;
+          const referenceAnchorCount = Array.from(doc.querySelectorAll('a[href]')).filter((tag) =>
+            normalizedRefs.some((link) => (tag.getAttribute('href') || '').includes(link.url))
+          ).length;
           return { totalAnchors, affiliateAnchorCount, internalAnchorCount, referenceAnchorCount };
         };
 
         const totals = recalcTotals();
-        const checkRegex = /(?:CHECK:|확인:)\s*(?:내부|내부링크|Internal):\s*\d+(?:개)?\s*\/\s*(?:제휴|제휴링크|Affiliate):\s*\d+(?:개)?\s*\/\s*(?:외부|외부링크|External):\s*\d+(?:개)?/i;
+        const checkRegex =
+          /(?:CHECK:|확인:)\s*(?:내부|내부링크|Internal):\s*\d+(?:개)?\s*\/\s*(?:제휴|제휴링크|Affiliate):\s*\d+(?:개)?\s*\/\s*(?:외부|외부링크|External):\s*\d+(?:개)?/i;
         const walker2 = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
         let tn2;
         while ((tn2 = walker2.nextNode())) {
@@ -1987,14 +2041,16 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
             referenceLinksAvailable: referenceLinks.length,
           }
         );
-        
+
         // [선택] 사용자에게 경고 알림
         try {
-          chrome.runtime.sendMessage({
-            action: 'show_notification',
-            title: '제휴 링크 삽입 부족',
-            message: `제휴 링크가 ${insertedCount}개만 삽입되었습니다. 최소 ${minRequiredLinks}개 이상 필요합니다.`,
-          }).catch(() => {});
+          chrome.runtime
+            .sendMessage({
+              action: 'show_notification',
+              title: '제휴 링크 삽입 부족',
+              message: `제휴 링크가 ${insertedCount}개만 삽입되었습니다. 최소 ${minRequiredLinks}개 이상 필요합니다.`,
+            })
+            .catch(() => {});
         } catch (e) {
           // 알림 실패 무시
         }
@@ -2002,27 +2058,35 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
     }
 
     // Add standardized affiliate disclosure HTML when affiliate candidates exist
-      try {
-        var disclosureText = '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
-        var desiredHtml = '<p style="text-align: center;" data-ke-size="size16"><span style="color: #9d9d9d;">' + disclosureText + '</span></p>';
-        var bodyHtml = doc.body.innerHTML || '';
-        var disclosureRegex = /이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다\./;
+    try {
+      var disclosureText =
+        '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
+      var desiredHtml =
+        '<p style="text-align: center;" data-ke-size="size16"><span style="color: #9d9d9d;">' +
+        disclosureText +
+        '</span></p>';
+      var bodyHtml = doc.body.innerHTML || '';
+      var disclosureRegex =
+        /이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다\./;
 
-        var hasAffiliateCandidates = (affiliateLinks && affiliateLinks.length > 0) || insertedCount > 0;
-        if (hasAffiliateCandidates) {
-          if (disclosureRegex.test(bodyHtml)) {
-            doc.body.innerHTML = bodyHtml.replace(disclosureRegex, desiredHtml);
-            Logger.debug('[postProcessAffiliateHtml] 기존 대가성 문구를 표준 스타일로 대체했습니다.');
-          } else {
-            doc.body.innerHTML = bodyHtml + desiredHtml;
-            Logger.debug('[postProcessAffiliateHtml] 대가성 문구(쿠팡 파트너스)를 본문 마지막에 추가했습니다.');
-          }
+      var hasAffiliateCandidates =
+        (affiliateLinks && affiliateLinks.length > 0) || insertedCount > 0;
+      if (hasAffiliateCandidates) {
+        if (disclosureRegex.test(bodyHtml)) {
+          doc.body.innerHTML = bodyHtml.replace(disclosureRegex, desiredHtml);
+          Logger.debug('[postProcessAffiliateHtml] 기존 대가성 문구를 표준 스타일로 대체했습니다.');
+        } else {
+          doc.body.innerHTML = bodyHtml + desiredHtml;
+          Logger.debug(
+            '[postProcessAffiliateHtml] 대가성 문구(쿠팡 파트너스)를 본문 마지막에 추가했습니다.'
+          );
         }
-      } catch (e) {
-        Logger.debug('[postProcessAffiliateHtml] 대가성 문구 추가 실패:', e);
       }
+    } catch (e) {
+      Logger.debug('[postProcessAffiliateHtml] 대가성 문구 추가 실패:', e);
+    }
 
-      return doc.body.innerHTML || html;
+    return doc.body.innerHTML || html;
   } catch (e) {
     // If anything fails, return original HTML and log
     Logger.warn('[postProcessAffiliateHtml] 처리 실패, 원본 HTML 반환:', e);
@@ -2482,28 +2546,28 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
 
     // 6. 시스템 프롬프트 생성
     let systemPrompt = builder.buildSystemPrompt();
-    
+
     // [신규] 현재 날짜와 시즌 컨텍스트 추가
     const now = new Date();
     const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
     const currentMonth = now.getMonth() + 1; // 1-12
     const currentYear = now.getFullYear();
-    
+
     // 시즌 판단
     let currentSeason = '';
     if (currentMonth >= 3 && currentMonth <= 5) currentSeason = '봄';
     else if (currentMonth >= 6 && currentMonth <= 8) currentSeason = '여름';
     else if (currentMonth >= 9 && currentMonth <= 11) currentSeason = '가을';
     else currentSeason = '겨울';
-    
+
     // 시즌별 주의사항
     const seasonWarnings = {
-      '봄': '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
-      '여름': '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
-      '가을': '크리스마스는 너무 이르며, 여름 관련 콘텐츠는 부적절합니다.',
-      '겨울': '여름휴가, 휴가철 관련 콘텐츠는 부적절합니다. (단, 12월은 크리스마스 시즌으로 적절)'
+      봄: '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
+      여름: '크리스마스, 연말연시, 겨울 관련 콘텐츠는 부적절합니다.',
+      가을: '크리스마스는 너무 이르며, 여름 관련 콘텐츠는 부적절합니다.',
+      겨울: '여름휴가, 휴가철 관련 콘텐츠는 부적절합니다. (단, 12월은 크리스마스 시즌으로 적절)',
     };
-    
+
     const dateContext = `
 
 📅 **[중요] 현재 날짜 및 시즌 정보**:
@@ -2515,7 +2579,7 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
   * 예: 여름에 "겨울 난방 팁" 같은 주제 금지
 - 연도를 언급할 때는 반드시 ${currentYear}년을 사용하세요.
 `;
-    
+
     systemPrompt += dateContext;
 
     // 로깅
@@ -2842,13 +2906,13 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         linkedScrapsContent.length > 0
       ) {
         Logger.info('[RAG] 조건 통과 - 키워드 기반 검색 시작');
-        
+
         // [FIX] 압축된 텍스트를 담은 객체 배열로 변환 (compressText 적용됨)
         const compressedScraps = linkedScrapsContent.map((scrap, index) => ({
           ...scrap,
           text: compressText(scrap.text || ''),
         }));
-        
+
         // 1. 키워드 기반 검색 (압축된 텍스트 사용)
         const relevantSections = searchRelevantContent(compressedScraps, searchTerms);
 
@@ -2909,90 +2973,113 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
     let myPastPostsText = '';
     try {
       const userId = await getCurrentUserId();
-      
+
       // [개선] 두 곳에서 포스팅 수집: channel_content (외부 수집) + published (직접 발행)
       const contentSnap = await get(ref(getDb(), `channel_content/${userId}/blogs`));
       const publishedSnap = await get(ref(getDb(), `kanban/${userId}/published`));
-      
+
       const allBlogs = contentSnap?.val() || {};
       const publishedPosts = publishedSnap?.val() || {};
-      
+
       // 디버깅: 원본 데이터 확인
-      console.log('[Internal Link DEBUG] channel_content 원본 키 개수:', Object.keys(allBlogs).length);
-      console.log('[Internal Link DEBUG] channel_content 샘플 데이터:', Object.keys(allBlogs).slice(0, 3));
-      console.log('[Internal Link DEBUG] published 원본 키 개수:', Object.keys(publishedPosts).length);
+      console.log(
+        '[Internal Link DEBUG] channel_content 원본 키 개수:',
+        Object.keys(allBlogs).length
+      );
+      console.log(
+        '[Internal Link DEBUG] channel_content 샘플 데이터:',
+        Object.keys(allBlogs).slice(0, 3)
+      );
+      console.log(
+        '[Internal Link DEBUG] published 원본 키 개수:',
+        Object.keys(publishedPosts).length
+      );
       console.log('[Internal Link DEBUG] ideaData.channelId:', ideaData.channelId);
       console.log('[Internal Link DEBUG] targetSourceId:', targetSourceId);
-      
+
       // 외부 수집 콘텐츠
       const externalPosts = Object.values(allBlogs)
         .filter((item) => item !== null && item.title && item.fullLink)
-        .map(item => ({
+        .map((item) => ({
           title: item.title,
           url: item.fullLink || item.link,
           description: item.description || item.cleanText?.substring(0, 100) || '',
           publishedAt: item.publishedAt || item.createdAt || 0,
           sourceId: item.sourceId, // 채널 필터링용
-          source: 'external'
+          source: 'external',
         }));
-      
+
       console.log('[Internal Link DEBUG] externalPosts 필터 후:', externalPosts.length);
       if (externalPosts.length > 0) {
-        console.log('[Internal Link DEBUG] externalPosts 첫 번째 sourceId:', externalPosts[0].sourceId);
+        console.log(
+          '[Internal Link DEBUG] externalPosts 첫 번째 sourceId:',
+          externalPosts[0].sourceId
+        );
       }
-      
+
       // 직접 발행한 포스팅 (publishedUrl이 있는 것만)
       const myPublishedPosts = Object.values(publishedPosts)
         .filter((item) => item !== null && item.title && item.publishedUrl)
-        .map(item => ({
+        .map((item) => ({
           title: item.title,
           url: item.publishedUrl,
           description: item.description || item.seoDescription || '',
           publishedAt: item.publishedAt || item.updatedAt || item.createdAt || 0,
-          source: 'published'
+          source: 'published',
         }));
-      
+
       // 두 목록 합치기
       const allPosts = [...externalPosts, ...myPublishedPosts];
-      
+
       // 아이디어 키워드 추출 (제목 + 설명에서)
       const ideaKeywords = [];
       if (ideaData.title) {
-        ideaKeywords.push(...ideaData.title.toLowerCase().split(/\s+/).filter(w => w.length > 1));
+        ideaKeywords.push(
+          ...ideaData.title
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((w) => w.length > 1)
+        );
       }
       if (ideaData.description) {
-        ideaKeywords.push(...ideaData.description.toLowerCase().split(/\s+/).filter(w => w.length > 1));
+        ideaKeywords.push(
+          ...ideaData.description
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((w) => w.length > 1)
+        );
       }
-      
+
       console.log('[Internal Link DEBUG] 아이디어 키워드:', ideaKeywords.slice(0, 10));
-      
+
       // 채널 필터링 + 관련성 점수 계산
       const myPosts = allPosts
         .filter((item) => {
           // 직접 발행한 포스팅은 모두 포함
           if (item.source === 'published') return true;
-          
+
           // 외부 콘텐츠는 채널 필터링
           if (!ideaData.channelId) return true;
           if (targetSourceId && item.sourceId === targetSourceId) return true;
           if (item.sourceId === ideaData.channelId) return true;
-          
+
           return false;
         })
-        .map(item => {
+        .map((item) => {
           // 관련성 점수 계산
           const postText = `${item.title} ${item.description}`.toLowerCase();
           let relevanceScore = 0;
-          
-          for (const keyword of ideaKeywords.slice(0, 20)) { // 상위 20개 키워드만 사용
+
+          for (const keyword of ideaKeywords.slice(0, 20)) {
+            // 상위 20개 키워드만 사용
             if (postText.includes(keyword)) {
               relevanceScore++;
             }
           }
-          
+
           return { ...item, relevanceScore };
         })
-        .filter(item => item.relevanceScore > 0) // 관련성 0인 글 제외
+        .filter((item) => item.relevanceScore > 0) // 관련성 0인 글 제외
         .sort((a, b) => {
           // 관련성 우선, 그 다음 최신순
           if (b.relevanceScore !== a.relevanceScore) {
@@ -3002,8 +3089,13 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
         })
         .slice(0, 15); // 관련성 높은 상위 15개 (다양한 링크 선택 위해 증가)
 
-      Logger.debug(`[Internal Link] 외부 수집: ${externalPosts.length}개, 직접 발행: ${myPublishedPosts.length}개, 최종 매칭: ${myPosts.length}개`);
-      console.log('[Internal Link DEBUG] 관련성 점수:', myPosts.map(p => `${p.title.substring(0, 30)}... (${p.relevanceScore}점)`));
+      Logger.debug(
+        `[Internal Link] 외부 수집: ${externalPosts.length}개, 직접 발행: ${myPublishedPosts.length}개, 최종 매칭: ${myPosts.length}개`
+      );
+      console.log(
+        '[Internal Link DEBUG] 관련성 점수:',
+        myPosts.map((p) => `${p.title.substring(0, 30)}... (${p.relevanceScore}점)`)
+      );
 
       if (myPosts.length > 0) {
         myPastPostsText = `[내 과거 포스팅 목록 (내부 링크 추천용)]\n`;
@@ -3016,8 +3108,11 @@ export async function generateDraftFromIdea(ideaData, options = {}) {
           })
           .join('\n');
         myPastPostsText += '\n';
-        
-        console.log('[Internal Link DEBUG] myPastPostsText 생성 완료:', myPastPostsText.substring(0, 500));
+
+        console.log(
+          '[Internal Link DEBUG] myPastPostsText 생성 완료:',
+          myPastPostsText.substring(0, 500)
+        );
       } else {
         console.log('[Internal Link DEBUG] myPosts.length === 0, 내부 링크 목록 생성 안 됨');
       }
@@ -4110,7 +4205,13 @@ ${myPastPostsText}
             위 3가지 항목이 모두 없으면 초안이 거부됩니다.
         `;
 
-    let rawDraft, cleanedDraft, formattedDraft, seoTitle, jsonLdSchema, thumbnailCandidates, aiGeneratedTags;
+    let rawDraft,
+      cleanedDraft,
+      formattedDraft,
+      seoTitle,
+      jsonLdSchema,
+      thumbnailCandidates,
+      aiGeneratedTags;
     // Flag used when cropping fails and we fall back to composed image
     let thumbnailGenerationPartialFailure = false;
     // 제목은 함수 최상단에서 하나만 선언되어야 함 (스코프 안정성)
@@ -4204,10 +4305,13 @@ ${defaultDescription}
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;
-      
+
       // AI가 생성한 발행 태그 저장
       aiGeneratedTags = processed.publishTags || [];
-      Logger.info(`[generateDraftFromIdea] AI 생성 태그 ${aiGeneratedTags.length}개 받음:`, aiGeneratedTags);
+      Logger.info(
+        `[generateDraftFromIdea] AI 생성 태그 ${aiGeneratedTags.length}개 받음:`,
+        aiGeneratedTags
+      );
 
       // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
       Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
@@ -4496,9 +4600,7 @@ ${defaultDescription}
     let tagsForPublish = '';
     if (aiGeneratedTags && aiGeneratedTags.length > 0) {
       // AI가 생성한 태그 사용 (이미 # 제거됨)
-      tagsForPublish = aiGeneratedTags
-        .filter((t) => t && t !== 'AI-추천')
-        .join(', ');
+      tagsForPublish = aiGeneratedTags.filter((t) => t && t !== 'AI-추천').join(', ');
       Logger.info('[generateDraftFromIdea] AI 생성 태그 사용:', tagsForPublish);
     } else {
       // 폴백: 브리핑 태그 사용
@@ -4647,26 +4749,26 @@ ${defaultDescription}
       const currentMonth = now.getMonth() + 1;
       const seasonalKeywords = {
         크리스마스: [12], // 12월만 허용
-        '연말연시': [12, 1], // 12월, 1월 허용
-        '새해': [12, 1, 2], // 12월~2월 허용
-        '겨울방학': [12, 1, 2], // 12월~2월 허용
-        '여름휴가': [6, 7, 8], // 6~8월 허용
-        '휴가철': [6, 7, 8],
-        '한여름': [6, 7, 8],
-        '겨울나기': [11, 12, 1, 2], // 11월~2월 허용
-        '난방': [10, 11, 12, 1, 2, 3], // 10월~3월 허용
+        연말연시: [12, 1], // 12월, 1월 허용
+        새해: [12, 1, 2], // 12월~2월 허용
+        겨울방학: [12, 1, 2], // 12월~2월 허용
+        여름휴가: [6, 7, 8], // 6~8월 허용
+        휴가철: [6, 7, 8],
+        한여름: [6, 7, 8],
+        겨울나기: [11, 12, 1, 2], // 11월~2월 허용
+        난방: [10, 11, 12, 1, 2, 3], // 10월~3월 허용
       };
-      
+
       let hasSeasonalIssue = false;
       const seasonalWarnings = [];
-      
+
       for (const [keyword, allowedMonths] of Object.entries(seasonalKeywords)) {
         if (formattedDraft.includes(keyword) && !allowedMonths.includes(currentMonth)) {
           hasSeasonalIssue = true;
           seasonalWarnings.push(`"${keyword}" (현재 ${currentMonth}월에 부적절)`);
         }
       }
-      
+
       if (hasSeasonalIssue) {
         Logger.warn(
           `[generateDraftFromIdea] ⚠️ 시즌 부적합 콘텐츠 감지:`,
@@ -4674,16 +4776,18 @@ ${defaultDescription}
         );
         // 사용자에게 알림 (선택적)
         try {
-          chrome.runtime.sendMessage({
-            action: 'show_notification',
-            title: '시즌 부적합 콘텐츠 감지',
-            message: `초안에 현재 시기에 맞지 않는 콘텐츠가 포함되어 있습니다: ${seasonalWarnings.slice(0, 2).join(', ')}`,
-          }).catch(() => {});
+          chrome.runtime
+            .sendMessage({
+              action: 'show_notification',
+              title: '시즌 부적합 콘텐츠 감지',
+              message: `초안에 현재 시기에 맞지 않는 콘텐츠가 포함되어 있습니다: ${seasonalWarnings.slice(0, 2).join(', ')}`,
+            })
+            .catch(() => {});
         } catch (e) {
           // 알림 실패 무시
         }
       }
-      
+
       const storageRes = await chrome.storage.local.get('autoInsertAffiliateLinks');
       const userAutoInsert = storageRes?.autoInsertAffiliateLinks;
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
@@ -4700,7 +4804,6 @@ ${defaultDescription}
         .map((s) => ({ title: s.title || '', url: s.url }));
 
       try {
-
         const anyLinksAvailable =
           (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) ||
           internalLinks.length > 0 ||
@@ -4717,12 +4820,16 @@ ${defaultDescription}
 
             // [신규] 제휴 링크 최종 검증: AI가 삽입했는지 확인
             const minRequiredAffiliateLinks = 2;
-            if (Array.isArray(affiliateLinks) && affiliateLinks.length >= minRequiredAffiliateLinks) {
-              const affiliateLinkCount = (formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || [])
-                .filter(tag => {
-                  // affiliateLinks의 URL이 포함되어 있는지 확인
-                  return affiliateLinks.some(link => tag.includes(link.url));
-                }).length;
+            if (
+              Array.isArray(affiliateLinks) &&
+              affiliateLinks.length >= minRequiredAffiliateLinks
+            ) {
+              const affiliateLinkCount = (
+                formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || []
+              ).filter((tag) => {
+                // affiliateLinks의 URL이 포함되어 있는지 확인
+                return affiliateLinks.some((link) => tag.includes(link.url));
+              }).length;
 
               if (affiliateLinkCount < minRequiredAffiliateLinks) {
                 Logger.warn(
@@ -4730,11 +4837,13 @@ ${defaultDescription}
                   '- AI가 프롬프트를 무시했거나 postProcessAffiliateHtml이 실패했습니다.'
                 );
                 try {
-                  chrome.runtime.sendMessage({
-                    action: 'show_notification',
-                    title: '⚠️ 제휴 링크 부족',
-                    message: `초안에 제휴 링크가 ${affiliateLinkCount}개만 삽입되었습니다 (최소 ${minRequiredAffiliateLinks}개 필요)`,
-                  }).catch(() => {});
+                  chrome.runtime
+                    .sendMessage({
+                      action: 'show_notification',
+                      title: '⚠️ 제휴 링크 부족',
+                      message: `초안에 제휴 링크가 ${affiliateLinkCount}개만 삽입되었습니다 (최소 ${minRequiredAffiliateLinks}개 필요)`,
+                    })
+                    .catch(() => {});
                 } catch (e) {
                   // 알림 실패 무시
                 }
@@ -4757,14 +4866,34 @@ ${defaultDescription}
 
     // Debug: count anchor tags and matched link types
     try {
-      const totalAnchors = (formattedDraft.match(/<a\s+[^>]*href=["'][^"']+["'][^>]*>/gi) || []).length;
-      const affiliateAnchorCount = (formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || [])
-        .filter(tag => Array.isArray(affiliateLinks) && affiliateLinks.some(link => tag.includes(link.url))).length;
-      const internalAnchorCount = (formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || [])
-        .filter(tag => Array.isArray(internalLinks) && internalLinks.some(il => tag.includes(il.url))).length;
-      const referenceAnchorCount = (formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || [])
-        .filter(tag => Array.isArray(referenceLinks) && referenceLinks.some(r => tag.includes(r.url))).length;
-      Logger.debug('[generateDraftFromIdea] Link counts - total:', totalAnchors, 'affiliate:', affiliateAnchorCount, 'internal:', internalAnchorCount, 'reference:', referenceAnchorCount);
+      const totalAnchors = (formattedDraft.match(/<a\s+[^>]*href=["'][^"']+["'][^>]*>/gi) || [])
+        .length;
+      const affiliateAnchorCount = (
+        formattedDraft.match(/<a[^>]+href=["'][^"']*["'][^>]*>/gi) || []
+      ).filter(
+        (tag) =>
+          Array.isArray(affiliateLinks) && affiliateLinks.some((link) => tag.includes(link.url))
+      ).length;
+      const internalAnchorCount = (
+        formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || []
+      ).filter(
+        (tag) => Array.isArray(internalLinks) && internalLinks.some((il) => tag.includes(il.url))
+      ).length;
+      const referenceAnchorCount = (
+        formattedDraft.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi) || []
+      ).filter(
+        (tag) => Array.isArray(referenceLinks) && referenceLinks.some((r) => tag.includes(r.url))
+      ).length;
+      Logger.debug(
+        '[generateDraftFromIdea] Link counts - total:',
+        totalAnchors,
+        'affiliate:',
+        affiliateAnchorCount,
+        'internal:',
+        internalAnchorCount,
+        'reference:',
+        referenceAnchorCount
+      );
     } catch (e) {
       Logger.debug('[generateDraftFromIdea] link counting failed:', e);
     }
@@ -5312,19 +5441,19 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     const analyzeBlogLevel = async () => {
       try {
         const db = getDb(); // 이미 import된 함수 사용
-        
+
         // [1단계] 애널리틱스 데이터 확인 (가장 정확)
         const analyticsSnapshot = await get(ref(db, `analytics/${userId}`));
-        
+
         if (analyticsSnapshot.exists()) {
           const analyticsData = analyticsSnapshot.val();
           let totalPageviews = 0;
-          Object.values(analyticsData).forEach(post => {
+          Object.values(analyticsData).forEach((post) => {
             if (post.pageviews) totalPageviews += post.pageviews;
           });
-          
+
           Logger.info(`[generateIdeaBriefing] 애널리틱스 기반 분석: 월 ${totalPageviews}명 유입`);
-          
+
           if (totalPageviews < 100) {
             return {
               level: 'beginner',
@@ -5332,7 +5461,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               monthlyVisitors: totalPageviews,
               source: 'analytics',
               longTailRatio: 1.0,
-              midTailRatio: 0.0
+              midTailRatio: 0.0,
             };
           } else if (totalPageviews < 1000) {
             return {
@@ -5341,7 +5470,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               monthlyVisitors: totalPageviews,
               source: 'analytics',
               longTailRatio: 0.7,
-              midTailRatio: 0.3
+              midTailRatio: 0.3,
             };
           } else {
             return {
@@ -5350,22 +5479,25 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               monthlyVisitors: totalPageviews,
               source: 'analytics',
               longTailRatio: 0.3,
-              midTailRatio: 0.7
+              midTailRatio: 0.7,
             };
           }
         }
-        
+
         // [2단계] 사용자 수동 입력 확인 (채널 설정에서)
         const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
         if (activeChannelId) {
           const channelSnapshot = await get(ref(db, `channels/${userId}/${activeChannelId}`));
           if (channelSnapshot.exists()) {
             const channelData = channelSnapshot.val();
-            const manualVisitors = channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
-            
+            const manualVisitors =
+              channelData.estimatedMonthlyVisitors || channelData.monthlyVisitors;
+
             if (manualVisitors && manualVisitors > 0) {
-              Logger.info(`[generateIdeaBriefing] 수동 입력 기반 분석: 월 ${manualVisitors}명 유입`);
-              
+              Logger.info(
+                `[generateIdeaBriefing] 수동 입력 기반 분석: 월 ${manualVisitors}명 유입`
+              );
+
               if (manualVisitors < 100) {
                 return {
                   level: 'beginner',
@@ -5373,7 +5505,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
                   monthlyVisitors: manualVisitors,
                   source: 'manual',
                   longTailRatio: 1.0,
-                  midTailRatio: 0.0
+                  midTailRatio: 0.0,
                 };
               } else if (manualVisitors < 1000) {
                 return {
@@ -5382,7 +5514,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
                   monthlyVisitors: manualVisitors,
                   source: 'manual',
                   longTailRatio: 0.7,
-                  midTailRatio: 0.3
+                  midTailRatio: 0.3,
                 };
               } else {
                 return {
@@ -5391,21 +5523,21 @@ export async function generateIdeaBriefing(cardId, title, description, options =
                   monthlyVisitors: manualVisitors,
                   source: 'manual',
                   longTailRatio: 0.3,
-                  midTailRatio: 0.7
+                  midTailRatio: 0.7,
                 };
               }
             }
           }
         }
-        
+
         // [3단계] 발행된 포스팅 개수로 추정 (최후의 방법)
         const publishedSnapshot = await get(ref(db, `kanban/${userId}/published`));
         let publishedCount = 0;
-        
+
         if (publishedSnapshot.exists()) {
           publishedCount = Object.keys(publishedSnapshot.val()).length;
           Logger.info(`[generateIdeaBriefing] 포스팅 개수 기반 분석: ${publishedCount}개 발행`);
-          
+
           if (publishedCount <= 5) {
             return {
               level: 'beginner',
@@ -5414,7 +5546,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               source: 'post_count',
               note: `발행 포스팅 ${publishedCount}개 (신규 블로그)`,
               longTailRatio: 1.0,
-              midTailRatio: 0.0
+              midTailRatio: 0.0,
             };
           } else if (publishedCount <= 20) {
             return {
@@ -5424,7 +5556,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               source: 'post_count',
               note: `발행 포스팅 ${publishedCount}개 (성장 중)`,
               longTailRatio: 0.7,
-              midTailRatio: 0.3
+              midTailRatio: 0.3,
             };
           } else {
             return {
@@ -5434,11 +5566,11 @@ export async function generateIdeaBriefing(cardId, title, description, options =
               source: 'post_count',
               note: `발행 포스팅 ${publishedCount}개 (성숙 블로그)`,
               longTailRatio: 0.3,
-              midTailRatio: 0.7
+              midTailRatio: 0.7,
             };
           }
         }
-        
+
         // [기본값] 모든 방법 실패 시
         Logger.warn('[generateIdeaBriefing] 블로그 수준 판단 불가 - 신규 블로그로 간주');
         return {
@@ -5448,7 +5580,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           source: 'default',
           note: '데이터 없음 (신규 블로그 추정)',
           longTailRatio: 1.0,
-          midTailRatio: 0.0
+          midTailRatio: 0.0,
         };
       } catch (e) {
         Logger.error('[generateIdeaBriefing] 블로그 수준 분석 실패:', e);
@@ -5458,7 +5590,7 @@ export async function generateIdeaBriefing(cardId, title, description, options =
           monthlyVisitors: 0,
           source: 'error',
           longTailRatio: 1.0,
-          midTailRatio: 0.0
+          midTailRatio: 0.0,
         };
       }
     };
@@ -5467,8 +5599,8 @@ export async function generateIdeaBriefing(cardId, title, description, options =
     const blogLevel = await analyzeBlogLevel();
     Logger.info(
       `[generateIdeaBriefing] 블로그 수준: ${blogLevel.level}, 월 유입: ${blogLevel.monthlyVisitors}명, ` +
-      `출처: ${blogLevel.source}, 전략: ${blogLevel.strategy}` +
-      (blogLevel.note ? `, 참고: ${blogLevel.note}` : '')
+        `출처: ${blogLevel.source}, 전략: ${blogLevel.strategy}` +
+        (blogLevel.note ? `, 참고: ${blogLevel.note}` : '')
     );
 
     if (options.generateOutline) {
@@ -5681,7 +5813,9 @@ JSON 배열 형식으로만 반환하세요. 예: ["1. 제목", "2. 제목", ...
 
     // 롱테일 키워드 생성 (블로그 수준 반영)
     if (options.generateLongTail) {
-      Logger.debug(`[generateIdeaBriefing] 롱테일 키워드 생성 시작 - 블로그 수준: ${blogLevel.level}`);
+      Logger.debug(
+        `[generateIdeaBriefing] 롱테일 키워드 생성 시작 - 블로그 수준: ${blogLevel.level}`
+      );
       const prompt = `"${contextText}" 주제의 블로그 포스트에 적합한 롱테일 키워드(검색 질문 형태) 5개를 JSON 배열 형식으로만 반환해주세요.
 
 [롱테일 키워드 선정 기준 - 필수 준수]
@@ -5854,7 +5988,10 @@ ${blogLevel.level === 'advanced' ? '[성숙 블로그 전략] 미들테일 중�
             try {
               updates.tags = await normalizeKeywordsToTags(cleanedKeywords);
             } catch (e) {
-              Logger.warn('[generateIdeaBriefing] 태그 정제 실패, 원본 사용:', e?.message || String(e));
+              Logger.warn(
+                '[generateIdeaBriefing] 태그 정제 실패, 원본 사용:',
+                e?.message || String(e)
+              );
               updates.tags = cleanedKeywords;
             }
 
