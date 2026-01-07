@@ -3988,9 +3988,26 @@ export function renderWorkspace(container, ideaData) {
       : '<span>롱테일 키워드 없음</span>';
 
   // 추천 검색어 표시 (tags 우선, 없으면 recommendedKeywords 사용)
+  // tags는 긴 검색어일 수 있으므로 정규화 필요 (1-3단어, 30자 이내로 제한)
   const recommendedKeywords =
     ideaData.tags?.length > 0
-      ? ideaData.tags.filter((t) => t !== '#AI-추천').map((t) => t.replace(/^#+/, ''))
+      ? ideaData.tags
+          .filter((t) => t !== '#AI-추천')
+          .map((t) => t.replace(/^#+/, ''))
+          .map((tag) => {
+            // 간단한 정규화: 단어 수와 길이 체크
+            const words = tag.trim().split(/\s+/);
+            if (words.length <= 3 && tag.length <= 30) {
+              return tag;
+            }
+            // 긴 검색어는 첫 3단어만 또는 30자까지만
+            if (words.length > 3) {
+              return words.slice(0, 3).join(' ');
+            }
+            return tag.slice(0, 30);
+          })
+          .filter((t, i, arr) => arr.indexOf(t) === i) // 중복 제거
+          .slice(0, 10) // 최대 10개
       : ideaData.recommendedKeywords || [];
 
   const searchHtml =

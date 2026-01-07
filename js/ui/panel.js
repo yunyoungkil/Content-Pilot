@@ -13,6 +13,7 @@ import { renderKanban, addKanbanEventListeners, destroyKanbanMode } from './kanb
 import { renderWorkspace } from './workspaceMode.js';
 import { renderPerformanceDashboard } from './performanceDashboardMode.js';
 import { renderPerformanceReport } from './performanceReportMode.js';
+import { renderPublishManagement } from './publishManagementMode.js';
 import { renderAdminMode } from './adminMode.js';
 import { Logger } from '../utils.js';
 
@@ -749,6 +750,8 @@ function addEventListenersToPanel(shadowRoot) {
         renderPerformanceDashboard(mainArea);
       } else if (activeKey === 'report') {
         renderPerformanceReport(mainArea);
+      } else if (activeKey === 'publish') {
+        renderPublishManagement(mainArea);
       } else {
         mainArea.innerHTML = `<h1 style="text-align:center; margin-top: 50px;">${tab.textContent} 모드는 구현 예정입니다.</h1>`;
       }

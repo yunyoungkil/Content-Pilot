@@ -1788,10 +1788,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 id: cardId,
                 status: status,
                 title: card.title || '제목 없음',
+                seoTitle: card.seoTitle || card.publishInfo?.seoTitle || '', // 최상위 seoTitle 우선, 없으면 publishInfo.seoTitle
                 publishedUrl: card.publishedUrl,
                 performance: card.performance,
                 createdAt: card.createdAt || 0,
                 lastUpdatedAt: card.performance.lastUpdatedAt || 0,
+                shareCount: card.shareCount || {}, // SNS 공유 횟수 추가
               });
             }
           }
@@ -1814,6 +1816,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           page: page,
           pageSize: pageSize,
         };
+      })()
+    );
+  }
+
+  // SNS 공유 횟수 증가
+  if (msg.action === 'increment_share_count') {
+    sendResponse(
+      (async () => {
+        try {
+          const { itemId, platform } = msg;
+          if (!itemId || !platform) {
+            return { success: false, error: 'itemId and platform are required' };
+          }
+
+          const userId = await getCurrentUserId();
+          if (!userId) {
+            return { success: false, error: 'User not authenticated' };
+          }
+
+          const { COLLECTIONS } = require('./js/constants.js');
+          const cardRef = `${COLLECTIONS.users}/${userId}/${COLLECTIONS.kanban}/${itemId}`;
+          
+          // 현재 shareCount 가져오기
+          const cardSnapshot = await get(ref(realtimeDb, cardRef));
+          const cardData = cardSnapshot.val() || {};
+          const shareCount = cardData.shareCount || {};
+          
+          // 플랫폼별 횟수 증가
+          shareCount[platform] = (shareCount[platform] || 0) + 1;
+          
+          // Firebase 업데이트
+          await update(ref(realtimeDb, cardRef), { shareCount });
+          
+          Logger.info(`[increment_share_count] ${platform} 공유 횟수 증가: ${itemId}`);
+          
+          return { success: true, shareCount };
+        } catch (error) {
+          Logger.error('[increment_share_count] Error:', error);
+          return { success: false, error: error.message };
+        }
       })()
     );
   }

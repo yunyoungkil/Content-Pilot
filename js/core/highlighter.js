@@ -80,7 +80,26 @@ export function setupHighlighter() {
   document.addEventListener('mouseover', _mouseoverHandler, true);
   window.__pilotHighlightHandlerRefs.mouseover = _mouseoverHandler;
 
-  // 2. Alt 키를 떼거나 창 포커스를 잃으면 하이라이트 제거
+  // 2. Alt 키 토글: Alt 키를 누르면 하이라이트 on/off 토글
+  const _keydownHandler = (e) => {
+    if (e.key === 'Alt' && !e.repeat) {
+      // Alt 키를 눌렀을 때 토글 (repeat는 길게 눌렀을 때를 제외)
+      highlightToggleState = !highlightToggleState;
+      chrome.storage.local.set({ highlightToggleState: highlightToggleState }, () => {
+        const statusText = highlightToggleState ? 'ON' : 'OFF';
+        showToast(`🔍 스크랩 하이라이터: ${statusText}`);
+        
+        // OFF 상태가 되면 현재 하이라이트 제거
+        if (!highlightToggleState) {
+          clearHighlight();
+        }
+      });
+    }
+  };
+  document.addEventListener('keydown', _keydownHandler, true);
+  window.__pilotHighlightHandlerRefs.keydown = _keydownHandler;
+
+  // 3. Alt 키를 떼거나 창 포커스를 잃으면 하이라이트 제거
   const _keyupHandler = (e) => {
     if (e.key === 'Alt') clearHighlight();
   };
@@ -396,6 +415,7 @@ export function resetHighlighterForTests() {
     if (refs) {
       if (refs.mouseout) document.removeEventListener('mouseout', refs.mouseout, true);
       if (refs.mouseover) document.removeEventListener('mouseover', refs.mouseover, true);
+      if (refs.keydown) document.removeEventListener('keydown', refs.keydown, true);
       if (refs.keyup) document.removeEventListener('keyup', refs.keyup, true);
       if (refs.blur) window.removeEventListener('blur', refs.blur, true);
       if (refs.click) document.removeEventListener('click', refs.click, true);

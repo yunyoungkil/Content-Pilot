@@ -16,7 +16,8 @@ export function renderPanelHeader() {
     { key: 'kanban', label: '기획 보드', color: '#34A853' },
     { key: 'performance', label: '성과 대시보드', color: '#9C27B0' },
     { key: 'report', label: '성과 리포트', color: '#FF6B6B' },
-    { key: 'draft', label: '초안 작성', color: '#FBBC05' },
+    { key: 'publish', label: '발행 관리', color: '#FBBC05' },
+    // 'publish' 탭: 발행된 콘텐츠 관리 및 성과 테이블 (DataTables)
     // 채널 연동 탭 제거됨 - 헤더의 글로벌 선택기로 대체
   ];
 

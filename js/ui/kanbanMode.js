@@ -1560,10 +1560,31 @@ function generateSimilarIdea(cardId, status, cardData) {
       blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
     }
 
+    // [중복 방지] 기존 아이디어 제목 목록 수집
+    let existingIdeasList = '';
+    try {
+      const allTitles = [];
+      ['ideas', 'inProgress', 'done'].forEach(columnStatus => {
+        const cards = window.__cp_kanbanCards?.[columnStatus] || [];
+        cards.forEach(card => {
+          if (card && card.title && card.id !== cardId) {
+            allTitles.push(card.title);
+          }
+        });
+      });
+      
+      if (allTitles.length > 0) {
+        existingIdeasList = `\n[내 기존 아이디어 목록]\n${allTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n⚠️ 위 목록과 중복되지 않도록 차별화된 아이디어를 제안하세요.\n`;
+        console.debug('[Kanban] 기존 아이디어 목록 추가:', allTitles.length, '개');
+      }
+    } catch (e) {
+      console.warn('[Kanban] 기존 아이디어 목록 조회 실패:', e);
+    }
+
     // 카드 정보를 기반으로 AI에게 유사 아이디어 생성 요청
     const prompt = `
 당신은 블로그 콘텐츠 전략가입니다. 아래 기존 콘텐츠를 기반으로 유사하지만 차별화된 새로운 아이디어를 제안해주세요.
-
+${existingIdeasList}
 [기존 콘텐츠]
 - 제목: ${cardData.title || '제목 없음'}
 - 설명: ${cardData.description || '설명 없음'}

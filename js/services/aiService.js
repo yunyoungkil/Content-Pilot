@@ -20,6 +20,7 @@ import {
 // [추가] PromptService 임포트
 import { PromptBuilder, detectPersona, PROMPT_CONFIG } from './promptService.js';
 import { generateThumbnailTexts } from './thumbnailService.js';
+import { extractKeywords } from './collectorService.js';
 // [추가] 상수 임포트
 import { AI_MODELS } from '../constants.js';
 
@@ -118,22 +119,61 @@ function sanitizeAltText(candidate, fallback) {
 function sanitizeThumbnailText(candidate, fallback) {
   try {
     const s = candidate ? String(candidate).trim() : '';
-    if (s && /[\p{L}\p{N}]/u.test(s)) {
-      // strip leading/trailing punctuation and collapse whitespace
-      const cleaned = s.replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').trim();
-      if (cleaned && /[\p{L}\p{N}]/u.test(cleaned)) {
-        return cleaned.length > 12 ? cleaned.substring(0, 12).trim() : cleaned;
-      }
-    }
+    if (s && s.length > 200) return s.substring(0, 200).trim();
   } catch (e) {}
-  try {
-    const fb = String(fallback || '')
-      .replace(/[\p{P}\p{S}]+/gu, '')
-      .trim();
-    return fb ? (fb.length > 12 ? fb.substring(0, 12).trim() : fb) : '썸네일';
-  } catch (e) {
-    return '썸네일';
+  return String(fallback || '');
+}
+
+/**
+ * Normalize an array of keywords into short tag-like keywords (1-3 words, <=30 chars).
+ * Tries to extract shorter keywords from long phrases using extractKeywords() as a fallback.
+ * Returns a deduplicated array (preserve order) limited to 10 items.
+ */
+export async function normalizeKeywordsToTags(keywords = []) {
+  if (!Array.isArray(keywords)) return [];
+  const normalized = [];
+
+  for (const raw of keywords) {
+    try {
+      let keyword = typeof raw === 'string' ? raw : String(raw || '');
+      // remove common leading bullets/hashtag chars and trim
+      keyword = keyword.replace(/^[#\-\*•]+/, '').trim();
+      // collapse whitespace and strip surrounding punctuation
+      keyword = keyword.replace(/\s+/g, ' ').replace(/^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/gu, '').trim();
+      if (!keyword) continue;
+
+      // enforce limits
+      const wordCount = keyword.split(/\s+/).length;
+      if (wordCount > 3 || keyword.length > 30) {
+        // try extracting from the phrase using collectorService.extractKeywords
+        try {
+          const extracted = await extractKeywords(keyword);
+          if (Array.isArray(extracted) && extracted.length > 0) {
+            // choose first suitable candidate
+            const candidate = extracted.find((k) => k && k.split(/\s+/).length <= 3 && String(k).length <= 30);
+            if (candidate) keyword = candidate;
+            else keyword = String(extracted[0]).split(/\s+/).slice(0, 3).join(' ').substring(0, 30);
+          } else {
+            keyword = keyword.split(/\s+/).slice(0, 3).join(' ').substring(0, 30);
+          }
+        } catch (e) {
+          keyword = keyword.split(/\s+/).slice(0, 3).join(' ').substring(0, 30);
+        }
+      }
+
+      // final cleanup
+      keyword = keyword.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
+      if (!keyword) continue;
+
+      if (!normalized.includes(keyword)) normalized.push(keyword);
+      if (normalized.length >= 10) break;
+    } catch (e) {
+      // ignore single-item errors
+      continue;
+    }
   }
+
+  return normalized;
 }
 
 // [신규] Detect meta-template style candidates and exclude them from use
@@ -175,7 +215,7 @@ function buildLinkRules(myPastPostsText, affiliateLinks = [], linkedScrapsText) 
     '- Distribute internal links across H2 sections (avoid placing all links in the conclusion).',
     affiliateCount > 0 ? '- If affiliate links are provided, insert 2 (minimum) and up to 3 affiliate links naturally in the body.' : '',
     hasScraps ? '- If connected scraps exist, insert 2–3 natural external reference links.' : '',
-    'After writing, add a short checklist line: "CHECK: Internal:N / Affiliate:M / External:K"'
+    'After writing, add a short checklist line in Korean: "확인: 내부링크:N개 / 제휴링크:M개 / 외부링크:K개"'
   ].filter(Boolean).join('\n');
 }
 
@@ -739,6 +779,29 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
     Logger.warn('[processDraftResponse] JSON-LD 탐색 시 예외:', e);
   }
 
+  // Publish tags extraction
+  let publishTags = [];
+  try {
+    const publishTagsMatch = cleanedDraft.match(/<PUBLISH_TAGS>([\s\S]*?)<\/PUBLISH_TAGS>/i);
+    if (publishTagsMatch && publishTagsMatch[1]) {
+      const tagsText = publishTagsMatch[1].trim();
+      // 쉼표로 구분된 태그를 배열로 변환
+      publishTags = tagsText
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0 && tag.length <= 15);
+      
+      Logger.info(`[processDraftResponse] AI 생성 발행 태그 ${publishTags.length}개 추출:`, publishTags);
+      
+      // Remove the tags from the draft
+      cleanedDraft = cleanedDraft.replace(/<PUBLISH_TAGS>[\s\S]*?<\/PUBLISH_TAGS>/gi, '').trim();
+    } else {
+      Logger.warn('[processDraftResponse] PUBLISH_TAGS 태그를 찾지 못했습니다.');
+    }
+  } catch (e) {
+    Logger.warn('[processDraftResponse] PUBLISH_TAGS 탐색 시 예외:', e);
+  }
+
   // Thumbnail candidates extraction
   let thumbnailCandidates = [];
   try {
@@ -808,7 +871,7 @@ export function processDraftResponse(rawDraft = '', ideaData = {}) {
     Logger.warn('[processDraftResponse] 썸네일정보 탐색 중 예외:', e);
   }
 
-  return { cleanedDraft, jsonLdSchema, thumbnailCandidates };
+  return { cleanedDraft, jsonLdSchema, thumbnailCandidates, publishTags };
 }
 
 // Enhance a draft with visual features: auto-generate thumbnails, crop, upload and insert to HTML
@@ -1902,12 +1965,12 @@ export function postProcessAffiliateHtml(html = '', affiliateLinks = [], options
         };
 
         const totals = recalcTotals();
-        const checkRegex = /CHECK:\s*Internal:\s*\d+\s*\/\s*Affiliate:\s*\d+\s*\/\s*External:\s*\d+/i;
+        const checkRegex = /(?:CHECK:|확인:)\s*(?:내부|내부링크|Internal):\s*\d+(?:개)?\s*\/\s*(?:제휴|제휴링크|Affiliate):\s*\d+(?:개)?\s*\/\s*(?:외부|외부링크|External):\s*\d+(?:개)?/i;
         const walker2 = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
         let tn2;
         while ((tn2 = walker2.nextNode())) {
           if (tn2.textContent && tn2.textContent.match(checkRegex)) {
-            tn2.textContent = `CHECK: Internal:${totals.internalAnchorCount} / Affiliate:${totals.affiliateAnchorCount} / External:${totals.referenceAnchorCount}`;
+            tn2.textContent = `확인: 내부링크:${totals.internalAnchorCount}개 / 제휴링크:${totals.affiliateAnchorCount}개 / 외부링크:${totals.referenceAnchorCount}개`;
             Logger.info('[postProcessAffiliateHtml] CHECK 라인 자동 갱신:', tn2.textContent);
           }
         }
@@ -3343,7 +3406,7 @@ ${myPastPostsText}`
             h1 제목 → 서론(일반 텍스트) → 본문(h2 섹션들) → 결론(h2)
 
             ### 5. 주요 키워드 (본문에 자연스럽게 포함해주세요)
-            ${tags.length > 0 ? tags.map((t) => `- ${t.replace(/^#/, '')}`).join('\n') : '없음'}
+            ${tags.length > 0 ? tags.map((t) => `${t.startsWith('#') ? t : '#' + t}`).join(', ') : '없음'}
 
             ### 6. 롱테일 키워드 (🚨 SEO Critical - 본문에 자연스럽게 2-3회 반복 필수)
             ${
@@ -3861,9 +3924,11 @@ ${myPastPostsText}`
                    ...
                  }
                  </JSON-LD>
-            13. **스마트 썸네일 A/B 테스팅 정보 생성 (매우 중요)**: 
+            13. **스마트 썸네일 A/B 테스팅 정보 생성 (필수 - 절대 생략 불가)**: 
 
-              초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 JSON 배열 형식으로 반환해주세요.
+              ⚠️ **중요**: 이 단계는 **반드시 포함**되어야 합니다. 썸네일 정보가 없으면 초안이 거부됩니다.
+
+              초안 생성 후, 클릭률(CTR)을 극대화하기 위해 서로 다른 3가지 컨셉의 썸네일 정보를 **반드시** JSON 배열 형식으로 반환해주세요.
               
               [썸네일 생성 규칙]
               ${thumbnailPromptGuide}
@@ -3935,6 +4000,9 @@ ${myPastPostsText}`
               ]
 
               </썸네일정보>
+              
+              ⚠️ **다시 한 번 강조**: 위 <썸네일정보> 블록은 **필수**입니다. 반드시 3개의 컨셉(curiosity, informative, emotional)을 모두 포함하여 생성해주세요.
+              
               - **썸네일 문구 작성 요령 (매우 중요)**: 
                 * 심플하지만 호기심을 유발하는 문구로 작성해주세요.
                 * 단순한 키워드 나열(예: "스마트홈 컨트롤")이 아니라, 독자의 호기심을 자극하는 문구여야 합니다.
@@ -4015,14 +4083,34 @@ ${myPastPostsText}
                 : ''
             }
             
+            15. **발행용 태그 생성 (매우 중요):**
+               - 이 글을 발행할 때 사용할 **SEO 최적화된 태그**를 생성해주세요.
+               - 태그는 **1~3단어 내외의 명사형 키워드**로 작성하세요.
+               - 각 태그는 **최대 15자 이내**로 제한하세요.
+               - 총 **10개의 태그**를 생성해주세요.
+               - 해시태그(#) 기호는 붙이지 말고, 순수 키워드만 작성하세요.
+               - 예시: "맥세이프", "차량용충전기", "무선충전", "아이폰액세서리", "카마운트"
+               - 태그는 본문 마지막에 다음 형식으로 포함해주세요:
+               
+               <PUBLISH_TAGS>
+               태그1, 태그2, 태그3, 태그4, 태그5, 태그6, 태그7, 태그8, 태그9, 태그10
+               </PUBLISH_TAGS>
+            
             [중요] **응답 형식 규칙:**
             - 반드시 **순수 마크다운 형식**으로만 작성해주세요.
             - 코드 블록(\`\`\`markdown ... \`\`\`)이나 다른 래퍼 태그 없이, 순수 마크다운 텍스트만 반환해주세요.
             - 예시: "# 제목\\n\\n본문 내용..." 형식으로 작성 (\`\`\`markdown 태그 없이)
             - 절대 금지: \`\`\`markdown으로 감싸거나, JSON 형식으로 감싸지 마세요.
+            
+            [필수 포함 항목 - 체크리스트]
+            ✅ <썸네일정보>[...]</썸네일정보> - 3가지 컨셉 모두 포함
+            ✅ <PUBLISH_TAGS>태그1, 태그2, ...</PUBLISH_TAGS>
+            ✅ <JSON-LD>{...}</JSON-LD> - 구조화된 데이터
+            
+            위 3가지 항목이 모두 없으면 초안이 거부됩니다.
         `;
 
-    let rawDraft, cleanedDraft, formattedDraft, seoTitle, jsonLdSchema, thumbnailCandidates;
+    let rawDraft, cleanedDraft, formattedDraft, seoTitle, jsonLdSchema, thumbnailCandidates, aiGeneratedTags;
     // Flag used when cropping fails and we fall back to composed image
     let thumbnailGenerationPartialFailure = false;
     // 제목은 함수 최상단에서 하나만 선언되어야 함 (스코프 안정성)
@@ -4116,6 +4204,10 @@ ${defaultDescription}
       cleanedDraft = processed.cleanedDraft;
       jsonLdSchema = processed.jsonLdSchema;
       thumbnailCandidates = processed.thumbnailCandidates;
+      
+      // AI가 생성한 발행 태그 저장
+      aiGeneratedTags = processed.publishTags || [];
+      Logger.info(`[generateDraftFromIdea] AI 생성 태그 ${aiGeneratedTags.length}개 받음:`, aiGeneratedTags);
 
       // [변경] 2. 안전한 HTML 정제 및 포매팅 (Offscreen 위임)
       Logger.debug('[generateDraftFromIdea] HTML 정제 및 포매팅 시작 (Offscreen)');
@@ -4400,11 +4492,22 @@ ${defaultDescription}
         .substring(0, 100);
     }
 
-    // 6. 태그 생성 (쉼표 구분)
-    const tagsForPublish = tags
-      .map((t) => t.replace(/^#/, ''))
-      .filter((t) => t && t !== 'AI-추천')
-      .join(', ');
+    // 6. 태그 생성 (AI 생성 태그 우선 사용, 없으면 브리핑 태그 사용)
+    let tagsForPublish = '';
+    if (aiGeneratedTags && aiGeneratedTags.length > 0) {
+      // AI가 생성한 태그 사용 (이미 # 제거됨)
+      tagsForPublish = aiGeneratedTags
+        .filter((t) => t && t !== 'AI-추천')
+        .join(', ');
+      Logger.info('[generateDraftFromIdea] AI 생성 태그 사용:', tagsForPublish);
+    } else {
+      // 폴백: 브리핑 태그 사용
+      tagsForPublish = tags
+        .map((t) => t.replace(/^#/, ''))
+        .filter((t) => t && t !== 'AI-추천')
+        .join(', ');
+      Logger.warn('[generateDraftFromIdea] AI 태그 없음, 브리핑 태그 사용:', tagsForPublish);
+    }
 
     // 7. 썸네일 정보는 오직 AI 초안(또는 명시적 publishInfo.thumbnailInfo)에서 제공된 경우에만 사용합니다.
     // 따라서 여태까지의 폴백 템플릿/자동 생성 로직은 제거되었습니다.
@@ -4586,16 +4689,17 @@ ${defaultDescription}
       const ideaOptIn = ideaData?.autoInsertAffiliateLinks;
       const shouldAutoInsert = typeof ideaOptIn === 'boolean' ? ideaOptIn : !!userAutoInsert;
 
-      // Auto-insert links: affiliate, internal, reference
-      try {
-        const internalLinks =
-          typeof myPosts !== 'undefined' && Array.isArray(myPosts)
-            ? myPosts.map((p) => ({ title: p.title, url: p.fullLink || p.link, keywords: [] }))
-            : [];
+      // Auto-insert links: affiliate, internal, reference (선언을 try 블록 밖으로 이동)
+      const internalLinks =
+        typeof myPosts !== 'undefined' && Array.isArray(myPosts)
+          ? myPosts.map((p) => ({ title: p.title, url: p.fullLink || p.link, keywords: [] }))
+          : [];
 
-        const referenceLinks = (ideaData.linkedScrapsContent || [])
-          .filter((s) => s && s.url)
-          .map((s) => ({ title: s.title || '', url: s.url }));
+      const referenceLinks = (ideaData.linkedScrapsContent || [])
+        .filter((s) => s && s.url)
+        .map((s) => ({ title: s.title || '', url: s.url }));
+
+      try {
 
         const anyLinksAvailable =
           (Array.isArray(affiliateLinks) && affiliateLinks.length > 0) ||
@@ -5668,41 +5772,27 @@ ${blogLevel.level === 'advanced' ? '[성숙 블로그 전략] 미들테일 중�
     if (options.generateKeywords) {
       Logger.debug(`[generateIdeaBriefing] 추천 검색어 생성 시작 (자료 수집 목적)`);
 
-      // 자료 수집에 최적화된 프롬프트
-      const prompt = `"${contextText}" 주제로 블로그 초안을 작성하기 위해 필요한 자료를 수집할 때 사용할 검색어 10개를 추천해주세요.
+      // 자료 수집에 최적화된 프롬프트 (실제 검색어 형태로 생성)
+      const prompt = `"${contextText}" 주제로 블로그 초안을 작성하기 위해 자료 수집에 사용할 **추천 검색어** 10개를 JSON 배열 형식으로만 반환해주세요.
 
-## 검색어 목적
-초안 작성 시 인용할 통계, 사례, 전문가 의견, 최신 트렌드, 비교 데이터 등을 찾기 위한 실용적인 검색어
+[필수 규칙 - 반드시 준수]
+1. **길이**: 각 검색어는 최소 15자 이상, 5~10단어로 구성
+2. **형태**: 실제 검색창에 입력할 법한 자연스러운 문장
+3. **구체성**: 방법, 비교, 추천, 후기 등 구체적 의도 포함
 
-## 검색어 생성 원칙
-1. **구체성**: "아이폰케이스" 같은 단순 키워드가 아닌, "아이폰 15 케이스 보호력 비교"처럼 구체적인 정보를 찾을 수 있는 검색어
-2. **다양성**: 통계, 사례, 가이드, 비교, 리뷰, 최신 뉴스 등 다양한 자료 유형을 커버
-3. **실용성**: 실제로 검색 엔진에 입력했을 때 양질의 결과가 나올 검색어
-4. **관련성**: 주제와 직접 관련된 키워드 (너무 광범위하거나 무관한 키워드 제외)
-5. **단순 키워드 금지**: "아이폰케이스", "아이폰케이스추천" 같은 단순 키워드는 피하고, 반드시 "아이폰 15 케이스 보호력 비교 2024"처럼 구체적인 정보를 찾을 수 있는 문구로 작성
+[좋은 예시 - 이렇게 작성]
+- "맥세이프 차량용 충전거치대 자력 테스트 방법 및 결과"
+- "투명 케이스 황변 방지 세척 방법 추천 2024"
+- "갤럭시 탭 S9 VS S10 스펙 비교 어떤게 좋을까"
+- "아이폰 15 프로 맥세이프 호환 액세서리 추천"
 
-## 검색어 유형 (균형있게 포함, 각 2개씩)
-- 통계/데이터 검색어 (예: "스마트홈 시장 규모 2024", "아이폰 케이스 판매량 순위")
-- 가이드/방법 검색어 (예: "스마트홈 설치 가이드 초보자용", "아이폰 케이스 선택 기준")
-- 비교/분석 검색어 (예: "구글홈 vs 아마존 에코 비교", "실리콘 vs 하드 케이스 장단점")
-- 사례/후기 검색어 (예: "스마트홈 구축 사례 집", "아이폰 케이스 장기 사용 후기")
-- 최신 트렌드 검색어 (예: "2024 스마트홈 트렌드", "아이폰 16 신기능 전망")
+[나쁜 예시 - 절대 금지]
+- "맥세이프" (1단어, 너무 짧음)
+- "차량용 충전기" (2단어, 너무 일반적)
+- "케이스 추천" (2단어, 구체성 없음)
 
-## 잘못된 예시 (절대 금지)
-- ❌ "아이폰케이스" (너무 단순, 구체성 부족)
-- ❌ "아이폰케이스추천" (단순 키워드 나열)
-- ❌ "케이스디자인" (너무 광범위)
-- ❌ "폰케이스추천" (주제와 직접 관련 없음)
-
-## 올바른 예시
-- ✅ "아이폰 15 케이스 보호력 테스트 결과"
-- ✅ "아이폰 케이스 재질별 비교 분석"
-- ✅ "갤럭시 vs 아이폰 케이스 시장 점유율 2024"
-- ✅ "실리콘 케이스 내구성 분석 후기"
-- ✅ "아이폰 케이스 트렌드 변화 전망"
-
-JSON 배열 형식으로만 반환. 해시태그(#) 제외. 반드시 구체적인 문구로 작성.
-예: ["스마트홈 시장 규모 2024", "스마트홈 설치 가이드 초보자용", "IoT 기기 추천 순위 비교"]`;
+[중요] 짧은 키워드가 아닌 **실제로 검색할 법한 긴 문장**을 작성하세요.
+반환 형식: JSON 배열만 (예: ["검색어1", "검색어2", ...])`;
 
       let res;
       try {
@@ -5726,7 +5816,7 @@ JSON 배열 형식으로만 반환. 해시태그(#) 제외. 반드시 구체적�
           let keywordsArray = tryParseArray(res);
           if (!Array.isArray(keywordsArray)) {
             try {
-              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제로 초안 작성에 필요한 자료를 수집하기 위한 실용적인 검색어 10개를 JSON 배열 형식으로만 응답해주세요. 해시태그(#) 제외.`;
+              const retryPrompt = `다시 요청합니다. 이전 응답을 무시하고, "${contextText}" 주제로 **5~10단어로 구성된 구체적인 검색 문구** 10개를 JSON 배열 형식으로만 응답해주세요. 예: ["맥세이프 차량용 충전기 자력 테스트 방법", "투명 케이스 황변 방지 세척 방법"]. 짧은 키워드가 아닌 긴 검색 문장을 작성하세요.`;
               const retryRes = await callGeminiAPI(retryPrompt);
               keywordsArray = tryParseArray(retryRes);
             } catch (retryErr) {}
@@ -5747,7 +5837,7 @@ JSON 배열 형식으로만 반환. 해시태그(#) 제외. 반드시 구체적�
 
           if (Array.isArray(keywordsArray)) {
             // 자료 수집용 검색어로 저장 (해시태그 형태 변환 제거)
-            updates.tags = keywordsArray
+            const cleanedKeywords = keywordsArray
               .map((item) => {
                 let keyword =
                   typeof item === 'object' && item !== null
@@ -5759,6 +5849,15 @@ JSON 배열 형식으로만 반환. 해시태그(#) 제외. 반드시 구체적�
               })
               .filter((item) => item && item.trim().length > 0)
               .slice(0, 10);
+
+            // Normalize and shorten to safe tag-like keywords (async fallback using extractKeywords)
+            try {
+              updates.tags = await normalizeKeywordsToTags(cleanedKeywords);
+            } catch (e) {
+              Logger.warn('[generateIdeaBriefing] 태그 정제 실패, 원본 사용:', e?.message || String(e));
+              updates.tags = cleanedKeywords;
+            }
+
             Logger.info(
               `[generateIdeaBriefing] 자료 수집용 추천 검색어 생성 성공: ${updates.tags.length}개`,
               updates.tags

@@ -1142,9 +1142,36 @@ function renderDetailView(scrapId, container) {
         blogLevelInfo = `\n\n[블로그 수준: 신규 (기본값)]\n권장 전략: 롱테일 키워드 100%`;
       }
       
+      // [중복 방지] 내 채널의 기존 콘텐츠 목록 수집
+      let myContentList = '';
+      try {
+        const activeChannelId = window.__cp_activeChannelId;
+        if (activeChannelId) {
+          const contentResponse = await chrome.runtime.sendMessage({
+            action: 'get_channel_content',
+            channelId: activeChannelId,
+            limit: 20
+          });
+          
+          if (contentResponse && contentResponse.success && contentResponse.content) {
+            const titles = contentResponse.content
+              .map(item => item.title)
+              .filter(title => title);
+            
+            if (titles.length > 0) {
+              myContentList = `\n\n[내 채널의 기존 콘텐츠 목록]\n${titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n⚠️ 위 목록과 중복되거나 유사한 주제는 피하고, 새로운 각도의 아이디어를 제안하세요.`;
+              console.debug('[Scrapbook] 기존 콘텐츠 목록 추가:', titles.length, '개');
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Scrapbook] 기존 콘텐츠 목록 조회 실패:', e);
+      }
+      
       const prompt = `다음 스크랩 내용을 읽고, 서로 다른 관점의 콘텐츠 아이디어 5개를 JSON 배열로만 반환하세요.
       
 각 아이디어는 객체로 "title", "summary"(한 문장), "tags"(문자열 배열)을 포함해야 합니다.
+${myContentList}
 
 [아이디어 선정 시 필수 고려사항]
 1. SEO 최적화: 제목(title)에 검색 의도가 명확한 키워드 포함

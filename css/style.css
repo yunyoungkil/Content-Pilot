@@ -1836,3 +1836,552 @@
   cursor: pointer;
   margin-left: 8px;
 }
+/* ============================================
+   발행 관리 테이블 스타일
+   ============================================ */
+
+.publish-management-container {
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.pm-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #f1f3f5;
+}
+
+.pm-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #212529;
+  margin: 0;
+}
+
+.pm-btn {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.pm-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.pm-btn:disabled {
+  background: #adb5bd;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.pm-content {
+  margin-top: 16px;
+}
+
+.pm-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: #868e96;
+  font-size: 15px;
+}
+
+.pm-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #868e96;
+}
+
+.pm-empty h3 {
+  margin: 16px 0 8px 0;
+  color: #495057;
+  font-weight: 600;
+}
+
+/* 발행 관리 DataTables 커스텀 스타일 */
+#publish-management-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100% !important;
+}
+
+#publish-management-table thead th {
+  background: #f8f9fa;
+  color: #495057;
+  font-weight: 600;
+  padding: 14px 12px;
+  text-align: left;
+  border-bottom: 2px solid #dee2e6;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#publish-management-table thead th:first-child {
+  border-top-left-radius: 8px;
+}
+
+#publish-management-table thead th:last-child {
+  border-top-right-radius: 8px;
+}
+
+#publish-management-table tbody td {
+  padding: 12px;
+  border-bottom: 1px solid #f1f3f5;
+  font-size: 13px;
+  color: #495057;
+}
+
+#publish-management-table tbody tr {
+  transition: background-color 0.15s;
+}
+
+#publish-management-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+#publish-management-table tbody td a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s;
+  display: block;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#publish-management-table tbody td a:hover {
+  color: #764ba2;
+  text-decoration: underline;
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* DataTables 페이징 및 검색 커스터마이징 */
+.dataTables_wrapper .dataTables_filter input {
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.dataTables_wrapper .dataTables_length select {
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  margin: 0 8px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+  padding: 6px 12px;
+  margin: 0 2px;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  background: white;
+  color: #495057 !important;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+  background: #f8f9fa;
+  border-color: #667eea;
+  color: #667eea !important;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+  background: #667eea;
+  color: white !important;
+  border-color: #667eea;
+}
+
+.dataTables_wrapper .dataTables_info {
+  font-size: 13px;
+  color: #868e96;
+  padding-top: 12px;
+}
+
+/* 가운데 정렬 */
+.dt-center {
+  text-align: center !important;
+}
+
+/* SNS 공유 버튼 스타일 */
+.pm-share-buttons {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pm-share-btn {
+  cursor: pointer;
+  border: none;
+  color: white;
+  border-radius: 4px;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.pm-share-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+}
+
+.pm-share-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.pm-share-twitter {
+  background: #000;
+}
+
+.pm-share-twitter:hover {
+  background: #333;
+}
+
+.pm-share-threads {
+  background: #000;
+}
+
+.pm-share-threads:hover {
+  background: #333;
+}
+
+.pm-share-threads svg {
+  display: block;
+}
+
+.pm-share-facebook {
+  background: #1877F2;
+}
+
+.pm-share-facebook:hover {
+  background: #1668d9;
+}
+
+.pm-share-pinterest {
+  background: #E60023;
+}
+
+.pm-share-pinterest:hover {
+  background: #cc0020;
+}
+
+.pm-share-linkedin {
+  background: #0077B5;
+}
+
+.pm-share-linkedin:hover {
+  background: #006399;
+}
+
+.pm-share-reddit {
+  background: #FF4500;
+}
+
+.pm-share-reddit:hover {
+  background: #e03d00;
+}
+
+.pm-share-copy {
+  background: #6c757d;
+  font-size: 16px;
+}
+
+.pm-share-copy:hover {
+  background: #5a6268;
+}
+
+/* DataTables 커스텀 스타일 */
+.publish-management-container table.dataTable {
+  width: 100% !important;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.publish-management-container table.dataTable thead {
+  background: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.publish-management-container table.dataTable thead th {
+  padding: 12px 8px;
+  font-weight: 600;
+  color: #495057;
+  text-align: left;
+  border-bottom: none;
+  font-size: 13px;
+}
+
+.publish-management-container table.dataTable tbody td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #f1f1f1;
+  vertical-align: middle;
+}
+
+.publish-management-container table.dataTable tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+/* 컬럼 너비 조정 */
+.publish-management-container table.dataTable thead th:nth-child(1),
+.publish-management-container table.dataTable tbody td:nth-child(1) {
+  width: 280px;
+  min-width: 280px;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(2),
+.publish-management-container table.dataTable tbody td:nth-child(2) {
+  width: 100px;
+  min-width: 100px;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(3),
+.publish-management-container table.dataTable tbody td:nth-child(3) {
+  width: auto;
+  min-width: 200px;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(4),
+.publish-management-container table.dataTable tbody td:nth-child(4) {
+  width: 60px;
+  text-align: center;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(5),
+.publish-management-container table.dataTable tbody td:nth-child(5) {
+  width: 80px;
+  text-align: center;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(6),
+.publish-management-container table.dataTable tbody td:nth-child(6) {
+  width: 80px;
+  text-align: center;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(7),
+.publish-management-container table.dataTable tbody td:nth-child(7) {
+  width: 80px;
+  text-align: center;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(8),
+.publish-management-container table.dataTable tbody td:nth-child(8) {
+  width: 80px;
+  text-align: center;
+}
+
+.publish-management-container table.dataTable thead th:nth-child(9),
+.publish-management-container table.dataTable tbody td:nth-child(9) {
+  width: 140px;
+  text-align: center;
+}
+
+/* DataTables 페이징 스타일 */
+.publish-management-container .dataTables_wrapper .dataTables_paginate,
+.publish-management-container nav[aria-label="pagination"] {
+  padding-top: 12px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_paginate .paginate_button,
+.publish-management-container .dt-paging-button {
+  padding: 6px 12px;
+  margin: 0;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 13px;
+  color: #495057;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_paginate .paginate_button:hover,
+.publish-management-container .dt-paging-button:hover:not(.disabled) {
+  background: #f8f9fa;
+  border-color: #adb5bd;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.publish-management-container .dt-paging-button.current {
+  background: #667eea;
+  color: white !important;
+  border-color: #667eea;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+.publish-management-container .dt-paging-button.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f8f9fa;
+  border-color: #e9ecef;
+  color: #adb5bd;
+}
+
+/* DataTables 정보 및 검색 스타일 */
+.publish-management-container .dataTables_wrapper .dataTables_info {
+  padding-top: 12px;
+  font-size: 13px;
+  color: #495057;
+  font-weight: 500;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_filter {
+  margin-bottom: 12px;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_filter label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_filter input {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s;
+  min-width: 250px;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_filter input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_length {
+  margin-bottom: 12px;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_length label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_length select {
+  padding: 6px 10px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  background-color: white;
+  transition: all 0.2s;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_length select:hover {
+  border-color: #adb5bd;
+}
+
+.publish-management-container .dataTables_wrapper .dataTables_length select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* DataTables Layout 스타일 */
+.publish-management-container .dt-layout-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+
+.publish-management-container .dt-layout-cell {
+  display: flex;
+  align-items: center;
+}
+
+.publish-management-container .dt-layout-start {
+  justify-content: flex-start;
+}
+
+.publish-management-container .dt-layout-end {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.publish-management-container .dt-length,
+.publish-management-container .dt-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.publish-management-container .dt-length label,
+.publish-management-container .dt-search label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  margin: 0;
+}
+
+.publish-management-container .dt-input {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s;
+  background-color: white;
+}
+
+.publish-management-container .dt-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.publish-management-container .dt-input[type="search"] {
+  min-width: 250px;
+}
+
+.publish-management-container .dt-input:hover {
+  border-color: #adb5bd;
+}
+
+.publish-management-container .dt-info {
+  padding-top: 12px;
+  font-size: 13px;
+  color: #495057;
+  font-weight: 500;
+}
