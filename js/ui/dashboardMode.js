@@ -21,6 +21,20 @@ async function getCacheKey() {
   });
 }
 
+// chrome.storage.get을 Promise로 래핑한 유틸 (호환성 보장)
+function storageGet(key) {
+  // chrome.storage.local.get이 Promise를 반환하는 경우(모던 API)를 그대로 사용
+  try {
+    const maybePromise = chrome.storage.local.get(key);
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      return maybePromise;
+    }
+  } catch (e) {
+    // ignore and fallback to callback-based wrapper
+  }
+  return new Promise((resolve) => chrome.storage.local.get(key, resolve));
+} 
+
 // 대시보드 뷰 상태 관리 (정렬, 페이지네이션)
 let viewState = {
   myChannels: { sortOrder: 'pubDate', currentPage: 0 },
@@ -42,7 +56,15 @@ async function getCachedDashboardData(activeChannelId) {
 
   // 캐시 만료 또는 없음 - 새로운 데이터 로드
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'get_channel_content' }, (response) => {
+    let called = false;
+    const cb = (response) => {
+      if (called) return;
+      called = true;
+      if (chrome.runtime.lastError) {
+        console.error('[getCachedDashboardData] get_channel_content 오류:', chrome.runtime.lastError);
+        resolve(null);
+        return;
+      }
       if (response && response.success) {
         // 캐시 저장
         dashboardCache.set(cacheKey, {
@@ -53,7 +75,18 @@ async function getCachedDashboardData(activeChannelId) {
       } else {
         resolve(null);
       }
-    });
+    };
+
+    chrome.runtime.sendMessage({ action: 'get_channel_content' }, cb);
+
+    // 응답이 없을 경우 3초 후에 타임아웃 처리
+    setTimeout(() => {
+      if (!called) {
+        console.warn('[getCachedDashboardData] get_channel_content 응답 대기 타임아웃');
+        called = true;
+        resolve(null);
+      }
+    }, 3000);
   });
 }
 
@@ -1215,7 +1248,7 @@ async function updateDashboardUIInternal(container) {
   }
 
   // [신규] 활성 채널 ID 가져오기
-  const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+  const { activeChannelId } = await storageGet('activeChannelId');
 
   // 1. 내 채널 설정 ('myChannels')
   const myCol = container.querySelector('#my-channels-col');
@@ -1591,19 +1624,42 @@ function renderDashboard(container) {
 
   // 캐시된 데이터 로드 및 UI 업데이트
   (async () => {
-    const { activeChannelId } = await chrome.storage.local.get('activeChannelId');
+    const { activeChannelId } = await storageGet('activeChannelId');
     cachedData = await getCachedDashboardData(activeChannelId);
 
     if (cachedData) {
       await updateDashboardUI(container);
     } else {
       // 캐시된 데이터가 없으면 실제 데이터 로드
+      let called = false;
       chrome.runtime.sendMessage({ action: 'get_channel_content' }, async (response) => {
+        if (called) return;
+        called = true;
+        if (chrome.runtime.lastError) {
+          console.error('[Dashboard] get_channel_content 오류:', chrome.runtime.lastError);
+          const el = container.querySelector('#myChannels-content-list');
+          if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다. 새로고침을 눌러 다시 시도하세요.</p>`;
+          return;
+        }
         if (response && response.success) {
           cachedData = response.data;
           await updateDashboardUI(container);
+        } else {
+          console.error('[Dashboard] get_channel_content 응답 실패:', response);
+          const el = container.querySelector('#myChannels-content-list');
+          if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다. 새로고침을 눌러 다시 시도하세요.</p>`;
         }
       });
+
+      // 응답이 없을 경우 3초 후에 사용자에게 안내 메시지 표시
+      setTimeout(() => {
+        if (!called) {
+          const el = container.querySelector('#myChannels-content-list');
+          if (el && !cachedData) {
+            el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다. 네트워크 문제일 수 있습니다. 새로고침 버튼을 눌러 다시 시도하세요.</p>`;
+          }
+        }
+      }, 3000);
     }
 
     // 이벤트 리스너 추가
@@ -2262,7 +2318,7 @@ function addDashboardEventListeners(container) {
       // [수정] 현재 활성 채널 ID를 가져와서 함께 전송
       (async () => {
         const channelId =
-          (await chrome.storage.local.get('activeChannelId')).activeChannelId || null;
+          (await storageGet('activeChannelId')).activeChannelId || null;
         const CACHE_KEY = await getCacheKey();
 
         chrome.runtime.sendMessage(
