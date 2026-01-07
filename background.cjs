@@ -355,6 +355,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         const userId = await getCurrentUserId();
         const db = getDb();
+        const { get, ref } = require('firebase/database');
         
         // [1단계] 애널리틱스 데이터 확인
         const analyticsSnapshot = await get(ref(db, `analytics/${userId}`));
@@ -402,6 +403,68 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         
         // [기본값]
         return { success: true, level: 'beginner', monthlyVisitors: 0, source: 'default' };
+      })()
+    );
+  }
+
+  // === [System] 채널 콘텐츠 목록 조회 (중복 방지용) ===
+  if (msg.action === 'get_channel_content_list') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const db = getDb();
+        const { get, ref } = require('firebase/database');
+        const { channelId, limit = 20 } = msg;
+        
+        if (!channelId) {
+          return { success: false, error: '채널 ID가 필요합니다.' };
+        }
+        
+        // [1] channel_content에서 외부 수집 콘텐츠 조회
+        const contentSnap = await get(ref(db, `channel_content/${userId}/blogs`));
+        const allBlogs = contentSnap?.val() || {};
+        
+        const externalContent = Object.values(allBlogs)
+          .filter(item => item !== null && item.title && item.fullLink)
+          .filter(item => item.sourceId === channelId)
+          .sort((a, b) => (b.publishedAt || b.createdAt || 0) - (a.publishedAt || a.createdAt || 0))
+          .slice(0, limit)
+          .map(item => ({
+            title: item.title,
+            url: item.fullLink || item.link,
+            publishedAt: item.publishedAt || item.createdAt
+          }));
+        
+        // [2] published에서 직접 발행한 포스팅 조회
+        const publishedSnap = await get(ref(db, `kanban/${userId}/published`));
+        const publishedPosts = publishedSnap?.val() || {};
+        
+        const myPublished = Object.values(publishedPosts)
+          .filter(item => item !== null && item.title && item.publishedUrl)
+          .sort((a, b) => (b.publishedAt || b.updatedAt || 0) - (a.publishedAt || a.updatedAt || 0))
+          .slice(0, limit)
+          .map(item => ({
+            title: item.title,
+            url: item.publishedUrl,
+            publishedAt: item.publishedAt || item.updatedAt
+          }));
+        
+        // [3] 두 목록 합치고 최신순 정렬
+        const allContent = [...externalContent, ...myPublished]
+          .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))
+          .slice(0, limit);
+        
+        Logger.debug(`[get_channel_content] 채널 ${channelId}: 외부 ${externalContent.length}개, 발행 ${myPublished.length}개, 총 ${allContent.length}개`);
+        
+        return {
+          success: true,
+          content: allContent,
+          stats: {
+            external: externalContent.length,
+            published: myPublished.length,
+            total: allContent.length
+          }
+        };
       })()
     );
   }
@@ -1755,6 +1818,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  if (msg.action === 'get_performance_for_cards') {
+    return handleAsync(
+      (async () => {
+        const userId = await getCurrentUserId();
+        const items = msg.items || [];
+        const results = [];
+
+        for (const it of items) {
+          const id = it.id;
+          const status = it.status;
+          const path = `${COLLECTIONS.KANBAN}/${userId}/${status}/${id}`;
+
+          const snap = await get(ref(getDb(), path));
+          const card = snap?.val() || {};
+
+          // Optional forced refresh
+          if (it.forceRefresh && card.publishedUrl) {
+            try {
+              await updateSinglePerformanceMetric({ id, path, url: card.publishedUrl });
+            } catch (e) {
+              Logger.warn('[get_performance_for_cards] force refresh failed for', id, e?.message || e);
+            }
+          }
+
+          const perf = card.performance || {};
+          const stale = !perf.lastUpdatedAt || Date.now() - perf.lastUpdatedAt > 21600000; // 6 hours
+
+          results.push({
+            id,
+            status,
+            title: card.title || null,
+            publishedUrl: card.publishedUrl || null,
+            performance: perf,
+            lastUpdatedAt: perf.lastUpdatedAt || 0,
+            stale,
+          });
+        }
+
+        return { success: true, data: results };
+      })()
+    );
+  }
+
   if (msg.action === 'get_all_scraps') {
     return handleAsync(
       (async () => {
@@ -1845,94 +1951,108 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'get_channel_content') {
     return handleAsync(
       (async () => {
-        const userId = await getCurrentUserId();
-        Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
-        const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
-          get(ref(getDb(), `${COLLECTIONS.CHANNEL_CONTENT}/${userId}`)),
-          get(ref(getDb(), `${COLLECTIONS.CHANNEL_META}/${userId}`)),
-          get(ref(getDb(), `${COLLECTIONS.CHANNELS}/${userId}`)),
-        ]);
-
-        // snapshot 객체에서 .val()로 데이터 추출
-        const content = contentSnap?.val() || {};
-        const metas = metaSnap?.val() || {};
-        const channels = channelsSnap?.val() || {
-          myChannels: {},
-          competitorChannels: {},
-        };
-
-        // 필터링: null 값 제거 및 undefined 값도 제거
-        const blogsRaw = content.blogs || {};
-        const youtubesRaw = content.youtubes || {};
-
-        // 디버깅: 원본 데이터 개수 확인
-        const blogsRawCount = Object.keys(blogsRaw).length;
-        const youtubesRawCount = Object.keys(youtubesRaw).length;
-        Logger.debug(
-          `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
-        );
-
-        const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
-        const youtubes = Object.values(youtubesRaw).filter(
-          (item) => item !== null && item !== undefined
-        );
-        const allContent = [...blogs, ...youtubes];
-
-        // 디버깅: 필터링 후 개수 확인
-        Logger.info(
-          `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
-        );
-        
-        // [DEBUG] channel_content 상세 데이터 출력
-        console.log('[CHANNEL_CONTENT DEBUG] ===== 시작 =====');
-        console.log('[CHANNEL_CONTENT DEBUG] blogs 총 개수:', blogs.length);
-        console.log('[CHANNEL_CONTENT DEBUG] youtubes 총 개수:', youtubes.length);
-        if (blogs.length > 0) {
-          console.log('[CHANNEL_CONTENT DEBUG] 첫 번째 블로그 포스트 샘플:', {
-            title: blogs[0].title,
-            sourceId: blogs[0].sourceId,
-            fullLink: blogs[0].fullLink,
-            publishedAt: blogs[0].publishedAt
-          });
-          console.log('[CHANNEL_CONTENT DEBUG] 모든 블로그 sourceId 목록:', [...new Set(blogs.map(b => b.sourceId))]);
-          console.log('[CHANNEL_CONTENT DEBUG] 전체 포스트 제목 목록:');
-          blogs.slice(0, 10).forEach((blog, idx) => {
-            console.log(`  ${idx + 1}. ${blog.title} (sourceId: ${blog.sourceId})`);
-          });
-          if (blogs.length > 10) {
-            console.log(`  ... 외 ${blogs.length - 10}개`);
+        try {
+          const userId = await getCurrentUserId();
+          Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
+          
+          // userId가 기본값인 경우 경고
+          if (userId === CONSTANTS.USER_ID) {
+            Logger.warn(`[get_channel_content] 기본 USER_ID 사용 중 - 로그인 필요할 수 있음`);
           }
-        }
-        console.log('[CHANNEL_CONTENT DEBUG] ===== 끝 =====');
+          
+          const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
+            get(ref(getDb(), `${COLLECTIONS.CHANNEL_CONTENT}/${userId}`)),
+            get(ref(getDb(), `${COLLECTIONS.CHANNEL_META}/${userId}`)),
+            get(ref(getDb(), `${COLLECTIONS.CHANNELS}/${userId}`)),
+          ]);
 
-        // 디버깅: null/undefined로 필터링된 항목 확인
-        if (blogsRawCount > blogs.length) {
-          const filteredOut = Object.entries(blogsRaw).filter(
-            ([key, value]) => value === null || value === undefined
-          );
-          Logger.warn(
-            `[get_channel_content] blogs에서 필터링된 항목: ${filteredOut.length}개`,
-            filteredOut.map(([key]) => key)
-          );
-        }
-        if (youtubesRawCount > youtubes.length) {
-          const filteredOut = Object.entries(youtubesRaw).filter(
-            ([key, value]) => value === null || value === undefined
-          );
-          Logger.warn(
-            `[get_channel_content] youtubes에서 필터링된 항목: ${filteredOut.length}개`,
-            filteredOut.map(([key]) => key)
-          );
-        }
+          // snapshot 객체에서 .val()로 데이터 추출
+          const content = contentSnap?.val() || {};
+          const metas = metaSnap?.val() || {};
+          const channels = channelsSnap?.val() || {
+            myChannels: {},
+            competitorChannels: {},
+          };
 
-        return {
-          success: true,
-          data: {
-            content: allContent,
-            metas: metas,
-            channels: channels,
-          },
-        };
+          // 필터링: null 값 제거 및 undefined 값도 제거
+          const blogsRaw = content.blogs || {};
+          const youtubesRaw = content.youtubes || {};
+
+          // 디버깅: 원본 데이터 개수 확인
+          const blogsRawCount = Object.keys(blogsRaw).length;
+          const youtubesRawCount = Object.keys(youtubesRaw).length;
+          Logger.debug(
+            `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
+          );
+
+          const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
+          const youtubes = Object.values(youtubesRaw).filter(
+            (item) => item !== null && item !== undefined
+          );
+          const allContent = [...blogs, ...youtubes];
+
+          // 디버깅: 필터링 후 개수 확인
+          Logger.info(
+            `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
+          );
+          
+          // [DEBUG] channel_content 상세 데이터 출력
+          console.log('[CHANNEL_CONTENT DEBUG] ===== 시작 =====');
+          console.log('[CHANNEL_CONTENT DEBUG] blogs 총 개수:', blogs.length);
+          console.log('[CHANNEL_CONTENT DEBUG] youtubes 총 개수:', youtubes.length);
+          if (blogs.length > 0) {
+            console.log('[CHANNEL_CONTENT DEBUG] 첫 번째 블로그 포스트 샘플:', {
+              title: blogs[0].title,
+              sourceId: blogs[0].sourceId,
+              fullLink: blogs[0].fullLink,
+              publishedAt: blogs[0].publishedAt
+            });
+            console.log('[CHANNEL_CONTENT DEBUG] 모든 블로그 sourceId 목록:', [...new Set(blogs.map(b => b.sourceId))]);
+            console.log('[CHANNEL_CONTENT DEBUG] 전체 포스트 제목 목록:');
+            blogs.slice(0, 10).forEach((blog, idx) => {
+              console.log(`  ${idx + 1}. ${blog.title} (sourceId: ${blog.sourceId})`);
+            });
+            if (blogs.length > 10) {
+              console.log(`  ... 외 ${blogs.length - 10}개`);
+            }
+          }
+          console.log('[CHANNEL_CONTENT DEBUG] ===== 끝 =====');
+
+          // 디버깅: null/undefined로 필터링된 항목 확인
+          if (blogsRawCount > blogs.length) {
+            const filteredOut = Object.entries(blogsRaw).filter(
+              ([key, value]) => value === null || value === undefined
+            );
+            Logger.warn(
+              `[get_channel_content] blogs에서 필터링된 항목: ${filteredOut.length}개`,
+              filteredOut.map(([key]) => key)
+            );
+          }
+          if (youtubesRawCount > youtubes.length) {
+            const filteredOut = Object.entries(youtubesRaw).filter(
+              ([key, value]) => value === null || value === undefined
+            );
+            Logger.warn(
+              `[get_channel_content] youtubes에서 필터링된 항목: ${filteredOut.length}개`,
+              filteredOut.map(([key]) => key)
+            );
+          }
+
+          return {
+            success: true,
+            data: {
+              content: allContent,
+              metas: metas,
+              channels: channels,
+            },
+          };
+        } catch (error) {
+          Logger.error(`[get_channel_content] 오류 발생:`, error);
+          return {
+            success: false,
+            error: error.message || '알 수 없는 오류',
+          };
+        }
       })()
     );
   }
