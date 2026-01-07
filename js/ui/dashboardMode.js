@@ -1638,7 +1638,7 @@ function renderDashboard(container) {
         if (chrome.runtime.lastError) {
           console.error('[Dashboard] get_channel_content 오류:', chrome.runtime.lastError);
           const el = container.querySelector('#myChannels-content-list');
-          if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다. 새로고침을 눌러 다시 시도하세요.</p>`;
+          if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다.<br>에러: ${chrome.runtime.lastError.message}<br>새로고침을 눌러 다시 시도하세요.</p>`;
           return;
         }
         if (response && response.success) {
@@ -1647,7 +1647,15 @@ function renderDashboard(container) {
         } else {
           console.error('[Dashboard] get_channel_content 응답 실패:', response);
           const el = container.querySelector('#myChannels-content-list');
-          if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다. 새로고침을 눌러 다시 시도하세요.</p>`;
+          
+          // 로그인 여부 확인
+          const { googleUserEmail } = await storageGet('googleUserEmail');
+          if (!googleUserEmail) {
+            if (el) el.innerHTML = `<p class="loading-placeholder error">❌ 로그인이 필요합니다.<br>우측 상단의 계정 아이콘을 클릭하여 Google 계정으로 로그인하세요.</p>`;
+          } else {
+            const errorDetail = response?.error || '알 수 없는 오류';
+            if (el) el.innerHTML = `<p class="loading-placeholder error">채널 정보를 불러오는 데 실패했습니다.<br>상세: ${errorDetail}<br>새로고침을 눌러 다시 시도하세요.</p>`;
+          }
         }
       });
 

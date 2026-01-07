@@ -2099,72 +2099,86 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'get_channel_content') {
     return handleAsync(
       (async () => {
-        const userId = await getCurrentUserId();
-        Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
-        const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
-          get(ref(getDb(), `${COLLECTIONS.CHANNEL_CONTENT}/${userId}`)),
-          get(ref(getDb(), `${COLLECTIONS.CHANNEL_META}/${userId}`)),
-          get(ref(getDb(), `${COLLECTIONS.CHANNELS}/${userId}`)),
-        ]);
+        try {
+          const userId = await getCurrentUserId();
+          Logger.info(`[get_channel_content] 요청 수신 - userId: ${userId}`);
+          
+          // userId가 기본값인 경우 경고
+          if (userId === CONSTANTS.USER_ID) {
+            Logger.warn(`[get_channel_content] 기본 USER_ID 사용 중 - 로그인 필요할 수 있음`);
+          }
+          
+          const [contentSnap, metaSnap, channelsSnap] = await Promise.all([
+            get(ref(getDb(), `${COLLECTIONS.CHANNEL_CONTENT}/${userId}`)),
+            get(ref(getDb(), `${COLLECTIONS.CHANNEL_META}/${userId}`)),
+            get(ref(getDb(), `${COLLECTIONS.CHANNELS}/${userId}`)),
+          ]);
 
-        // snapshot 객체에서 .val()로 데이터 추출
-        const content = contentSnap?.val() || {};
-        const metas = metaSnap?.val() || {};
-        const channels = channelsSnap?.val() || {
-          myChannels: {},
-          competitorChannels: {},
-        };
+          // snapshot 객체에서 .val()로 데이터 추출
+          const content = contentSnap?.val() || {};
+          const metas = metaSnap?.val() || {};
+          const channels = channelsSnap?.val() || {
+            myChannels: {},
+            competitorChannels: {},
+          };
 
-        // 필터링: null 값 제거 및 undefined 값도 제거
-        const blogsRaw = content.blogs || {};
-        const youtubesRaw = content.youtubes || {};
+          // 필터링: null 값 제거 및 undefined 값도 제거
+          const blogsRaw = content.blogs || {};
+          const youtubesRaw = content.youtubes || {};
 
-        // 디버깅: 원본 데이터 개수 확인
-        const blogsRawCount = Object.keys(blogsRaw).length;
-        const youtubesRawCount = Object.keys(youtubesRaw).length;
-        Logger.debug(
-          `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
-        );
-
-        const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
-        const youtubes = Object.values(youtubesRaw).filter(
-          (item) => item !== null && item !== undefined
-        );
-        const allContent = [...blogs, ...youtubes];
-
-        // 디버깅: 필터링 후 개수 확인
-        Logger.info(
-          `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
-        );
-
-        // 디버깅: null/undefined로 필터링된 항목 확인
-        if (blogsRawCount > blogs.length) {
-          const filteredOut = Object.entries(blogsRaw).filter(
-            ([key, value]) => value === null || value === undefined
+          // 디버깅: 원본 데이터 개수 확인
+          const blogsRawCount = Object.keys(blogsRaw).length;
+          const youtubesRawCount = Object.keys(youtubesRaw).length;
+          Logger.debug(
+            `[get_channel_content] 원본 데이터 개수 - blogs: ${blogsRawCount}, youtubes: ${youtubesRawCount}`
           );
-          Logger.warn(
-            `[get_channel_content] blogs에서 필터링된 항목: ${filteredOut.length}개`,
-            filteredOut.map(([key]) => key)
+
+          const blogs = Object.values(blogsRaw).filter((item) => item !== null && item !== undefined);
+          const youtubes = Object.values(youtubesRaw).filter(
+            (item) => item !== null && item !== undefined
           );
+          const allContent = [...blogs, ...youtubes];
+
+          // 디버깅: 필터링 후 개수 확인
+          Logger.info(
+            `[get_channel_content] 데이터 로드 완료 - blogs: ${blogs.length} (원본: ${blogsRawCount}), youtubes: ${youtubes.length} (원본: ${youtubesRawCount}), total: ${allContent.length}`
+          );
+
+          // 디버깅: null/undefined로 필터링된 항목 확인
+          if (blogsRawCount > blogs.length) {
+            const filteredOut = Object.entries(blogsRaw).filter(
+              ([key, value]) => value === null || value === undefined
+            );
+            Logger.warn(
+              `[get_channel_content] blogs에서 필터링된 항목: ${filteredOut.length}개`,
+              filteredOut.map(([key]) => key)
+            );
+          }
+          if (youtubesRawCount > youtubes.length) {
+            const filteredOut = Object.entries(youtubesRaw).filter(
+              ([key, value]) => value === null || value === undefined
+            );
+            Logger.warn(
+              `[get_channel_content] youtubes에서 필터링된 항목: ${filteredOut.length}개`,
+              filteredOut.map(([key]) => key)
+            );
+          }
+
+          return {
+            success: true,
+            data: {
+              content: allContent,
+              metas: metas,
+              channels: channels,
+            },
+          };
+        } catch (error) {
+          Logger.error(`[get_channel_content] 오류 발생:`, error);
+          return {
+            success: false,
+            error: error.message || '알 수 없는 오류',
+          };
         }
-        if (youtubesRawCount > youtubes.length) {
-          const filteredOut = Object.entries(youtubesRaw).filter(
-            ([key, value]) => value === null || value === undefined
-          );
-          Logger.warn(
-            `[get_channel_content] youtubes에서 필터링된 항목: ${filteredOut.length}개`,
-            filteredOut.map(([key]) => key)
-          );
-        }
-
-        return {
-          success: true,
-          data: {
-            content: allContent,
-            metas: metas,
-            channels: channels,
-          },
-        };
       })()
     );
   }
