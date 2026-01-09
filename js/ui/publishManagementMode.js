@@ -267,6 +267,7 @@ function loadPublishedData(container, page = 1, pageSize = 50, accum = []) {
 
           // 홍보 횟수 가져오기
           const shareCount = item.shareCount || {};
+          const snsHistory = item.snsHistory || [];
           const totalShares =
             (shareCount.twitter || 0) +
             (shareCount.threads || 0) +
@@ -275,28 +276,52 @@ function loadPublishedData(container, page = 1, pageSize = 50, accum = []) {
             (shareCount.linkedin || 0) +
             (shareCount.reddit || 0);
 
-          // SNS 공유 버튼 생성
+          // 플랫폼별 최근 게시 시간 계산
+          const getLastPostTime = (platform) => {
+            const platformHistory = snsHistory.filter((h) => h.platform === platform);
+            if (platformHistory.length === 0) return null;
+            return new Date(platformHistory[0].postedAt);
+          };
+
+          // 시간 차이를 "N시간 전" 형식으로 변환
+          const formatTimeSince = (date) => {
+            if (!date) return '';
+            const hours = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60));
+            if (hours < 1) return '방금';
+            if (hours < 24) return `${hours}시간 전`;
+            const days = Math.floor(hours / 24);
+            if (days < 7) return `${days}일 전`;
+            return `${Math.floor(days / 7)}주 전`;
+          };
+
+          // 캐시 존재 여부 확인
+          const snsPostCache = item.snsPostCache || {};
+          const hasCacheFor = (platform) => {
+            return snsPostCache[platform] && snsPostCache[platform].stylesData;
+          };
+
+          // SNS 공유 버튼 생성 (최근 게시 시간 표시 + 캐시 표시)
           const shareButtons =
             url && url !== '#'
               ? `
           <div class="pm-share-buttons" data-url="${escapeHtml(url)}" data-title="${escapeHtml(seoTitle)}" data-item-id="${item.id || ''}">
-            <button class="pm-share-btn pm-share-twitter" title="트위터 공유" data-platform="twitter">
-              X${shareCount.twitter ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.twitter})</span>` : ''}
+            <button class="pm-share-btn pm-share-twitter ${hasCacheFor('twitter') ? 'has-cache' : ''}" title="트위터 공유${hasCacheFor('twitter') ? ' (캐시됨 💾)' : ''}${getLastPostTime('twitter') ? ` (최근: ${formatTimeSince(getLastPostTime('twitter'))})` : ''}" data-platform="twitter">
+              X${shareCount.twitter ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.twitter})</span>` : ''}${hasCacheFor('twitter') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
-            <button class="pm-share-btn pm-share-threads" title="쓰레드 공유" data-platform="threads">
-              ⓪${shareCount.threads ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.threads})</span>` : ''}
+            <button class="pm-share-btn pm-share-threads ${hasCacheFor('threads') ? 'has-cache' : ''}" title="쓰레드 공유${hasCacheFor('threads') ? ' (캐시됨 💾)' : ''}${getLastPostTime('threads') ? ` (최근: ${formatTimeSince(getLastPostTime('threads'))})` : ''}" data-platform="threads">
+              ⓪${shareCount.threads ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.threads})</span>` : ''}${hasCacheFor('threads') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
-            <button class="pm-share-btn pm-share-facebook" title="페이스북 공유" data-platform="facebook">
-              f${shareCount.facebook ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.facebook})</span>` : ''}
+            <button class="pm-share-btn pm-share-facebook ${hasCacheFor('facebook') ? 'has-cache' : ''}" title="페이스북 공유${hasCacheFor('facebook') ? ' (캐시됨 💾)' : ''}${getLastPostTime('facebook') ? ` (최근: ${formatTimeSince(getLastPostTime('facebook'))})` : ''}" data-platform="facebook">
+              f${shareCount.facebook ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.facebook})</span>` : ''}${hasCacheFor('facebook') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
-            <button class="pm-share-btn pm-share-pinterest" title="핌터레스트 공유" data-platform="pinterest">
-              P${shareCount.pinterest ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.pinterest})</span>` : ''}
+            <button class="pm-share-btn pm-share-pinterest ${hasCacheFor('pinterest') ? 'has-cache' : ''}" title="핀터레스트 공유${hasCacheFor('pinterest') ? ' (캐시됨 💾)' : ''}${getLastPostTime('pinterest') ? ` (최근: ${formatTimeSince(getLastPostTime('pinterest'))})` : ''}" data-platform="pinterest">
+              P${shareCount.pinterest ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.pinterest})</span>` : ''}${hasCacheFor('pinterest') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
-            <button class="pm-share-btn pm-share-linkedin" title="링크드인 공유" data-platform="linkedin">
-              in${shareCount.linkedin ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.linkedin})</span>` : ''}
+            <button class="pm-share-btn pm-share-linkedin ${hasCacheFor('linkedin') ? 'has-cache' : ''}" title="링크드인 공유${hasCacheFor('linkedin') ? ' (캐시됨 💾)' : ''}${getLastPostTime('linkedin') ? ` (최근: ${formatTimeSince(getLastPostTime('linkedin'))})` : ''}" data-platform="linkedin">
+              in${shareCount.linkedin ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.linkedin})</span>` : ''}${hasCacheFor('linkedin') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
-            <button class="pm-share-btn pm-share-reddit" title="레딧 공유" data-platform="reddit">
-              R${shareCount.reddit ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.reddit})</span>` : ''}
+            <button class="pm-share-btn pm-share-reddit ${hasCacheFor('reddit') ? 'has-cache' : ''}" title="레딧 공유${hasCacheFor('reddit') ? ' (캐시됨 💾)' : ''}${getLastPostTime('reddit') ? ` (최근: ${formatTimeSince(getLastPostTime('reddit'))})` : ''}" data-platform="reddit">
+              R${shareCount.reddit ? `<span style="font-size:10px;margin-left:2px;">(${shareCount.reddit})</span>` : ''}${hasCacheFor('reddit') ? '<span style="position:absolute;top:-2px;right:-2px;font-size:8px;">💾</span>' : ''}
             </button>
             <button class="pm-share-btn pm-share-copy" title="링크 복사">🔗</button>
             ${totalShares > 0 ? `<span style="font-size:11px;color:#666;margin-left:4px;">총 ${totalShares}회</span>` : ''}

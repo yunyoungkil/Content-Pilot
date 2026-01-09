@@ -1874,6 +1874,187 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
   }
 
+  // SNS 게시 이력 저장
+  if (msg.action === 'save_sns_post_history') {
+    sendResponse(
+      (async () => {
+        try {
+          const { itemId, platform, postText, style } = msg;
+          if (!itemId || !platform || !postText) {
+            return { success: false, error: 'itemId, platform, and postText are required' };
+          }
+
+          const userId = await getCurrentUserId();
+          if (!userId) {
+            return { success: false, error: 'User not authenticated' };
+          }
+
+          const cardPath = `users/${userId}/kanban/${itemId}`;
+
+          // REST API로 현재 카드 데이터 가져오기
+          const { get, update } = require('./js/services/firebaseService.js');
+          const cardSnapshot = await get(cardPath);
+          const cardData = cardSnapshot.val() || {};
+          const snsHistory = cardData.snsHistory || [];
+
+          // 새 이력 항목 생성
+          const historyEntry = {
+            platform,
+            postedAt: new Date().toISOString(),
+            postText,
+            style: style || 'unknown',
+            success: true,
+          };
+
+          // 이력 배열에 추가 (최근 항목이 앞에 오도록)
+          snsHistory.unshift(historyEntry);
+
+          // 최대 100개까지만 유지 (오래된 항목 제거)
+          if (snsHistory.length > 100) {
+            snsHistory.splice(100);
+          }
+
+          // REST API로 Firebase 업데이트
+          await update(cardPath, { snsHistory });
+
+          Logger.info(`[save_sns_post_history] ${platform} 게시 이력 저장: ${itemId}`);
+
+          return { success: true, historyEntry };
+        } catch (error) {
+          Logger.error('[save_sns_post_history] Error:', error);
+          return { success: false, error: error.message };
+        }
+      })()
+    );
+    return true;
+  }
+
+  // SNS 게시 이력 조회
+  if (msg.action === 'get_sns_post_history') {
+    (async () => {
+      try {
+        const { itemId, platform } = msg;
+        if (!itemId) {
+          sendResponse({ success: false, error: 'itemId is required' });
+          return;
+        }
+
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ success: false, error: 'User not authenticated' });
+          return;
+        }
+
+        const cardPath = `users/${userId}/kanban/${itemId}`;
+
+        // REST API로 카드 데이터 가져오기
+        const { get } = require('./js/services/firebaseService.js');
+        const cardSnapshot = await get(cardPath);
+        const cardData = cardSnapshot.val() || {};
+        let snsHistory = cardData.snsHistory || [];
+
+        // 특정 플랫폼 필터링 (옵션)
+        if (platform) {
+          snsHistory = snsHistory.filter((entry) => entry.platform === platform);
+        }
+
+        Logger.info(`[get_sns_post_history] 이력 조회: ${itemId}, 항목 ${snsHistory.length}개`);
+
+        sendResponse({ success: true, history: snsHistory });
+      } catch (error) {
+        Logger.error('[get_sns_post_history] Error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  // SNS 게시글 캐시 저장
+  if (msg.action === 'save_sns_post_cache') {
+    (async () => {
+      try {
+        const { itemId, platform, stylesData } = msg;
+        if (!itemId || !platform || !stylesData) {
+          sendResponse({ success: false, error: 'itemId, platform, and stylesData are required' });
+          return;
+        }
+
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ success: false, error: 'User not authenticated' });
+          return;
+        }
+
+        const cardPath = `users/${userId}/kanban/${itemId}`;
+
+        // REST API로 현재 카드 데이터 가져오기
+        const { get, update } = require('./js/services/firebaseService.js');
+        const cardSnapshot = await get(cardPath);
+        const cardData = cardSnapshot.val() || {};
+        const snsPostCache = cardData.snsPostCache || {};
+
+        // 플랫폼별 캐시 업데이트
+        snsPostCache[platform] = {
+          generatedAt: new Date().toISOString(),
+          stylesData: stylesData, // { styles, tones } 객체 저장
+        };
+
+        // REST API로 Firebase 업데이트
+        await update(cardPath, { snsPostCache });
+
+        Logger.info(`[save_sns_post_cache] ${platform} 게시글 캐시 저장: ${itemId}`);
+
+        sendResponse({ success: true });
+      } catch (error) {
+        Logger.error('[save_sns_post_cache] Error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  // SNS 게시글 캐시 조회
+  if (msg.action === 'get_sns_post_cache') {
+    const handleCacheQuery = async () => {
+      const { itemId, platform } = msg;
+      if (!itemId || !platform) {
+        return { success: false, error: 'itemId and platform are required' };
+      }
+
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        return { success: false, error: 'User not authenticated' };
+      }
+
+      const cardPath = `users/${userId}/kanban/${itemId}`;
+
+      // REST API로 카드 데이터 가져오기
+      const { get } = require('./js/services/firebaseService.js');
+      const cardSnapshot = await get(cardPath);
+      const cardData = cardSnapshot.val() || {};
+      const snsPostCache = cardData.snsPostCache || {};
+
+      // 플랫폼별 캐시 조회
+      const cachedPost = snsPostCache[platform];
+
+      if (cachedPost) {
+        Logger.info(`[get_sns_post_cache] ${platform} 캐시 조회 성공: ${itemId}`);
+        return { success: true, cached: true, data: cachedPost };
+      } else {
+        Logger.info(`[get_sns_post_cache] ${platform} 캐시 없음: ${itemId}`);
+        return { success: true, cached: false };
+      }
+    };
+
+    handleCacheQuery()
+      .then((result) => sendResponse(result))
+      .catch((error) => {
+        Logger.error('[get_sns_post_cache] Error:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
   if (msg.action === 'get_performance_for_cards') {
     return handleAsync(
       (async () => {
