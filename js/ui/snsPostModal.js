@@ -65,7 +65,7 @@ function extractStyleTones(response) {
   // [^\n\r]+ 로 같은 줄에 있는 텍스트만 매칭 (줄바꿈 이전까지)
   const regex = /\*?\*?\[스타일\d+\]\s*([^\n\r*]+?)(?:\*\*)?(?:\r?\n|$)/g;
   const matches = response.matchAll(regex);
-  
+
   for (const match of matches) {
     if (match[1]) {
       const tone = match[1].trim();
@@ -75,12 +75,12 @@ function extractStyleTones(response) {
       }
     }
   }
-  
+
   // 톤 정보가 충분하지 않으면 기본값 사용
   if (tones.length < 3) {
     return ['캐주얼/친근한 톤', '전문적/정보 전달 톤', '질문형/참여 유도 톤'];
   }
-  
+
   return tones;
 }
 
@@ -90,18 +90,18 @@ function extractStyleTones(response) {
  */
 function parseSnsStyles(response) {
   console.log('[parseSnsStyles] 원본 응답:', response);
-  
+
   // 먼저 톤 정보 추출
   const tones = extractStyleTones(response);
-  
+
   const styles = [];
   const imagePrompts = [];
-  
+
   // 1. 먼저 이미지 프롬프트 섹션을 분리하여 추출
   // "---"로 시작하는 부분이나 [이미지프롬프트1] 패턴을 찾아서 그 이후를 이미지 프롬프트 섹션으로 간주
   let contentPart = response;
   let imagePromptPart = '';
-  
+
   // --- 기준으로 먼저 분리
   const dashSeparatorMatch = response.match(/(^|\n)\s*---\s*\n/);
   if (dashSeparatorMatch) {
@@ -118,34 +118,34 @@ function parseSnsStyles(response) {
       console.log('[parseSnsStyles] [이미지프롬프트] 패턴으로 분리됨');
     }
   }
-  
+
   console.log('[parseSnsStyles] 콘텐츠 부분 길이:', contentPart.length);
   console.log('[parseSnsStyles] 이미지 프롬프트 부분 길이:', imagePromptPart.length);
-  
+
   // 2. 스타일 파싱 (콘텐츠 부분만 사용)
   const styleRegex = /\[스타일(\d+)\][^\n]*\n+([\s\S]*?)(?=\[스타일\d+\]|$)/gi;
   const styleMatches = contentPart.matchAll(styleRegex);
-  
+
   for (const match of styleMatches) {
     let text = match[2].trim();
-    
+
     // 첫 줄이 톤 설명이면 제거
     const lines = text.split('\n');
     if (lines.length > 0 && lines[0].match(/^\*\*[^\*]+\*\*$|^\([^\)]+\)$/)) {
       text = lines.slice(1).join('\n').trim();
     }
-    
+
     if (text) {
       styles.push(text);
       console.log(`[parseSnsStyles] 스타일 ${match[1]} 파싱됨, 길이: ${text.length}`);
     }
   }
-  
+
   // 3. 이미지 프롬프트 파싱
   if (imagePromptPart) {
     const promptRegex = /\[이미지프롬프트(\d+)\]\s*\n+([\s\S]*?)(?=\[이미지프롬프트\d+\]|$)/gi;
     const promptMatches = imagePromptPart.matchAll(promptRegex);
-    
+
     for (const match of promptMatches) {
       const prompt = match[2].trim();
       if (prompt && prompt.length > 0 && prompt.length < 2000) {
@@ -154,17 +154,17 @@ function parseSnsStyles(response) {
       }
     }
   }
-  
+
   // 파싱 실패 시 전체 응답을 하나의 스타일로
   if (styles.length === 0) {
     console.warn('[parseSnsStyles] 스타일 파싱 실패, 전체를 하나의 스타일로 사용');
     styles.push(contentPart.trim());
   }
 
-  console.log('[parseSnsStyles] 최종 결과:', { 
-    stylesCount: styles.length, 
+  console.log('[parseSnsStyles] 최종 결과:', {
+    stylesCount: styles.length,
     tonesCount: tones.length,
-    imagePromptsCount: imagePrompts.length 
+    imagePromptsCount: imagePrompts.length,
   });
 
   return { styles, tones, imagePrompts };
@@ -288,19 +288,19 @@ export async function showSnsPostModal(platform, title, url, itemId, container) 
         success: cacheResponse?.success,
         cached: cacheResponse?.cached,
         hasData: !!cacheResponse?.data,
-        dataKeys: cacheResponse?.data ? Object.keys(cacheResponse.data) : []
+        dataKeys: cacheResponse?.data ? Object.keys(cacheResponse.data) : [],
       });
 
       if (cacheResponse && cacheResponse.success && cacheResponse.cached) {
         console.log('✅ [SNS Post] 캐시 사용 - AI 호출 안함!');
         console.log('📄 [SNS Post] 캐시된 데이터:', cacheResponse.data);
         const cachedData = cacheResponse.data;
-        
+
         // 캐시 데이터가 객체인지 배열인지 확인
-        const stylesData = cachedData.stylesData 
+        const stylesData = cachedData.stylesData
           ? cachedData.stylesData // 새 형식: { styles, tones }
           : { styles: cachedData.styles || [], tones: [] }; // 구 형식: styles만 있음
-        
+
         const generatedAt = new Date(cachedData.generatedAt);
         const hoursAgo = Math.floor((Date.now() - generatedAt.getTime()) / (1000 * 60 * 60));
 
@@ -314,7 +314,7 @@ export async function showSnsPostModal(platform, title, url, itemId, container) 
           isSuccess: cacheResponse?.success,
           isCached: cacheResponse?.cached,
           hasData: !!cacheResponse?.data,
-          rawResponse: JSON.stringify(cacheResponse, null, 2)
+          rawResponse: JSON.stringify(cacheResponse, null, 2),
         });
       }
     } catch (err) {
@@ -412,9 +412,9 @@ async function generateNewSnsPosts(modal, platform, title, url, itemId, containe
  */
 function renderSnsPostsUI(modal, stylesData, platform, url, itemId, container, isCached, hoursAgo) {
   const modalBody = modal.querySelector('.sns-post-modal-body');
-  
+
   // stylesData가 배열이면 (구 형식) 객체로 변환
-  const { styles, tones, imagePrompts } = Array.isArray(stylesData) 
+  const { styles, tones, imagePrompts } = Array.isArray(stylesData)
     ? { styles: stylesData, tones: [], imagePrompts: [] }
     : { ...stylesData, imagePrompts: stylesData.imagePrompts || [] };
 
@@ -426,25 +426,30 @@ function renderSnsPostsUI(modal, stylesData, platform, url, itemId, container, i
     : '';
 
   // 이미지 프롬프트 섹션 HTML 생성
-  const imagePromptsSection = imagePrompts && imagePrompts.length > 0 
-    ? `
+  const imagePromptsSection =
+    imagePrompts && imagePrompts.length > 0
+      ? `
     <div class="sns-post-image-prompts-section" style="margin-bottom: 20px; padding: 16px; background: #fff9f0; border: 1px solid #ffd89b; border-radius: 8px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <label style="display: block; font-size: 14px; font-weight: 600; color: #495057; margin: 0;">🎨 카드 뉴스 이미지 프롬프트</label>
         <span style="font-size: 12px; color: #6c757d;">클릭하여 복사</span>
       </div>
       <div class="sns-post-image-prompts" style="display: flex; flex-direction: column; gap: 12px;">
-        ${imagePrompts.map((prompt, index) => `
+        ${imagePrompts
+          .map(
+            (prompt, index) => `
           <div class="sns-post-image-prompt-item" data-prompt="${escapeHtml(prompt)}" style="display: flex; align-items: start; gap: 8px; padding: 12px; background: white; border: 1px solid #e9ecef; border-radius: 6px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='#667eea'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.1)';" onmouseout="this.style.borderColor='#e9ecef'; this.style.boxShadow='none';" title="클릭하여 복사">
             <span style="flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #667eea; color: white; border-radius: 50%; font-size: 12px; font-weight: 600;">${index + 1}</span>
             <span style="flex: 1; font-size: 13px; color: #495057; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">${escapeHtml(prompt)}</span>
             <span class="copy-icon" style="flex-shrink: 0; font-size: 16px; opacity: 0.5;">📋</span>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     </div>
     `
-    : '';
+      : '';
 
   modalBody.innerHTML = `
     ${cacheInfo}
@@ -514,8 +519,10 @@ function renderSnsPostsUI(modal, stylesData, platform, url, itemId, container, i
         };
         // 모달의 title 가져오기
         const modalHeader = modal.querySelector('.sns-post-modal-header h3');
-        const title = modalHeader ? modalHeader.textContent.replace('📱 ', '').replace(' 게시글 작성', '') : platformNames[platform];
-        
+        const title = modalHeader
+          ? modalHeader.textContent.replace('📱 ', '').replace(' 게시글 작성', '')
+          : platformNames[platform];
+
         generateNewSnsPosts(modal, platform, title, url, itemId, container);
       };
     }
@@ -541,12 +548,12 @@ function renderSnsPostsUI(modal, stylesData, platform, url, itemId, container, i
         try {
           // 클립보드에 텍스트 복사
           await navigator.clipboard.writeText(shareText + '\n\n' + url);
-          
+
           // Threads 앱 열기
           window.open('https://www.threads.net/', '_blank');
-          
+
           showToast('📋 게시글이 클립보드에 복사되었습니다! Threads에서 붙여넣기 하세요.');
-          
+
           // SNS 발행 이력 저장
           if (itemId) {
             try {
@@ -584,18 +591,32 @@ function renderSnsPostsUI(modal, stylesData, platform, url, itemId, container, i
           let imageUrl = '';
           if (itemId) {
             try {
-              const cardResp = await chrome.runtime.sendMessage({ action: 'get_idea_data', ideaId: itemId });
+              const cardResp = await chrome.runtime.sendMessage({
+                action: 'get_idea_data',
+                ideaId: itemId,
+              });
               if (cardResp && cardResp.success && cardResp.data) {
                 const card = cardResp.data;
                 const publishInfo = card.publishInfo || {};
                 const tInfo = publishInfo.thumbnailInfo || [];
                 if (Array.isArray(tInfo) && tInfo.length > 0) {
-                  const sel = typeof publishInfo.selectedThumbnailIndex === 'number' ? publishInfo.selectedThumbnailIndex : 0;
+                  const sel =
+                    typeof publishInfo.selectedThumbnailIndex === 'number'
+                      ? publishInfo.selectedThumbnailIndex
+                      : 0;
                   const thumb = tInfo[sel] || tInfo[0] || {};
-                  imageUrl = thumb.bgImage || (Array.isArray(thumb.bgImages) && thumb.bgImages[0]) || thumb.url || '';
+                  imageUrl =
+                    thumb.bgImage ||
+                    (Array.isArray(thumb.bgImages) && thumb.bgImages[0]) ||
+                    thumb.url ||
+                    '';
                 }
                 if (!imageUrl && card.thumbnail) imageUrl = card.thumbnail;
-                if (!imageUrl && Array.isArray(card.publishInfo?.bgImages) && card.publishInfo.bgImages.length) {
+                if (
+                  !imageUrl &&
+                  Array.isArray(card.publishInfo?.bgImages) &&
+                  card.publishInfo.bgImages.length
+                ) {
                   imageUrl = card.publishInfo.bgImages[0];
                 }
               }

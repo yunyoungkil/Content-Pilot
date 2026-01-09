@@ -2049,16 +2049,23 @@
 
 /* 캐시가 있는 버튼 스타일 */
 .pm-share-btn.has-cache {
-  box-shadow: 0 0 0 2px #ffd700, 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 0 0 2px #ffd700,
+    0 1px 3px rgba(0, 0, 0, 0.1);
   animation: pulse-cache 2s ease-in-out infinite;
 }
 
 @keyframes pulse-cache {
-  0%, 100% {
-    box-shadow: 0 0 0 2px #ffd700, 0 1px 3px rgba(0, 0, 0, 0.1);
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px #ffd700,
+      0 1px 3px rgba(0, 0, 0, 0.1);
   }
   50% {
-    box-shadow: 0 0 0 2px #ffed4e, 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow:
+      0 0 0 2px #ffed4e,
+      0 1px 3px rgba(0, 0, 0, 0.1);
   }
 }
 
@@ -2069,7 +2076,9 @@
 
 .pm-share-btn.has-cache:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 0 2px #ffd700, 0 3px 6px rgba(0, 0, 0, 0.15);
+  box-shadow:
+    0 0 0 2px #ffd700,
+    0 3px 6px rgba(0, 0, 0, 0.15);
 }
 
 .pm-share-btn:active {
